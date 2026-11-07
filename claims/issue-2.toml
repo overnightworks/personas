@@ -1,0 +1,8 @@
+claim_id = "b5f3aa1523ea4bd1b5f052e136598c6f"
+agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
+role = "builder"
+base = "1d09e96fc325b9e535779ac4ab5f78584a95f318"
+branch = "claude/issue-2-s1-the-repository-document-set-ci-and-th"
+scope = [".github", "AGENTS.md", "CLAUDE.md", "LICENSE", "README.md", "docs", "quality", "sonar-project.properties"]
+opened_commit = "b77a17c38bccc78ddf3bc7a9ee874e3ce14b9fa3"
+whole_reason = "The first slice of a new repository creates its skeleton: the documents link to each other and the gate judges them together, so nothing smaller lands green."
