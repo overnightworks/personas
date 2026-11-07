@@ -4,7 +4,7 @@ The home of the operator's AI agents: each with its own name, picture, personali
 
 For the operator, who gives each agent its name and rights, and for the people who meet his agents in his apps.
 
-No code runs yet. The repository holds its documents and its CI; the work to come is on this repository's board (`.aco/board.toml`, mirrored in its GitHub issues).
+No code runs yet. The repository holds its documents and its CI; the work to come is in this repository's GitHub issues.
 
 ## Read on
 
