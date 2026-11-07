@@ -1,7 +1,0 @@
-claim_id = "b06bae348ba2470c96aa697a5bfb3bda"
-agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
-role = "builder"
-base = "18b92de29543069c9aa3cd55f13b0901027564ff"
-branch = "docs/vision-memory-consent"
-scope = ["docs/VISION.md"]
-opened_commit = "913f5c4848a23f3dc663d6c7e62509ad0682ba66"
