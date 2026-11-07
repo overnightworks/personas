@@ -12,8 +12,7 @@ and brings its own toolchain, commands and tests; this file then names them.
 
 - `docs/VISION.md` is the operator-blessed vision text. Change its words only
   with his yes.
-- The persona, memory and runner shape is unruled; it lives in
-  overnightworks/agent-runtime#763 until it lands. `docs/ARCHITECTURE.md`
+- The persona, memory and runner shape is not ruled yet. `docs/ARCHITECTURE.md`
   states only what exists.
 
 ## Checks

@@ -2,7 +2,7 @@
 
 ## 1. Context and Scope
 
-Agents holds no code yet. The repository carries its documents and the CI that judges them; its purpose is in [the vision](VISION.md). The persona, memory and runner shape is not ruled and lives in overnightworks/agent-runtime#763 until it lands, so no component is described here.
+Agents holds no code yet. The repository carries its documents and the CI that judges them; its purpose is in [the vision](VISION.md). The persona, memory and runner shape is not ruled yet, so no component is described here.
 
 ## 2. Building Block View
 
