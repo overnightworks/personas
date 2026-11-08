@@ -15,7 +15,7 @@ from mcp_types import INVALID_PARAMS
 
 from agents.app_session import INVALID_ANSWER_CODE, open_mcp_session
 from agents.decision import Accept, Refusal, status_code
-from agents.failures import StatusFailure, Unreachable, UnusableAnswer, WaitToolError
+from agents.failures import CallFailure, StatusFailure, Unreachable, UnusableAnswer, WaitToolError
 from agents.main import configure_logging
 from agents.secret import Secret
 from tests.support.fakes import app_target
@@ -229,10 +229,11 @@ class SeveredTransport(httpx2.AsyncBaseTransport):
     def __init__(self, app: FakeApp) -> None:
         self.inner = app.asgi()
         self.severed = False
+        self.failure: Exception = httpx2.ConnectError("connection lost")
 
     async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
         if self.severed:
-            raise httpx2.ConnectError("connection lost")
+            raise self.failure
         return await self.inner.handle_async_request(request)
 
 
@@ -303,3 +304,19 @@ async def test_a_malformed_notification_of_the_app_logs_none_of_its_content(app,
         await waits()
 
     assert leaked not in caplog.text
+
+
+async def test_an_error_that_is_no_failure_of_the_app_is_not_turned_into_one(app, bearer):
+    transport = SeveredTransport(app)
+    transport.failure = BodyError("a programming error")
+
+    async def waits_after_the_transport_breaks():
+        async with open_mcp_session(app_target(), bearer, transport=transport) as session:
+            await session.wait(None)
+            transport.severed = True
+            await session.wait(None)
+
+    with pytest.raises(BaseException) as caught:  # noqa: PT011 - the SDK may wrap it in a group
+        await waits_after_the_transport_breaks()
+
+    assert not isinstance(caught.value, CallFailure)
