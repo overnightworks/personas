@@ -7,8 +7,9 @@ from typing import TYPE_CHECKING
 
 import httpx2
 import pytest
+from agent_runtime_client.turn import Principal
 
-from agents.app_session import open_mcp_session
+from agents.app_session import READ_SECONDS, open_mcp_session
 from agents.config import AppTarget, Config
 from agents.loop import AgentLoop, Boundaries, run_all
 from agents.main import QUIET_LIBRARIES, configure_logging
@@ -26,14 +27,14 @@ from tests.support.fakes import (
     credentials,
     grant,
 )
-from tests.support.hopin import AGENT_SUBJECT, APP_URL, FakeApp
+from tests.support.hopin import AGENT_SUBJECT, ISSUER, FakeApp
 from tests.support.realm import TOKEN_ENDPOINT, FakeRealm
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator
     from pathlib import Path
 
-    from agent_runtime_client.wait import WaitAnswer
+    from agent_runtime_client.member import MemberStanding
 
     from agents.decision import Refusal
     from agents.failures import CallFailure
@@ -77,16 +78,16 @@ class Scenario:
 @pytest.fixture
 def scenario() -> Callable[..., Scenario]:
     def build(
-        waits: list[WaitAnswer | CallFailure],
+        reads: list[MemberStanding | CallFailure],
         *,
         tokens: list[GrantedToken | CallFailure] | None = None,
         accepts: list[Refusal | CallFailure | None] | None = None,
-        seconds_per_wait: float = 0.0,
+        seconds_per_read: float = 0.0,
         seconds_per_accept: float = 0.0,
     ) -> Scenario:
         clock = FakeClock()
         granted = FakeTokens(clock, list(tokens) if tokens is not None else [grant() for _ in range(5)])
-        session = FakeSession(clock, list(waits), list(accepts or []), seconds_per_wait, seconds_per_accept)
+        session = FakeSession(clock, list(reads), list(accepts or []), seconds_per_read, seconds_per_accept)
         return Scenario(granted, session, clock, Reports())
 
     return build
@@ -97,11 +98,14 @@ SCENARIO_CONTENT = ("room-7", "inv-3", "Mozart")
 
 
 class Harness:
-    """The real runner (loop, token adapter, SDK session) against a fake realm and app, in process."""
+    """The real runner (loop, token adapter, SDK session) against a fake realm and an app on a loopback socket."""
 
-    def __init__(self, ready_file: Path) -> None:
+    def __init__(self, ready_file: Path, app: FakeApp, app_url: str) -> None:
         self.ready_file = ready_file
-        self.app = FakeApp()
+        self.app_url = app_url
+        self.on_report: Callable[[StateChange], None] = lambda change: None
+        self.app = app
+        self.app_principal = Principal(iss=ISSUER, sub=AGENT_SUBJECT)
         self.agent = credentials()
         self.realm = FakeRealm(self.app, self.agent, AGENT_SUBJECT, SCOPE)
         self.clock = FakeClock()
@@ -112,16 +116,17 @@ class Harness:
     def _report(self, change: StateChange) -> None:
         self.reports(change)
         log_state_change(change)
+        self.on_report(change)
 
-    def start(self) -> None:
+    def start(self, *, stream_seconds: float = READ_SECONDS) -> None:
         boundaries = Boundaries(
             tokens=HttpTokenSource(TOKEN_ENDPOINT, self.token_client),
-            open_session=partial(open_mcp_session, transport=self.app.asgi()),
+            open_session=partial(open_mcp_session, stream_seconds=stream_seconds),
             clock=self.clock,
             report=self._report,
             ready=FileReadyMarker(self.ready_file),
         )
-        config = Config(TOKEN_ENDPOINT, self.ready_file, (AppTarget(APP_URL, SCOPE),), (self.agent,))
+        config = Config(TOKEN_ENDPOINT, self.ready_file, (AppTarget(self.app_url, SCOPE),), (self.agent,))
         self.task = asyncio.create_task(run_all(config, boundaries))
 
     def secrets_and_content(self) -> list[str]:
@@ -143,11 +148,13 @@ async def runner(caplog: pytest.LogCaptureFixture, library_loggers: None, tmp_pa
     """The runner's world; at its end no log line holds a secret, a token or the content of a tool."""
     configure_logging()
     caplog.set_level(logging.DEBUG)
-    harness = Harness(tmp_path / "ready")
-    yield harness
-    if harness.task is not None:
-        harness.task.cancel()
-        await asyncio.gather(harness.task, return_exceptions=True)
+    app = FakeApp()
+    async with app.serving() as app_url:
+        harness = Harness(tmp_path / "ready", app, app_url)
+        yield harness
+        if harness.task is not None:
+            harness.task.cancel()
+            await asyncio.gather(harness.task, return_exceptions=True)
     await harness.token_client.aclose()
     logged = "\n".join(record.getMessage() for record in caplog.get_records("call"))
     assert not harness.reports.changes or "client_id=" in logged

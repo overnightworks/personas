@@ -1,45 +1,59 @@
-"""An app that serves agent-runtime's own MCP front, with the gate in front of it a host has.
+"""An app that serves agent-runtime's own MCP front on a loopback socket, behind the gate a host has.
 
-The front, the ``wait`` tool and the cursor rules are agent_runtime_client's; only the accept tool
-is scripted, as the app owns it.
+The front, its resources and its change signal are agent_runtime_client's; the app's standings and
+the accept tool are scripted. A test may script the answer to a request method to misbehave once.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+from collections import defaultdict
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from http import HTTPStatus
+from typing import TYPE_CHECKING, Any
 
-import httpx2
-from agent_runtime_client.mcp_server import (
-    InMemoryMemberChanges,
-    McpPersonFront,
-    PersonRequest,
-    PersonTool,
-    wait_tool,
-)
+from agent_runtime_client.mcp_server import McpPersonFront, PersonRequest, PersonTool, ResourceChanges
 from agent_runtime_client.mcp_wire import MCP_ENDPOINT_PATH
+from agent_runtime_client.member import (
+    ACCEPT_INVITATION_TOOL,
+    STANDING_URI,
+    AcceptInvitationArguments,
+    Invitation,
+    MemberStanding,
+    PlaceRef,
+    PlaceWindow,
+    Standing,
+    StandingState,
+    place_window_uri,
+)
 from agent_runtime_client.tools import ToolDeclaration, ToolEffect, ToolOutcome
 from agent_runtime_client.turn import JsonObject, Principal
-from agent_runtime_client.wait import Invitation, PlaceRef, Standing, StandingState
 
-from agents.app_session import ACCEPT_TOOL
+from tests.support.loopback import serving
+from tests.support.wire import ConnectionCut, Handler, Reply, Rpc
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Callable
 
 AGENT_SUBJECT = "agent-subject"
 ISSUER = "https://realm.test/realms/test"
-APP_URL = f"http://app.test{MCP_ENDPOINT_PATH}"
+LIMIT_SECONDS = 10
 _SUBJECT_KEY = "test.subject"
 
+DISCOVER = "server/discover"
+LISTEN = "subscriptions/listen"
+READ = "resources/read"
+CALL = "tools/call"
+INITIALIZE = "initialize"
+ACKNOWLEDGED = "acknowledged"
+
 _ACCEPT_DECLARATION = ToolDeclaration(
-    name=ACCEPT_TOOL,
+    name=ACCEPT_INVITATION_TOOL,
     description="Joins the place an invitation is for.",
-    parameters={
-        "type": "object",
-        "properties": {"room": {"type": "string"}, "invitation": {"type": "string"}, "epoch": {"type": "integer"}},
-        "required": ["room", "invitation", "epoch"],
-    },
+    parameters=AcceptInvitationArguments.model_json_schema(),
     effect=ToolEffect.SIDE_EFFECTING,
 )
 
@@ -53,26 +67,38 @@ def active(place_id: str) -> Standing:
     return Standing(place=PlaceRef(kind="call", id=place_id), state=StandingState.ACTIVE)
 
 
-class RecordingChanges(InMemoryMemberChanges):
-    """The front's own change signal, which also records every wait that reaches it."""
+class RequestLog:
+    """What the app saw, in order: each request's method, and the acknowledgement of each stream."""
 
     def __init__(self) -> None:
-        super().__init__()
-        self.in_flight = 0
-        self.most_in_flight = 0
-        self.held = asyncio.Event()
-        self.started: asyncio.Queue[str | None] = asyncio.Queue()
+        self.entries: list[str] = []
+        self._added = asyncio.Event()
 
-    async def wait(self, recipient: Principal, after: str | None, seconds: float) -> str:
-        self.started.put_nowait(after)
-        self.in_flight += 1
-        self.most_in_flight = max(self.most_in_flight, self.in_flight)
-        if after is not None:
-            self.held.set()
-        try:
-            return await super().wait(recipient, after, seconds)
-        finally:
-            self.in_flight -= 1
+    def add(self, entry: str) -> None:
+        self.entries.append(entry)
+        self._added.set()
+
+    def count(self, entry: str) -> int:
+        return self.entries.count(entry)
+
+    def reads_follow_acknowledgements(self) -> bool:
+        """Every read came after the acknowledgement of the stream that was open when it arrived."""
+        acknowledged = False
+        for entry in self.entries:
+            if entry == LISTEN:
+                acknowledged = False
+            elif entry == ACKNOWLEDGED:
+                acknowledged = True
+            elif entry == READ and not acknowledged:
+                return False
+        return True
+
+    async def until(self, entry: str, count: int = 1) -> None:
+        """Returns once the entry was seen this many times; fails after the limit."""
+        async with asyncio.timeout(LIMIT_SECONDS):
+            while self.count(entry) < count:
+                self._added.clear()
+                await self._added.wait()
 
 
 @dataclass
@@ -82,14 +108,25 @@ class FakeApp:
     bearers: dict[str, str] = field(default_factory=dict[str, str])
     standings: dict[str, list[Standing]] = field(default_factory=dict[str, list[Standing]])
     refuse_with: HTTPStatus | None = None
-    standings_fail: bool = False
-    offers_accept: bool = True
-    wait_answers_with: str | None = None
+    refused_method: str | None = None
+    lists_standing: bool = True
+    pulses_on_read: bool = False
     accept_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
-    accepted: list[JsonObject] = field(default_factory=list[JsonObject])
-    requests_seen: int = 0
+    accepted: list[AcceptInvitationArguments] = field(default_factory=list[AcceptInvitationArguments])
+    log: RequestLog = field(default_factory=RequestLog)
     refusals: asyncio.Queue[HTTPStatus] = field(default_factory=asyncio.Queue[HTTPStatus])
-    changes: RecordingChanges = field(default_factory=RecordingChanges)
+    changes: ResourceChanges = field(default_factory=ResourceChanges)
+    scripted: defaultdict[str, list[Handler]] = field(default_factory=lambda: defaultdict(list[Handler]))
+    held_read: asyncio.Event | None = None
+    read_held: asyncio.Event = field(default_factory=asyncio.Event)
+
+    def __post_init__(self) -> None:
+        self._front = McpPersonFront(
+            [PersonTool(_ACCEPT_DECLARATION, self._accept)],
+            resolve_person=lambda scope: Principal(iss=ISSUER, sub=scope[_SUBJECT_KEY]),
+            resources=self,
+            changes=self.changes,
+        )
 
     def let_in(self, bearer: str, subject: str) -> None:
         self.bearers[bearer] = subject
@@ -97,51 +134,100 @@ class FakeApp:
     def stand(self, subject: str, *standings: Standing) -> None:
         """Sets the subject's standings and signals the change, as an app does once the state is visible."""
         self.standings[subject] = list(standings)
-        self.changes.changed(Principal(iss=ISSUER, sub=subject))
+        self.changes.changed(Principal(iss=ISSUER, sub=subject), STANDING_URI)
 
-    async def _standings(self, principal: Principal) -> list[Standing]:
-        if self.standings_fail:
-            raise RuntimeError("the standings cannot be read")
-        return self.standings.get(principal.sub, [])
+    def hold_next_read(self) -> asyncio.Event:
+        """The next read takes its snapshot, tells ``read_held`` and answers once the returned event is set."""
+        self.held_read = asyncio.Event()
+        return self.held_read
+
+    def script(self, method: str, *handlers: Handler) -> None:
+        """Each of the next requests of this method is answered by one handler, in order."""
+        self.scripted[method].extend(handlers)
+
+    async def current(self, principal: Principal) -> list[str]:
+        if not self.lists_standing:
+            return []
+        return [STANDING_URI, *(place_window_uri(each.place) for each in self.standings.get(principal.sub, []))]
+
+    async def read(self, principal: Principal, uri: str) -> MemberStanding | PlaceWindow | None:
+        if uri != STANDING_URI:
+            return None
+        snapshot = MemberStanding(standings=tuple(self.standings.get(principal.sub, [])))
+        if self.pulses_on_read:
+            self.changes.changed(principal, STANDING_URI)
+        held, self.held_read = self.held_read, None
+        if held is not None:
+            self.read_held.set()
+            await held.wait()
+        return snapshot
 
     async def _accept(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
-        self.accepted.append(arguments)
+        self.accepted.append(AcceptInvitationArguments.model_validate(arguments))
         if self.accept_outcomes:
             return self.accept_outcomes.pop(0)
-        return ToolOutcome(json.dumps({"room": arguments["room"], "name": "Mozart"}), is_error=False)
+        return ToolOutcome(json.dumps({"name": "Mozart"}), is_error=False)
 
-    async def _wait_answer(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
-        assert self.wait_answers_with is not None
-        return ToolOutcome(self.wait_answers_with, is_error=False)
+    @asynccontextmanager
+    async def serving(self) -> AsyncIterator[str]:
+        """The app's MCP URL, served until the end."""
+        try:
+            async with self._front.running(), serving(self._gate) as origin:
+                yield f"{origin}{MCP_ENDPOINT_PATH}"
+        except ExceptionGroup as group:
+            # The front's task group wraps what its host raises through it; the host's caller sees the bare error.
+            if len(group.exceptions) != 1:
+                raise
+            raise group.exceptions[0] from None
 
-    def asgi(self) -> httpx2.ASGITransport:
-        waiting = wait_tool(self.changes, self._standings)
-        if self.wait_answers_with is not None:
-            waiting = PersonTool(waiting.declaration, self._wait_answer)
-        tools = [waiting, PersonTool(_ACCEPT_DECLARATION, self._accept)] if self.offers_accept else [waiting]
-        front = McpPersonFront(
-            tools,
-            resolve_person=lambda scope: Principal(iss=ISSUER, sub=scope[_SUBJECT_KEY]),
-        )
+    async def _gate(self, scope: dict[str, Any], receive: Callable[..., Any], send: Callable[..., Any]) -> None:
+        body = await _body_of(receive)
+        document = json.loads(body) if body else {}
+        method = document.get("method", "")
+        self.log.add(method)
+        headers = {name.decode(): value.decode() for name, value in scope["headers"]}
+        bearer = headers.get("authorization", "").removeprefix("Bearer ")
+        noting = self._noting_acknowledgements(send)
+        reply = Reply(Rpc(document.get("id", 0), method, document.get("params") or {}), noting)
+        if bearer not in self.bearers:
+            self.refusals.put_nowait(HTTPStatus.UNAUTHORIZED)
+            await reply.status(HTTPStatus.UNAUTHORIZED)
+        elif self.refuse_with is not None and self.refused_method in (None, method):
+            self.refusals.put_nowait(self.refuse_with)
+            await reply.status(self.refuse_with)
+        elif self.scripted[method]:
+            try:
+                await self.scripted[method].pop(0)(reply)
+            except ConnectionCut:
+                self.log.add(f"{method} cut")
+                raise
+        else:
+            scope[_SUBJECT_KEY] = self.bearers[bearer]
+            await self._front(scope, _replayed(body, receive), noting)
 
-        async def gate(scope, receive, send) -> None:
-            self.requests_seen += 1
-            headers = {name.decode(): value.decode() for name, value in scope["headers"]}
-            bearer = headers.get("authorization", "").removeprefix("Bearer ")
-            if bearer not in self.bearers:
-                self.refusals.put_nowait(HTTPStatus.UNAUTHORIZED)
-                await _answer(send, HTTPStatus.UNAUTHORIZED)
-            elif self.refuse_with is not None:
-                self.refusals.put_nowait(self.refuse_with)
-                await _answer(send, self.refuse_with)
-            else:
-                scope[_SUBJECT_KEY] = self.bearers[bearer]
-                await front(scope, receive, send)
+    def _noting_acknowledgements(self, send: Callable[..., Any]) -> Callable[..., Any]:
+        async def noting(message: dict[str, Any]) -> None:
+            if b"subscriptions/acknowledged" in message.get("body", b""):
+                self.log.add(ACKNOWLEDGED)
+            await send(message)
 
-        return httpx2.ASGITransport(app=gate)
+        return noting
 
 
-async def _answer(send, status: HTTPStatus) -> None:
-    headers = [(b"location", b"http://app.test/elsewhere")] if status.is_redirection else []
-    await send({"type": "http.response.start", "status": status.value, "headers": headers})
-    await send({"type": "http.response.body", "body": b""})
+async def _body_of(receive: Callable[..., Any]) -> bytes:
+    body = b""
+    more = True
+    while more:
+        message = await receive()
+        body += message.get("body", b"")
+        more = message.get("more_body", False)
+    return body
+
+
+def _replayed(body: bytes, receive: Callable[..., Any]) -> Callable[..., Any]:
+    pending = [{"type": "http.request", "body": body, "more_body": False}]
+
+    async def replay() -> dict[str, Any]:
+        return pending.pop() if pending else await receive()
+
+    return replay

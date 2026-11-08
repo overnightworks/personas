@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from functools import partial
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import httpx2
@@ -25,9 +25,10 @@ from tests.support.realm import FakeRealm
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-    from agents.config import Config
+    from agents.config import AppTarget, Config
     from agents.readiness import ReadyMarker
     from agents.reporting import StateChange
+    from agents.secret import Secret
     from tests.support.configfiles import Files
 
 
@@ -44,7 +45,7 @@ def test_an_error_record_of_a_library_the_runner_uses_reaches_no_log_line(
 
 
 class Stop(Exception):  # noqa: N818 - a test's way to end a runner whose loops never end
-    """Raised by the report once an agent joined, which is after its first wait answered."""
+    """Raised by the report once an agent joined, which is after its first read answered."""
 
 
 class World:
@@ -67,12 +68,16 @@ class World:
         async def note_request(request: httpx2.Request) -> None:
             self.tokens_requested_with_marker.append(self.files.ready_path.exists())
 
-        async with httpx2.AsyncClient(
-            transport=realm.transport(), event_hooks={"request": [note_request]}
-        ) as token_client:
+        def open_at_the_app(app: AppTarget, token: Secret):
+            return open_mcp_session(replace(app, mcp_url=app_url), token)
+
+        async with (
+            self.app.serving() as app_url,
+            httpx2.AsyncClient(transport=realm.transport(), event_hooks={"request": [note_request]}) as token_client,
+        ):
             yield Boundaries(
                 tokens=HttpTokenSource(config.token_endpoint, token_client),
-                open_session=partial(open_mcp_session, transport=self.app.asgi()),
+                open_session=open_at_the_app,
                 clock=FakeClock(),
                 report=self._report,
                 ready=ready,

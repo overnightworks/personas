@@ -2,29 +2,51 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Callable, Generator, Iterator
+import asyncio
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Generator, Iterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from typing import Final, Protocol, cast, override
 
 import httpx2
-from agent_runtime_client.wait import STANDINGS_READ_SECONDS, WAIT_BOUND_SECONDS, WaitAnswer
+from agent_runtime_client.member import (
+    ACCEPT_INVITATION_TOOL,
+    LISTEN_BOUND_SECONDS,
+    STANDING_URI,
+    AcceptInvitationArguments,
+    MemberStanding,
+)
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
+from mcp.client.subscriptions import SubscriptionLost, listen
 from mcp.shared.exceptions import MCPError
-from mcp_types import CONNECTION_CLOSED, REQUEST_TIMEOUT, CallToolResult, InputRequiredResult, TextContent
+from mcp_types import (
+    CONNECTION_CLOSED,
+    REQUEST_TIMEOUT,
+    UNSUPPORTED_PROTOCOL_VERSION,
+    CallToolResult,
+    InputRequiredResult,
+    TextContent,
+    TextResourceContents,
+)
 from pydantic import ValidationError
 
 from agents.config import AppTarget
 from agents.decision import Accept, Refusal, status_code
-from agents.failures import INVALID_ANSWER_CODE, CallFailure, StatusFailure, Unreachable, UnusableAnswer, WaitToolError
+from agents.failures import (
+    INVALID_ANSWER_CODE,
+    LISTEN_NOT_HONORED_CODE,
+    UNSUPPORTED_VERSION_CODE,
+    CallFailure,
+    StatusFailure,
+    Unreachable,
+    UnusableAnswer,
+)
 from agents.secret import Secret
 
 CONNECT_SECONDS: Final = 30.0
-READ_SECONDS: Final = 2 * (WAIT_BOUND_SECONDS + STANDINGS_READ_SECONDS)
-"""Well above the longest a held ``wait`` takes, so the client never cuts one short."""
-WAIT_TOOL: Final = "wait"
-ACCEPT_TOOL: Final = "accept_invitation"
+READ_SECONDS: Final = 2 * LISTEN_BOUND_SECONDS
+"""Twice the bound an app puts on a stream: the runner cuts a stream that outlasts it."""
 _TRANSPORT_ERROR_CODES: Final = frozenset({CONNECTION_CLOSED, REQUEST_TIMEOUT})
 """What the SDK answers for a connection that broke or a request that timed out."""
 
@@ -34,8 +56,17 @@ class AppSession(Protocol):
         """Every later call carries this bearer."""
         ...
 
-    async def wait(self, after: str | None) -> WaitAnswer:
-        """Raises ``StatusFailure``, ``Unreachable``, ``UnusableAnswer`` or ``WaitToolError``."""
+    def changes(self) -> AbstractAsyncContextManager[AsyncIterator[object]]:
+        """A stream of wakes; entering returns once the app acknowledged it with the standing honored.
+
+        Iterating yields once per wake and ends when the app ends the stream. The stream, its
+        acknowledgement and everything the body does share one deadline. Raises ``StatusFailure``,
+        ``Unreachable`` or ``UnusableAnswer``.
+        """
+        ...
+
+    async def read_standing(self) -> MemberStanding:
+        """Raises ``StatusFailure``, ``Unreachable`` or ``UnusableAnswer``."""
         ...
 
     async def accept(self, accept: Accept) -> Refusal | None:
@@ -82,33 +113,52 @@ class _ValidatingSession(ClientSession):
 class _McpAppSession:
     session: ClientSession
     auth: _BearerAuth
+    stream_seconds: float
 
     def use_token(self, token: Secret) -> None:
         self.auth.token = token
 
-    async def wait(self, after: str | None) -> WaitAnswer:
-        result = await self._call(WAIT_TOOL, {} if after is None else {"after": after})
-        if result.is_error:
-            raise WaitToolError("the wait tool answered an error")
+    @asynccontextmanager
+    async def changes(self) -> AsyncGenerator[AsyncIterator[object]]:
+        self.auth.last_status = None
         try:
-            return WaitAnswer.model_validate_json(_text_of(result))
+            async with (
+                asyncio.timeout(self.stream_seconds),
+                listen(self.session, resource_subscriptions=[STANDING_URI]) as subscription,
+            ):
+                if STANDING_URI not in (subscription.honored.resource_subscriptions or ()):
+                    raise UnusableAnswer(LISTEN_NOT_HONORED_CODE)
+                yield subscription
+        except CallFailure:
+            raise
+        except Exception as error:
+            raise _failure_or_raise(error, self.auth) from None
+
+    async def read_standing(self) -> MemberStanding:
+        result = await self._asked(self.session.read_resource(STANDING_URI, allow_input_required=True))
+        if isinstance(result, InputRequiredResult):
+            raise UnusableAnswer(INVALID_ANSWER_CODE)
+        text = "".join(block.text for block in result.contents if isinstance(block, TextResourceContents))
+        try:
+            return MemberStanding.model_validate_json(text)
         except ValidationError:
             raise UnusableAnswer(INVALID_ANSWER_CODE) from None
 
     async def accept(self, accept: Accept) -> Refusal | None:
-        arguments = {"room": accept.place_id, "invitation": accept.invitation_id, "epoch": accept.epoch}
-        result = await self._call(ACCEPT_TOOL, arguments)
-        return _refusal_of(_text_of(result)) if result.is_error else None
-
-    async def _call(self, name: str, arguments: dict[str, str | int]) -> CallToolResult:
-        self.auth.last_status = None
-        try:
-            result = await self.session.call_tool(name, arguments, allow_input_required=True)
-        except Exception as error:
-            raise _failure_or_raise(error, self.auth) from None
+        arguments = AcceptInvitationArguments(
+            place=accept.place, invitation=accept.invitation_id, epoch=accept.epoch
+        ).model_dump(mode="json")
+        result = await self._asked(self.session.call_tool(ACCEPT_INVITATION_TOOL, arguments, allow_input_required=True))
         if isinstance(result, InputRequiredResult):
             raise UnusableAnswer(INVALID_ANSWER_CODE)
-        return result
+        return _refusal_of(_text_of(result)) if result.is_error else None
+
+    async def _asked[Answer](self, request: Awaitable[Answer]) -> Answer:
+        self.auth.last_status = None
+        try:
+            return await request
+        except Exception as error:
+            raise _failure_or_raise(error, self.auth) from None
 
 
 def _text_of(result: CallToolResult) -> str:
@@ -125,6 +175,8 @@ def _failure_of(error: BaseException, auth: _BearerAuth) -> CallFailure | None:
     A protocol error or a result the SDK cannot validate is an unusable answer; only a broken or
     silent connection is unreachable. Any other error is not the app's and has no failure.
     """
+    if isinstance(error, MCPError) and error.code == UNSUPPORTED_PROTOCOL_VERSION:
+        return UnusableAnswer(f"jsonrpc_{error.code}")
     status = auth.last_status
     if status is not None and status >= 400:
         return StatusFailure(status)
@@ -134,6 +186,8 @@ def _failure_of(error: BaseException, auth: _BearerAuth) -> CallFailure | None:
         if error.code in _TRANSPORT_ERROR_CODES:
             return Unreachable("the app did not answer")
         return UnusableAnswer(f"jsonrpc_{error.code}")
+    if isinstance(error, SubscriptionLost):
+        return Unreachable("the stream was lost")
     if isinstance(error, ValidationError | _InvalidToolResult):
         return UnusableAnswer(INVALID_ANSWER_CODE)
     if isinstance(error, httpx2.TransportError | OSError):
@@ -158,24 +212,25 @@ def _leaves(error: BaseException) -> Iterator[BaseException]:
 
 @asynccontextmanager
 async def open_mcp_session(
-    app: AppTarget, token: Secret, *, transport: httpx2.AsyncBaseTransport | None = None
+    app: AppTarget, token: Secret, *, stream_seconds: float = READ_SECONDS
 ) -> AsyncGenerator[AppSession]:
-    """An initialised session; the failures a call raises are the ones ``AppSession`` names.
+    """A session at the app's revision; the failures a call raises are the ones ``AppSession`` names.
 
-    ``transport`` serves an app in the same process; without it the network is used.
+    A bare ``ClientSession`` discovers the revision: the SDK's own client would fall back to
+    ``initialize`` on any error, so a 401 on the probe would enter a path this runner does not have.
     """
     auth = _BearerAuth(token)
-    timeout = httpx2.Timeout(CONNECT_SECONDS, read=READ_SECONDS)
+    timeout = httpx2.Timeout(CONNECT_SECONDS, read=stream_seconds)
     raised_in_body: Exception | None = None
     try:
         async with (
-            httpx2.AsyncClient(auth=auth, transport=transport, timeout=timeout) as client,
+            httpx2.AsyncClient(auth=auth, timeout=timeout) as client,
             streamable_http_client(app.mcp_url, http_client=client) as (read_stream, write_stream),
             _ValidatingSession(read_stream, write_stream) as session,
         ):
-            await _initialise(session, auth)
+            await _discover(session, auth)
             try:
-                yield _McpAppSession(session, auth)
+                yield _McpAppSession(session, auth, stream_seconds)
             except Exception as error:
                 raised_in_body = error
                 raise
@@ -196,8 +251,11 @@ async def open_mcp_session(
         raise
 
 
-async def _initialise(session: ClientSession, auth: _BearerAuth) -> None:
+async def _discover(session: ClientSession, auth: _BearerAuth) -> None:
+    auth.last_status = None
     try:
-        await session.initialize()
+        await session.discover()
+    except RuntimeError:
+        raise UnusableAnswer(UNSUPPORTED_VERSION_CODE) from None
     except Exception as error:
         raise _failure_or_raise(error, auth) from None

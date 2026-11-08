@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from agent_runtime_client.wait import Standing, WaitAnswer
+from agent_runtime_client.member import MemberStanding, Standing
 
 from agents.config import AgentCredentials, AppTarget
 from agents.decision import Accept, Refusal
@@ -17,6 +17,8 @@ from agents.secret import Secret
 from agents.tokens import GrantedToken
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from agents.reporting import StateChange
 
 
@@ -44,8 +46,8 @@ def app_target() -> AppTarget:
     return AppTarget("https://app.test/mcp", "mcp-app")
 
 
-def answer(cursor: str, *standings: Standing) -> WaitAnswer:
-    return WaitAnswer(cursor=cursor, standings=standings)
+def read_of(*standings: Standing) -> MemberStanding:
+    return MemberStanding(standings=standings)
 
 
 def grant(lifetime: float = 300.0) -> GrantedToken:
@@ -74,18 +76,33 @@ class FakeTokens:
         return step
 
 
+class _Wakes:
+    """One wake for each read still scripted, then silence: the scenario has reached its end."""
+
+    def __init__(self, session: FakeSession) -> None:
+        self._session = session
+
+    def __aiter__(self) -> _Wakes:
+        return self
+
+    async def __anext__(self) -> None:
+        if self._session.reads:
+            return
+        self._session.idle.set()
+        await asyncio.Event().wait()
+
+
 @dataclass
 class FakeSession:
-    """Answers each wait and accept from a script and notes their bearer and time; blocking ends a scenario."""
+    """Answers each read and accept from a script and notes their bearer and time; blocking ends a scenario."""
 
     clock: FakeClock
-    waits: list[WaitAnswer | CallFailure]
+    reads: list[MemberStanding | CallFailure]
     accepts: list[Refusal | CallFailure | None] = field(default_factory=list[Refusal | CallFailure | None])
-    seconds_per_wait: float = 0.0
+    seconds_per_read: float = 0.0
     seconds_per_accept: float = 0.0
     bearer: Secret | None = None
-    opened: int = 0
-    cursors: list[str | None] = field(default_factory=list[str | None])
+    opened_with: list[Secret] = field(default_factory=list[Secret])
     accepted: list[Accept] = field(default_factory=list[Accept])
     bearers_with_time: list[tuple[Secret, float]] = field(default_factory=list[tuple[Secret, float]])
     idle: asyncio.Event = field(default_factory=asyncio.Event)
@@ -93,15 +110,22 @@ class FakeSession:
     def use_token(self, token: Secret) -> None:
         self.bearer = token
 
-    async def wait(self, after: str | None) -> WaitAnswer:
+    @property
+    def opened(self) -> int:
+        return len(self.opened_with)
+
+    @asynccontextmanager
+    async def changes(self) -> AsyncIterator[AsyncIterator[object]]:
+        yield _Wakes(self)
+
+    async def read_standing(self) -> MemberStanding:
         assert self.bearer is not None
         self.bearers_with_time.append((self.bearer, self.clock.now()))
-        self.cursors.append(after)
-        if not self.waits:
+        if not self.reads:
             self.idle.set()
             await asyncio.Event().wait()
-        self.clock.time += self.seconds_per_wait
-        step = self.waits.pop(0)
+        self.clock.time += self.seconds_per_read
+        step = self.reads.pop(0)
         if isinstance(step, CallFailure):
             raise step
         return step
@@ -118,7 +142,7 @@ class FakeSession:
 
     @asynccontextmanager
     async def open(self, app: AppTarget, token: Secret):
-        self.opened += 1
+        self.opened_with.append(token)
         self.bearer = token
         yield self
 
