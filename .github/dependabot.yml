@@ -17,3 +17,9 @@ updates:
     # proposal against the git pin. They move by their owners' release items.
     ignore:
       - dependency-name: "overnightworks-*"
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: daily
+    cooldown:
+      default-days: 7

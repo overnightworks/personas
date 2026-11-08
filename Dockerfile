@@ -1,0 +1,45 @@
+# Both images are held by digest, because a tag is a name its owner may move;
+# Dependabot's docker entry moves the digest through review.
+FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS uv
+
+FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS python-base
+
+COPY --from=uv /uv /usr/local/bin/uv
+
+# The interpreter is the image's own, so uv never downloads another one.
+ENV UV_PYTHON_DOWNLOADS=never \
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_COMPILE_BYTECODE=1 \
+    UV_NO_CACHE=1 \
+    PATH=/opt/venv/bin:$PATH
+
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+
+# git exists only in this stage, because uv needs it to fetch the git-pinned
+# library; the final stage copies the environment and never carries it.
+FROM python-base AS dependencies
+RUN apt-get update \
+ && apt-get install --yes --no-install-recommends git ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+# One build runs, the git-pinned library named in pyproject.toml (tool.uv),
+# with exact build tools. --no-build refuses every other source distribution,
+# whose build script would run third-party code during the image build, so
+# third-party packages are wheel-only. agents itself is installed in a second
+# step below, after its source is copied, so that its own build runs through
+# the exact-pinned hatchling.
+RUN uv sync --frozen --no-dev --no-install-project --no-build
+
+FROM python-base
+COPY --from=dependencies /opt/venv /opt/venv
+RUN useradd --no-create-home --uid 1001 agents
+COPY src ./src
+# Only the project is installed here, as a wheel built from the copied source;
+# --no-build keeps the install itself from running any other build script.
+RUN uv build --wheel --out-dir /tmp/wheel \
+ && uv pip install --python /opt/venv/bin/python --no-deps --no-build /tmp/wheel/*.whl \
+ && rm -r /tmp/wheel
+# A pod's runAsNonRoot can verify only a numeric user; 1001 is agents' uid.
+USER 1001
+
+CMD ["agents"]

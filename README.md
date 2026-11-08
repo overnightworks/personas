@@ -16,6 +16,10 @@ Install with `uv sync`, point `AGENTS_CONFIG` at a TOML file and start `agents`.
 
 The commands for working on the runner are in [AGENTS.md](AGENTS.md).
 
+## Release it
+
+The image is the runner's release. The operator dispatches the `Release` workflow (`.github/workflows/release.yml`) on `main` with the version as `YYYY.MM.DD.N`, for example `2026.11.08.1`. Quality's gate refuses a commit whose checks are not green, the image is pushed to GHCR with an attestation, and then the tag `v<version>` is created. The image holds no configuration; `AGENTS_CONFIG` and the secret files come from the deployment. An AI agent dispatches a release only on the operator's explicit yes for that one version. [quality's release path](https://github.com/overnightworks/quality/blob/v0.10.0/docs/release.md) owns the rules.
+
 ## Read on
 
 - [Vision](docs/VISION.md): what agents is for and what it deliberately is not.

@@ -1,2 +1,2 @@
 [gate]
-mandatory_jobs = ["Documents", "Lint and test"]
+mandatory_jobs = ["Documents", "Lint and test", "Image"]
