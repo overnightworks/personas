@@ -12,7 +12,7 @@ from agent_runtime_client.wait import STANDINGS_READ_SECONDS, WAIT_BOUND_SECONDS
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from mcp.shared.exceptions import MCPError
-from mcp_types import CONNECTION_CLOSED, REQUEST_TIMEOUT, CallToolResult, TextContent
+from mcp_types import CONNECTION_CLOSED, REQUEST_TIMEOUT, CallToolResult, InputRequiredResult, TextContent
 from pydantic import ValidationError
 
 from agents.config import AppTarget
@@ -103,9 +103,12 @@ class _McpAppSession:
     async def _call(self, name: str, arguments: dict[str, str | int]) -> CallToolResult:
         self.auth.last_status = None
         try:
-            return await self.session.call_tool(name, arguments)
+            result = await self.session.call_tool(name, arguments, allow_input_required=True)
         except Exception as error:
             raise _failure_or_raise(error, self.auth) from None
+        if isinstance(result, InputRequiredResult):
+            raise UnusableAnswer(INVALID_ANSWER_CODE)
+        return result
 
 
 def _text_of(result: CallToolResult) -> str:

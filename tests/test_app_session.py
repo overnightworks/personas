@@ -15,7 +15,7 @@ from mcp_types import INVALID_PARAMS
 
 from agents.app_session import ACCEPT_TOOL, WAIT_TOOL, open_mcp_session
 from agents.decision import Accept, Refusal, status_code
-from agents.failures import INVALID_ANSWER_CODE, CallFailure, StatusFailure, Unreachable, UnusableAnswer, WaitToolError
+from agents.failures import INVALID_ANSWER_CODE, StatusFailure, Unreachable, UnusableAnswer, WaitToolError
 from agents.main import configure_logging
 from agents.secret import Secret
 from tests.support.fakes import app_target
@@ -282,8 +282,18 @@ class AnswersToolCallsWith(httpx2.AsyncBaseTransport):
 @pytest.mark.parametrize("tool_call", ["wait", "accept"])
 @pytest.mark.parametrize(
     "answer",
-    [{"content": 7}, {"content": [], "structuredContent": {"standings": 7}}, {"content": []}],
-    ids=["malformed result", "structured content against the output schema", "structured content missing"],
+    [
+        {"content": 7},
+        {"content": [], "structuredContent": {"standings": 7}},
+        {"content": []},
+        {"resultType": "input_required", "requestState": "x"},
+    ],
+    ids=[
+        "malformed result",
+        "structured content against the output schema",
+        "structured content missing",
+        "input required",
+    ],
 )
 async def test_a_tool_result_the_sdk_cannot_validate_is_an_unusable_answer(app, bearer, tool_call, answer):
     output_schema = {"type": "object", "properties": {"standings": {"type": "array"}}, "required": ["standings"]}
@@ -332,7 +342,5 @@ async def test_an_error_that_is_no_failure_of_the_app_is_not_turned_into_one(app
             transport.severed = True
             await session.wait(None)
 
-    with pytest.raises(BaseException) as caught:  # noqa: PT011 - the SDK may wrap it in a group
+    with pytest.RaisesGroup(BodyError):
         await waits_after_the_transport_breaks()
-
-    assert not isinstance(caught.value, CallFailure)

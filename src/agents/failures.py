@@ -34,7 +34,7 @@ class WaitToolError(CallFailure):
 
 
 class UnusableAnswer(CallFailure):
-    """The app answered, but with an error or a body the loop cannot use; ``code`` says which."""
+    """The server answered, but with an error or a body the loop cannot use; ``code`` says which."""
 
     def __init__(self, code: str) -> None:
         super().__init__(code)
