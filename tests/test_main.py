@@ -3,14 +3,29 @@
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
+from functools import partial
 from typing import TYPE_CHECKING
 
+import httpx2
 import pytest
 
+from agents.app_session import open_mcp_session
 from agents.config import CONFIG_ENVIRONMENT_VARIABLE
+from agents.loop import Boundaries
 from agents.main import QUIET_LIBRARIES, READINESS_ERROR_EXIT_CODE, configure_logging, main
+from agents.reporting import Event
+from agents.tokens import HttpTokenSource
+from tests.support.fakes import FakeClock
+from tests.support.hopin import AGENT_SUBJECT, FakeApp, invited
+from tests.support.realm import FakeRealm
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
+    from agents.config import Config
+    from agents.readiness import ReadyMarker
+    from agents.reporting import StateChange
     from tests.support.configfiles import Files
 
 
@@ -26,53 +41,86 @@ def test_an_error_record_of_a_library_the_runner_uses_reaches_no_log_line(
     assert caplog.records == []
 
 
-def _start_with_loops(monkeypatch: pytest.MonkeyPatch, files: Files, behaviour) -> None:
-    """Starts the real entry point whose loops are replaced by `behaviour(boundaries)`."""
+class Stop(Exception):  # noqa: N818 - a test's way to end a runner whose loops never end
+    """Raised by the report once an agent joined, which is after its first wait answered."""
 
-    async def loops(config, boundaries):
-        behaviour(boundaries)
 
-    monkeypatch.setattr("agents.main.run_all", loops)
-    monkeypatch.setenv(CONFIG_ENVIRONMENT_VARIABLE, str(files.config_path))
+class World:
+    """The real entry point, loops and adapters over a fake realm and app that answer for real."""
+
+    def __init__(self, files: Files) -> None:
+        self.files = files
+        self.app = FakeApp()
+        self.tokens_requested_with_marker: list[bool] = []
+        self.app.stand(AGENT_SUBJECT, invited("room-7", "inv-3"))
+
+    def _report(self, change: StateChange) -> None:
+        if change.event is Event.JOINED:
+            raise Stop
+
+    @asynccontextmanager
+    async def compose(self, config: Config, ready: ReadyMarker) -> AsyncGenerator[Boundaries]:
+        realm = FakeRealm(self.app, config.agents[0], AGENT_SUBJECT, config.apps[0].scope)
+
+        async def note_request(request: httpx2.Request) -> None:
+            self.tokens_requested_with_marker.append(self.files.ready_path.exists())
+
+        async with httpx2.AsyncClient(
+            transport=realm.transport(), event_hooks={"request": [note_request]}
+        ) as token_client:
+            yield Boundaries(
+                tokens=HttpTokenSource(config.token_endpoint, token_client),
+                open_session=partial(open_mcp_session, transport=self.app.asgi()),
+                clock=FakeClock(),
+                report=self._report,
+                ready=ready,
+            )
+
+    def start(self) -> None:
+        main(self.compose)
+
+
+@pytest.fixture
+def world(files: Files, monkeypatch: pytest.MonkeyPatch) -> World:
     files.write()
+    monkeypatch.setenv(CONFIG_ENVIRONMENT_VARIABLE, str(files.config_path))
+    return World(files)
 
 
-def test_a_marker_left_from_an_earlier_run_is_gone_before_any_loop_starts(files, monkeypatch):
-    files.ready_path.touch()
-    seen: list[bool] = []
-    _start_with_loops(monkeypatch, files, lambda boundaries: seen.append(files.ready_path.exists()))
+def test_a_marker_left_from_an_earlier_run_is_gone_before_the_first_token_request(world):
+    world.files.ready_path.touch()
 
-    main()
+    with pytest.raises(ExceptionGroup):
+        world.start()
 
-    assert seen == [False]
-
-
-def test_the_marker_is_created_once_when_a_loop_announces_it_and_stays(files, monkeypatch):
-    _start_with_loops(monkeypatch, files, lambda boundaries: (boundaries.ready.announce(), boundaries.ready.announce()))
-
-    main()
-
-    assert files.ready_path.exists()
+    assert world.tokens_requested_with_marker[0] is False
 
 
-def test_a_marker_that_cannot_be_removed_stops_the_start_and_names_its_path(files, monkeypatch, capsys):
-    files.ready_path.mkdir()
-    (files.ready_path / "held").touch()
-    _start_with_loops(monkeypatch, files, lambda boundaries: None)
+def test_the_marker_is_created_when_a_loop_is_served_and_stays(world):
+    with pytest.raises(ExceptionGroup):
+        world.start()
+
+    assert world.files.ready_path.exists()
+
+
+def test_a_marker_that_cannot_be_removed_stops_the_start_and_names_its_path(world, capsys):
+    world.files.ready_path.mkdir()
+    (world.files.ready_path / "held").touch()
 
     with pytest.raises(SystemExit) as stopped:
-        main()
+        world.start()
 
     assert stopped.value.code == READINESS_ERROR_EXIT_CODE
-    assert str(files.ready_path) in capsys.readouterr().err
+    assert str(world.files.ready_path) in capsys.readouterr().err
+    assert world.tokens_requested_with_marker == []
 
 
-def test_a_marker_that_cannot_be_created_stops_the_runner_and_names_its_path(files, monkeypatch, capsys):
+def test_a_marker_that_cannot_be_created_stops_the_runner_and_names_its_path(files, world, capsys):
     files.text = files.text.replace(str(files.ready_path), str(files.ready_path / "missing-directory" / "ready"))
-    _start_with_loops(monkeypatch, files, lambda boundaries: boundaries.ready.announce())
+    files.write()
 
     with pytest.raises(SystemExit) as stopped:
-        main()
+        world.start()
 
     assert stopped.value.code == READINESS_ERROR_EXIT_CODE
     assert "missing-directory" in capsys.readouterr().err
