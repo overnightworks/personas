@@ -91,7 +91,7 @@ class _McpAppSession:
         try:
             return await self.session.call_tool(name, arguments)
         except Exception as error:
-            raise _failure_of(error, self.auth) from None
+            raise _failure_or_raise(error, self.auth) from None
 
 
 def _text_of(result: CallToolResult) -> str:
@@ -102,19 +102,33 @@ def _refusal_of(text: str) -> Refusal:
     return next((code for code in Refusal if code is not Refusal.UNRECOGNISED and code in text), Refusal.UNRECOGNISED)
 
 
-def _failure_of(error: Exception, auth: _BearerAuth) -> CallFailure:
+def _failure_of(error: BaseException, auth: _BearerAuth) -> CallFailure | None:
     """A call that gave no usable answer: told by the last HTTP status the app sent, else by the error.
 
-    A protocol error the app answered is an unusable answer; only a broken connection is unreachable.
+    A protocol error or a result the SDK cannot validate is an unusable answer; only a broken or
+    silent connection is unreachable. Any other error is not the app's and has no failure.
     """
     status = auth.last_status
     if status is not None and status >= 400:
         return StatusFailure(status)
     if status is not None and status >= 300:
         return UnusableAnswer(status_code(status))
-    if isinstance(error, MCPError) and error.code not in _TRANSPORT_ERROR_CODES:
+    if isinstance(error, MCPError):
+        if error.code in _TRANSPORT_ERROR_CODES:
+            return Unreachable("the app did not answer")
         return UnusableAnswer(f"jsonrpc_{error.code}")
-    return Unreachable("the app did not answer")
+    if isinstance(error, ValidationError):
+        return UnusableAnswer(INVALID_ANSWER_CODE)
+    if isinstance(error, httpx2.TransportError | OSError):
+        return Unreachable("the app did not answer")
+    return None
+
+
+def _failure_or_raise(error: Exception, auth: _BearerAuth) -> CallFailure:
+    failure = _failure_of(error, auth)
+    if failure is None:
+        raise error
+    return failure
 
 
 def _leaves(error: BaseException) -> Iterator[BaseException]:
@@ -158,11 +172,15 @@ async def open_mcp_session(
             raise failure from None
         if raised_in_body is not None:
             raise raised_in_body from None
-        raise _failure_of(error, auth) from None
+        for leaf in leaves:
+            failure = _failure_of(leaf, auth)
+            if failure is not None:
+                raise failure from None
+        raise
 
 
 async def _initialise(session: ClientSession, auth: _BearerAuth) -> None:
     try:
         await session.initialize()
     except Exception as error:
-        raise _failure_of(error, auth) from None
+        raise _failure_or_raise(error, auth) from None

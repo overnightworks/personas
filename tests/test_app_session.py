@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 import secrets
 from http import HTTPStatus
 
@@ -14,6 +16,7 @@ from mcp_types import INVALID_PARAMS
 from agents.app_session import INVALID_ANSWER_CODE, open_mcp_session
 from agents.decision import Accept, Refusal, status_code
 from agents.failures import StatusFailure, Unreachable, UnusableAnswer, WaitToolError
+from agents.main import configure_logging
 from agents.secret import Secret
 from tests.support.fakes import app_target
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
@@ -244,3 +247,59 @@ async def test_a_connection_lost_after_the_session_started_is_unreachable(app, b
 
     with pytest.raises(Unreachable):
         await waits_after_the_connection_is_lost()
+
+
+class AnswersToolCallsWith(httpx2.AsyncBaseTransport):
+    """Serves through the app, except that every tool call is answered with the given server-sent events."""
+
+    def __init__(self, app: FakeApp, *messages: dict[str, object]) -> None:
+        self.inner = app.asgi()
+        self.messages = messages
+
+    async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
+        call = json.loads(request.content) if request.content else {}
+        if call.get("method") != "tools/call":
+            return await self.inner.handle_async_request(request)
+        replies = [
+            {"jsonrpc": "2.0", **message, **({"id": call["id"]} if "result" in message else {})}
+            for message in self.messages
+        ]
+        events = "".join(f"event: message\ndata: {json.dumps(reply)}\n\n" for reply in replies)
+        return httpx2.Response(200, headers={"content-type": "text/event-stream"}, content=events.encode())
+
+
+@pytest.mark.parametrize("tool_call", ["wait", "accept"])
+async def test_a_tool_result_the_sdk_cannot_validate_is_an_unusable_answer(app, bearer, tool_call):
+    transport = AnswersToolCallsWith(app, {"result": {"content": 7}})
+
+    async def calls_the_tool():
+        async with open_mcp_session(app_target(), bearer, transport=transport) as session:
+            if tool_call == "wait":
+                await session.wait(None)
+            else:
+                await session.accept(Accept("room-7", "inv-3", 0))
+
+    with pytest.raises(UnusableAnswer) as failure:
+        await calls_the_tool()
+
+    assert failure.value.code == INVALID_ANSWER_CODE
+
+
+async def test_a_malformed_notification_of_the_app_logs_none_of_its_content(app, bearer, library_loggers, caplog):
+    configure_logging()
+    caplog.set_level(logging.DEBUG)
+    leaked = "content-of-a-malformed-notification"
+    transport = AnswersToolCallsWith(
+        app,
+        {"method": "notifications/progress", "params": {"progressToken": 1, "progress": leaked}},
+        {"result": {"content": [], "isError": False}},
+    )
+
+    async def waits():
+        async with open_mcp_session(app_target(), bearer, transport=transport) as session:
+            await session.wait(None)
+
+    with pytest.raises(UnusableAnswer):
+        await waits()
+
+    assert leaked not in caplog.text

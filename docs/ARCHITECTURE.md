@@ -22,7 +22,7 @@ flowchart LR
 
 - **The runner** (`src/agents`, console script `agents`) reads and validates the configuration at start, then runs one loop for every agent and every app.
 - **A loop** takes a token by client credentials with the app's scope and renews it before it expires. It keeps one `wait` in flight, carrying the last cursor, and accepts each invitation it has not seen refused as stale. A refusal by the realm or the app (a 4xx, a 401 after one renewal, a `wait` tool error, a protocol error, a redirect or a `wait` answer that is no standing) suspends that loop, which retries at a bounded interval and resumes when `wait` answers; a network failure or a 5xx backs off with a capped interval.
-- **Decisions** (`decision.py`) are pure: standings in, accepts out; token expiry against a given clock; the reaction to a status.
+- **Decisions** (`decision.py`) are pure: standings in, accepts out; token expiry against a given clock; the reaction to a failure.
 - **Boundaries** are the token endpoint, the MCP session (the official SDK over the JSON-only streamable HTTP of agent-runtime), the clock and the log, each behind a narrow port so the loop is judged with scripted ones.
 - **The log** holds each state change once (started, suspended, resumed, joined, refused) with the client id, the app and a status or refusal code, and no secret, token or tool content.
 

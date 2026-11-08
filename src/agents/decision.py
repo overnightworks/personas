@@ -43,8 +43,14 @@ class Refusal(StrEnum):
 
 class Reaction(StrEnum):
     RENEW = "renew"
-    SUSPEND = "suspend"
     BACKOFF = "backoff"
+
+
+@dataclass(frozen=True)
+class Suspend:
+    """The loop suspends and logs this code."""
+
+    code: str
 
 
 @dataclass(frozen=True)
@@ -111,21 +117,21 @@ def status_code(status: int) -> str:
     return f"http_{status}"
 
 
-def reaction_to(failure: CallFailure, *, already_renewed: bool) -> tuple[Reaction, str | None]:
-    """What the loop does after a failure and the code it logs: a refusal suspends, the rest backs off.
+def reaction_to(failure: CallFailure, *, already_renewed: bool) -> Reaction | Suspend:
+    """What the loop does after a failure: a refusal suspends with its code, the rest backs off.
 
     A server error and a failure of the network back off. An app's first 401 renews the token once.
     """
     match failure:
         case WaitToolError():
-            return Reaction.SUSPEND, WAIT_ERROR_CODE
+            return Suspend(WAIT_ERROR_CODE)
         case UnusableAnswer(code=code):
-            return Reaction.SUSPEND, code
+            return Suspend(code)
         case StatusFailure(status=status):
             if status >= 500:
-                return Reaction.BACKOFF, None
+                return Reaction.BACKOFF
             if status == 401 and not already_renewed and not isinstance(failure, TokenStatusFailure):
-                return Reaction.RENEW, None
-            return Reaction.SUSPEND, status_code(status)
+                return Reaction.RENEW
+            return Suspend(status_code(status))
         case _:
-            return Reaction.BACKOFF, None
+            return Reaction.BACKOFF

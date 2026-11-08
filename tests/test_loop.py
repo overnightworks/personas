@@ -206,8 +206,27 @@ async def test_an_accept_the_app_cannot_answer_suspends_the_loop_with_its_code_a
     assert run.reports.events() == [
         ("started", None),
         ("suspended", "jsonrpc_-32602"),
-        ("joined", None),
         ("resumed", None),
+        ("suspended", "jsonrpc_-32602"),
+        ("resumed", None),
+        ("joined", None),
+    ]
+
+
+async def test_a_loop_resumes_once_wait_answers_though_the_accept_after_it_fails(scenario):
+    standing = invited("room-7", "inv-3")
+    run = scenario(
+        [UnusableAnswer("jsonrpc_-32602"), answer("c1", standing), answer("c2", standing)],
+        accepts=[StatusFailure(503), None],
+    )
+
+    await run.play()
+
+    assert run.reports.events() == [
+        ("started", None),
+        ("suspended", "jsonrpc_-32602"),
+        ("resumed", None),
+        ("joined", None),
     ]
 
 

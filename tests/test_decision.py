@@ -15,6 +15,7 @@ from agents.decision import (
     Memory,
     Reaction,
     Refusal,
+    Suspend,
     Token,
     accepts_for,
     after_refusal,
@@ -119,25 +120,25 @@ def test_the_backoff_grows_never_beyond_its_cap_and_is_never_zero():
 
 
 @pytest.mark.parametrize(
-    ("failure", "already_renewed", "reaction", "code"),
+    ("failure", "already_renewed", "reaction"),
     [
-        (TokenStatusFailure(401), False, Reaction.SUSPEND, "http_401"),
-        (TokenStatusFailure(400), False, Reaction.SUSPEND, "http_400"),
-        (TokenStatusFailure(503), False, Reaction.BACKOFF, None),
-        (StatusFailure(401), False, Reaction.RENEW, None),
-        (StatusFailure(401), True, Reaction.SUSPEND, "http_401"),
-        (StatusFailure(403), False, Reaction.SUSPEND, "http_403"),
-        (StatusFailure(400), True, Reaction.SUSPEND, "http_400"),
-        (StatusFailure(500), False, Reaction.BACKOFF, None),
-        (StatusFailure(502), True, Reaction.BACKOFF, None),
-        (Unreachable("down"), False, Reaction.BACKOFF, None),
-        (WaitToolError("failed"), False, Reaction.SUSPEND, WAIT_ERROR_CODE),
-        (UnusableAnswer("jsonrpc_-32602"), False, Reaction.SUSPEND, "jsonrpc_-32602"),
-        (UnusableAnswer("http_307"), True, Reaction.SUSPEND, "http_307"),
+        (TokenStatusFailure(401), False, Suspend("http_401")),
+        (TokenStatusFailure(400), False, Suspend("http_400")),
+        (TokenStatusFailure(503), False, Reaction.BACKOFF),
+        (StatusFailure(401), False, Reaction.RENEW),
+        (StatusFailure(401), True, Suspend("http_401")),
+        (StatusFailure(403), False, Suspend("http_403")),
+        (StatusFailure(400), True, Suspend("http_400")),
+        (StatusFailure(500), False, Reaction.BACKOFF),
+        (StatusFailure(502), True, Reaction.BACKOFF),
+        (Unreachable("down"), False, Reaction.BACKOFF),
+        (WaitToolError("failed"), False, Suspend(WAIT_ERROR_CODE)),
+        (UnusableAnswer("jsonrpc_-32602"), False, Suspend("jsonrpc_-32602")),
+        (UnusableAnswer("http_307"), True, Suspend("http_307")),
     ],
 )
-def test_each_failure_makes_the_loop_renew_suspend_or_back_off(failure, already_renewed, reaction, code):
-    assert reaction_to(failure, already_renewed=already_renewed) == (reaction, code)
+def test_each_failure_makes_the_loop_renew_suspend_or_back_off(failure, already_renewed, reaction):
+    assert reaction_to(failure, already_renewed=already_renewed) == reaction
 
 
 def test_a_secret_shows_nothing_of_itself():

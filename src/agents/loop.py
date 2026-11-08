@@ -10,6 +10,7 @@ from agents.decision import (
     SUSPENDED_RETRY_SECONDS,
     Memory,
     Reaction,
+    Suspend,
     Token,
     accepts_for,
     after_refusal,
@@ -86,6 +87,7 @@ class AgentLoop:
                 await self._use_current_token(session)
                 answer = await session.wait(self._cursor)
                 self._cursor = answer.cursor
+                self._resume_if_suspended()
                 self._memory = forget_gone(self._memory, answer)
                 await self._accept_invitations(session, answer)
                 self._served()
@@ -101,9 +103,12 @@ class AgentLoop:
         return self._token
 
     def _served(self) -> None:
-        """A wait and every accept it led to went through: the loop is healthy again."""
+        """A wait and every accept it led to went through: the failure counters start over."""
         self._failures = 0
         self._renewed_after_401 = False
+
+    def _resume_if_suspended(self) -> None:
+        """A wait answered: the app is reachable and accepts the token, whatever an accept then does."""
         if self._suspension is not None:
             self._suspension = None
             self._report(Event.RESUMED)
@@ -120,17 +125,16 @@ class AgentLoop:
                 self._report(Event.REFUSED, refusal.value)
 
     async def _react(self, failure: CallFailure) -> None:
-        reaction, code = reaction_to(failure, already_renewed=self._renewed_after_401)
-        match reaction:
+        match reaction_to(failure, already_renewed=self._renewed_after_401):
             case Reaction.RENEW:
                 self._renewed_after_401 = True
                 self._token = None
-            case Reaction.SUSPEND:
+            case Suspend(code=code):
                 await self._suspend(code)
             case Reaction.BACKOFF:
                 await self._back_off()
 
-    async def _suspend(self, code: str | None) -> None:
+    async def _suspend(self, code: str) -> None:
         if self._suspension != code:
             self._suspension = code
             self._report(Event.SUSPENDED, code)
