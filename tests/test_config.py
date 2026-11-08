@@ -93,6 +93,8 @@ def test_a_file_that_cannot_be_read_stops_the_start_and_names_its_path(files, mo
         (lambda text: "apps = []\n" + text.replace(APP_TABLE, ""), "apps"),
         (lambda text: "agents = []\n" + text.split("[[agents]]")[0], "agents"),
         (lambda text: text + "unknown = 1\n", "unknown"),
+        (lambda text: text + APP_TABLE, "apps"),
+        (lambda text: text + "[[agents]]" + text.split("[[agents]]")[1], "agents"),
         (lambda text: text.replace("[[agents]]", "[[agents"), "TOML"),
     ],
     ids=[
@@ -109,6 +111,8 @@ def test_a_file_that_cannot_be_read_stops_the_start_and_names_its_path(files, mo
         "empty list of apps",
         "empty list of agents",
         "unknown field",
+        "app URL listed twice",
+        "client id listed twice",
         "not TOML",
     ],
 )

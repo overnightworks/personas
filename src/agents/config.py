@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Self
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, ValidationError
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from agents.secret import Secret
 
@@ -64,6 +64,20 @@ class _FileModel(_Entry):
     token_endpoint: AnyHttpUrl
     apps: tuple[_AppEntry, ...] = Field(min_length=1)
     agents: tuple[_AgentEntry, ...] = Field(min_length=1)
+
+    @field_validator("apps")
+    @classmethod
+    def _one_entry_per_app(cls, apps: tuple[_AppEntry, ...]) -> tuple[_AppEntry, ...]:
+        if len({app.mcp_url for app in apps}) != len(apps):
+            raise ValueError("an mcp_url is listed twice")
+        return apps
+
+    @field_validator("agents")
+    @classmethod
+    def _one_entry_per_agent(cls, agents: tuple[_AgentEntry, ...]) -> tuple[_AgentEntry, ...]:
+        if len({agent.client_id for agent in agents}) != len(agents):
+            raise ValueError("a client_id is listed twice")
+        return agents
 
     @classmethod
     def parse(cls, text: str) -> Self:
