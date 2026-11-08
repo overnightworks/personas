@@ -1,0 +1,8 @@
+claim_id = "c61f61ff313e4961acd8ae37d6d49cf2"
+agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
+role = "builder"
+base = "217ebf61ebc60be893cfa31ec6250e84d7476195"
+branch = "claude/issue-16-the-runner-learns-what-changes-through-m"
+scope = ["AGENTS.md", "README.md", "docs/ARCHITECTURE.md", "pyproject.toml", "src/agents/app_session.py", "src/agents/decision.py", "src/agents/failures.py", "src/agents/loop.py", "tests", "uv.lock"]
+opened_commit = "d76ae61d259088d85ac3a8c0cca4a95bbb5bcf71"
+whole_reason = "One connection path is replaced atomically, and no tree holds two."
