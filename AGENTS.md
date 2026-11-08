@@ -16,7 +16,7 @@ dependencies, hatchling is pinned as in skat, and `uv sync` installs.
 - Tests: name the module, as in `uv run pytest tests/test_loop.py --no-cov`.
   Async tests carry `pytestmark = pytest.mark.anyio`. Coverage is branch
   coverage over `src`, set in `pyproject.toml`.
-- Gate rules: `quality hygiene .` at the release `ci.yml` pins.
+- Gate rules: `quality check` at the release `ci.yml` pins.
 
 ## Where things live
 
