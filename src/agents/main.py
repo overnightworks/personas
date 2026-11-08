@@ -33,13 +33,17 @@ async def _run(config: Config) -> None:
         await run_all(config, boundaries)
 
 
+def configure_logging() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+    for name in _QUIET_LIBRARIES:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
 def main() -> None:
     try:
         config = load_config(os.environ)
     except ConfigError as error:
         sys.stderr.write(f"agents: {error}\n")
         raise SystemExit(CONFIGURATION_ERROR_EXIT_CODE) from None
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
-    for name in _QUIET_LIBRARIES:
-        logging.getLogger(name).setLevel(logging.WARNING)
+    configure_logging()
     asyncio.run(_run(config))

@@ -43,6 +43,16 @@ class Boundaries:
     report: Reporter
 
 
+def _raise_if_cancelled() -> None:
+    """Stops a loop whose cancellation an SDK task group swallowed while a session was opening.
+
+    The task still counts the request; without this the loop would open the next session instead of ending.
+    """
+    task = asyncio.current_task()
+    if task is not None and task.cancelling():
+        raise asyncio.CancelledError
+
+
 class AgentLoop:
     """Keeps one ``wait`` in flight for one agent in one app and accepts what it is invited to.
 
@@ -64,6 +74,7 @@ class AgentLoop:
     async def run(self) -> NoReturn:
         self._report(Event.STARTED)
         while True:
+            _raise_if_cancelled()
             try:
                 await self._serve()
             except CallFailure as failure:

@@ -61,9 +61,11 @@ class RecordingChanges(InMemoryMemberChanges):
         self.in_flight = 0
         self.most_in_flight = 0
         self.held = asyncio.Event()
+        self.started: asyncio.Queue[str | None] = asyncio.Queue()
 
     async def wait(self, recipient: Principal, after: str | None, seconds: float) -> str:
         self.cursors_waited_on.append(after)
+        self.started.put_nowait(after)
         self.in_flight += 1
         self.most_in_flight = max(self.most_in_flight, self.in_flight)
         if after is not None:
@@ -84,6 +86,7 @@ class FakeApp:
     accept_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
     accepted: list[JsonObject] = field(default_factory=list[JsonObject])
     requests_seen: int = 0
+    refusals: asyncio.Queue[HTTPStatus] = field(default_factory=asyncio.Queue[HTTPStatus])
     changes: RecordingChanges = field(default_factory=RecordingChanges)
     accepted_event: asyncio.Event = field(default_factory=asyncio.Event)
 
@@ -116,8 +119,10 @@ class FakeApp:
             headers = {name.decode(): value.decode() for name, value in scope["headers"]}
             bearer = headers.get("authorization", "").removeprefix("Bearer ")
             if bearer not in self.bearers:
+                self.refusals.put_nowait(HTTPStatus.UNAUTHORIZED)
                 await _answer(send, HTTPStatus.UNAUTHORIZED)
             elif self.refuse_with is not None:
+                self.refusals.put_nowait(self.refuse_with)
                 await _answer(send, self.refuse_with)
             else:
                 scope[_SUBJECT_KEY] = self.bearers[bearer]

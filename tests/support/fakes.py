@@ -120,11 +120,22 @@ class FakeSession:
 
 
 class Reports:
+    """The state changes a loop reported, in order, and a way to wait for one."""
+
     def __init__(self) -> None:
         self.changes: list[StateChange] = []
+        self._added = asyncio.Event()
 
     def __call__(self, change: StateChange) -> None:
         self.changes.append(change)
+        self._added.set()
 
     def events(self) -> list[tuple[str, str | None]]:
         return [(change.event.value, change.code) for change in self.changes]
+
+    async def until(self, event: str, *, limit_seconds: float = 10.0) -> None:
+        """Returns once a change of this event has been reported; fails after the limit."""
+        async with asyncio.timeout(limit_seconds):
+            while not any(change.event.value == event for change in self.changes):
+                self._added.clear()
+                await self._added.wait()

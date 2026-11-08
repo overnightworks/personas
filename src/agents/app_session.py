@@ -7,6 +7,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from typing import Final, Protocol, cast, override
 
+import anyio
 import httpx2
 from agent_runtime_client.wait import STANDINGS_READ_SECONDS, WAIT_BOUND_SECONDS, WaitAnswer
 from mcp import ClientSession
@@ -105,12 +106,12 @@ def _failure_after(auth: _BearerAuth) -> CallFailure:
     return Unreachable("the app did not answer")
 
 
-def _call_failures(error: BaseException) -> Iterator[CallFailure]:
-    if isinstance(error, CallFailure):
-        yield error
-    elif isinstance(error, BaseExceptionGroup):
+def _leaves(error: BaseException) -> Iterator[BaseException]:
+    if isinstance(error, BaseExceptionGroup):
         for inner in cast("BaseExceptionGroup[BaseException]", error).exceptions:
-            yield from _call_failures(inner)
+            yield from _leaves(inner)
+    else:
+        yield error
 
 
 @asynccontextmanager
@@ -133,8 +134,12 @@ async def open_mcp_session(
             yield _McpAppSession(session, auth)
     except Exception as error:
         # The SDK's task groups wrap what is raised inside them, so what the session raised is
-        # looked for in the group; any other error is a failed connection.
-        raise next(_call_failures(error), _failure_after(auth)) from None
+        # looked for in the group; a cancellation in it must stay one, or the loop would go on
+        # after being stopped. Any other error is a failed connection.
+        leaves = list(_leaves(error))
+        if any(isinstance(leaf, anyio.get_cancelled_exc_class()) for leaf in leaves):
+            raise anyio.get_cancelled_exc_class() from None
+        raise next((leaf for leaf in leaves if isinstance(leaf, CallFailure)), _failure_after(auth)) from None
 
 
 async def _initialise(session: ClientSession, auth: _BearerAuth) -> None:
