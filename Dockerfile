@@ -28,7 +28,7 @@ RUN apt-get update \
 # third-party packages are wheel-only. agents itself is installed in a second
 # step below, after its source is copied, so that its own build runs through
 # the exact-pinned hatchling.
-RUN uv sync --frozen --no-dev --no-install-project --no-build
+RUN uv sync --locked --no-dev --no-install-project --no-build
 
 FROM python-base
 COPY --from=dependencies /opt/venv /opt/venv
