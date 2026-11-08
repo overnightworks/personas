@@ -1,8 +1,0 @@
-claim_id = "71c5a60635c346288a9ac3a333e45c3c"
-agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
-role = "builder"
-base = "4c133dfe2f70dd1f19a1870c5e8f2f48bf058df6"
-branch = "claude/issue-7-p5a-runner"
-scope = [".github", ".gitignore", ".python-version", "AGENTS.md", "README.md", "docs/ARCHITECTURE.md", "pyproject.toml", "quality", "sonar-project.properties", "src", "tests", "uv.lock"]
-opened_commit = "38bdd14f46bfecb491b1ad3d95a6594b85a5d213"
-whole_reason = "The thinnest honest end-to-end proof of the runner needs the token, the wait loop and the accept together with the toolchain and CI that judge them; any smaller cut lands code no entry point reaches."
