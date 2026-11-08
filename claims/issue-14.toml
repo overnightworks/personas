@@ -1,8 +1,0 @@
-claim_id = "7609261d48d2482d8c8ae8bad4ec4cb0"
-agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
-role = "builder"
-base = "07c08ec6a9407425545638c3d9ca889520c1f980"
-branch = "claude/issue-14-ready-marker"
-scope = ["README.md", "docs/ARCHITECTURE.md", "src", "tests"]
-opened_commit = "83dca1e68177d2ef4acff035ec5f10cd37dcf276"
-whole_reason = "The key, the marker and the backoff line meet in the entry point and the loop, and only together give the platform a check that an E2E on the image can prove."
