@@ -9,10 +9,11 @@ from http import HTTPStatus
 import httpx2
 import pytest
 from agent_runtime_client.tools import ToolOutcome
+from mcp_types import INVALID_PARAMS
 
-from agents.app_session import open_mcp_session
-from agents.decision import Accept, Refusal
-from agents.failures import StatusFailure, Unreachable
+from agents.app_session import INVALID_ANSWER_CODE, open_mcp_session
+from agents.decision import Accept, Refusal, status_code
+from agents.failures import StatusFailure, Unreachable, UnusableAnswer, WaitToolError
 from agents.secret import Secret
 from tests.support.fakes import app_target
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
@@ -108,16 +109,20 @@ async def test_a_renewed_token_is_the_bearer_of_the_next_call(app, bearer):
 async def test_an_http_status_the_app_answers_reaches_the_loop_as_that_status(app, bearer, status):
     app.refuse_with = status
 
+    opening = open_mcp_session(app_target(), bearer, transport=app.asgi())
+
     with pytest.raises(StatusFailure) as failure:
-        async with open_mcp_session(app_target(), bearer, transport=app.asgi()):
+        async with opening:
             pass
 
     assert failure.value.status == status
 
 
 async def test_a_bearer_the_app_does_not_know_is_a_401(app):
+    opening = open_mcp_session(app_target(), Secret(secrets.token_urlsafe(24)), transport=app.asgi())
+
     with pytest.raises(StatusFailure) as failure:
-        async with open_mcp_session(app_target(), Secret("unknown"), transport=app.asgi()):
+        async with opening:
             pass
 
     assert failure.value.status == HTTPStatus.UNAUTHORIZED
@@ -140,6 +145,102 @@ async def test_an_app_that_cannot_be_reached_is_unreachable(bearer):
     def refuse_connection(request: httpx2.Request) -> httpx2.Response:
         raise httpx2.ConnectError("no route")
 
+    opening = open_mcp_session(app_target(), bearer, transport=httpx2.MockTransport(refuse_connection))
+
     with pytest.raises(Unreachable):
-        async with open_mcp_session(app_target(), bearer, transport=httpx2.MockTransport(refuse_connection)):
+        async with opening:
             pass
+
+
+class BodyError(Exception):
+    pass
+
+
+async def test_an_error_raised_in_the_session_body_reaches_the_caller_unchanged(app, bearer):
+    raised = BodyError("the caller's own code failed")
+
+    async def fails_in_the_body():
+        async with open_mcp_session(app_target(), bearer, transport=app.asgi()) as session:
+            await session.wait(None)
+            raise raised
+
+    with pytest.raises(BodyError) as caught:
+        await fails_in_the_body()
+
+    assert caught.value is raised
+
+
+async def test_a_wait_tool_that_answers_an_error_is_a_wait_tool_error(app, bearer):
+    app.standings_fail = True
+
+    async def waits_for_a_failing_tool():
+        async with open_mcp_session(app_target(), bearer, transport=app.asgi()) as session:
+            await session.wait(None)
+
+    with pytest.raises(WaitToolError):
+        await waits_for_a_failing_tool()
+
+
+async def test_a_wait_answer_that_is_no_standing_is_an_unusable_answer(app, bearer):
+    app.wait_answers_with = "no standings here"
+
+    async def waits_for_a_wrong_answer():
+        async with open_mcp_session(app_target(), bearer, transport=app.asgi()) as session:
+            await session.wait(None)
+
+    with pytest.raises(UnusableAnswer) as failure:
+        await waits_for_a_wrong_answer()
+
+    assert failure.value.code == INVALID_ANSWER_CODE
+
+
+async def test_an_app_without_the_accept_tool_answers_a_protocol_error_that_is_an_unusable_answer(app, bearer):
+    app.offers_accept = False
+
+    async def accepts_where_it_is_not_offered():
+        async with open_mcp_session(app_target(), bearer, transport=app.asgi()) as session:
+            await session.accept(Accept("room-7", "inv-3", 0))
+
+    with pytest.raises(UnusableAnswer) as failure:
+        await accepts_where_it_is_not_offered()
+
+    assert failure.value.code == f"jsonrpc_{INVALID_PARAMS}"
+
+
+async def test_a_redirect_the_app_answers_is_an_unusable_answer_named_by_its_status(app, bearer):
+    app.refuse_with = HTTPStatus.TEMPORARY_REDIRECT
+
+    async def waits_behind_a_redirect():
+        async with open_mcp_session(app_target(), bearer, transport=app.asgi()) as session:
+            await session.wait(None)
+
+    with pytest.raises(UnusableAnswer) as failure:
+        await waits_behind_a_redirect()
+
+    assert failure.value.code == status_code(HTTPStatus.TEMPORARY_REDIRECT)
+
+
+class SeveredTransport(httpx2.AsyncBaseTransport):
+    """Serves through the app until severed, then fails every request as a lost connection does."""
+
+    def __init__(self, app: FakeApp) -> None:
+        self.inner = app.asgi()
+        self.severed = False
+
+    async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
+        if self.severed:
+            raise httpx2.ConnectError("connection lost")
+        return await self.inner.handle_async_request(request)
+
+
+async def test_a_connection_lost_after_the_session_started_is_unreachable(app, bearer):
+    transport = SeveredTransport(app)
+
+    async def waits_after_the_connection_is_lost():
+        async with open_mcp_session(app_target(), bearer, transport=transport) as session:
+            await session.wait(None)
+            transport.severed = True
+            await session.wait(None)
+
+    with pytest.raises(Unreachable):
+        await waits_after_the_connection_is_lost()

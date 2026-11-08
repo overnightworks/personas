@@ -6,11 +6,14 @@ rule is called with the values it judges.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
 from agent_runtime_client.wait import StandingState, WaitAnswer
+
+from agents.failures import CallFailure, StatusFailure, TokenStatusFailure, UnusableAnswer, WaitToolError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -22,6 +25,7 @@ RENEW_BEFORE_EXPIRY_SECONDS: Final = 60.0
 """A token is renewed once this little of its lifetime remains, so no call carries an expired one."""
 BACKOFF_BASE_SECONDS: Final = 1.0
 BACKOFF_CAP_SECONDS: Final = 30.0
+_DOUBLINGS_TO_CAP: Final = math.ceil(math.log2(BACKOFF_CAP_SECONDS / BACKOFF_BASE_SECONDS))
 SUSPENDED_RETRY_SECONDS: Final = 30.0
 """How often a suspended loop asks the realm and then the app again."""
 WAIT_ERROR_CODE: Final = "wait_error"
@@ -35,13 +39,6 @@ class Refusal(StrEnum):
     TWO_SEATS = "two_seats"
     BUSY = "busy"
     UNRECOGNISED = "unrecognised"
-
-
-class CallSource(StrEnum):
-    """Whom a failed HTTP call went to: the realm's token endpoint or the app."""
-
-    REALM = "realm"
-    APP = "app"
 
 
 class Reaction(StrEnum):
@@ -65,7 +62,7 @@ class Token:
 
 @dataclass(frozen=True)
 class Memory:
-    """What a loop remembers between answers: invitations refused as stale, and the last other refusal."""
+    """What a loop remembers: invitations refused as stale, and the last other refusal of each."""
 
     stale: frozenset[str] = frozenset()
     refused: Mapping[str, Refusal] = field(default_factory=dict[str, Refusal])
@@ -84,10 +81,10 @@ def accepts_for(answer: WaitAnswer, memory: Memory) -> tuple[Accept, ...]:
 
 
 def forget_gone(memory: Memory, answer: WaitAnswer) -> Memory:
-    """Drop what is remembered of an invitation the answer no longer holds; it cannot come back."""
+    """Drop the last refusal of an invitation the answer no longer holds; a stale one stays refused."""
     present = {standing.invitation.id for standing in answer.standings if standing.invitation is not None}
     return Memory(
-        stale=memory.stale & present,
+        stale=memory.stale,
         refused={invitation: code for invitation, code in memory.refused.items() if invitation in present},
     )
 
@@ -106,17 +103,29 @@ def renewal_due(token: Token | None, now: float) -> bool:
 
 def backoff_delay(failures: int) -> float:
     """The wait after the ``failures``-th failure in a row (from one): doubling up to a cap."""
-    return min(BACKOFF_BASE_SECONDS * 2 ** (failures - 1), BACKOFF_CAP_SECONDS)
+    doublings = min(failures - 1, _DOUBLINGS_TO_CAP)
+    return min(BACKOFF_BASE_SECONDS * 2**doublings, BACKOFF_CAP_SECONDS)
 
 
 def status_code(status: int) -> str:
     return f"http_{status}"
 
 
-def reaction_to_status(status: int, source: CallSource, *, already_renewed: bool) -> Reaction:
-    """A server error backs off; a refusal suspends; an app's first 401 renews the token once."""
-    if status >= 500:
-        return Reaction.BACKOFF
-    if source is CallSource.APP and status == 401 and not already_renewed:
-        return Reaction.RENEW
-    return Reaction.SUSPEND
+def reaction_to(failure: CallFailure, *, already_renewed: bool) -> tuple[Reaction, str | None]:
+    """What the loop does after a failure and the code it logs: a refusal suspends, the rest backs off.
+
+    A server error and a failure of the network back off. An app's first 401 renews the token once.
+    """
+    match failure:
+        case WaitToolError():
+            return Reaction.SUSPEND, WAIT_ERROR_CODE
+        case UnusableAnswer(code=code):
+            return Reaction.SUSPEND, code
+        case StatusFailure(status=status):
+            if status >= 500:
+                return Reaction.BACKOFF, None
+            if status == 401 and not already_renewed and not isinstance(failure, TokenStatusFailure):
+                return Reaction.RENEW, None
+            return Reaction.SUSPEND, status_code(status)
+        case _:
+            return Reaction.BACKOFF, None

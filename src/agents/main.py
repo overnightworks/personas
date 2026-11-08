@@ -18,8 +18,9 @@ from agents.reporting import log_state_change
 from agents.tokens import HttpTokenSource
 
 CONFIGURATION_ERROR_EXIT_CODE: Final = 2
-# Their records carry request details; only the runner's own state changes are logged.
-_QUIET_LIBRARIES: Final = ("httpx2", "httpcore2", "mcp")
+QUIET_LIBRARIES: Final = ("httpx2", "httpcore2", "mcp")
+"""Their records carry request details and response content; only the runner's own state changes are logged."""
+SILENT_LEVEL: Final = logging.CRITICAL + 1
 
 
 async def _run(config: Config) -> None:
@@ -35,8 +36,8 @@ async def _run(config: Config) -> None:
 
 def configure_logging() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
-    for name in _QUIET_LIBRARIES:
-        logging.getLogger(name).setLevel(logging.WARNING)
+    for name in QUIET_LIBRARIES:
+        logging.getLogger(name).setLevel(SILENT_LEVEL)
 
 
 def main() -> None:

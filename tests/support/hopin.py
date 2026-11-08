@@ -58,14 +58,12 @@ class RecordingChanges(InMemoryMemberChanges):
 
     def __init__(self) -> None:
         super().__init__()
-        self.cursors_waited_on: list[str | None] = []
         self.in_flight = 0
         self.most_in_flight = 0
         self.held = asyncio.Event()
         self.started: asyncio.Queue[str | None] = asyncio.Queue()
 
     async def wait(self, recipient: Principal, after: str | None, seconds: float) -> str:
-        self.cursors_waited_on.append(after)
         self.started.put_nowait(after)
         self.in_flight += 1
         self.most_in_flight = max(self.most_in_flight, self.in_flight)
@@ -84,12 +82,14 @@ class FakeApp:
     bearers: dict[str, str] = field(default_factory=dict[str, str])
     standings: dict[str, list[Standing]] = field(default_factory=dict[str, list[Standing]])
     refuse_with: HTTPStatus | None = None
+    standings_fail: bool = False
+    offers_accept: bool = True
+    wait_answers_with: str | None = None
     accept_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
     accepted: list[JsonObject] = field(default_factory=list[JsonObject])
     requests_seen: int = 0
     refusals: asyncio.Queue[HTTPStatus] = field(default_factory=asyncio.Queue[HTTPStatus])
     changes: RecordingChanges = field(default_factory=RecordingChanges)
-    accepted_event: asyncio.Event = field(default_factory=asyncio.Event)
 
     def let_in(self, bearer: str, subject: str) -> None:
         self.bearers[bearer] = subject
@@ -100,18 +100,27 @@ class FakeApp:
         self.changes.changed(Principal(iss=ISSUER, sub=subject))
 
     async def _standings(self, principal: Principal) -> list[Standing]:
+        if self.standings_fail:
+            raise RuntimeError("the standings cannot be read")
         return self.standings.get(principal.sub, [])
 
     async def _accept(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
         self.accepted.append(arguments)
-        self.accepted_event.set()
         if self.accept_outcomes:
             return self.accept_outcomes.pop(0)
         return ToolOutcome(json.dumps({"room": arguments["room"], "name": "Mozart"}), is_error=False)
 
+    async def _wait_answer(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
+        assert self.wait_answers_with is not None
+        return ToolOutcome(self.wait_answers_with, is_error=False)
+
     def asgi(self) -> httpx2.ASGITransport:
+        waiting = wait_tool(self.changes, self._standings)
+        if self.wait_answers_with is not None:
+            waiting = PersonTool(waiting.declaration, self._wait_answer)
+        tools = [waiting, PersonTool(_ACCEPT_DECLARATION, self._accept)] if self.offers_accept else [waiting]
         front = McpPersonFront(
-            [wait_tool(self.changes, self._standings), PersonTool(_ACCEPT_DECLARATION, self._accept)],
+            tools,
             resolve_person=lambda scope: Principal(iss=ISSUER, sub=scope[_SUBJECT_KEY]),
         )
 
@@ -133,5 +142,6 @@ class FakeApp:
 
 
 async def _answer(send, status: HTTPStatus) -> None:
-    await send({"type": "http.response.start", "status": status.value, "headers": []})
+    headers = [(b"location", b"http://app.test/elsewhere")] if status.is_redirection else []
+    await send({"type": "http.response.start", "status": status.value, "headers": headers})
     await send({"type": "http.response.body", "body": b""})

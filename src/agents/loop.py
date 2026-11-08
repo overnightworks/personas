@@ -8,8 +8,6 @@ from typing import TYPE_CHECKING, NoReturn
 
 from agents.decision import (
     SUSPENDED_RETRY_SECONDS,
-    WAIT_ERROR_CODE,
-    CallSource,
     Memory,
     Reaction,
     Token,
@@ -17,11 +15,10 @@ from agents.decision import (
     after_refusal,
     backoff_delay,
     forget_gone,
-    reaction_to_status,
+    reaction_to,
     renewal_due,
-    status_code,
 )
-from agents.failures import CallFailure, StatusFailure, TokenStatusFailure, WaitToolError
+from agents.failures import CallFailure
 from agents.reporting import Event, Reporter, StateChange
 
 if TYPE_CHECKING:
@@ -86,10 +83,15 @@ class AgentLoop:
         token = await self._current_token()
         async with self._boundaries.open_session(self._app, token.value) as session:
             while True:
-                session.use_token((await self._current_token()).value)
+                await self._use_current_token(session)
                 answer = await session.wait(self._cursor)
-                self._answered(answer)
+                self._cursor = answer.cursor
+                self._memory = forget_gone(self._memory, answer)
                 await self._accept_invitations(session, answer)
+                self._served()
+
+    async def _use_current_token(self, session: AppSession) -> None:
+        session.use_token((await self._current_token()).value)
 
     async def _current_token(self) -> Token:
         if self._token is None or renewal_due(self._token, self._boundaries.clock.now()):
@@ -98,17 +100,17 @@ class AgentLoop:
             self._token = Token(granted.value, expires_at)
         return self._token
 
-    def _answered(self, answer: WaitAnswer) -> None:
-        self._cursor = answer.cursor
+    def _served(self) -> None:
+        """A wait and every accept it led to went through: the loop is healthy again."""
         self._failures = 0
         self._renewed_after_401 = False
         if self._suspension is not None:
             self._suspension = None
             self._report(Event.RESUMED)
-        self._memory = forget_gone(self._memory, answer)
 
     async def _accept_invitations(self, session: AppSession, answer: WaitAnswer) -> None:
         for accept in accepts_for(answer, self._memory):
+            await self._use_current_token(session)
             refusal = await session.accept(accept)
             if refusal is None:
                 self._report(Event.JOINED)
@@ -118,23 +120,17 @@ class AgentLoop:
                 self._report(Event.REFUSED, refusal.value)
 
     async def _react(self, failure: CallFailure) -> None:
-        match failure:
-            case WaitToolError():
-                await self._suspend(WAIT_ERROR_CODE)
-            case StatusFailure(status=status):
-                source = CallSource.REALM if isinstance(failure, TokenStatusFailure) else CallSource.APP
-                match reaction_to_status(status, source, already_renewed=self._renewed_after_401):
-                    case Reaction.RENEW:
-                        self._renewed_after_401 = True
-                        self._token = None
-                    case Reaction.SUSPEND:
-                        await self._suspend(status_code(status))
-                    case Reaction.BACKOFF:
-                        await self._back_off()
-            case _:
+        reaction, code = reaction_to(failure, already_renewed=self._renewed_after_401)
+        match reaction:
+            case Reaction.RENEW:
+                self._renewed_after_401 = True
+                self._token = None
+            case Reaction.SUSPEND:
+                await self._suspend(code)
+            case Reaction.BACKOFF:
                 await self._back_off()
 
-    async def _suspend(self, code: str) -> None:
+    async def _suspend(self, code: str | None) -> None:
         if self._suspension != code:
             self._suspension = code
             self._report(Event.SUSPENDED, code)

@@ -12,7 +12,7 @@ from agents.decision import (
     Refusal,
     backoff_delay,
 )
-from agents.failures import StatusFailure, TokenStatusFailure, Unreachable, WaitToolError
+from agents.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer, WaitToolError
 from tests.support.fakes import answer
 from tests.support.hopin import active, invited
 
@@ -74,6 +74,17 @@ async def test_a_token_is_renewed_before_it_expires_and_never_sent_expired(scena
         assert sent_at < run.tokens.expires_at[bearer] - RENEW_BEFORE_EXPIRY_SECONDS
 
 
+async def test_an_accept_never_carries_a_bearer_that_expired_while_the_wait_and_earlier_accepts_ran(scenario):
+    invitations = [invited(f"room-{n}", f"inv-{n}") for n in range(3)]
+    run = scenario([answer("c1", *invitations)], seconds_per_accept=150.0)
+
+    await run.play()
+
+    assert len(run.session.accepted) == 3
+    for bearer, sent_at in run.session.bearers_with_time:
+        assert sent_at < run.tokens.expires_at[bearer] - RENEW_BEFORE_EXPIRY_SECONDS
+
+
 async def test_a_refused_token_suspends_the_loop_without_an_app_call_and_logs_it_once(scenario):
     refused = [TokenStatusFailure(401)] * 3
     run = scenario([answer("c1")], tokens=refused)
@@ -91,8 +102,10 @@ async def test_a_refused_token_suspends_the_loop_without_an_app_call_and_logs_it
         (StatusFailure(403), "http_403"),
         (StatusFailure(400), "http_400"),
         (WaitToolError("wait failed"), "wait_error"),
+        (UnusableAnswer("jsonrpc_-32602"), "jsonrpc_-32602"),
+        (UnusableAnswer("http_307"), "http_307"),
     ],
-    ids=["403", "400", "wait tool error"],
+    ids=["403", "400", "wait tool error", "protocol error", "redirect"],
 )
 async def test_an_app_refusal_suspends_the_loop_and_it_resumes_when_wait_answers(scenario, failure, code):
     run = scenario([failure, failure, answer("c1"), answer("c2")])
@@ -180,3 +193,41 @@ async def test_the_backoff_starts_over_after_an_answer(scenario):
     await run.play()
 
     assert run.clock.slept == [backoff_delay(1), backoff_delay(2), backoff_delay(1)]
+
+
+async def test_an_accept_the_app_cannot_answer_suspends_the_loop_with_its_code_and_does_not_retry_at_once(scenario):
+    standing = invited("room-7", "inv-3")
+    failure = UnusableAnswer("jsonrpc_-32602")
+    run = scenario([answer(f"c{n}", standing) for n in range(3)], accepts=[failure, failure, None])
+
+    await run.play()
+
+    assert run.clock.slept == [SUSPENDED_RETRY_SECONDS] * 2
+    assert run.reports.events() == [
+        ("started", None),
+        ("suspended", "jsonrpc_-32602"),
+        ("joined", None),
+        ("resumed", None),
+    ]
+
+
+async def test_an_accept_that_answers_401_again_after_a_renewal_suspends_the_loop_though_a_wait_succeeded_between(
+    scenario,
+):
+    standing = invited("room-7", "inv-3")
+    unauthorised = StatusFailure(401)
+    run = scenario([answer(f"c{n}", standing) for n in range(3)], accepts=[unauthorised, unauthorised, None])
+
+    await run.play()
+
+    assert run.clock.slept == [SUSPENDED_RETRY_SECONDS]
+    assert run.reports.events()[:2] == [("started", None), ("suspended", "http_401")]
+
+
+async def test_an_accept_that_fails_on_the_network_backs_off_and_does_not_retry_every_second(scenario):
+    standing = invited("room-7", "inv-3")
+    run = scenario([answer(f"c{n}", standing) for n in range(4)], accepts=[Unreachable("down")] * 3 + [None])
+
+    await run.play()
+
+    assert run.clock.slept == [backoff_delay(1), backoff_delay(2), backoff_delay(3)]

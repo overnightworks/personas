@@ -7,17 +7,17 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from typing import Final, Protocol, cast, override
 
-import anyio
 import httpx2
 from agent_runtime_client.wait import STANDINGS_READ_SECONDS, WAIT_BOUND_SECONDS, WaitAnswer
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
-from mcp_types import CallToolResult, TextContent
+from mcp.shared.exceptions import MCPError
+from mcp_types import CONNECTION_CLOSED, REQUEST_TIMEOUT, CallToolResult, TextContent
 from pydantic import ValidationError
 
 from agents.config import AppTarget
-from agents.decision import Accept, Refusal
-from agents.failures import CallFailure, StatusFailure, Unreachable, WaitToolError
+from agents.decision import Accept, Refusal, status_code
+from agents.failures import CallFailure, StatusFailure, Unreachable, UnusableAnswer, WaitToolError
 from agents.secret import Secret
 
 CONNECT_SECONDS: Final = 30.0
@@ -25,6 +25,9 @@ READ_SECONDS: Final = 2 * (WAIT_BOUND_SECONDS + STANDINGS_READ_SECONDS)
 """Well above the longest a held ``wait`` takes, so the client never cuts one short."""
 WAIT_TOOL: Final = "wait"
 ACCEPT_TOOL: Final = "accept_invitation"
+INVALID_ANSWER_CODE: Final = "invalid_answer"
+_TRANSPORT_ERROR_CODES: Final = frozenset({CONNECTION_CLOSED, REQUEST_TIMEOUT})
+"""What the SDK answers for a connection that broke or a request that timed out."""
 
 
 class AppSession(Protocol):
@@ -33,11 +36,11 @@ class AppSession(Protocol):
         ...
 
     async def wait(self, after: str | None) -> WaitAnswer:
-        """Raises ``StatusFailure``, ``Unreachable`` or ``WaitToolError``."""
+        """Raises ``StatusFailure``, ``Unreachable``, ``UnusableAnswer`` or ``WaitToolError``."""
         ...
 
     async def accept(self, accept: Accept) -> Refusal | None:
-        """``None`` when joined, else the refusal; raises ``StatusFailure`` or ``Unreachable``."""
+        """``None`` when joined, else the refusal; raises ``StatusFailure``, ``Unreachable`` or ``UnusableAnswer``."""
         ...
 
 
@@ -76,7 +79,7 @@ class _McpAppSession:
         try:
             return WaitAnswer.model_validate_json(_text_of(result))
         except ValidationError:
-            raise Unreachable("the wait tool answered something else than standings") from None
+            raise UnusableAnswer(INVALID_ANSWER_CODE) from None
 
     async def accept(self, accept: Accept) -> Refusal | None:
         arguments = {"room": accept.place_id, "invitation": accept.invitation_id, "epoch": accept.epoch}
@@ -87,8 +90,8 @@ class _McpAppSession:
         self.auth.last_status = None
         try:
             return await self.session.call_tool(name, arguments)
-        except Exception:
-            raise _failure_after(self.auth) from None
+        except Exception as error:
+            raise _failure_of(error, self.auth) from None
 
 
 def _text_of(result: CallToolResult) -> str:
@@ -99,10 +102,18 @@ def _refusal_of(text: str) -> Refusal:
     return next((code for code in Refusal if code is not Refusal.UNRECOGNISED and code in text), Refusal.UNRECOGNISED)
 
 
-def _failure_after(auth: _BearerAuth) -> CallFailure:
+def _failure_of(error: Exception, auth: _BearerAuth) -> CallFailure:
+    """A call that gave no usable answer: told by the last HTTP status the app sent, else by the error.
+
+    A protocol error the app answered is an unusable answer; only a broken connection is unreachable.
+    """
     status = auth.last_status
     if status is not None and status >= 400:
         return StatusFailure(status)
+    if status is not None and status >= 300:
+        return UnusableAnswer(status_code(status))
+    if isinstance(error, MCPError) and error.code not in _TRANSPORT_ERROR_CODES:
+        return UnusableAnswer(f"jsonrpc_{error.code}")
     return Unreachable("the app did not answer")
 
 
@@ -124,6 +135,7 @@ async def open_mcp_session(
     """
     auth = _BearerAuth(token)
     timeout = httpx2.Timeout(CONNECT_SECONDS, read=READ_SECONDS)
+    raised_in_body: Exception | None = None
     try:
         async with (
             httpx2.AsyncClient(auth=auth, transport=transport, timeout=timeout) as client,
@@ -131,19 +143,26 @@ async def open_mcp_session(
             ClientSession(read_stream, write_stream) as session,
         ):
             await _initialise(session, auth)
-            yield _McpAppSession(session, auth)
+            try:
+                yield _McpAppSession(session, auth)
+            except Exception as error:
+                raised_in_body = error
+                raise
     except Exception as error:
-        # The SDK's task groups wrap what is raised inside them, so what the session raised is
-        # looked for in the group; a cancellation in it must stay one, or the loop would go on
-        # after being stopped. Any other error is a failed connection.
+        # The SDK's task groups wrap what is raised inside them, so a failure of the call is looked
+        # for in the group. What the caller's own code raised stays as it was; any other error is the
+        # connection failing.
         leaves = list(_leaves(error))
-        if any(isinstance(leaf, anyio.get_cancelled_exc_class()) for leaf in leaves):
-            raise anyio.get_cancelled_exc_class() from None
-        raise next((leaf for leaf in leaves if isinstance(leaf, CallFailure)), _failure_after(auth)) from None
+        failure = next((leaf for leaf in leaves if isinstance(leaf, CallFailure)), None)
+        if failure is not None:
+            raise failure from None
+        if raised_in_body is not None:
+            raise raised_in_body from None
+        raise _failure_of(error, auth) from None
 
 
 async def _initialise(session: ClientSession, auth: _BearerAuth) -> None:
     try:
         await session.initialize()
-    except Exception:
-        raise _failure_after(auth) from None
+    except Exception as error:
+        raise _failure_of(error, auth) from None

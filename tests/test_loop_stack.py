@@ -6,6 +6,7 @@ import asyncio
 from http import HTTPStatus
 
 import pytest
+from mcp_types import INVALID_PARAMS
 
 from agents.decision import SUSPENDED_RETRY_SECONDS
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
@@ -83,6 +84,29 @@ async def test_a_token_the_app_does_not_accept_is_renewed_once_and_then_suspends
 
     assert runner.reports.events() == [("started", None), ("suspended", "http_401")]
     assert len(runner.realm.issued) > 2
+
+
+async def test_a_wait_tool_that_answers_an_error_suspends_the_loop_until_it_answers_standings_again(runner):
+    runner.app.standings_fail = True
+    runner.start()
+    await runner.reports.until("suspended")
+
+    assert runner.reports.events() == [("started", None), ("suspended", "wait_error")]
+    assert set(runner.clock.slept) == {SUSPENDED_RETRY_SECONDS}
+
+    runner.app.standings_fail = False
+    await runner.reports.until("resumed")
+    assert runner.reports.events() == [("started", None), ("suspended", "wait_error"), ("resumed", None)]
+
+
+async def test_an_app_without_the_accept_tool_suspends_the_loop_with_the_protocol_error_code(runner):
+    runner.app.offers_accept = False
+    runner.app.stand(SUBJECT, invited("room-7", "inv-3"))
+    runner.start()
+    await runner.reports.until("suspended")
+
+    assert runner.reports.events() == [("started", None), ("suspended", f"jsonrpc_{INVALID_PARAMS}")]
+    assert runner.app.accepted == []
 
 
 @pytest.mark.parametrize("turns_before_stop", range(0, 40, 3))

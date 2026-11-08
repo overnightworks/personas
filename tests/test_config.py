@@ -44,7 +44,9 @@ def files(tmp_path: Path) -> Files:
 
 
 def fails_at_start(environment: dict[str, str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
-    monkeypatch.setattr("os.environ", environment)
+    monkeypatch.delenv(CONFIG_ENVIRONMENT_VARIABLE, raising=False)
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
     with pytest.raises(SystemExit) as stopped:
         main()
     assert stopped.value.code == CONFIGURATION_ERROR_EXIT_CODE

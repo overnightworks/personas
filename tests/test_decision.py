@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import secrets
+
 import pytest
 from agent_runtime_client.wait import PlaceRef, Standing, StandingState
 
 from agents.decision import (
     BACKOFF_CAP_SECONDS,
     RENEW_BEFORE_EXPIRY_SECONDS,
+    WAIT_ERROR_CODE,
     Accept,
-    CallSource,
     Memory,
     Reaction,
     Refusal,
@@ -18,9 +20,10 @@ from agents.decision import (
     after_refusal,
     backoff_delay,
     forget_gone,
-    reaction_to_status,
+    reaction_to,
     renewal_due,
 )
+from agents.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer, WaitToolError
 from agents.secret import Secret
 from tests.support.fakes import answer
 from tests.support.hopin import active, invited
@@ -80,8 +83,16 @@ def test_what_is_remembered_of_an_invitation_that_left_the_answer_is_dropped():
 
     forgotten = forget_gone(memory, answer("c2", invited("room-8", "inv-4")))
 
-    assert forgotten.stale == frozenset()
     assert forgotten.refused == {"inv-4": Refusal.BUSY}
+
+
+def test_a_stale_invitation_stays_refused_when_an_answer_leaves_it_out_and_a_later_one_holds_it_again():
+    standing = invited("room-7", "inv-3")
+    memory, _ = after_refusal(Memory(), Accept("room-7", "inv-3", 0), Refusal.STALE_INVITATION)
+
+    memory = forget_gone(memory, answer("c2"))
+
+    assert accepts_for(answer("c3", standing), memory) == ()
 
 
 @pytest.mark.parametrize(
@@ -90,7 +101,7 @@ def test_what_is_remembered_of_an_invitation_that_left_the_answer_is_dropped():
 )
 def test_a_token_is_due_for_renewal_before_it_expires(seconds_left, due):
     now = 500.0
-    token = Token(Secret("value"), expires_at=now + seconds_left)
+    token = Token(Secret(secrets.token_hex(8)), expires_at=now + seconds_left)
 
     assert renewal_due(token, now) is due
 
@@ -100,7 +111,7 @@ def test_no_token_is_due_for_renewal():
 
 
 def test_the_backoff_grows_never_beyond_its_cap_and_is_never_zero():
-    delays = [backoff_delay(failures) for failures in range(1, 40)]
+    delays = [backoff_delay(failures) for failures in [*range(1, 40), 1025, 10**6]]
 
     assert delays == sorted(delays)
     assert all(0 < delay <= BACKOFF_CAP_SECONDS for delay in delays)
@@ -108,24 +119,29 @@ def test_the_backoff_grows_never_beyond_its_cap_and_is_never_zero():
 
 
 @pytest.mark.parametrize(
-    ("status", "source", "already_renewed", "reaction"),
+    ("failure", "already_renewed", "reaction", "code"),
     [
-        (401, CallSource.REALM, False, Reaction.SUSPEND),
-        (400, CallSource.REALM, False, Reaction.SUSPEND),
-        (503, CallSource.REALM, False, Reaction.BACKOFF),
-        (401, CallSource.APP, False, Reaction.RENEW),
-        (401, CallSource.APP, True, Reaction.SUSPEND),
-        (403, CallSource.APP, False, Reaction.SUSPEND),
-        (400, CallSource.APP, True, Reaction.SUSPEND),
-        (500, CallSource.APP, False, Reaction.BACKOFF),
-        (502, CallSource.APP, True, Reaction.BACKOFF),
+        (TokenStatusFailure(401), False, Reaction.SUSPEND, "http_401"),
+        (TokenStatusFailure(400), False, Reaction.SUSPEND, "http_400"),
+        (TokenStatusFailure(503), False, Reaction.BACKOFF, None),
+        (StatusFailure(401), False, Reaction.RENEW, None),
+        (StatusFailure(401), True, Reaction.SUSPEND, "http_401"),
+        (StatusFailure(403), False, Reaction.SUSPEND, "http_403"),
+        (StatusFailure(400), True, Reaction.SUSPEND, "http_400"),
+        (StatusFailure(500), False, Reaction.BACKOFF, None),
+        (StatusFailure(502), True, Reaction.BACKOFF, None),
+        (Unreachable("down"), False, Reaction.BACKOFF, None),
+        (WaitToolError("failed"), False, Reaction.SUSPEND, WAIT_ERROR_CODE),
+        (UnusableAnswer("jsonrpc_-32602"), False, Reaction.SUSPEND, "jsonrpc_-32602"),
+        (UnusableAnswer("http_307"), True, Reaction.SUSPEND, "http_307"),
     ],
 )
-def test_each_status_makes_the_loop_renew_suspend_or_back_off(status, source, already_renewed, reaction):
-    assert reaction_to_status(status, source, already_renewed=already_renewed) is reaction
+def test_each_failure_makes_the_loop_renew_suspend_or_back_off(failure, already_renewed, reaction, code):
+    assert reaction_to(failure, already_renewed=already_renewed) == (reaction, code)
 
 
 def test_a_secret_shows_nothing_of_itself():
-    secret = Secret("s3cret-value")
+    value = secrets.token_hex(8)
+    secret = Secret(value)
 
-    assert "s3cret-value" not in repr(secret) + str(secret) + repr(Token(secret, 1.0))
+    assert value not in repr(secret) + str(secret) + repr(Token(secret, 1.0))

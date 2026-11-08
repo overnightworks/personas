@@ -76,12 +76,13 @@ class FakeTokens:
 
 @dataclass
 class FakeSession:
-    """Answers each wait and accept from a script, then blocks, which ends a test's scenario."""
+    """Answers each wait and accept from a script and notes their bearer and time; blocking ends a scenario."""
 
     clock: FakeClock
     waits: list[WaitAnswer | CallFailure]
     accepts: list[Refusal | CallFailure | None] = field(default_factory=list[Refusal | CallFailure | None])
     seconds_per_wait: float = 0.0
+    seconds_per_accept: float = 0.0
     bearer: Secret | None = None
     opened: int = 0
     cursors: list[str | None] = field(default_factory=list[str | None])
@@ -106,6 +107,9 @@ class FakeSession:
         return step
 
     async def accept(self, accept: Accept) -> Refusal | None:
+        assert self.bearer is not None
+        self.bearers_with_time.append((self.bearer, self.clock.now()))
+        self.clock.time += self.seconds_per_accept
         self.accepted.append(accept)
         step = self.accepts.pop(0) if self.accepts else None
         if isinstance(step, CallFailure):

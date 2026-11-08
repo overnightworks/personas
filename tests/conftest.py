@@ -11,7 +11,7 @@ import pytest
 from agents.app_session import open_mcp_session
 from agents.config import AppTarget, Config
 from agents.loop import AgentLoop, Boundaries, run_all
-from agents.main import configure_logging
+from agents.main import QUIET_LIBRARIES, configure_logging
 from agents.reporting import log_state_change
 from agents.tokens import HttpTokenSource
 from tests.support.fakes import FakeClock, FakeSession, FakeTokens, Reports, app_target, credentials, grant
@@ -19,7 +19,7 @@ from tests.support.hopin import AGENT_SUBJECT, APP_URL, FakeApp
 from tests.support.realm import TOKEN_ENDPOINT, FakeRealm
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncIterator, Callable, Iterator
 
     from agent_runtime_client.wait import WaitAnswer
 
@@ -68,10 +68,11 @@ def scenario() -> Callable[..., Scenario]:
         tokens: list[GrantedToken | CallFailure] | None = None,
         accepts: list[Refusal | CallFailure | None] | None = None,
         seconds_per_wait: float = 0.0,
+        seconds_per_accept: float = 0.0,
     ) -> Scenario:
         clock = FakeClock()
         granted = FakeTokens(clock, list(tokens) if tokens is not None else [grant() for _ in range(5)])
-        session = FakeSession(clock, list(waits), list(accepts or []), seconds_per_wait)
+        session = FakeSession(clock, list(waits), list(accepts or []), seconds_per_wait, seconds_per_accept)
         return Scenario(granted, session, clock, Reports())
 
     return build
@@ -112,7 +113,17 @@ class Harness:
 
 
 @pytest.fixture
-async def runner(caplog: pytest.LogCaptureFixture) -> AsyncIterator[Harness]:
+def library_loggers() -> Iterator[None]:
+    """The levels of the loggers `configure_logging` quiets, put back at the test's end."""
+    loggers = [logging.getLogger(name) for name in QUIET_LIBRARIES]
+    levels = [each.level for each in loggers]
+    yield
+    for each, level in zip(loggers, levels, strict=True):
+        each.setLevel(level)
+
+
+@pytest.fixture
+async def runner(caplog: pytest.LogCaptureFixture, library_loggers: None) -> AsyncIterator[Harness]:
     """The runner's world; at its end no log line holds a secret, a token or the content of a tool."""
     configure_logging()
     caplog.set_level(logging.DEBUG)

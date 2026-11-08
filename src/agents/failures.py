@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 
-class CallFailure(Exception):  # noqa: N818 - the base of the three failures below, which name their kind
+# The base of the failures below, which name their kind; a suffix would repeat it.
+class CallFailure(Exception):  # noqa: N818
     """A call did not give an answer the loop can use."""
 
 
@@ -25,3 +26,11 @@ class Unreachable(CallFailure):
 
 class WaitToolError(CallFailure):
     """The ``wait`` tool answered with an error result."""
+
+
+class UnusableAnswer(CallFailure):
+    """The app answered, but with an error or a body the loop cannot use; ``code`` says which."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
