@@ -28,4 +28,4 @@ flowchart LR
 
 ## 3. Checks
 
-Every pull request runs `Lint and test` (ruff, pyright strict, vulture, pytest with branch coverage), `Documents` (lychee, offline, over the tracked Markdown) and the shared quality gate of overnightworks/quality, which judges both through `quality/config.toml`; `quality / verdict` is the check a merge requires. CodeQL analyses the workflows and the Python, and Dependabot proposes updates to the pinned actions and the locked dependencies.
+Every pull request runs `Lint and test` (ruff, pyright strict, vulture, pytest with branch coverage), `Documents` (lychee, offline, over the tracked Markdown) and the shared quality gate of overnightworks/quality (its check and Sonar jobs), which judges both through `quality/config.toml`; `quality / verdict` is the check a merge requires. CodeQL analyses the workflows and the Python, and Dependabot proposes updates to the pinned actions and the locked dependencies.
