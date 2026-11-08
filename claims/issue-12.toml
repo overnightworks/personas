@@ -1,8 +1,0 @@
-claim_id = "0cb7c36e19a2418aab7a583382abef78"
-agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
-role = "builder"
-base = "1c69bbcb21cf97e2f3748ecd4ebc06d36c250039"
-branch = "claude/issue-12-p5b-release-path"
-scope = [".dockerignore", ".github", "AGENTS.md", "Dockerfile", "README.md", "docs/ARCHITECTURE.md", "quality", "sonar-project.properties"]
-opened_commit = "7f26729323d4975506e0fec619fe52630040dd85"
-whole_reason = "The image, its CI build and the release workflow are judged together by the release standard."
