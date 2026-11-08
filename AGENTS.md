@@ -5,15 +5,31 @@ This file holds the repository's own facts on top of the global contract.
 
 ## State
 
-The repository holds documents and CI only. Code arrives with its first slice
-and brings its own toolchain, commands and tests; this file then names them.
+The repository holds the runner (`src/agents/`, console script `agents`) and
+its documents. Python 3.14 with uv: `pyproject.toml` and `uv.lock` own the
+dependencies, hatchling is pinned as in skat, and `uv sync` installs.
+
+## Commands
+
+- Lint: `uv run ruff check .` and `uv run ruff format --check src tests`.
+- Types (strict): `uv run pyright`. Dead code: `uv run vulture`.
+- Tests: name the module, as in `uv run pytest tests/test_loop.py --no-cov`.
+  Async tests carry `pytestmark = pytest.mark.anyio`. Coverage is branch
+  coverage over `src`, set in `pyproject.toml`.
+- Gate rules: `quality hygiene .` at the release `ci.yml` pins.
 
 ## Where things live
 
 - `docs/VISION.md` is the operator-blessed vision text. Change its words only
   with his yes.
-- The persona, memory and runner shape is not ruled yet. `docs/ARCHITECTURE.md`
-  states only what exists.
+- `src/agents/decision.py` decides everything that needs no process, network
+  or clock; `loop.py` performs it through the boundaries `tokens.py`,
+  `app_session.py`, `clock.py` and `reporting.py`; `config.py` owns the TOML.
+  Extend the owner of a question, never a second decider.
+- A secret or token lives in `secret.Secret` and reaches no log line, error
+  message, repr or test literal; tests generate theirs.
+- The persona and memory shape is not ruled yet. `docs/ARCHITECTURE.md` states
+  only what exists.
 
 ## Checks
 
@@ -21,11 +37,14 @@ and brings its own toolchain, commands and tests; this file then names them.
   tracked Markdown file and fails on a relative link or anchor that points
   nowhere. Its arguments live in the workflow, so the root holds no lychee
   config.
+- `Lint and test` runs ruff, pyright, vulture and pytest with coverage over
+  `src`, installing only what `uv.lock` resolved, and uploads `coverage.xml`
+  for Sonar.
 - `quality/config.toml` configures the shared gate: `mandatory_jobs` names
-  `Documents`, and there is no `legacy` key. The required check is
+  `Documents` and `Lint and test`, and there is no `legacy` key. The required check is
   `quality / verdict`; overnightworks/quality's README owns the gate's
-  semantics. The checks that come with code join `mandatory_jobs` in that slice.
+  semantics. A new check joins `mandatory_jobs` with its job.
 - The root holds only what the gate's `root-layout` rule allows; a new root
   entry needs a `[[root.allow]]` entry with its reason.
-- `sonar.sources` names `.github` whole; add each directory of code with the
-  slice that brings it.
+- `sonar.sources` names `src/agents` and `.github` whole; add each directory of
+  code with the slice that brings it.

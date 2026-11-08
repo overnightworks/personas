@@ -112,6 +112,8 @@ addopts = [
 # measures the same files.
 source = ["src"]
 branch = true
+# Sonar resolves the report's paths against the checkout.
+relative_files = true
 
 [tool.coverage.report]
 exclude_lines = [

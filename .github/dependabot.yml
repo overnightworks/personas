@@ -6,3 +6,14 @@ updates:
       interval: daily
     cooldown:
       default-days: 7
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: daily
+    cooldown:
+      default-days: 7
+    # why: these are direct git references; Dependabot looks a direct reference
+    # up on PyPI by name, so a published or squatted name would become a
+    # proposal against the git pin. They move by their owners' release items.
+    ignore:
+      - dependency-name: "overnightworks-*"
