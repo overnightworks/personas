@@ -86,6 +86,9 @@ class _Wakes:
         return self
 
     async def __anext__(self) -> None:
+        if self._session.graceful_ends:
+            self._session.graceful_ends -= 1
+            raise StopAsyncIteration
         if self._session.reads:
             return
         self._session.idle.set()
@@ -94,14 +97,19 @@ class _Wakes:
 
 @dataclass
 class FakeSession:
-    """Answers each read and accept from a script and notes their bearer and time; blocking ends a scenario."""
+    """Answers each read and accept from a script and notes their bearer and time; blocking ends a scenario.
+
+    The first ``graceful_ends`` streams end at once, as an app ends a stream at its bound.
+    """
 
     clock: FakeClock
     reads: list[MemberStanding | CallFailure]
     accepts: list[Refusal | CallFailure | None] = field(default_factory=list[Refusal | CallFailure | None])
     seconds_per_read: float = 0.0
     seconds_per_accept: float = 0.0
+    graceful_ends: int = 0
     bearer: Secret | None = None
+    entered_with_time: list[tuple[Secret, float]] = field(default_factory=list[tuple[Secret, float]])
     opened_with: list[Secret] = field(default_factory=list[Secret])
     accepted: list[Accept] = field(default_factory=list[Accept])
     bearers_with_time: list[tuple[Secret, float]] = field(default_factory=list[tuple[Secret, float]])
@@ -116,6 +124,8 @@ class FakeSession:
 
     @asynccontextmanager
     async def changes(self) -> AsyncIterator[AsyncIterator[object]]:
+        assert self.bearer is not None
+        self.entered_with_time.append((self.bearer, self.clock.now()))
         yield _Wakes(self)
 
     async def read_standing(self) -> MemberStanding:

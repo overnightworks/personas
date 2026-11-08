@@ -13,6 +13,7 @@ import pytest
 from agent_runtime_client.member import ACCEPT_INVITATION_TOOL, STANDING_URI, AcceptInvitationArguments, PlaceRef
 from agent_runtime_client.tools import ToolOutcome
 from mcp_types import INVALID_PARAMS, ListToolsResult, Tool
+from pydantic import ValidationError
 
 from agents.app_session import open_mcp_session
 from agents.config import AppTarget
@@ -31,6 +32,8 @@ POLLING_NAMES = ["agent_runtime_client.wait", "WaitAnswer", "WAIT_TOOL", "WaitTo
 SEARCHED = ["src", "tests", "README.md", "docs"]
 THIS_FILE = ":(exclude)tests/test_app_session.py"
 KEEP_ALIVE_INTERVAL_SECONDS = 0.01
+PLACE = PlaceRef(kind="call", id="room-7")
+PLACE_CONTENT = ("room-7", "inv-3")
 
 
 @pytest.fixture
@@ -48,8 +51,40 @@ def bearer(app):
     return token
 
 
+@pytest.fixture(autouse=True)
+def nothing_secret_is_logged(app, bearer, library_loggers, caplog):
+    """At a test's end no log line holds a token or the content of a place."""
+    configure_logging()
+    caplog.set_level(logging.DEBUG)
+    yield
+    logged = "\n".join(record.getMessage() for record in caplog.get_records("call"))
+    for held in (bearer.reveal(), *PLACE_CONTENT):
+        assert held not in logged
+
+
 def opened(app, bearer, **keywords):
     return open_mcp_session(AppTarget(app.url, "scope"), bearer, **keywords)
+
+
+async def opens(app, bearer):
+    async with opened(app, bearer):
+        pass
+
+
+async def listens(app, bearer, **keywords):
+    async with opened(app, bearer, **keywords) as session, session.changes():
+        pass
+
+
+async def listens_and_reads_on_every_wake(app, bearer, **keywords):
+    async with opened(app, bearer, **keywords) as session, session.changes() as changes:
+        async for _ in changes:
+            await session.read_standing()
+
+
+async def accepts_a_place(app, bearer):
+    async with opened(app, bearer) as session:
+        await session.accept(Accept(PLACE, "inv-3", 0))
 
 
 async def test_a_stream_is_open_once_acknowledged_and_a_change_is_one_wake(app, bearer):
@@ -78,8 +113,7 @@ async def test_an_app_that_does_not_list_the_standing_does_not_honor_the_stream(
     app.lists_standing = False
 
     with pytest.raises(UnusableAnswer) as failure:
-        async with opened(app, bearer) as session, session.changes():
-            pass
+        await listens(app, bearer)
 
     assert failure.value.code == LISTEN_NOT_HONORED_CODE
 
@@ -92,8 +126,7 @@ async def test_a_stream_the_app_completes_without_acknowledging_is_not_honored(a
     app.script("subscriptions/listen", completes_at_once)
 
     with pytest.raises(UnusableAnswer) as failure:
-        async with opened(app, bearer) as session, session.changes():
-            pass
+        await listens(app, bearer)
 
     assert failure.value.code == LISTEN_NOT_HONORED_CODE
 
@@ -151,8 +184,7 @@ async def test_a_renewed_token_is_the_bearer_of_the_next_call(app, bearer):
 
 async def test_a_bearer_the_app_does_not_know_is_a_401(app):
     with pytest.raises(StatusFailure) as failure:
-        async with opened(app, Secret(secrets.token_urlsafe(24))):
-            pass
+        await opens(app, Secret(secrets.token_urlsafe(24)))
 
     assert failure.value.status == HTTPStatus.UNAUTHORIZED
 
@@ -164,10 +196,14 @@ async def test_a_redirect_the_app_answers_is_an_unusable_answer_named_by_its_sta
     app.script(CALL, redirects)
 
     with pytest.raises(UnusableAnswer) as failure:
-        async with opened(app, bearer) as session:
-            await session.accept(Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 0))
+        await accepts_a_place(app, bearer)
 
     assert failure.value.code == status_code(HTTPStatus.TEMPORARY_REDIRECT)
+
+
+async def opens_at(mcp_url, bearer):
+    async with open_mcp_session(AppTarget(mcp_url, "scope"), bearer):
+        pass
 
 
 async def test_an_app_that_cannot_be_reached_is_unreachable(app, bearer):
@@ -180,23 +216,32 @@ async def test_an_app_that_cannot_be_reached_is_unreachable(app, bearer):
         pass
 
     with pytest.raises(Unreachable):
-        async with open_mcp_session(AppTarget(f"{origin}/mcp", "scope"), bearer):
-            pass
+        await opens_at(f"{origin}/mcp", bearer)
 
 
 class BodyError(Exception):
     pass
 
 
-async def test_an_error_raised_in_the_stream_body_reaches_the_caller_unchanged(app, bearer):
-    raised = BodyError("the caller's own code failed")
+async def raises_in_the_stream_body(app, bearer, raised):
+    async with opened(app, bearer) as session, session.changes():
+        raise raised
 
-    async def fails_in_the_body():
-        async with opened(app, bearer) as session, session.changes():
-            raise raised
 
-    with pytest.raises(BodyError) as caught:
-        await fails_in_the_body()
+@pytest.mark.parametrize(
+    "raised",
+    [
+        BodyError("the caller's own code failed"),
+        OSError("a local file failed"),
+        TimeoutError("the caller's own wait timed out"),
+        ValidationError.from_exception_data("a local record", []),
+        Unreachable("raised by the caller"),
+    ],
+    ids=["its own error", "os error", "timeout", "validation error", "call failure"],
+)
+async def test_an_error_raised_in_the_stream_body_reaches_the_caller_unchanged(app, bearer, raised):
+    with pytest.raises(type(raised)) as caught:
+        await raises_in_the_stream_body(app, bearer, raised)
 
     assert caught.value is raised
 
@@ -211,13 +256,8 @@ async def test_a_stream_that_outlasts_its_deadline_by_sending_on_is_unreachable(
 
     app.script("subscriptions/listen", sends_on_and_on)
 
-    async def reads_on_every_wake():
-        async with opened(app, bearer, stream_seconds=SHORT_STREAM_SECONDS) as session, session.changes() as changes:
-            async for _ in changes:
-                await session.read_standing()
-
     with pytest.raises(Unreachable):
-        await reads_on_every_wake()
+        await listens_and_reads_on_every_wake(app, bearer, stream_seconds=SHORT_STREAM_SECONDS)
 
 
 async def test_traffic_with_no_acknowledgement_until_past_the_deadline_is_unreachable(app, bearer):
@@ -230,8 +270,7 @@ async def test_traffic_with_no_acknowledgement_until_past_the_deadline_is_unreac
     app.script("subscriptions/listen", talks_without_acknowledging)
 
     with pytest.raises(Unreachable):
-        async with opened(app, bearer, stream_seconds=SHORT_STREAM_SECONDS) as session, session.changes():
-            pass
+        await listens(app, bearer, stream_seconds=SHORT_STREAM_SECONDS)
 
 
 async def test_an_accept_without_the_tool_is_a_protocol_error_that_is_an_unusable_answer(app, bearer):
@@ -241,8 +280,7 @@ async def test_an_accept_without_the_tool_is_a_protocol_error_that_is_an_unusabl
     app.script(CALL, knows_no_such_tool)
 
     with pytest.raises(UnusableAnswer) as failure:
-        async with opened(app, bearer) as session:
-            await session.accept(Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 0))
+        await accepts_a_place(app, bearer)
 
     assert failure.value.code == f"jsonrpc_{INVALID_PARAMS}"
 
@@ -276,15 +314,12 @@ async def test_an_accept_result_the_sdk_cannot_validate_is_an_unusable_answer(ap
     app.script(CALL, answers_wrongly)
 
     with pytest.raises(UnusableAnswer) as failure:
-        async with opened(app, bearer) as session:
-            await session.accept(Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 0))
+        await accepts_a_place(app, bearer)
 
     assert failure.value.code == INVALID_ANSWER_CODE
 
 
-async def test_a_malformed_notification_of_the_app_logs_none_of_its_content(app, bearer, library_loggers, caplog):
-    configure_logging()
-    caplog.set_level(logging.DEBUG)
+async def test_a_malformed_notification_of_the_app_logs_none_of_its_content(app, bearer, caplog):
     leaked = "content-of-a-malformed-notification"
 
     async def notifies_wrongly_then_answers(reply):
@@ -298,19 +333,16 @@ async def test_a_malformed_notification_of_the_app_logs_none_of_its_content(app,
     app.script(CALL, notifies_wrongly_then_answers)
 
     with pytest.raises(UnusableAnswer):
-        async with opened(app, bearer) as session:
-            await session.accept(Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 0))
+        await accepts_a_place(app, bearer)
 
     assert leaked not in caplog.text
 
 
 @pytest.mark.parametrize("name", POLLING_NAMES)
-def test_nothing_in_the_tree_names_the_polling_path(name):
-    found = subprocess.run(  # noqa: S603 - fixed arguments, no shell
-        ["git", "grep", "-n", "-F", name, "--", *SEARCHED, THIS_FILE],  # noqa: S607
-        capture_output=True,
-        text=True,
-        check=False,
+async def test_nothing_in_the_tree_names_the_polling_path(name):
+    search = await asyncio.create_subprocess_exec(
+        "git", "grep", "-n", "-F", name, "--", *SEARCHED, THIS_FILE, stdout=subprocess.PIPE
     )
+    stdout, _ = await search.communicate()
 
-    assert found.stdout == ""
+    assert stdout == b""

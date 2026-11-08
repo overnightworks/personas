@@ -42,18 +42,13 @@ pytestmark = pytest.mark.anyio
 
 REFUSALS_BEFORE_THE_FIX = 3
 SHORT_STREAM_SECONDS = 0.3
+KEEP_ALIVE_INTERVAL_SECONDS = 0.01
 CALL_PLACE = PlaceRef(kind="call", id="room-7")
 
 
 async def drain(queue, count):
     for _ in range(count):
         await asyncio.wait_for(queue.get(), LIMIT_SECONDS)
-
-
-async def hold_open(reply):
-    await reply.open_stream()
-    await reply.acknowledge([STANDING_URI])
-    await asyncio.Event().wait()
 
 
 async def test_every_read_follows_the_acknowledgement_of_its_stream_and_an_invitation_is_accepted_once(runner):
@@ -140,6 +135,23 @@ async def test_a_stream_that_never_completes_is_cut_at_the_runners_deadline_and_
 
     assert runner.reports.events()[:2] == [("started", None), ("backoff", "network")]
     assert backoff_delay(1) in runner.clock.slept
+
+
+async def test_a_stream_with_no_acknowledgement_until_past_the_deadline_backs_off_and_is_reopened_and_read(runner):
+    async def talks_without_acknowledging(reply):
+        await reply.open_stream()
+        while True:
+            await reply.keep_alive()
+            await asyncio.sleep(KEEP_ALIVE_INTERVAL_SECONDS)
+
+    runner.app.script(LISTEN, talks_without_acknowledging)
+    runner.start(stream_seconds=SHORT_STREAM_SECONDS)
+    await runner.reports.until("resumed")
+
+    assert runner.reports.events() == [("started", None), ("backoff", "network"), ("resumed", None)]
+    assert runner.clock.slept == [backoff_delay(1)]
+    assert runner.app.log.count(LISTEN) == 2
+    assert runner.app.log.reads_follow_acknowledgements()
 
 
 @pytest.mark.parametrize("arrangement", ["not listed", "completed unacknowledged"])

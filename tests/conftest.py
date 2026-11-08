@@ -84,10 +84,13 @@ def scenario() -> Callable[..., Scenario]:
         accepts: list[Refusal | CallFailure | None] | None = None,
         seconds_per_read: float = 0.0,
         seconds_per_accept: float = 0.0,
+        graceful_ends: int = 0,
     ) -> Scenario:
         clock = FakeClock()
         granted = FakeTokens(clock, list(tokens) if tokens is not None else [grant() for _ in range(5)])
-        session = FakeSession(clock, list(reads), list(accepts or []), seconds_per_read, seconds_per_accept)
+        session = FakeSession(
+            clock, list(reads), list(accepts or []), seconds_per_read, seconds_per_accept, graceful_ends
+        )
         return Scenario(granted, session, clock, Reports())
 
     return build

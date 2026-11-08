@@ -14,7 +14,7 @@ from agents.decision import (
     backoff_delay,
 )
 from agents.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer
-from tests.support.fakes import read_of
+from tests.support.fakes import grant, read_of
 from tests.support.hopin import active, invited
 
 pytestmark = pytest.mark.anyio
@@ -307,6 +307,17 @@ async def test_a_stream_reopened_after_a_renewal_carries_the_new_token_and_each_
     assert run.session.opened_with[0] != run.session.opened_with[1]
     for bearer, sent_at in run.session.bearers_with_time:
         assert sent_at < run.tokens.expires_at[bearer] - RENEW_BEFORE_EXPIRY_SECONDS
+
+
+async def test_a_stream_reopened_after_a_graceful_end_carries_the_token_renewed_since(scenario):
+    run = scenario([read_of(), read_of()], seconds_per_read=grant().lifetime_seconds, graceful_ends=1)
+
+    await run.play()
+
+    assert len(run.session.entered_with_time) == 2
+    assert run.session.opened == 1
+    for bearer, entered_at in run.session.entered_with_time:
+        assert entered_at < run.tokens.expires_at[bearer] - RENEW_BEFORE_EXPIRY_SECONDS
 
 
 async def test_a_place_gone_between_the_read_and_the_accept_is_the_refusal_and_no_failure(scenario):

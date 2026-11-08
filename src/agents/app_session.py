@@ -18,7 +18,7 @@ from agent_runtime_client.member import (
 )
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
-from mcp.client.subscriptions import SubscriptionLost, listen
+from mcp.client.subscriptions import Subscription, SubscriptionLost, listen
 from mcp.shared.exceptions import MCPError
 from mcp_types import (
     CONNECTION_CLOSED,
@@ -121,17 +121,24 @@ class _McpAppSession:
     @asynccontextmanager
     async def changes(self) -> AsyncGenerator[AsyncIterator[object]]:
         self.auth.last_status = None
+        deadline = asyncio.timeout(self.stream_seconds)
+        raised_in_body: Exception | None = None
         try:
-            async with (
-                asyncio.timeout(self.stream_seconds),
-                listen(self.session, resource_subscriptions=[STANDING_URI]) as subscription,
-            ):
+            async with deadline, listen(self.session, resource_subscriptions=[STANDING_URI]) as subscription:
                 if STANDING_URI not in (subscription.honored.resource_subscriptions or ()):
                     raise UnusableAnswer(LISTEN_NOT_HONORED_CODE)
-                yield subscription
+                try:
+                    yield _wakes_of(subscription, self.auth)
+                except Exception as error:
+                    raised_in_body = error
+                    raise
         except CallFailure:
             raise
         except Exception as error:
+            if error is raised_in_body:
+                raise
+            if isinstance(error, TimeoutError) and deadline.expired():
+                raise Unreachable("the stream outlasted its deadline") from None
             raise _failure_or_raise(error, self.auth) from None
 
     async def read_standing(self) -> MemberStanding:
@@ -159,6 +166,14 @@ class _McpAppSession:
             return await request
         except Exception as error:
             raise _failure_or_raise(error, self.auth) from None
+
+
+async def _wakes_of(subscription: Subscription, auth: _BearerAuth) -> AsyncIterator[object]:
+    try:
+        async for wake in subscription:
+            yield wake
+    except SubscriptionLost as lost:
+        raise _failure_or_raise(lost, auth) from None
 
 
 def _text_of(result: CallToolResult) -> str:

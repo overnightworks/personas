@@ -57,11 +57,6 @@ class Reply:
     async def end(self) -> None:
         await self.send({"type": "http.response.body", "body": b"", "more_body": False})
 
-    async def result_in_stream(self, result: dict[str, Any]) -> None:
-        await self.open_stream()
-        await self.event({"jsonrpc": "2.0", "id": self.rpc.id, "result": result})
-        await self.end()
-
     async def error(self, code: int, *, status: HTTPStatus = HTTPStatus.BAD_REQUEST, data: object = None) -> None:
         error = JSONRPCError(jsonrpc="2.0", id=self.rpc.id, error=ErrorData(code=code, message="refused", data=data))
         await self._whole(status, error.model_dump(by_alias=True, mode="json", exclude_none=True))
