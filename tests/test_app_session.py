@@ -15,11 +15,11 @@ from agents.decision import Accept, Refusal
 from agents.failures import StatusFailure, Unreachable
 from agents.secret import Secret
 from tests.support.fakes import app_target
+from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import FakeApp, active, invited
 
 pytestmark = pytest.mark.anyio
 
-SUBJECT = "agent-subject"
 WAIT_LIMIT_SECONDS = 10
 
 

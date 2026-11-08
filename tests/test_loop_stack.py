@@ -8,7 +8,7 @@ from http import HTTPStatus
 import pytest
 
 from agents.decision import SUSPENDED_RETRY_SECONDS
-from tests.conftest import SUBJECT
+from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import active, invited
 
 pytestmark = pytest.mark.anyio

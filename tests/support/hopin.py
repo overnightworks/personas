@@ -27,6 +27,7 @@ from agent_runtime_client.wait import Invitation, PlaceRef, Standing, StandingSt
 
 from agents.app_session import ACCEPT_TOOL
 
+AGENT_SUBJECT = "agent-subject"
 ISSUER = "https://realm.test/realms/test"
 APP_URL = f"http://app.test{MCP_ENDPOINT_PATH}"
 _SUBJECT_KEY = "test.subject"

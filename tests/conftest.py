@@ -15,7 +15,7 @@ from agents.main import configure_logging
 from agents.reporting import log_state_change
 from agents.tokens import HttpTokenSource
 from tests.support.fakes import FakeClock, FakeSession, FakeTokens, Reports, app_target, credentials, grant
-from tests.support.hopin import APP_URL, FakeApp
+from tests.support.hopin import AGENT_SUBJECT, APP_URL, FakeApp
 from tests.support.realm import TOKEN_ENDPOINT, FakeRealm
 
 if TYPE_CHECKING:
@@ -77,7 +77,6 @@ def scenario() -> Callable[..., Scenario]:
     return build
 
 
-SUBJECT = "agent-subject"
 SCOPE = "mcp-app"
 SCENARIO_CONTENT = ("room-7", "inv-3", "Mozart")
 
@@ -88,7 +87,7 @@ class Harness:
     def __init__(self) -> None:
         self.app = FakeApp()
         self.agent = credentials()
-        self.realm = FakeRealm(self.app, self.agent, SUBJECT, SCOPE)
+        self.realm = FakeRealm(self.app, self.agent, AGENT_SUBJECT, SCOPE)
         self.clock = FakeClock()
         self.reports = Reports()
         self.token_client = httpx2.AsyncClient(transport=self.realm.transport())

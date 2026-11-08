@@ -40,7 +40,7 @@ class Refusal(StrEnum):
 class CallSource(StrEnum):
     """Whom a failed HTTP call went to: the realm's token endpoint or the app."""
 
-    TOKEN_ENDPOINT = "token_endpoint"
+    REALM = "realm"
     APP = "app"
 
 

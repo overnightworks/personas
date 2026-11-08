@@ -110,9 +110,9 @@ def test_the_backoff_grows_never_beyond_its_cap_and_is_never_zero():
 @pytest.mark.parametrize(
     ("status", "source", "already_renewed", "reaction"),
     [
-        (401, CallSource.TOKEN_ENDPOINT, False, Reaction.SUSPEND),
-        (400, CallSource.TOKEN_ENDPOINT, False, Reaction.SUSPEND),
-        (503, CallSource.TOKEN_ENDPOINT, False, Reaction.BACKOFF),
+        (401, CallSource.REALM, False, Reaction.SUSPEND),
+        (400, CallSource.REALM, False, Reaction.SUSPEND),
+        (503, CallSource.REALM, False, Reaction.BACKOFF),
         (401, CallSource.APP, False, Reaction.RENEW),
         (401, CallSource.APP, True, Reaction.SUSPEND),
         (403, CallSource.APP, False, Reaction.SUSPEND),

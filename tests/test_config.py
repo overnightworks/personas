@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import secrets
+from typing import TYPE_CHECKING
 
 import pytest
 
 from agents.config import CONFIG_ENVIRONMENT_VARIABLE, load_config
 from agents.main import CONFIGURATION_ERROR_EXIT_CODE, main
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pathlib import Path

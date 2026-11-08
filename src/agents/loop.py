@@ -122,7 +122,7 @@ class AgentLoop:
             case WaitToolError():
                 await self._suspend(WAIT_ERROR_CODE)
             case StatusFailure(status=status):
-                source = CallSource.TOKEN_ENDPOINT if isinstance(failure, TokenStatusFailure) else CallSource.APP
+                source = CallSource.REALM if isinstance(failure, TokenStatusFailure) else CallSource.APP
                 match reaction_to_status(status, source, already_renewed=self._renewed_after_401):
                     case Reaction.RENEW:
                         self._renewed_after_401 = True
