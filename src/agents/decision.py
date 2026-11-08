@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 CALL_PLACE_KIND: Final = "call"
 RENEW_BEFORE_EXPIRY_SECONDS: Final = 60.0
 """A token is renewed once this little of its lifetime remains, so no call carries an expired one."""
+NETWORK_FAILURE_CODE: Final = "network"
 BACKOFF_BASE_SECONDS: Final = 1.0
 BACKOFF_CAP_SECONDS: Final = 30.0
 _DOUBLINGS_TO_CAP: Final = math.ceil(math.log2(BACKOFF_CAP_SECONDS / BACKOFF_BASE_SECONDS))
@@ -115,6 +116,13 @@ def backoff_delay(failures: int) -> float:
 
 def status_code(status: int) -> str:
     return f"http_{status}"
+
+
+def backoff_reason(failure: CallFailure) -> str:
+    """The code a backoff logs: the HTTP status of a server error, else a fixed word for the network."""
+    if isinstance(failure, StatusFailure):
+        return status_code(failure.status)
+    return NETWORK_FAILURE_CODE
 
 
 def reaction_to(failure: CallFailure, *, already_renewed: bool) -> Reaction | Suspend:

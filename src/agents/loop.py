@@ -15,6 +15,7 @@ from agents.decision import (
     accepts_for,
     after_refusal,
     backoff_delay,
+    backoff_reason,
     forget_gone,
     reaction_to,
     renewal_due,
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
     from agents.app_session import AppSession, SessionOpener
     from agents.clock import Clock
     from agents.config import AgentCredentials, AppTarget, Config
+    from agents.readiness import ReadyMarker
     from agents.tokens import TokenSource
 
 
@@ -39,6 +41,7 @@ class Boundaries:
     open_session: SessionOpener
     clock: Clock
     report: Reporter
+    ready: ReadyMarker
 
 
 def _raise_if_cancelled() -> None:
@@ -55,7 +58,8 @@ class AgentLoop:
     """Keeps one ``wait`` in flight for one agent in one app and accepts what it is invited to.
 
     A refusal by the realm or the app suspends the loop: it makes no further call until its next
-    retry, and resumes once ``wait`` answers again. A network failure or a 5xx backs off.
+    retry, and resumes once ``wait`` answers again. A network failure or a 5xx backs off, logged once until
+    ``wait`` answers.
     """
 
     def __init__(self, agent: AgentCredentials, app: AppTarget, boundaries: Boundaries) -> None:
@@ -68,6 +72,7 @@ class AgentLoop:
         self._failures = 0
         self._renewed_after_401 = False
         self._suspension: str | None = None
+        self._backing_off = False
 
     async def run(self) -> NoReturn:
         self._report(Event.STARTED)
@@ -87,7 +92,8 @@ class AgentLoop:
                 await self._use_current_token(session)
                 answer = await session.wait(self._cursor)
                 self._cursor = answer.cursor
-                self._resume_if_suspended()
+                self._resume_if_unwell()
+                self._boundaries.ready.announce()
                 self._memory = forget_gone(self._memory, answer)
                 await self._accept_invitations(session, answer)
                 self._served()
@@ -107,10 +113,11 @@ class AgentLoop:
         self._failures = 0
         self._renewed_after_401 = False
 
-    def _resume_if_suspended(self) -> None:
+    def _resume_if_unwell(self) -> None:
         """A wait answered: the app is reachable and accepts the token, whatever an accept then does."""
-        if self._suspension is not None:
+        if self._suspension is not None or self._backing_off:
             self._suspension = None
+            self._backing_off = False
             self._report(Event.RESUMED)
 
     async def _accept_invitations(self, session: AppSession, answer: WaitAnswer) -> None:
@@ -132,16 +139,20 @@ class AgentLoop:
             case Suspend(code=code):
                 await self._suspend(code)
             case Reaction.BACKOFF:
-                await self._back_off()
+                await self._back_off(failure)
 
     async def _suspend(self, code: str) -> None:
         if self._suspension != code:
             self._suspension = code
             self._report(Event.SUSPENDED, code)
+        self._backing_off = False
         self._token = None
         await self._boundaries.clock.sleep(SUSPENDED_RETRY_SECONDS)
 
-    async def _back_off(self) -> None:
+    async def _back_off(self, failure: CallFailure) -> None:
+        if not self._backing_off:
+            self._backing_off = True
+            self._report(Event.BACKOFF, backoff_reason(failure))
         self._failures += 1
         await self._boundaries.clock.sleep(backoff_delay(self._failures))
 

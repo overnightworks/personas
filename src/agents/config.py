@@ -1,6 +1,6 @@
 """The operator's configuration: one TOML file named by ``AGENTS_CONFIG``.
 
-The file holds the realm's token endpoint, the apps (an MCP URL and its scope) and the agents
+The file holds the realm's token endpoint, the ready file's path, the apps (an MCP URL and its scope) and the agents
 (a client id and the path of the file holding its client secret). Which apps an agent may reach
 is the realm's group membership, never this file. Every value is validated at start and an
 error names the field or path, never a secret.
@@ -42,6 +42,7 @@ class AgentCredentials:
 @dataclass(frozen=True)
 class Config:
     token_endpoint: str
+    ready_file: Path
     apps: tuple[AppTarget, ...]
     agents: tuple[AgentCredentials, ...]
 
@@ -62,8 +63,16 @@ class _AgentEntry(_Entry):
 
 class _FileModel(_Entry):
     token_endpoint: AnyHttpUrl
+    ready_file: Path
     apps: tuple[_AppEntry, ...] = Field(min_length=1)
     agents: tuple[_AgentEntry, ...] = Field(min_length=1)
+
+    @field_validator("ready_file")
+    @classmethod
+    def _ready_file_is_absolute(cls, ready_file: Path) -> Path:
+        if not ready_file.is_absolute():
+            raise ValueError("the path must be absolute")
+        return ready_file
 
     @field_validator("apps")
     @classmethod
@@ -116,6 +125,7 @@ def load_config(environment: Mapping[str, str]) -> Config:
     parsed = _FileModel.parse(text)
     return Config(
         token_endpoint=str(parsed.token_endpoint),
+        ready_file=parsed.ready_file,
         apps=tuple(AppTarget(str(app.mcp_url), app.scope) for app in parsed.apps),
         agents=tuple(
             AgentCredentials(agent.client_id, _read_secret(index, agent.secret_file))

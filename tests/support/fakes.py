@@ -123,6 +123,20 @@ class FakeSession:
         yield self
 
 
+class FakeReadyMarker:
+    """Notes how often the marker was asked for; the marker itself is a file the real adapter owns."""
+
+    def __init__(self) -> None:
+        self.cleared = 0
+        self.announced = 0
+
+    def clear(self) -> None:
+        self.cleared += 1
+
+    def announce(self) -> None:
+        self.announced += 1
+
+
 class Reports:
     """The state changes a loop reported, in order, and a way to wait for one."""
 
