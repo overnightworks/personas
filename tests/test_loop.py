@@ -161,11 +161,13 @@ async def test_a_wait_after_a_failure_starts_without_a_cursor_so_the_answer_is_t
 
 
 @pytest.mark.parametrize(
-    "failure",
-    [Unreachable("down"), StatusFailure(503)],
+    ("failure", "code"),
+    [(Unreachable("down"), "network"), (StatusFailure(503), "http_503")],
     ids=["network", "5xx from the app"],
 )
-async def test_an_app_failure_that_is_not_a_refusal_backs_off_with_a_capped_growing_interval(scenario, failure):
+async def test_an_app_failure_that_is_not_a_refusal_backs_off_with_a_capped_growing_interval_and_logs_it_once(
+    scenario, failure, code
+):
     failures = 40
     run = scenario([failure] * failures)
 
@@ -174,7 +176,7 @@ async def test_an_app_failure_that_is_not_a_refusal_backs_off_with_a_capped_grow
     assert run.clock.slept == [backoff_delay(attempt) for attempt in range(1, failures + 1)]
     assert max(run.clock.slept) == BACKOFF_CAP_SECONDS
     assert min(run.clock.slept) > 0
-    assert run.reports.events() == [("started", None)]
+    assert run.reports.events() == [("started", None), ("backoff", code)]
 
 
 async def test_a_realm_that_does_not_answer_or_fails_backs_off_without_suspending(scenario):
@@ -184,7 +186,7 @@ async def test_a_realm_that_does_not_answer_or_fails_backs_off_without_suspendin
     await run.play()
 
     assert run.clock.slept == [backoff_delay(1), backoff_delay(2), backoff_delay(3)]
-    assert run.reports.events() == [("started", None)]
+    assert run.reports.events() == [("started", None), ("backoff", "network")]
 
 
 async def test_the_backoff_starts_over_after_an_answer(scenario):
@@ -226,6 +228,8 @@ async def test_a_loop_resumes_once_wait_answers_though_the_accept_after_it_fails
         ("started", None),
         ("suspended", "jsonrpc_-32602"),
         ("resumed", None),
+        ("backoff", "http_503"),
+        ("resumed", None),
         ("joined", None),
     ]
 
@@ -250,3 +254,62 @@ async def test_an_accept_that_fails_on_the_network_backs_off_and_does_not_retry_
     await run.play()
 
     assert run.clock.slept == [backoff_delay(1), backoff_delay(2), backoff_delay(3)]
+
+
+async def test_the_marker_is_asked_for_when_a_wait_answers_and_not_before(scenario):
+    run = scenario([Unreachable("down"), StatusFailure(403), answer("c1"), answer("c2")])
+
+    await run.play()
+
+    assert run.ready.announced == 2
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [StatusFailure(403), StatusFailure(503), Unreachable("down")],
+    ids=["refusal", "5xx", "network"],
+)
+async def test_no_marker_is_asked_for_while_wait_has_not_answered(scenario, failure):
+    run = scenario([failure, failure])
+
+    await run.play()
+
+    assert run.ready.announced == 0
+
+
+async def test_a_failure_after_the_first_answer_does_not_take_the_marker_back(scenario):
+    run = scenario([answer("c1"), StatusFailure(403), Unreachable("down")])
+
+    await run.play()
+
+    assert run.ready.announced == 1
+    assert run.ready.cleared == 0
+
+
+async def test_a_backoff_is_logged_once_for_its_retries_and_again_after_the_loop_resumed(scenario):
+    run = scenario(
+        [Unreachable("down"), StatusFailure(502), Unreachable("down"), answer("c1"), StatusFailure(503), answer("c2")]
+    )
+
+    await run.play()
+
+    assert run.reports.events() == [
+        ("started", None),
+        ("backoff", "network"),
+        ("resumed", None),
+        ("backoff", "http_503"),
+        ("resumed", None),
+    ]
+
+
+async def test_a_backoff_after_a_suspension_is_logged_and_one_answer_resumes_both(scenario):
+    run = scenario([StatusFailure(403), Unreachable("down"), answer("c1")])
+
+    await run.play()
+
+    assert run.reports.events() == [
+        ("started", None),
+        ("suspended", "http_403"),
+        ("backoff", "network"),
+        ("resumed", None),
+    ]

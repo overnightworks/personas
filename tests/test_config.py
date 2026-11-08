@@ -2,45 +2,18 @@
 
 from __future__ import annotations
 
-import secrets
-from typing import TYPE_CHECKING
-
 import pytest
 
 from agents.config import CONFIG_ENVIRONMENT_VARIABLE, load_config
 from agents.main import CONFIGURATION_ERROR_EXIT_CODE, main
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
 APP_TABLE = '[[apps]]\nmcp_url = "https://hopin.test/mcp"\nscope = "mcp-hopin"\n'
 
 
-class Files:
-    """A configuration directory: a secret file and a TOML that points at it, each changeable by a test."""
-
-    def __init__(self, directory: Path) -> None:
-        self.secret = secrets.token_hex(16)
-        self.secret_path = directory / "mozart.secret"
-        self.secret_path.write_text(f"{self.secret}\n", encoding="utf-8")
-        self.config_path = directory / "agents.toml"
-        self.text = self.valid_text()
-
-    def valid_text(self) -> str:
-        return (
-            'token_endpoint = "https://realm.test/protocol/openid-connect/token"\n'
-            '[[apps]]\nmcp_url = "https://hopin.test/mcp"\nscope = "mcp-hopin"\n'
-            f'[[agents]]\nclient_id = "agent-mozart"\nsecret_file = "{self.secret_path}"\n'
-        )
-
-    def write(self) -> dict[str, str]:
-        self.config_path.write_text(self.text, encoding="utf-8")
-        return {CONFIG_ENVIRONMENT_VARIABLE: str(self.config_path)}
-
-
-@pytest.fixture
-def files(tmp_path: Path) -> Files:
-    return Files(tmp_path)
+def _with_ready_file(text: str, value: str | None) -> str:
+    """The valid text with its ready_file line removed (None) or set to a value."""
+    others = [line for line in text.splitlines(keepends=True) if not line.startswith("ready_file")]
+    return "".join(others if value is None else [f'ready_file = "{value}"\n', *others])
 
 
 def fails_at_start(environment: dict[str, str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
@@ -57,6 +30,7 @@ def test_a_valid_file_gives_every_agent_its_secret_and_every_app_its_scope(files
     config = load_config(files.write())
 
     assert config.token_endpoint.startswith("https://realm.test/")
+    assert config.ready_file == files.ready_path
     assert [(app.mcp_url, app.scope) for app in config.apps] == [("https://hopin.test/mcp", "mcp-hopin")]
     assert [(agent.client_id, agent.client_secret.reveal()) for agent in config.agents] == [
         ("agent-mozart", files.secret)
@@ -96,6 +70,9 @@ def test_a_file_that_cannot_be_read_stops_the_start_and_names_its_path(files, mo
         (lambda text: text + APP_TABLE, "apps"),
         (lambda text: text + "[[agents]]" + text.split("[[agents]]")[1], "agents"),
         (lambda text: text.replace("[[agents]]", "[[agents"), "TOML"),
+        (lambda text: _with_ready_file(text, None), "ready_file"),
+        (lambda text: _with_ready_file(text, ""), "ready_file"),
+        (lambda text: _with_ready_file(text, "ready"), "ready_file"),
     ],
     ids=[
         "token endpoint missing",
@@ -114,6 +91,9 @@ def test_a_file_that_cannot_be_read_stops_the_start_and_names_its_path(files, mo
         "app URL listed twice",
         "client id listed twice",
         "not TOML",
+        "ready file missing",
+        "ready file empty",
+        "ready file relative",
     ],
 )
 def test_a_missing_or_malformed_field_stops_the_start_and_names_it(files, monkeypatch, capsys, break_it, named):

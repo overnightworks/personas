@@ -12,14 +12,26 @@ from agents.app_session import open_mcp_session
 from agents.config import AppTarget, Config
 from agents.loop import AgentLoop, Boundaries, run_all
 from agents.main import QUIET_LIBRARIES, configure_logging
+from agents.readiness import FileReadyMarker
 from agents.reporting import log_state_change
 from agents.tokens import HttpTokenSource
-from tests.support.fakes import FakeClock, FakeSession, FakeTokens, Reports, app_target, credentials, grant
+from tests.support.configfiles import Files
+from tests.support.fakes import (
+    FakeClock,
+    FakeReadyMarker,
+    FakeSession,
+    FakeTokens,
+    Reports,
+    app_target,
+    credentials,
+    grant,
+)
 from tests.support.hopin import AGENT_SUBJECT, APP_URL, FakeApp
 from tests.support.realm import TOKEN_ENDPOINT, FakeRealm
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator
+    from pathlib import Path
 
     from agent_runtime_client.wait import WaitAnswer
 
@@ -44,7 +56,9 @@ class Scenario:
         self.session = session
         self.clock = clock
         self.reports = reports
-        self.loop = AgentLoop(credentials(), app_target(), Boundaries(tokens, session.open, clock, reports))
+        self.ready = FakeReadyMarker()
+        boundaries = Boundaries(tokens, session.open, clock, reports, self.ready)
+        self.loop = AgentLoop(credentials(), app_target(), boundaries)
 
     async def play(self) -> None:
         """Runs the loop until the script is spent, which is when a boundary blocks, then stops it."""
@@ -85,7 +99,8 @@ SCENARIO_CONTENT = ("room-7", "inv-3", "Mozart")
 class Harness:
     """The real runner (loop, token adapter, SDK session) against a fake realm and app, in process."""
 
-    def __init__(self) -> None:
+    def __init__(self, ready_file: Path) -> None:
+        self.ready_file = ready_file
         self.app = FakeApp()
         self.agent = credentials()
         self.realm = FakeRealm(self.app, self.agent, AGENT_SUBJECT, SCOPE)
@@ -104,8 +119,9 @@ class Harness:
             open_session=partial(open_mcp_session, transport=self.app.asgi()),
             clock=self.clock,
             report=self._report,
+            ready=FileReadyMarker(self.ready_file),
         )
-        config = Config(TOKEN_ENDPOINT, (AppTarget(APP_URL, SCOPE),), (self.agent,))
+        config = Config(TOKEN_ENDPOINT, self.ready_file, (AppTarget(APP_URL, SCOPE),), (self.agent,))
         self.task = asyncio.create_task(run_all(config, boundaries))
 
     def secrets_and_content(self) -> list[str]:
@@ -123,11 +139,11 @@ def library_loggers() -> Iterator[None]:
 
 
 @pytest.fixture
-async def runner(caplog: pytest.LogCaptureFixture, library_loggers: None) -> AsyncIterator[Harness]:
+async def runner(caplog: pytest.LogCaptureFixture, library_loggers: None, tmp_path: Path) -> AsyncIterator[Harness]:
     """The runner's world; at its end no log line holds a secret, a token or the content of a tool."""
     configure_logging()
     caplog.set_level(logging.DEBUG)
-    harness = Harness()
+    harness = Harness(tmp_path / "ready")
     yield harness
     if harness.task is not None:
         harness.task.cancel()
@@ -137,3 +153,8 @@ async def runner(caplog: pytest.LogCaptureFixture, library_loggers: None) -> Asy
     assert not harness.reports.changes or "client_id=" in logged
     for held in harness.secrets_and_content():
         assert held not in logged
+
+
+@pytest.fixture
+def files(tmp_path: Path) -> Files:
+    return Files(tmp_path)

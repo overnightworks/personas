@@ -121,3 +121,24 @@ async def test_a_runner_stopped_while_it_connects_ends(runner, turns_before_stop
     async with asyncio.timeout(LIMIT_SECONDS):
         await asyncio.gather(runner.task, return_exceptions=True)
     assert runner.task.done()
+
+
+async def test_the_marker_exists_once_the_first_wait_answers_and_not_before(runner):
+    runner.realm.refusing = True
+    runner.start()
+    await drain(runner.realm.refusals, REFUSALS_BEFORE_THE_FIX)
+    assert not runner.ready_file.exists()
+
+    runner.realm.refusing = False
+    await runner.reports.until("resumed")
+    await next_wait(runner)
+
+    assert runner.ready_file.exists()
+
+
+async def test_an_app_that_refuses_with_403_leaves_no_marker(runner):
+    runner.app.refuse_with = HTTPStatus.FORBIDDEN
+    runner.start()
+    await runner.reports.until("suspended")
+
+    assert not runner.ready_file.exists()

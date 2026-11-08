@@ -15,6 +15,7 @@ class Event(StrEnum):
     STARTED = "started"
     SUSPENDED = "suspended"
     RESUMED = "resumed"
+    BACKOFF = "backoff"
     JOINED = "joined"
     REFUSED = "refused"
 
