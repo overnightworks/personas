@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Final, Protocol
 
 import httpx2
 
-from agents.failures import TokenStatusFailure, Unreachable
+from agents.failures import INVALID_ANSWER_CODE, TokenStatusFailure, Unreachable, UnusableAnswer
 from agents.secret import Secret
 
 if TYPE_CHECKING:
@@ -26,7 +26,8 @@ class GrantedToken:
 
 class TokenSource(Protocol):
     async def fetch(self, agent: AgentCredentials, scope: str) -> GrantedToken:
-        """Raises ``TokenStatusFailure`` when the realm refuses and ``Unreachable`` when it does not answer."""
+        """Raises ``TokenStatusFailure`` when the realm refuses, ``UnusableAnswer`` when it answers no token
+        and ``Unreachable`` when it does not answer."""
         ...
 
 
@@ -57,7 +58,7 @@ def _granted(body: bytes) -> GrantedToken:
         token = grant["access_token"]
         lifetime = grant["expires_in"]
     except ValueError, KeyError, TypeError:
-        raise Unreachable("the token endpoint answered something else than a token") from None
+        raise UnusableAnswer(INVALID_ANSWER_CODE) from None
     if not isinstance(token, str) or not token or not isinstance(lifetime, int | float) or lifetime <= 0:
-        raise Unreachable("the token endpoint answered something else than a token")
+        raise UnusableAnswer(INVALID_ANSWER_CODE)
     return GrantedToken(Secret(token), float(lifetime))

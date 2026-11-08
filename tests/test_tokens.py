@@ -8,7 +8,7 @@ import secrets
 import httpx2
 import pytest
 
-from agents.failures import TokenStatusFailure, Unreachable
+from agents.failures import INVALID_ANSWER_CODE, TokenStatusFailure, Unreachable, UnusableAnswer
 from agents.tokens import HttpTokenSource
 from tests.support.fakes import credentials
 
@@ -54,12 +54,14 @@ async def test_a_refusal_of_the_realm_is_its_status(status):
     ],
     ids=["not json", "not an object", "no token", "no lifetime left", "token not text"],
 )
-async def test_an_answer_that_is_no_token_is_unreachable(body):
+async def test_an_answer_that_is_no_token_is_an_unusable_answer(body):
     source = source_answering(lambda request: httpx2.Response(200, content=body))
     agent = credentials()
 
-    with pytest.raises(Unreachable):
+    with pytest.raises(UnusableAnswer) as failure:
         await source.fetch(agent, "mcp-app")
+
+    assert failure.value.code == INVALID_ANSWER_CODE
 
 
 async def test_a_realm_that_cannot_be_reached_is_unreachable():
