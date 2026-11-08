@@ -13,9 +13,9 @@ import pytest
 from agent_runtime_client.tools import ToolOutcome
 from mcp_types import INVALID_PARAMS
 
-from agents.app_session import INVALID_ANSWER_CODE, open_mcp_session
+from agents.app_session import ACCEPT_TOOL, WAIT_TOOL, open_mcp_session
 from agents.decision import Accept, Refusal, status_code
-from agents.failures import CallFailure, StatusFailure, Unreachable, UnusableAnswer, WaitToolError
+from agents.failures import INVALID_ANSWER_CODE, CallFailure, StatusFailure, Unreachable, UnusableAnswer, WaitToolError
 from agents.main import configure_logging
 from agents.secret import Secret
 from tests.support.fakes import app_target
@@ -253,25 +253,41 @@ async def test_a_connection_lost_after_the_session_started_is_unreachable(app, b
 class AnswersToolCallsWith(httpx2.AsyncBaseTransport):
     """Serves through the app, except that every tool call is answered with the given server-sent events."""
 
-    def __init__(self, app: FakeApp, *messages: dict[str, object]) -> None:
+    def __init__(
+        self, app: FakeApp, *messages: dict[str, object], output_schema: dict[str, object] | None = None
+    ) -> None:
         self.inner = app.asgi()
         self.messages = messages
+        self.output_schema = output_schema
 
     async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
         call = json.loads(request.content) if request.content else {}
-        if call.get("method") != "tools/call":
+        if self.output_schema is not None and call.get("method") == "tools/list":
+            tools = [
+                {"name": name, "inputSchema": {"type": "object"}, "outputSchema": self.output_schema}
+                for name in (WAIT_TOOL, ACCEPT_TOOL)
+            ]
+            replies = [{"jsonrpc": "2.0", "id": call["id"], "result": {"tools": tools}}]
+        elif call.get("method") == "tools/call":
+            replies = [
+                {"jsonrpc": "2.0", **message, **({"id": call["id"]} if "result" in message else {})}
+                for message in self.messages
+            ]
+        else:
             return await self.inner.handle_async_request(request)
-        replies = [
-            {"jsonrpc": "2.0", **message, **({"id": call["id"]} if "result" in message else {})}
-            for message in self.messages
-        ]
         events = "".join(f"event: message\ndata: {json.dumps(reply)}\n\n" for reply in replies)
         return httpx2.Response(200, headers={"content-type": "text/event-stream"}, content=events.encode())
 
 
 @pytest.mark.parametrize("tool_call", ["wait", "accept"])
-async def test_a_tool_result_the_sdk_cannot_validate_is_an_unusable_answer(app, bearer, tool_call):
-    transport = AnswersToolCallsWith(app, {"result": {"content": 7}})
+@pytest.mark.parametrize(
+    "answer",
+    [{"content": 7}, {"content": [], "structuredContent": {"standings": 7}}, {"content": []}],
+    ids=["malformed result", "structured content against the output schema", "structured content missing"],
+)
+async def test_a_tool_result_the_sdk_cannot_validate_is_an_unusable_answer(app, bearer, tool_call, answer):
+    output_schema = {"type": "object", "properties": {"standings": {"type": "array"}}, "required": ["standings"]}
+    transport = AnswersToolCallsWith(app, {"result": answer}, output_schema=output_schema)
 
     async def calls_the_tool():
         async with open_mcp_session(app_target(), bearer, transport=transport) as session:

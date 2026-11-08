@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from typing import Final
+
+INVALID_ANSWER_CODE: Final = "invalid_answer"
+"""The code of an answer that arrived but is not the kind of answer asked for."""
+
 
 # The base of the failures below, which name their kind; a suffix would repeat it.
 class CallFailure(Exception):  # noqa: N818
@@ -21,7 +26,7 @@ class TokenStatusFailure(StatusFailure):
 
 
 class Unreachable(CallFailure):
-    """The server was not reached, timed out or sent something that is not an answer."""
+    """The server was not reached or timed out."""
 
 
 class WaitToolError(CallFailure):

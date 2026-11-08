@@ -17,7 +17,7 @@ from pydantic import ValidationError
 
 from agents.config import AppTarget
 from agents.decision import Accept, Refusal, status_code
-from agents.failures import CallFailure, StatusFailure, Unreachable, UnusableAnswer, WaitToolError
+from agents.failures import INVALID_ANSWER_CODE, CallFailure, StatusFailure, Unreachable, UnusableAnswer, WaitToolError
 from agents.secret import Secret
 
 CONNECT_SECONDS: Final = 30.0
@@ -25,7 +25,6 @@ READ_SECONDS: Final = 2 * (WAIT_BOUND_SECONDS + STANDINGS_READ_SECONDS)
 """Well above the longest a held ``wait`` takes, so the client never cuts one short."""
 WAIT_TOOL: Final = "wait"
 ACCEPT_TOOL: Final = "accept_invitation"
-INVALID_ANSWER_CODE: Final = "invalid_answer"
 _TRANSPORT_ERROR_CODES: Final = frozenset({CONNECTION_CLOSED, REQUEST_TIMEOUT})
 """What the SDK answers for a connection that broke or a request that timed out."""
 
@@ -62,6 +61,21 @@ class _BearerAuth(httpx2.Auth):
         request.headers["Authorization"] = f"Bearer {self.token.reveal()}"
         response = yield request
         self.last_status = response.status_code
+
+
+class _InvalidToolResult(Exception):  # noqa: N818
+    """The app's result does not meet the output schema it advertised; carries none of its content."""
+
+
+class _ValidatingSession(ClientSession):
+    """Names the SDK's validation failure, which it raises as a bare ``RuntimeError``."""
+
+    @override
+    async def validate_tool_result(self, name: str, result: CallToolResult) -> None:
+        try:
+            await super().validate_tool_result(name, result)
+        except RuntimeError:
+            raise _InvalidToolResult from None
 
 
 @dataclass
@@ -117,7 +131,7 @@ def _failure_of(error: BaseException, auth: _BearerAuth) -> CallFailure | None:
         if error.code in _TRANSPORT_ERROR_CODES:
             return Unreachable("the app did not answer")
         return UnusableAnswer(f"jsonrpc_{error.code}")
-    if isinstance(error, ValidationError):
+    if isinstance(error, ValidationError | _InvalidToolResult):
         return UnusableAnswer(INVALID_ANSWER_CODE)
     if isinstance(error, httpx2.TransportError | OSError):
         return Unreachable("the app did not answer")
@@ -154,7 +168,7 @@ async def open_mcp_session(
         async with (
             httpx2.AsyncClient(auth=auth, transport=transport, timeout=timeout) as client,
             streamable_http_client(app.mcp_url, http_client=client) as (read_stream, write_stream),
-            ClientSession(read_stream, write_stream) as session,
+            _ValidatingSession(read_stream, write_stream) as session,
         ):
             await _initialise(session, auth)
             try:
