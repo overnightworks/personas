@@ -18,14 +18,21 @@ flowchart LR
     end
     loop -- "client credentials, own token" --> realm["Realm token endpoint"]
     loop -- "MCP: wait, accept_invitation" --> app["App /mcp"]
+    dispatch["Operator dispatches release.yml with YYYY.MM.DD.N"] --> gate["quality gate: checks green"]
+    gate --> image["Dockerfile: image of the runner"]
+    image -- "push with attestation" --> ghcr["GHCR"]
+    image --> tag["tag v YYYY.MM.DD.N"]
+    image -. "runs as" .-> runner
 ```
 
 - **The runner** (`src/agents`, console script `agents`) reads and validates the configuration at start, then runs one loop for every agent and every app.
 - **A loop** takes a token by client credentials with the app's scope and renews it before it expires. It keeps one `wait` in flight, carrying the last cursor, and accepts each invitation it has not seen refused as stale. A refusal by the realm or the app (a 4xx, a 401 after one renewal, a `wait` tool error, a protocol error, a redirect or a `wait` answer that is no standing) suspends that loop, which retries at a bounded interval and resumes when `wait` answers; a network failure or a 5xx backs off with a capped interval.
 - **Decisions** (`decision.py`) are pure: standings in, accepts out; token expiry against a given clock; the reaction to a failure.
 - **Boundaries** are the token endpoint, the MCP session (the official SDK over the JSON-only streamable HTTP of agent-runtime), the clock and the log, each behind a narrow port so the loop is judged with scripted ones.
+- **The image** (`Dockerfile`) installs the locked dependencies and the runner as a wheel into a slim Python image, runs as the non-root uid 1001 and starts `agents`. It holds no configuration and no secret; the deployment supplies `AGENTS_CONFIG` and the secret files.
+- **The release path** (`.github/workflows/release.yml`) calls quality's reusable workflows: the gate judges the commit, the image is built and pushed to GHCR, and the tag follows. The README owns the release instructions.
 - **The log** holds each state change once (started, suspended, resumed, joined, refused) with the client id, the app and a status or refusal code, and no secret, token or tool content.
 
 ## 3. Checks
 
-Every pull request runs `Lint and test` (ruff, pyright strict, vulture, pytest with branch coverage), `Documents` (lychee, offline, over the tracked Markdown) and the shared quality gate of overnightworks/quality (its check and Sonar jobs), which judges both through `quality/config.toml`; `quality / verdict` is the check a merge requires. CodeQL analyses the workflows and the Python, and Dependabot proposes updates to the pinned actions and the locked dependencies.
+Every pull request runs `Lint and test` (ruff, pyright strict, vulture, pytest with branch coverage), `Documents` (lychee, offline, over the tracked Markdown), `Image` (the build without a push, and the refusal to start with no configuration) and the shared quality gate of overnightworks/quality (its check and Sonar jobs), which judges them through `quality/config.toml`; `quality / verdict` is the check a merge requires. CodeQL analyses the workflows and the Python, and Dependabot proposes updates to the pinned actions, the locked dependencies and the Dockerfile's base images.

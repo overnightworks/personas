@@ -82,9 +82,28 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  image:
+    name: Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build the image without pushing it
+        run: docker build --tag agents-image .
+
+      # The image holds no configuration, so the runner stops at start with the variable named.
+      - name: Check that the runner refuses to start without a configuration
+        run: |
+          if docker run --rm agents-image 2>stderr.txt; then exit 1; fi
+          grep AGENTS_CONFIG stderr.txt
+
   quality:
     name: quality
-    needs: [docs, ci]
+    needs: [docs, ci, image]
     if: always()
     permissions:
       contents: read

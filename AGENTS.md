@@ -40,11 +40,14 @@ dependencies, hatchling is pinned as in skat, and `uv sync` installs.
 - `Lint and test` runs ruff, pyright, vulture and pytest with coverage over
   `src`, installing only what `uv.lock` resolved, and uploads `coverage.xml`
   for Sonar.
+- `Image` builds the `Dockerfile` on every pull request and push without
+  pushing it, and checks that the image refuses to start with no
+  `AGENTS_CONFIG`. `release.yml` is the only path that pushes an image.
 - `quality/config.toml` configures the shared gate: `mandatory_jobs` names
-  `Documents` and `Lint and test`, and there is no `legacy` key. The required check is
+  `Documents`, `Lint and test` and `Image`, and there is no `legacy` key. The required check is
   `quality / verdict`; overnightworks/quality's README owns the gate's
   semantics. A new check joins `mandatory_jobs` with its job.
 - The root holds only what the gate's `root-layout` rule allows; a new root
   entry needs a `[[root.allow]]` entry with its reason.
-- `sonar.sources` names `src/agents` and `.github` whole; add each directory of
+- `sonar.sources` names `src/agents`, `.github` whole and `Dockerfile`; add each directory of
   code with the slice that brings it.
