@@ -1,0 +1,133 @@
+[project]
+name = "agents"
+version = "0.1.0"
+description = "The runner that signs agents in as themselves and keeps them waiting in the apps they may join"
+license = "MIT"
+requires-python = ">=3.14"
+dependencies = [
+    "httpx2>=2.16.0",
+    "mcp>=2.3.0",
+    "mcp-types>=2.3.0",
+    "overnightworks-agent-runtime-client @ git+https://github.com/overnightworks/agent-runtime@v0.25.0",
+    "pydantic>=2.12",
+]
+
+[project.scripts]
+agents = "agents.main:main"
+
+[build-system]
+requires = ["hatchling==1.33.0"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+# The overnightworks library is built from its git tag; a named package
+# overrides a global --no-build, so every other package still installs as a wheel.
+no-binary-package = ["overnightworks-agent-runtime-client"]
+# Its build backend runs with these exact tools, as hatchling is pinned above.
+build-constraint-dependencies = ["setuptools==84.2.1", "wheel==0.48.0"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agents"]
+
+[dependency-groups]
+dev = [
+    "anyio>=4.16.0",
+    "overnightworks-agent-runtime-client[mcp-server] @ git+https://github.com/overnightworks/agent-runtime@v0.25.0",
+    "pyright>=1.1.414",
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
+    "ruff>=0.17.0",
+    "vulture>=2.15",
+]
+
+# --- Ruff ---
+
+[tool.ruff]
+src = [".", "src"]
+target-version = "py314"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "F",      # pyflakes
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "I",      # isort
+    "N",      # pep8-naming
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "A",      # flake8-builtins
+    "C4",     # flake8-comprehensions
+    "DTZ",    # flake8-datetimez
+    "SIM",    # flake8-simplify
+    "TC",     # flake8-type-checking
+    "ARG",    # flake8-unused-arguments
+    "PTH",    # flake8-use-pathlib
+    "RUF",    # ruff-specific rules
+    "ANN",    # flake8-annotations
+    "ASYNC",  # flake8-async
+    "RET",    # flake8-return
+    "SLF",    # flake8-self
+    "PT",     # flake8-pytest-style
+]
+ignore = []
+# quality owns S and T20; its noqa lines would read as unused here
+external = ["S", "T20"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "ANN",     # relax annotations in tests
+    "ARG",     # allow unused arguments in fixtures
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# --- Pyright ---
+
+[tool.pyright]
+include = ["src"]
+typeCheckingMode = "strict"
+pythonVersion = "3.14"
+
+# --- Pytest ---
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "src"]
+addopts = [
+    "--import-mode=importlib",
+    "--strict-markers",
+    "--strict-config",
+    "--cov",
+    "--cov-report=term-missing",
+]
+
+# --- Coverage ---
+
+[tool.coverage.run]
+# The measured set has one owner, here: `--cov` in addopts turns measurement
+# on and takes its sources from this key, so every way of running the suite
+# measures the same files.
+source = ["src"]
+branch = true
+# Sonar resolves the report's paths against the checkout.
+relative_files = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.",
+]
+show_missing = true
+
+# --- Vulture ---
+
+[tool.vulture]
+paths = ["src/agents"]
+min_confidence = 80
