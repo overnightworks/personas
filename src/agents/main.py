@@ -62,13 +62,10 @@ def main(compose: Compose = real_boundaries) -> None:
         raise SystemExit(CONFIGURATION_ERROR_EXIT_CODE) from None
     configure_logging()
     marker = FileReadyMarker(config.ready_file)
-    failure: Exception | None = None
     try:
         # A marker from an earlier run never counts: it goes before any loop asks for a token.
         marker.clear()
         asyncio.run(_run(config, marker, compose))
     except* ReadinessError as group:
-        failure = group.exceptions[0]
-    if failure is not None:
-        sys.stderr.write(f"agents: {failure}\n")
-        raise SystemExit(READINESS_ERROR_EXIT_CODE)
+        sys.stderr.write(f"agents: {group.exceptions[0]}\n")
+        raise SystemExit(READINESS_ERROR_EXIT_CODE) from None

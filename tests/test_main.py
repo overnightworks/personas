@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from functools import partial
@@ -11,9 +12,10 @@ import httpx2
 import pytest
 
 from agents.app_session import open_mcp_session
-from agents.config import CONFIG_ENVIRONMENT_VARIABLE
+from agents.config import CONFIG_ENVIRONMENT_VARIABLE, load_config
 from agents.loop import Boundaries
-from agents.main import QUIET_LIBRARIES, READINESS_ERROR_EXIT_CODE, configure_logging, main
+from agents.main import QUIET_LIBRARIES, READINESS_ERROR_EXIT_CODE, configure_logging, main, real_boundaries
+from agents.readiness import FileReadyMarker
 from agents.reporting import Event
 from agents.tokens import HttpTokenSource
 from tests.support.fakes import FakeClock
@@ -124,3 +126,15 @@ def test_a_marker_that_cannot_be_created_stops_the_runner_and_names_its_path(fil
 
     assert stopped.value.code == READINESS_ERROR_EXIT_CODE
     assert "missing-directory" in capsys.readouterr().err
+
+
+def test_the_real_boundaries_hand_the_loops_the_marker_they_were_given(files):
+    files.write()
+    config = load_config({CONFIG_ENVIRONMENT_VARIABLE: str(files.config_path)})
+    marker = FileReadyMarker(config.ready_file)
+
+    async def boundaries_ready() -> ReadyMarker:
+        async with real_boundaries(config, marker) as boundaries:
+            return boundaries.ready
+
+    assert asyncio.run(boundaries_ready()) is marker
