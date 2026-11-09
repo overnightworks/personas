@@ -1,0 +1,8 @@
+claim_id = "d5b3ce740e1d4349bbfabd8e85d11655"
+agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
+role = "builder"
+base = "9860838a73fddd4b1a972b4ddd2dda20288d99ab"
+branch = "claude/issue-52-ci-runs-the-tests-in-parallel-and-cancel"
+scope = [".github/workflows/ci.yml", ".github/workflows/code-scanning.yml", "AGENTS.md", "docs/ARCHITECTURE.md", "pyproject.toml", "tests", "uv.lock"]
+opened_commit = "c46ee716c03044d2c498acda04620ff82a652d2d"
+whole_reason = "The dependency, the CI call that needs it and the cancel rule are one small CI change; tests is in scope only for a test that fails under parallel workers."
