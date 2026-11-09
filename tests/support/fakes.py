@@ -8,13 +8,15 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from agent_runtime_client.member import MemberStanding, Standing
+from agent_runtime_client.member import MemberStanding, PlaceEntry, PlaceWindow, Standing
 
 from agents.config import AgentCredentials, AppTarget
 from agents.decision import Accept, Refusal
 from agents.failures import CallFailure
 from agents.secret import Secret
 from agents.tokens import GrantedToken
+from tests.support.hopin import ISSUER
+from tests.support.realm import AGENT_NAME, API_GROUP, jwt_of
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -50,8 +52,22 @@ def read_of(*standings: Standing) -> MemberStanding:
     return MemberStanding(standings=standings)
 
 
+def line(seq: int, text: str, *, own: bool = False, name: str = "Ada") -> PlaceEntry:
+    return PlaceEntry(seq=seq, kind="message", name=name, text=text, own=own)
+
+
+def window_of(*lines: PlaceEntry, generation: str = "generation-1") -> PlaceWindow:
+    return PlaceWindow(generation=generation, starts_at=lines[0].seq if lines else 1, entries=lines)
+
+
 def grant(lifetime: float = 300.0) -> GrantedToken:
     return GrantedToken(Secret(secrets.token_hex(16)), lifetime)
+
+
+def jwt_grant(lifetime: float = 300.0) -> GrantedToken:
+    """A grant of a token that carries the facts of an agent named Mozart."""
+    claims = {"iss": ISSUER, "sub": secrets.token_hex(8), "groups": [API_GROUP], "agent_name": AGENT_NAME}
+    return GrantedToken(Secret(jwt_of(claims)), lifetime)
 
 
 @dataclass

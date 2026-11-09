@@ -24,10 +24,12 @@ from agent_runtime_client.member import (
     AcceptInvitationArguments,
     Invitation,
     MemberStanding,
+    PlaceEntry,
     PlaceRef,
     PlaceWindow,
     Standing,
     StandingState,
+    place_ref_from_window_uri,
     place_window_uri,
 )
 from agent_runtime_client.tools import ToolDeclaration, ToolEffect, ToolOutcome
@@ -48,8 +50,23 @@ DISCOVER = "server/discover"
 LISTEN = "subscriptions/listen"
 READ = "resources/read"
 CALL = "tools/call"
+LIST_TOOLS = "tools/list"
 INITIALIZE = "initialize"
 ACKNOWLEDGED = "acknowledged"
+
+SAY_TOOL = "say"
+GENERATION = "generation-1"
+
+_SAY_DECLARATION = ToolDeclaration(
+    name=SAY_TOOL,
+    description="Says a line in a call.",
+    parameters={
+        "type": "object",
+        "properties": {"place": {"type": "string"}, "text": {"type": "string"}},
+        "required": ["place", "text"],
+    },
+    effect=ToolEffect.SIDE_EFFECTING,
+)
 
 _ACCEPT_DECLARATION = ToolDeclaration(
     name=ACCEPT_INVITATION_TOOL,
@@ -62,6 +79,16 @@ _ACCEPT_DECLARATION = ToolDeclaration(
 def invited(place_id: str, invitation_id: str, epoch: int = 0, kind: str = "call") -> Standing:
     invitation = Invitation(id=invitation_id, epoch=epoch, expires_at=datetime(2099, 1, 1, tzinfo=UTC))
     return Standing(place=PlaceRef(kind=kind, id=place_id), state=StandingState.INVITED, invitation=invitation)
+
+
+@dataclass(frozen=True)
+class Line:
+    """A line of a place, as the app keeps it: who said it and what name it shows."""
+
+    seq: int
+    author: str
+    name: str
+    text: str
 
 
 def active(place_id: str) -> Standing:
@@ -123,6 +150,13 @@ class FakeApp:
     pulses_on_read: bool = False
     accept_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
     accepted: list[AcceptInvitationArguments] = field(default_factory=list[AcceptInvitationArguments])
+    lines: dict[str, list[Line]] = field(default_factory=dict[str, list[Line]])
+    vanished: set[str] = field(default_factory=set[str])
+    say_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
+    said: list[tuple[str, str, str]] = field(default_factory=list[tuple[str, str, str]])
+    said_added: asyncio.Event = field(default_factory=asyncio.Event)
+    held_window_read: asyncio.Event | None = None
+    window_read_held: asyncio.Event = field(default_factory=asyncio.Event)
     log: RequestLog = field(default_factory=RequestLog)
     refusals: asyncio.Queue[HTTPStatus] = field(default_factory=asyncio.Queue[HTTPStatus])
     changes: ResourceChanges = field(default_factory=ResourceChanges)
@@ -134,7 +168,7 @@ class FakeApp:
 
     def __post_init__(self) -> None:
         self._front = McpPersonFront(
-            [PersonTool(_ACCEPT_DECLARATION, self._accept)],
+            [PersonTool(_ACCEPT_DECLARATION, self._accept), PersonTool(_SAY_DECLARATION, self._say)],
             resolve_person=lambda scope: Principal(iss=ISSUER, sub=scope[_SUBJECT_KEY]),
             resources=self,
             changes=self.changes,
@@ -150,6 +184,23 @@ class FakeApp:
         for each in standings:
             self.content.update([each.place.id, *([each.invitation.id] if each.invitation else [])])
         self.changes.changed(Principal(iss=ISSUER, sub=subject), STANDING_URI)
+
+    def speak(self, place_id: str, author: str, name: str, text: str) -> int:
+        """Adds a line to a place and signals its window to every member standing there, once it is visible."""
+        place_lines = self.lines.setdefault(place_id, [])
+        place_lines.append(Line(len(place_lines) + 1, author, name, text))
+        self.content.add(text)
+        window = place_window_uri(PlaceRef(kind="call", id=place_id))
+        for subject, standings in self.standings.items():
+            if any(standing.place.id == place_id for standing in standings):
+                self.changes.changed(Principal(iss=ISSUER, sub=subject), window)
+        return len(place_lines)
+
+    def hold_next_window_read(self) -> asyncio.Event:
+        """The next window read takes its snapshot, tells ``window_read_held`` and answers once the event is set."""
+        self.held_window_read = asyncio.Event()
+        self.window_read_held.clear()
+        return self.held_window_read
 
     def kept_out_of_logs(self) -> set[str]:
         """Every bearer this app let in or was shown, and every piece of content it served or took."""
@@ -170,6 +221,9 @@ class FakeApp:
         return [STANDING_URI, *(place_window_uri(each.place) for each in self.standings.get(principal.sub, []))]
 
     async def read(self, principal: Principal, uri: str) -> MemberStanding | PlaceWindow | None:
+        place = place_ref_from_window_uri(uri)
+        if place is not None:
+            return await self._window(principal, place)
         if uri != STANDING_URI:
             return None
         snapshot = MemberStanding(standings=tuple(self.standings.get(principal.sub, [])))
@@ -180,6 +234,44 @@ class FakeApp:
             self.read_held.set()
             await held.wait()
         return snapshot
+
+    async def _window(self, principal: Principal, place: PlaceRef) -> PlaceWindow | None:
+        if place.id in self.vanished or not any(each.place == place for each in self.standings.get(principal.sub, [])):
+            return None
+        entries = tuple(
+            PlaceEntry(seq=line.seq, kind="message", name=line.name, text=line.text, own=line.author == principal.sub)
+            for line in self.lines.get(place.id, [])
+        )
+        window = PlaceWindow(
+            generation=GENERATION,
+            starts_at=entries[0].seq if entries else len(self.lines.get(place.id, [])) + 1,
+            entries=entries,
+        )
+        held, self.held_window_read = self.held_window_read, None
+        if held is not None:
+            self.window_read_held.set()
+            await held.wait()
+        return window
+
+    async def _say(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
+        if self.say_outcomes:
+            return self.say_outcomes.pop(0)
+        place_id, text = str(arguments["place"]), str(arguments["text"])
+        self.said.append((request.principal.sub, place_id, text))
+        self.said_added.set()
+        self.speak(place_id, request.principal.sub, ACCEPTED_NAME, text)
+        return ToolOutcome("said", is_error=False)
+
+    async def until_window_read_held(self) -> None:
+        async with asyncio.timeout(LIMIT_SECONDS):
+            await self.window_read_held.wait()
+
+    async def said_count(self, count: int) -> None:
+        """Returns once this many lines were said through the tool; fails after the limit."""
+        async with asyncio.timeout(LIMIT_SECONDS):
+            while len(self.said) < count:
+                self.said_added.clear()
+                await self.said_added.wait()
 
     async def _accept(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
         taken = AcceptInvitationArguments.model_validate(arguments)
@@ -232,7 +324,9 @@ class FakeApp:
         """Content a request carries counts as held before any scripted answer, refusal or status can ignore it."""
         arguments = call.get("arguments") or {}
         place = arguments.get("place") or {}
-        self.content.update(value for value in (place.get("id"), arguments.get("invitation")) if isinstance(value, str))
+        place_id = place.get("id") if isinstance(place, dict) else place
+        taken = (place_id, arguments.get("invitation"), arguments.get("text"))
+        self.content.update(value for value in taken if isinstance(value, str))
 
     def _noting_acknowledgements(self, send: Callable[..., Any]) -> Callable[..., Any]:
         async def noting(message: dict[str, Any]) -> None:

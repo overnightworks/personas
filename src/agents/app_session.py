@@ -16,21 +16,28 @@ from agent_runtime_client.member import (
     STANDING_URI,
     AcceptInvitationArguments,
     MemberStanding,
+    PlaceRef,
+    PlaceWindow,
+    place_window_uri,
 )
+from agent_runtime_client.tools import JsonObject, ToolDeclaration, ToolEffect, ToolOutcome
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from mcp.client.subscriptions import Subscription, SubscriptionLost, listen
 from mcp.shared.exceptions import MCPError
 from mcp_types import (
     CONNECTION_CLOSED,
+    INVALID_PARAMS,
     REQUEST_TIMEOUT,
     UNSUPPORTED_PROTOCOL_VERSION,
     CallToolResult,
     InputRequiredResult,
+    ReadResourceResult,
     TextContent,
     TextResourceContents,
+    Tool,
 )
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from agents.config import AppTarget
 from agents.decision import Accept, Refusal, status_code
@@ -75,6 +82,21 @@ class AppSession(Protocol):
         """``None`` when joined, else the refusal; raises ``StatusFailure``, ``Unreachable`` or ``UnusableAnswer``."""
         ...
 
+    async def read_place(self, place: PlaceRef) -> PlaceWindow | None:
+        """The place's window, or ``None`` when the app shows it to this member no more.
+
+        Raises ``StatusFailure``, ``Unreachable`` or ``UnusableAnswer``.
+        """
+        ...
+
+    async def declared_tools(self) -> tuple[ToolDeclaration, ...]:
+        """The first page of the app's tools; raises ``StatusFailure``, ``Unreachable`` or ``UnusableAnswer``."""
+        ...
+
+    async def invoke(self, name: str, arguments: JsonObject) -> ToolOutcome:
+        """The tool's outcome, an error one included; raises ``StatusFailure``, ``Unreachable``, ``UnusableAnswer``."""
+        ...
+
 
 type SessionOpener = Callable[[AppTarget, Secret], AbstractAsyncContextManager[AppSession]]
 
@@ -98,6 +120,10 @@ class _BearerAuth(httpx2.Auth):
 
 class _InvalidToolResult(Exception):  # noqa: N818
     """The app's result does not meet the output schema it advertised; carries none of its content."""
+
+
+class _UnknownResource(Exception):  # noqa: N818
+    """The app shows this member no such resource."""
 
 
 _CALL_ERRORS: Final = (
@@ -158,12 +184,19 @@ class _McpAppSession:
             raise _failure_of(error, self.auth) from None
 
     async def read_standing(self) -> MemberStanding:
-        result = await self._asked(self.session.read_resource(STANDING_URI, allow_input_required=True))
-        if isinstance(result, InputRequiredResult):
-            raise UnusableAnswer(INVALID_ANSWER_CODE)
-        text = "".join(block.text for block in result.contents if isinstance(block, TextResourceContents))
+        return _record_of(MemberStanding, await self._asked(self._read(STANDING_URI)))
+
+    async def read_place(self, place: PlaceRef) -> PlaceWindow | None:
+        read = self._read(place_window_uri(place), unknown_is_absent=True)
         try:
-            return MemberStanding.model_validate_json(text)
+            return _record_of(PlaceWindow, await self._asked(read))
+        except _UnknownResource:
+            return None
+
+    async def declared_tools(self) -> tuple[ToolDeclaration, ...]:
+        listing = await self._asked(self.session.list_tools())
+        try:
+            return tuple(_declaration_of(tool) for tool in listing.tools)
         except ValidationError:
             raise UnusableAnswer(INVALID_ANSWER_CODE) from None
 
@@ -171,10 +204,30 @@ class _McpAppSession:
         arguments = AcceptInvitationArguments(
             place=accept.place, invitation=accept.invitation_id, epoch=accept.epoch
         ).model_dump(mode="json")
-        result = await self._asked(self.session.call_tool(ACCEPT_INVITATION_TOOL, arguments, allow_input_required=True))
+        result = await self._called(ACCEPT_INVITATION_TOOL, arguments)
+        return _refusal_of(_text_of(result)) if result.is_error else None
+
+    async def invoke(self, name: str, arguments: JsonObject) -> ToolOutcome:
+        result = await self._called(name, arguments)
+        return ToolOutcome(_text_of(result), result.is_error)
+
+    async def _called(self, name: str, arguments: JsonObject) -> CallToolResult:
+        result = await self._asked(self.session.call_tool(name, arguments, allow_input_required=True))
+        if not isinstance(result, CallToolResult):
+            raise UnusableAnswer(INVALID_ANSWER_CODE)
+        return result
+
+    async def _read(self, uri: str, *, unknown_is_absent: bool = False) -> ReadResourceResult:
+        """The resource; an app that shows this member no such one answers an invalid-params error."""
+        try:
+            result = await self.session.read_resource(uri, allow_input_required=True)
+        except MCPError as error:
+            if unknown_is_absent and error.code == INVALID_PARAMS:
+                raise _UnknownResource from None
+            raise
         if isinstance(result, InputRequiredResult):
             raise UnusableAnswer(INVALID_ANSWER_CODE)
-        return _refusal_of(_text_of(result)) if result.is_error else None
+        return result
 
     async def _asked[Answer](self, request: Awaitable[Answer]) -> Answer:
         self.auth.last_status = None
@@ -190,6 +243,24 @@ async def _wakes_of(subscription: Subscription, auth: _BearerAuth) -> AsyncItera
             yield wake
     except SubscriptionLost as lost:
         raise _failure_of(lost, auth) from None
+
+
+def _record_of[Record: BaseModel](record: type[Record], result: ReadResourceResult) -> Record:
+    text = "".join(block.text for block in result.contents if isinstance(block, TextResourceContents))
+    try:
+        return record.model_validate_json(text)
+    except ValidationError:
+        raise UnusableAnswer(INVALID_ANSWER_CODE) from None
+
+
+def _declaration_of(tool: Tool) -> ToolDeclaration:
+    read_only = tool.annotations is not None and bool(tool.annotations.read_only_hint)
+    return ToolDeclaration(
+        name=tool.name,
+        description=tool.description or "",
+        parameters=tool.input_schema,
+        effect=ToolEffect.READ_ONLY if read_only else ToolEffect.SIDE_EFFECTING,
+    )
 
 
 def _text_of(result: CallToolResult) -> str:

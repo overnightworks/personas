@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import itertools
+import json
 import secrets
 
 import pytest
 from agent_runtime_client.member import LEASE_SECONDS, LISTEN_BOUND_SECONDS, PlaceRef, Standing, StandingState
+from agent_runtime_client.tools import ToolDeclaration
 
 from agents.app_session import READ_SECONDS
 from agents.decision import (
@@ -16,18 +18,25 @@ from agents.decision import (
     Memory,
     Reaction,
     Refusal,
+    Seen,
     Suspend,
     Token,
     accepts_for,
+    active_call_places,
+    addressed,
     after_refusal,
     backoff_delay,
+    bound_declarations,
     decisive_failure,
     forget_gone,
     reaction_to,
     renewal_due,
+    turn_input,
+    unread,
 )
 from agents.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer
 from agents.secret import Secret
+from tests.support.fakes import line, window_of
 from tests.support.hopin import active, invited
 
 TRANSIENT_REFUSALS = [Refusal.SPONSOR_AWAY, Refusal.TWO_SEATS, Refusal.BUSY, Refusal.UNRECOGNISED]
@@ -193,3 +202,95 @@ def test_the_failure_that_decides_is_the_refusal_before_the_renewal_before_the_b
 )
 def test_no_failure_decides_when_any_leaf_is_no_call_failure(leaves):
     assert decisive_failure(leaves, already_renewed=False) is None
+
+
+PLACE = PlaceRef(kind="call", id="room-7")
+
+
+def test_only_the_active_call_places_are_read():
+    paused = Standing(place=PlaceRef(kind="call", id="room-8"), state=StandingState.PAUSED)
+    other = Standing(place=PlaceRef(kind="table", id="table-1"), state=StandingState.ACTIVE)
+
+    assert active_call_places((active("room-7"), paused, other, invited("room-9", "inv-3"))) == (PLACE,)
+
+
+@pytest.mark.parametrize(
+    ("seen", "expected"),
+    [
+        (None, [1, 2, 3]),
+        (Seen("generation-1", 0), [1, 2, 3]),
+        (Seen("generation-1", 2), [3]),
+        (Seen("generation-1", 3), []),
+        (Seen("generation-2", 3), [1, 2, 3]),
+    ],
+    ids=["nothing seen", "seen up to nothing", "seen up to the second", "seen all", "another generation"],
+)
+def test_the_unread_lines_are_the_ones_after_what_was_seen_and_reading_otherwise_starts_at_seq_1(seen, expected):
+    window = window_of(line(1, "a"), line(2, "b"), line(3, "c"))
+
+    assert [each.seq for each in unread(window, seen)] == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "name", "expected"),
+    [
+        ("Mozart, are you there?", "Mozart", True),
+        ("hey MOZART", "Mozart", True),
+        ("what do you think, mozart?!", "Mozart", True),
+        ("@Mozart", "Mozart", True),
+        ("Mozart's view", "Mozart", True),
+        ("Mozartian music", "Mozart", False),
+        ("Amozart", "Mozart", False),
+        ("Wolfgang", "Mozart", False),
+        ("Mozart", "Mo.art", False),
+        ("a Mo.art here", "Mo.art", True),
+        ("STRASSE", "Straße", True),
+    ],
+    ids=[
+        "named",
+        "other case",
+        "lower case",
+        "mention",
+        "possessive",
+        "longer word",
+        "inside a word",
+        "not named",
+        "the name is no pattern",
+        "a name with a dot",
+        "case folding",
+    ],
+)
+def test_a_line_is_addressed_when_it_names_the_agent_as_a_whole_word_whatever_the_case(text, name, expected):
+    assert addressed(line(1, text), name) is expected
+
+
+def test_a_line_of_his_own_is_never_addressed_to_him():
+    assert not addressed(line(1, "Mozart answers", own=True), "Mozart")
+
+
+def _declaration(name: str) -> ToolDeclaration:
+    return ToolDeclaration(name=name, description=secrets.token_hex(4), parameters={"type": "object"})
+
+
+def test_the_bound_tools_are_declared_in_the_order_they_are_bound():
+    declared = [_declaration("a"), _declaration("b"), _declaration("c")]
+
+    assert bound_declarations(declared, ["c", "a"]) == (declared[2], declared[0])
+
+
+def test_a_bound_tool_the_app_declares_no_more_leaves_no_declarations():
+    assert bound_declarations([_declaration("a")], ["a", "gone"]) is None
+
+
+def test_a_turn_is_told_facts_only_the_room_the_lines_which_are_new_and_which_are_his_own():
+    own, theirs, new = secrets.token_hex(4), secrets.token_hex(4), secrets.token_hex(4)
+    window = window_of(line(4, theirs, name="Ada"), line(5, own, own=True, name="Mozart"), line(6, new, name="Ada"))
+
+    facts = json.loads(turn_input(PLACE, "Mozart", window, window.entries[2:]))
+
+    assert (facts["kind"], facts["id"], facts["you"]) == (PLACE.kind, PLACE.id, "Mozart")
+    assert [(each["seq"], each["text"], each["own"], each["new"]) for each in facts["lines"]] == [
+        (4, theirs, False, False),
+        (5, own, True, False),
+        (6, new, False, True),
+    ]
