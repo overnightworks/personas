@@ -9,9 +9,9 @@ from functools import partial
 from typing import TYPE_CHECKING, Final, NoReturn
 
 from agent_runtime_client.agents import TurnRequest
-from agent_runtime_client.backend import TurnPerson, TurnStopped
+from agent_runtime_client.backend import TurnPerson, TurnStopKind, TurnStopped
 from agent_runtime_client.tools import HandTool, ToolOutcome
-from agent_runtime_client.turn import Principal, Turn, TurnMessage, TurnRole
+from agent_runtime_client.turn import FailureCode, Principal, Turn, TurnMessage, TurnRole
 
 from agents.decision import (
     SUSPENDED_RETRY_SECONDS,
@@ -81,6 +81,14 @@ def _raise_if_cancelled() -> None:
     task = asyncio.current_task()
     if task is not None and task.cancelling():
         raise asyncio.CancelledError
+
+
+class _RelayFailed(TurnStopped):
+    """The stop a failed relayed call gives the backend, which ends the turn at once; it holds the failure."""
+
+    def __init__(self, failure: Exception) -> None:
+        super().__init__(TurnStopKind.FAILED, FailureCode.PROVIDER_ERROR)
+        self.failure = failure
 
 
 @dataclass(frozen=True)
@@ -286,12 +294,16 @@ class AgentLoop:
         except Exception as error:
             _raise_if_cancelled()
             leaves = list(leaves_of(error))
-            stopped = next((leaf for leaf in leaves if isinstance(leaf, TurnStopped)), None)
+            relay_stop = next((leaf for leaf in leaves if isinstance(leaf, _RelayFailed)), None)
+            stopped = relay_stop or next((leaf for leaf in leaves if isinstance(leaf, TurnStopped)), None)
             if stopped is None:
                 raise
-            self._report(Event.TURN_ENDED, stopped.code.value)
+            # The stop only carries the failure out of the backend; the failure goes to the group, never the stop.
+            if relay_stop is None:
+                self._report(Event.TURN_ENDED, stopped.code.value)
             # What left the session beside the stop (a late answer) still goes to the group, to be judged there.
-            rest = [leaf for leaf in leaves if leaf is not stopped]
+            rest: list[BaseException] = [relay_stop.failure] if relay_stop is not None else []
+            rest.extend(leaf for leaf in leaves if leaf is not stopped)
             if len(rest) == 1:
                 raise rest[0] from None
             if rest:
@@ -321,8 +333,11 @@ class AgentLoop:
                     continue
 
     async def _relay(self, session: AppSession, name: str, _principal: Principal, arguments: JsonObject) -> ToolOutcome:
-        await self._use_current_token(session)
-        return await session.invoke(name, arguments)
+        try:
+            await self._use_current_token(session)
+            return await session.invoke(name, arguments)
+        except Exception as error:
+            raise _RelayFailed(error) from None
 
     async def _react(self, failure: CallFailure) -> None:
         match reaction_to(failure, already_renewed=self._renewed_after_401):

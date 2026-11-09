@@ -52,6 +52,15 @@ def test_an_error_record_of_a_library_the_runner_uses_reaches_no_log_line(
     assert caplog.records == []
 
 
+def test_an_error_record_of_the_gateway_backend_reaches_no_log_line(library_loggers, caplog: pytest.LogCaptureFixture):
+    configure_logging()
+    caplog.set_level(logging.DEBUG)
+
+    logging.getLogger("agent_runtime_client.backend.gateway").error("tool say raised Unreachable")
+
+    assert caplog.records == []
+
+
 class Stop(Exception):  # noqa: N818 - a test's way to end a runner whose loops never end
     """Raised by the report once an agent joined, which is after its first read answered."""
 

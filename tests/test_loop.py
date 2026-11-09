@@ -7,7 +7,9 @@ from contextlib import asynccontextmanager
 
 import pytest
 from agent_runtime_client.backend import TurnStopKind, TurnStopped
+from agent_runtime_client.backend.gateway import GatewayBackend
 from agent_runtime_client.member import PlaceRef
+from agent_runtime_client.tools import ToolDeclaration, ToolEffect
 from agent_runtime_client.turn import RejectionCode
 
 from agents.config import load_config
@@ -32,6 +34,7 @@ from tests.support.fakes import (
     read_of,
     window_of,
 )
+from tests.support.gateway import Gateway, says
 from tests.support.hopin import active, invited
 
 pytestmark = pytest.mark.anyio
@@ -528,3 +531,76 @@ async def test_a_cancelled_turn_whose_opener_swallowed_it_reports_nothing_calls_
     assert swallowed.relayed == []
     assert swallowed.clock.slept == []
     assert swallowed.reports.events() == [("started", None)]
+
+
+class DefectInARelayedCall:
+    """One agent whose model calls ``say`` once in the one addressed line; the relayed call raises ``defect``."""
+
+    def __init__(self, files, defect: Exception) -> None:
+        config = load_config(files.write())
+        assert config.gateway is not None
+        self.clock = FakeClock()
+        self.reports = Reports()
+        self.gateway = Gateway(*says("room-7", "never said"))
+        self.requests_at_failure = 0
+        self._defect = defect
+        self._reads = 0
+        self._windows = [window_of(line(1, "Mozart?"))]
+        gateway = config.gateway
+        boundaries = Boundaries(
+            FakeTokens(self.clock, [jwt_grant() for _ in range(5)]),
+            self.open,
+            self.clock,
+            self.reports,
+            FakeReadyMarker(),
+            backend=lambda tools: GatewayBackend(gateway, tools=tools, transport=self.gateway),
+        )
+        self.loop = AgentLoop(config.agents[0], config.apps[0], boundaries, TurnCounter())
+
+    @asynccontextmanager
+    async def open(self, app, token):
+        yield self
+
+    def use_token(self, token) -> None:
+        pass
+
+    @asynccontextmanager
+    async def changes(self):
+        yield _OneWake()
+
+    async def read_standing(self):
+        self._reads += 1
+        if self._reads > 1:
+            await asyncio.Event().wait()
+        return read_of(active("room-7"))
+
+    async def read_place(self, place):
+        return self._windows.pop(0)
+
+    async def declared_tools(self):
+        return (
+            ToolDeclaration(
+                name="say", description="Says a line.", parameters={"type": "object"}, effect=ToolEffect.SIDE_EFFECTING
+            ),
+        )
+
+    async def invoke(self, name, arguments):
+        self.requests_at_failure = len(self.gateway.requests)
+        raise self._defect
+
+
+async def test_a_relayed_call_that_raises_a_defect_ends_the_runner_loud_with_the_defect_at_the_top_and_no_second_round(
+    files,
+):
+    defect = ValueError("a defect")
+    raising = DefectInARelayedCall(files, defect)
+    task = asyncio.create_task(raising.loop.run())
+    async with asyncio.timeout(10):
+        (ended,) = await asyncio.gather(task, return_exceptions=True)
+
+    assert isinstance(ended, ExceptionGroup)
+    assert list(leaves_of(ended)) == [defect]
+    assert raising.requests_at_failure == 1
+    assert len(raising.gateway.requests) == 1
+    assert raising.clock.slept == []
+    assert raising.reports.events() == [("started", None)]

@@ -34,7 +34,7 @@ type Compose = Callable[[Config, ReadyMarker], AbstractAsyncContextManager[Bound
 
 CONFIGURATION_ERROR_EXIT_CODE: Final = 2
 READINESS_ERROR_EXIT_CODE: Final = 3
-QUIET_LIBRARIES: Final = ("httpx2", "httpcore2", "mcp", "client")
+QUIET_LIBRARIES: Final = ("httpx2", "httpcore2", "mcp", "client", "agent_runtime_client")
 """Their records carry request details and response content; only the runner's own state changes are logged."""
 SILENT_LEVEL: Final = logging.CRITICAL + 1
 

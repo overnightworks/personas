@@ -664,6 +664,10 @@ async def refuses_the_token(reply):
     await reply.status(HTTPStatus.UNAUTHORIZED)
 
 
+async def answers_wrongly(reply):
+    await reply.error(INVALID_PARAMS, status=HTTPStatus.OK)
+
+
 @pytest.mark.parametrize(
     ("method", "fails", "events"),
     [
@@ -739,6 +743,56 @@ async def test_a_turn_failure_cancelling_a_lifecycle_that_unwinds_with_a_late_an
 
     assert runner.reports.events() == [("started", None), ("backoff", "network"), ("resumed", None)]
     assert [opening.new_seqs for opening in runner.gateway.openings()] == [[2]]
+
+
+async def relayed_say_fails(runner, fails):
+    """An addressed line whose model calls ``say`` and whose first relayed call the app answers with ``fails``."""
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER)[:1], *says(PLACE_ID, ANSWER))
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    runner.start()
+    await runner.app.log.until(READ)
+    runner.app.script(CALL, fails)
+    say_in_the_call(runner, ADDRESSED)
+
+
+@pytest.mark.parametrize(
+    ("fails", "events", "issued"),
+    [
+        (cuts, [("started", None), ("backoff", "network"), ("resumed", None)], 1),
+        (refuses_the_token, [("started", None)], 2),
+        (answers_wrongly, [("started", None), ("suspended", f"jsonrpc_{INVALID_PARAMS}"), ("resumed", None)], 2),
+    ],
+    ids=["transport", "401", "protocol error"],
+)
+async def test_a_relayed_call_that_fails_ends_the_turn_after_one_round_and_leads_to_one_lifecycle_reaction(
+    runner, fails, events, issued
+):
+    await relayed_say_fails(runner, fails)
+    await runner.app.log.until(LISTEN, 2)
+    await runner.app.log.until(READ, 3)
+    say_in_the_call(runner, f"{ADDRESSED} Again.")
+    await runner.gateway.until_requested(3)
+
+    assert runner.reports.events() == events
+    assert runner.gateway.round_sizes() == [2, 2, 4]
+    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [2]]
+    assert len(runner.realm.issued) == issued
+
+
+async def test_a_relayed_call_beside_a_late_answer_gives_one_reaction_and_no_turn_report(runner, monkeypatch):
+    failing = transport_closing_with_late_answers(echo=anyio.BrokenResourceError, only_close=1)
+    monkeypatch.setattr(app_session, "streamable_http_client", failing)
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    runner.start()
+    await runner.app.log.until(READ)
+    runner.app.script(CALL, cuts)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.reports.until("resumed")
+
+    assert runner.reports.events() == [("started", None), ("backoff", "network"), ("resumed", None)]
+    assert len(runner.gateway.requests) == 1
+    assert not runner.task.done()
 
 
 async def test_a_window_the_app_lost_is_skipped_and_is_no_suspension(runner):
