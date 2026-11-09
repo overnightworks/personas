@@ -1,8 +1,0 @@
-claim_id = "d5a8e6257f4f43b4a3bd4e1e7074bbad"
-agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
-role = "builder"
-base = "087d85faed6201361ee4a2b77561a1186f4f42ad"
-branch = "claude/issue-18-one-failure-decides-the-runner-s-reactio"
-scope = ["docs/ARCHITECTURE.md", "src/agents/app_session.py", "src/agents/decision.py", "src/agents/failures.py", "src/agents/loop.py", "tests"]
-opened_commit = "63f3cd4d2ac943ec4833ab0b4ccf0a6403b0a0fe"
-whole_reason = "One reduction replaces the two selection points, in the teardown and in run(), at once."
