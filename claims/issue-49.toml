@@ -1,8 +1,0 @@
-claim_id = "5648194b4a8a44e9b2ec4ad099998c56"
-agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
-role = "builder"
-base = "9860838a73fddd4b1a972b4ddd2dda20288d99ab"
-branch = "claude/issue-49-a-turn-reaches-a-tools-only-app"
-scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/app_session.py", "src/personas/config.py", "src/personas/decision.py", "src/personas/loop.py", "src/personas/reporting.py", "tests"]
-opened_commit = "9c52afee858d503ba26308d84daaeb5b96afcba5"
-whole_reason = "The configuration field, the pure decision of what a turn holds, the loop's performing of it and the one event are one path; split, a field or a decision has no caller."
