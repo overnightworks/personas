@@ -131,6 +131,13 @@ class _RelayFailed(TurnStopped):
         self.failure = failure
 
 
+def _failure_held_by(leaf: BaseException) -> BaseException | None:
+    """The failure a session-body leaf stands for: a relay stop holds its failure, the gateway's own stop none."""
+    if isinstance(leaf, _RelayFailed):
+        return leaf.failure
+    return None if isinstance(leaf, TurnStopped) else leaf
+
+
 @dataclass(frozen=True)
 class _TurnSetup:
     """What an agent's turn in an app is made of: the persona, the tools bound and the backend that runs it."""
@@ -150,13 +157,13 @@ class TurnCounter:
 
 @dataclass(frozen=True)
 class ActiveTurn:
-    """The running turn: its task and place, the loop's request to end it, its end report and a relayed defect."""
+    """The running turn: its task and place, the loop's request to end it, its end report and the defect it met."""
 
     task: asyncio.Task[None]
     place: PlaceRef
     cancel_requested: bool = False
     end_reported: bool = False
-    relay_defect: Exception | None = None
+    defect: Exception | None = None
 
 
 @dataclass(frozen=True)
@@ -369,43 +376,39 @@ class AgentLoop:
 
     async def _take_turn(self, setup: _TurnSetup, admitted: _Admitted) -> None:
         """Runs one turn; a cancelled one ends the runner loud with a defect it met, or when nobody cancelled it."""
-        task = asyncio.current_task()
-        assert task is not None  # noqa: S101 - a turn runs inside a task
-        await _ending_loud_when_cancelled(self._judge_turn(setup, admitted), partial(self._loud_end_of, task))
+        await _ending_loud_when_cancelled(self._judge_turn(setup, admitted), self._loud_end_of_turn)
 
-    def _loud_end_of(self, task: asyncio.Task[object]) -> Exception | None:
+    def _loud_end_of_turn(self) -> Exception | None:
         """What ends the runner when the turn's session has left and the turn is cancelled.
 
-        A defect a relayed call raised comes first: the cancellation can reach the session's teardown after it
-        and leave the defect only as the cancellation's context. A turn's own count is above 0 on a cancel by
+        The defect the session body raised comes first: the cancellation can reach the session's teardown after
+        it and leave the defect only as the cancellation's context. A turn's own count is above 0 on a cancel by
         the loop, the group or the runner; it is 0 when only anyio's own scope cancellation ended its session.
         """
         assert self._turn is not None  # noqa: S101 - the turn's record lives until its task has ended
-        return self._turn.relay_defect or _unrequested_unless_cancelling(task)
+        return self._turn.defect or _unrequested_unless_cancelling(self._turn.task)
 
     async def _judge_turn(self, setup: _TurnSetup, admitted: _Admitted) -> None:
         """Runs one turn over its own session.
 
         A turn the gateway ends short is reported; a failed relayed call and any other error go to the group.
-        A cancelled turn hands the group only a defect, so a failure of its call and late answers end as the
-        cancellation.
+        Every error of a cancelled turn ends as the cancellation; a defect of its session body is recorded.
         """
         try:
             await self._run_turn(setup, admitted)
         except Exception as error:
+            _raise_if_cancelled()
             leaves = list(leaves_of(error))
             relay_stop = next((leaf for leaf in leaves if isinstance(leaf, _RelayFailed)), None)
             stopped = relay_stop or next((leaf for leaf in leaves if isinstance(leaf, TurnStopped)), None)
-            # The stop only carries the failure out of the backend; the failure goes to the group, never the stop.
-            # What left the session beside the stop (a late answer) goes there too, to be judged there.
-            rest: list[BaseException] = [relay_stop.failure] if relay_stop is not None else []
-            rest.extend(leaf for leaf in leaves if leaf is not stopped)
-            if not any(is_defect(leaf) for leaf in rest):
-                _raise_if_cancelled()
             if stopped is None:
                 raise
+            # The stop only carries the failure out of the backend; the failure goes to the group, never the stop.
             if relay_stop is None:
                 self._report_turn_end(stopped.code.value)
+            # What left the session beside the stop (a late answer) still goes to the group, to be judged there.
+            rest: list[BaseException] = [relay_stop.failure] if relay_stop is not None else []
+            rest.extend(leaf for leaf in leaves if leaf is not stopped)
             if len(rest) == 1:
                 raise rest[0] from None
             if rest:
@@ -414,34 +417,49 @@ class AgentLoop:
     async def _run_turn(self, setup: _TurnSetup, admitted: _Admitted) -> None:
         token = await self._current_token()
         async with self._boundaries.open_session(self._app, token.value) as session:
-            _raise_if_cancelled()
-            declarations = bound_declarations(await session.declared_tools(), setup.binding.tools)
-            if declarations is None:
-                self._report_turn_end(TOOL_NOT_DECLARED_CODE)
-                return
-            tools = tuple(HandTool(each, partial(self._relay, session, each.name)) for each in declarations)
-            request = TurnRequest(
-                agent=setup.persona.name,
-                turn=Turn(system=setup.persona.prompt, messages=[TurnMessage(role=TurnRole.USER, text=admitted.input)]),
-                roles=setup.persona.roles,
-                tools=declarations,
-                model=setup.persona.model,
-                max_duration_seconds=setup.persona.max_duration_seconds,
-                max_tool_calls=setup.binding.max_tool_calls,
-            )
-            person = TurnPerson(admitted.facts.principal, TURN_ROLE, admitted.groups)
-            async with aclosing(setup.backend(tools).run(request, person)) as events:
-                async for _ in events:
-                    continue
+            try:
+                await self._run_session_body(setup, admitted, session)
+            except Exception as error:
+                self._record_defect(error)
+                raise
+
+    def _record_defect(self, error: Exception) -> None:
+        """Keeps the first defect among the leaves of an error the session body left with.
+
+        A cancelled turn loses its errors to the cancellation; the record lets the runner end loud anyway.
+        """
+        failures = (_failure_held_by(leaf) for leaf in leaves_of(error))
+        defect = next((failure for failure in failures if isinstance(failure, Exception) and is_defect(failure)), None)
+        if defect is not None:
+            assert self._turn is not None  # noqa: S101 - only the running turn runs its session body
+            self._turn = replace(self._turn, defect=defect)
+
+    async def _run_session_body(self, setup: _TurnSetup, admitted: _Admitted, session: AppSession) -> None:
+        _raise_if_cancelled()
+        declarations = bound_declarations(await session.declared_tools(), setup.binding.tools)
+        if declarations is None:
+            self._report_turn_end(TOOL_NOT_DECLARED_CODE)
+            return
+        tools = tuple(HandTool(each, partial(self._relay, session, each.name)) for each in declarations)
+        request = TurnRequest(
+            agent=setup.persona.name,
+            turn=Turn(system=setup.persona.prompt, messages=[TurnMessage(role=TurnRole.USER, text=admitted.input)]),
+            roles=setup.persona.roles,
+            tools=declarations,
+            model=setup.persona.model,
+            max_duration_seconds=setup.persona.max_duration_seconds,
+            max_tool_calls=setup.binding.max_tool_calls,
+        )
+        person = TurnPerson(admitted.facts.principal, TURN_ROLE, admitted.groups)
+        async with aclosing(setup.backend(tools).run(request, person)) as events:
+            async for _ in events:
+                continue
 
     async def _relay(self, session: AppSession, name: str, _principal: Principal, arguments: JsonObject) -> ToolOutcome:
         try:
             await self._use_current_token(session)
             return await session.invoke(name, arguments)
         except Exception as error:
-            if is_defect(error):
-                assert self._turn is not None  # noqa: S101 - only the running turn relays
-                self._turn = replace(self._turn, relay_defect=error)
             raise _RelayFailed(error) from None
 
     async def _react(self, failure: CallFailure) -> None:

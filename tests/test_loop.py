@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 
+import anyio
 import pytest
 from agent_runtime_client.backend import TurnStopKind, TurnStopped
 from agent_runtime_client.backend.gateway import GatewayBackend
@@ -531,8 +532,14 @@ class SwallowedCancellation(TurnAndLifecycle):
 
 @pytest.mark.parametrize(
     "outcome",
-    [Unreachable("down"), TurnStopped(TurnStopKind.REFUSED, RejectionCode.BUSY), None],
-    ids=["a connection failure", "a stop", "the session itself"],
+    [
+        Unreachable("down"),
+        TurnStopped(TurnStopKind.REFUSED, RejectionCode.BUSY),
+        anyio.BrokenResourceError(),
+        anyio.ClosedResourceError(),
+        None,
+    ],
+    ids=["a connection failure", "a stop", "a broken stream", "a closed stream", "the session itself"],
 )
 async def test_a_cancelled_turn_whose_opener_swallowed_it_reports_nothing_calls_nothing_and_leaves_no_reaction(
     files, outcome
@@ -613,12 +620,16 @@ class TurnEndingInTheStepItsPlaceLeaves(TurnAndLifecycle):
 
 
 @pytest.mark.parametrize(
-    ("ending", "own_reports"),
-    [("stop", [("turn_ended", "busy")]), ("completion", []), ("relayed failure", [])],
+    ("ending", "own_reports", "sleeps"),
+    [
+        ("stop", [("turn_ended", "busy")], []),
+        ("completion", [], []),
+        ("relayed failure", [], [backoff_delay(1)]),
+    ],
     ids=["a stop it reported", "a completion", "a failed relayed call"],
 )
 async def test_a_turn_that_ends_on_its_own_in_the_step_its_place_leaves_reports_only_its_own_end(
-    files, ending, own_reports
+    files, ending, own_reports, sleeps
 ):
     together = TurnEndingInTheStepItsPlaceLeaves(files, ending)
     task = asyncio.create_task(together.loop.run())
@@ -632,6 +643,7 @@ async def test_a_turn_that_ends_on_its_own_in_the_step_its_place_leaves_reports_
         await asyncio.gather(task, return_exceptions=True)
 
     assert [event for event in together.reports.events() if event[0] == "turn_ended"] == own_reports
+    assert together.clock.slept == sleeps
 
 
 class TokenFetchSwallowingTheCancellation:
