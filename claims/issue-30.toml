@@ -1,0 +1,8 @@
+claim_id = "c5b76eb72e7a448bbe20f39455e1906d"
+agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
+role = "builder"
+base = "79ad9bfab3f9ec6d73ca4baa1deb84da705eaa21"
+branch = "claude/issue-30-mozart-s-turn-ends-with-its-place"
+scope = ["docs/ARCHITECTURE.md", "src/agents/app_session.py", "src/agents/decision.py", "src/agents/loop.py", "tests"]
+opened_commit = "e299be0d7c7662fd030feece07df649a846607a6"
+whole_reason = "The turn's cancel, the session's cancellation rule that lets _turn_failed go, and the guards that keep a silent or swallowed end loud are one cancellation path; the rule without run_all's loud end could stop a loop in silence, and the cancel without the rule keeps a guard in the loop that belongs to the adapter."
