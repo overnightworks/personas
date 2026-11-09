@@ -8,6 +8,7 @@ from http import HTTPStatus
 
 import anyio
 import pytest
+from agent_runtime_client.backend.fake_gateway import Reply
 from agent_runtime_client.member import STANDING_URI
 from mcp_types import ListToolsResult
 
@@ -194,16 +195,20 @@ SESSION_SEAMS = pytest.mark.parametrize(
 )
 
 
-async def a_turn_removed_while_its_session_closes(runner, monkeypatch, *, seam, error):
-    """A turn whose app seam raises ``error``, its session's close held; the place is then removed."""
+async def a_turn_removed_while_its_session_closes(runner, monkeypatch, *, seam=None, error=None, gateway=None):
+    """A turn whose app seam raises ``error`` or whose gateway answers as scripted, its session's close held.
+
+    The place is then removed.
+    """
 
     async def raise_it(self, *arguments):
         raise error
 
     closing = ClosingHold()
     monkeypatch.setattr(app_session, "streamable_http_client", closing.transport())
-    monkeypatch.setattr(f"agents.app_session._McpAppSession.{seam}", raise_it)
-    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    if seam is not None:
+        monkeypatch.setattr(f"agents.app_session._McpAppSession.{seam}", raise_it)
+    runner.gateway = gateway or Gateway(*says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
     try:
@@ -234,6 +239,21 @@ async def test_a_call_failure_in_a_turns_session_body_whose_place_then_leaves_en
     runner, monkeypatch, seam
 ):
     await a_turn_removed_while_its_session_closes(runner, monkeypatch, seam=seam, error=Unreachable("down"))
+    await runner.reports.until("turn_ended")
+    later_read = runner.app.hold_next_read()
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    await runner.app.until_read_held()
+
+    assert runner.reports.events() == [("started", None), ("turn_ended", TURN_CANCELLED_CODE)]
+    assert not runner.task.done()
+    later_read.set()
+
+
+async def test_a_gateway_stop_in_a_turns_session_body_whose_place_then_leaves_ends_as_the_cancellation(
+    runner, monkeypatch
+):
+    gateway = Gateway(Reply(status=HTTPStatus.SERVICE_UNAVAILABLE))
+    await a_turn_removed_while_its_session_closes(runner, monkeypatch, gateway=gateway)
     await runner.reports.until("turn_ended")
     later_read = runner.app.hold_next_read()
     runner.app.stand(SUBJECT, active(PLACE_ID))

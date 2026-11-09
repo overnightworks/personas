@@ -404,10 +404,11 @@ class AgentLoop:
             if stopped is None:
                 raise
             # The stop only carries the failure out of the backend; the failure goes to the group, never the stop.
-            if relay_stop is None:
+            held = _failure_held_by(stopped)
+            if held is None:
                 self._report_turn_end(stopped.code.value)
             # What left the session beside the stop (a late answer) still goes to the group, to be judged there.
-            rest: list[BaseException] = [relay_stop.failure] if relay_stop is not None else []
+            rest: list[BaseException] = [held] if held is not None else []
             rest.extend(leaf for leaf in leaves if leaf is not stopped)
             if len(rest) == 1:
                 raise rest[0] from None
