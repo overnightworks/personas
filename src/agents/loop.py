@@ -145,7 +145,7 @@ class _TurnSetup:
     persona: AgentDefinition
     binding: ToolBinding
     backend: BackendFactory
-    cap: TurnCap
+    cap: TurnCap | None
 
 
 @dataclass
@@ -202,11 +202,11 @@ class AgentLoop:
         self._checkpoints: dict[PlaceRef, Checkpoint] = {}
         self._turn: ActiveTurn | None = None
         self._turn_ended = asyncio.Event()
-        persona, binding, backend, cap = agent.persona, app.binding, boundaries.backend, agent.turn_cap
+        persona, binding, backend = agent.persona, app.binding, boundaries.backend
         self._turn_setup = (
             None
-            if persona is None or binding is None or backend is None or cap is None
-            else _TurnSetup(persona, binding, backend, cap)
+            if persona is None or binding is None or backend is None
+            else _TurnSetup(persona, binding, backend, agent.turn_cap)
         )
 
     async def run(self) -> NoReturn:

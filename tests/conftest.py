@@ -127,8 +127,8 @@ class Harness:
         self.token_client = httpx2.AsyncClient(transport=self.realm.transport())
         self.task: asyncio.Task[object] | None = None
 
-    def cap_turns(self, cap: TurnCap) -> None:
-        """Gives every agent this cap; the amounts of a scenario are its own."""
+    def cap_turns(self, cap: TurnCap | None) -> None:
+        """Gives every agent this cap, or none; the amounts of a scenario are its own."""
         self.config = replace(self.config, agents=tuple(replace(each, turn_cap=cap) for each in self.config.agents))
 
     def add_app(self) -> None:

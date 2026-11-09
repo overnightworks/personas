@@ -60,6 +60,18 @@ async def test_a_line_addressed_to_him_over_the_cap_starts_no_turn_makes_no_gate
     assert "capped client_id=agent-mozart" in formatted(caplog.get_records("call"))
 
 
+async def test_an_agent_without_a_cap_answers_every_addressed_line_and_logs_no_capped(runner):
+    runner.cap_turns(None)
+    runner.gateway = Gateway(refused_turn(), refused_turn(), refused_turn())
+    await restarted_in_the_call(runner)
+    for round_number in range(1, 4):
+        say_in_the_call(runner, f"{ADDRESSED} Round {round_number}.")
+        await runner.reports.until("turn_ended", count=round_number)
+
+    assert len(runner.gateway.openings()) == 3
+    assert "capped" not in [event for event, _ in runner.reports.events()]
+
+
 async def test_after_the_period_has_passed_an_addressed_line_starts_a_turn_again(runner):
     runner.cap_turns(TURN_CAP)
     runner.gateway = Gateway(refused_turn(), *says(PLACE_ID, ANSWER))

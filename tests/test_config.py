@@ -162,12 +162,24 @@ def test_a_configuration_without_tools_in_any_app_needs_no_gateway_and_no_person
 
 
 @pytest.mark.parametrize("field", ["max_turns", "turn_period_seconds"])
-def test_a_turn_cap_amount_that_is_missing_stops_the_start_and_names_the_field(files, monkeypatch, capsys, field):
+def test_a_turn_cap_amount_set_without_the_other_stops_the_start_and_names_the_missing_field(
+    files, monkeypatch, capsys, field
+):
     files.text = "\n".join(line for line in files.text.splitlines() if not line.startswith(field))
 
     error = fails_at_start(files.write(), monkeypatch, capsys)
 
-    assert field in error
+    assert f"{field}: required" in error
+
+
+def test_an_agent_that_binds_tools_and_sets_no_turn_cap_amount_has_no_cap(files):
+    files.text = "\n".join(
+        line for line in files.text.splitlines() if not line.startswith(("max_turns", "turn_period_seconds"))
+    )
+
+    [agent] = load_config(files.write()).agents
+
+    assert agent.turn_cap is None
 
 
 def test_a_whole_number_of_seconds_is_taken_for_the_turn_period(files):

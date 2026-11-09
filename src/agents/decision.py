@@ -247,11 +247,14 @@ class TurnCap:
     period_seconds: float
 
 
-def reserve_turn(started: tuple[float, ...], now: float, cap: TurnCap) -> tuple[float, ...] | None:
+def reserve_turn(started: tuple[float, ...], now: float, cap: TurnCap | None) -> tuple[float, ...] | None:
     """The start times after a turn starting at ``now``, or None when the cap holds it back.
 
     ``started`` holds the start times of earlier turns; those at or before ``now - period_seconds`` no longer count.
+    Without a cap nothing holds a turn back and no start time is kept.
     """
+    if cap is None:
+        return started
     inside = tuple(each for each in started if each > now - cap.period_seconds)
     if len(inside) >= cap.max_turns:
         return None

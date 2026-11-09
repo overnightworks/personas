@@ -3,8 +3,9 @@
 The file holds the realm's token endpoint, the ready file's path, the apps (an MCP URL and its scope) and the agents
 (a client id and the path of the file holding its client secret). Which apps an agent may reach
 is the realm's group membership, never this file. An app that binds tools to its agents' turns
-names them with their call bound, and then the model gateway and each agent's persona file and turn cap
-(``max_turns`` in ``turn_period_seconds``) are required.
+names them with their call bound, and then the model gateway and each agent's persona file are required.
+An agent has a turn cap only when it sets ``max_turns`` in ``turn_period_seconds``, both or neither;
+with neither its turns are bounded by the budget and the off switches alone.
 Every value is validated at start and an error names the field or path, never a secret.
 """
 
@@ -106,6 +107,13 @@ class _AgentEntry(_Entry):
     max_turns: PositiveInt | None = Field(default=None, strict=True)
     turn_period_seconds: PositiveFloat | None = Field(default=None, strict=True)
 
+    @model_validator(mode="after")
+    def _turn_cap_amounts_come_together(self) -> Self:
+        for present, missing in (("max_turns", "turn_period_seconds"), ("turn_period_seconds", "max_turns")):
+            if getattr(self, present) is not None and getattr(self, missing) is None:
+                raise ValueError(f"{missing}: required when {present} is set")
+        return self
+
     @property
     def turn_cap(self) -> TurnCap | None:
         if self.max_turns is None or self.turn_period_seconds is None:
@@ -125,9 +133,8 @@ class _FileModel(_Entry):
         if any(app.binding for app in self.apps):
             if self.gateway is None:
                 raise ValueError("gateway: required when an app binds tools")
-            for field_name in ("persona_file", "max_turns", "turn_period_seconds"):
-                if any(getattr(agent, field_name) is None for agent in self.agents):
-                    raise ValueError(f"{field_name}: required for every agent when an app binds tools")
+            if any(agent.persona_file is None for agent in self.agents):
+                raise ValueError("persona_file: required for every agent when an app binds tools")
         return self
 
     @field_validator("ready_file")

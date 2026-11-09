@@ -431,6 +431,12 @@ def test_a_turn_with_no_turns_started_is_reserved_at_now():
     assert reserve_turn((), NOW, CAP) == (NOW,)
 
 
+def test_without_a_cap_every_turn_may_start_and_no_start_time_is_kept():
+    started = (NOW - 50, NOW - 10)
+
+    assert reserve_turn(started, NOW, None) == started
+
+
 def test_turns_below_the_cap_keep_their_times_and_add_now():
     started = (NOW - 50, NOW - 10)
 
