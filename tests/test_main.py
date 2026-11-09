@@ -177,6 +177,23 @@ def test_a_marker_that_cannot_be_created_stops_the_runner_and_names_its_path(fil
     assert "missing-directory" in capsys.readouterr().err
 
 
+def test_a_marker_that_cannot_be_created_ends_the_runner_with_its_exit_code_though_other_loops_are_cancelled(
+    files, world, capsys
+):
+    first_app = files.text[files.text.index("[[apps]]") : files.text.index("[[agents]]")]
+    second_app = first_app.replace("hopin.test", "second.hopin.test")
+    files.text = files.text.replace(str(files.ready_path), str(files.ready_path / "missing-directory" / "ready"))
+    files.text = files.text.replace("[[agents]]", f"{second_app}[[agents]]")
+    files.write()
+    world.app.hold_next_read()
+
+    with pytest.raises(SystemExit) as stopped:
+        world.start()
+
+    assert stopped.value.code == READINESS_ERROR_EXIT_CODE
+    assert "missing-directory" in capsys.readouterr().err
+
+
 def test_the_real_boundaries_hand_the_loops_the_marker_they_were_given(files):
     files.write()
     config = load_config({CONFIG_ENVIRONMENT_VARIABLE: str(files.config_path)})

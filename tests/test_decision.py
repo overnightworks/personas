@@ -48,6 +48,7 @@ from agents.decision import (
     sets_where_reading_starts,
     sync_checkpoints,
     turn_input,
+    turn_invalid,
 )
 from agents.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer
 from agents.secret import Secret
@@ -227,6 +228,22 @@ def test_only_the_active_call_places_are_read():
     other = Standing(place=PlaceRef(kind="table", id="table-1"), state=StandingState.ACTIVE)
 
     assert active_call_places((active("room-7"), paused, other, invited("room-9", "inv-3"))) == (PLACE,)
+
+
+@pytest.mark.parametrize(
+    ("standings", "invalid"),
+    [
+        ((active("room-7"),), False),
+        ((active("room-8"),), True),
+        ((), True),
+        ((paused("room-7"), active("room-8")), True),
+        ((invited("room-7", "inv-3"),), True),
+        ((active("room-8"), active("room-7")), False),
+    ],
+    ids=["active", "gone", "no standing", "paused", "invited again", "active beside another place"],
+)
+def test_a_turn_is_invalid_once_its_place_is_not_active_in_the_standing(standings, invalid):
+    assert turn_invalid(PLACE, standings) is invalid
 
 
 OTHER_GENERATION = "generation-2"

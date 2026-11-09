@@ -299,7 +299,7 @@ def _settled(leaf: BaseException, from_body: set[int], auth: _BearerAuth, *, bes
     The transport's task finds its read stream closed when an answer lands after the session ended: beside
     a leaf that is no such error that is a lost answer, unreachable whatever status it carried. Alone it is
     how a cancelled session unwinds, and it stays as it was so that no cancellation turns into a failure
-    the loop backs off from.
+    the loop backs off from; the session itself turns it into the cancellation where its task was cancelled.
     """
     if isinstance(leaf, CallFailure) or id(leaf) in from_body:
         return leaf
@@ -318,11 +318,14 @@ async def open_mcp_session(
 
     A bare ``ClientSession`` discovers the revision: the SDK's own client would fall back to
     ``initialize`` on any error, so a 401 on the probe would enter a path this runner does not have.
-    Several leaves, failures or defects, leave as one ``ExceptionGroup`` holding each of them.
+    Several leaves, failures or defects, leave as one ``ExceptionGroup`` holding each of them. A session whose
+    task was being cancelled when the body left and that closes with late answers alone raises the cancellation:
+    the SDK's task groups lower the task's cancellation count and turn it into those answers.
     """
     auth = _BearerAuth(token)
     timeout = httpx2.Timeout(CONNECT_SECONDS, read=stream_seconds)
     raised_in_body: Exception | None = None
+    cancelled_in_body = False
     try:
         async with (
             httpx2.AsyncClient(auth=auth, timeout=timeout) as client,
@@ -335,12 +338,18 @@ async def open_mcp_session(
             except Exception as error:
                 raised_in_body = error
                 raise
+            except asyncio.CancelledError:
+                task = asyncio.current_task()
+                cancelled_in_body = task is not None and task.cancelling() > 0
+                raise
     except Exception as error:
         # The SDK's task groups wrap what is raised inside them, so every leaf is looked at: a failure
         # of the call and what the caller's own code raised stay as they were, an error of the
         # connection becomes its failure and a defect stays a defect. The loop picks what decides.
         from_body = {id(own) for own in leaves_of(raised_in_body)} if raised_in_body else set[int]()
         found = list(leaves_of(error))
+        if cancelled_in_body and all(isinstance(leaf, LATE_ANSWER_ERRORS) for leaf in found):
+            raise asyncio.CancelledError from None
         beside_no_echo = any(not isinstance(leaf, LATE_ANSWER_ERRORS) for leaf in found)
         leaves = [_settled(leaf, from_body, auth, beside_no_echo=beside_no_echo) for leaf in found]
         if len(leaves) == 1:

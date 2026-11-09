@@ -38,6 +38,8 @@ TURN_ROLE: Final[AgentRole] = "user"
 """The app role a turn acts under: an agent holds no admin right."""
 TOOL_NOT_DECLARED_CODE: Final = "tool_not_declared"
 """The code of a turn that ends because the app no longer declares a tool the configuration binds."""
+TURN_CANCELLED_CODE: Final = "cancelled"
+"""The code of a turn the loop cancelled because its place left the standing."""
 
 
 class Refusal(StrEnum):
@@ -151,14 +153,19 @@ def reaction_to(failure: CallFailure, *, already_renewed: bool) -> Reaction | Su
             return Reaction.BACKOFF
 
 
+def is_defect(leaf: BaseException) -> bool:
+    """Whether a leaf is a defect: any leaf that is no failure of a call."""
+    return not isinstance(leaf, CallFailure)
+
+
 def decisive_failure(leaves: Sequence[BaseException], *, already_renewed: bool) -> CallFailure | None:
     """The one failure that decides the reaction to several: a refusal before a renewal before a backoff.
 
-    Any leaf that is no failure of a call is a defect, and then no failure decides. Of equal ranks the first wins.
+    With a defect among the leaves no failure decides. Of equal ranks the first wins.
     """
-    failures = [leaf for leaf in leaves if isinstance(leaf, CallFailure)]
-    if len(failures) < len(leaves):
+    if any(is_defect(leaf) for leaf in leaves):
         return None
+    failures = [leaf for leaf in leaves if isinstance(leaf, CallFailure)]
     return min(failures, key=lambda failure: _rank(reaction_to(failure, already_renewed=already_renewed)))
 
 
@@ -225,6 +232,11 @@ def active_call_places(standings: tuple[Standing, ...]) -> tuple[PlaceRef, ...]:
         for standing in standings
         if standing.state is StandingState.ACTIVE and standing.place.kind == CALL_PLACE_KIND
     )
+
+
+def turn_invalid(place: PlaceRef, standings: tuple[Standing, ...]) -> bool:
+    """A turn ends with its place: it is invalid once the place is gone, invited again or paused."""
+    return not any(standing.place == place and standing.state is StandingState.ACTIVE for standing in standings)
 
 
 @dataclass(frozen=True)
