@@ -1,8 +1,0 @@
-claim_id = "135b8e9113774d25b863b06dffad82fe"
-agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
-role = "builder"
-base = "ee1ee3534d52fcaf09f68bc1a26912852b9113a6"
-branch = "claude/issue-27-a-failed-relayed-call-ends-mozart-s-turn"
-scope = ["docs/ARCHITECTURE.md", "src/agents/loop.py", "src/agents/main.py", "tests"]
-opened_commit = "e5ef8293bfa5510645cf36a22a3baa6dc8693372"
-whole_reason = "The relay's stop and the after-turn hand-over are one path through loop.py; the quiet library is one line beside it, and splitting leaves a held failure nothing raises."
