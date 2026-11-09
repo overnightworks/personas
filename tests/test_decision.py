@@ -21,6 +21,7 @@ from agents.decision import (
     Seen,
     Suspend,
     Token,
+    TurnCap,
     accepts_for,
     active_call_places,
     addressed,
@@ -31,6 +32,7 @@ from agents.decision import (
     forget_gone,
     reaction_to,
     renewal_due,
+    reserve_turn,
     turn_input,
     unread,
 )
@@ -294,3 +296,29 @@ def test_a_turn_is_told_facts_only_the_room_the_lines_which_are_new_and_which_ar
         (5, own, True, False),
         (6, new, False, True),
     ]
+
+
+CAP = TurnCap(max_turns=3, period_seconds=100.0)
+NOW = 5000.0
+
+
+def test_a_turn_with_no_turns_started_is_reserved_at_now():
+    assert reserve_turn((), NOW, CAP) == (NOW,)
+
+
+def test_turns_below_the_cap_keep_their_times_and_add_now():
+    started = (NOW - 50, NOW - 10)
+
+    assert reserve_turn(started, NOW, CAP) == (*started, NOW)
+
+
+def test_a_turn_at_the_cap_inside_the_period_is_held_back():
+    assert reserve_turn((NOW - 90, NOW - 50, NOW - 10), NOW, CAP) is None
+
+
+def test_a_start_exactly_one_period_old_no_longer_counts():
+    assert reserve_turn((NOW - CAP.period_seconds, NOW - 50, NOW - 10), NOW, CAP) == (NOW - 50, NOW - 10, NOW)
+
+
+def test_a_start_just_inside_the_period_still_counts():
+    assert reserve_turn((NOW - CAP.period_seconds + 1, NOW - 50, NOW - 10), NOW, CAP) is None

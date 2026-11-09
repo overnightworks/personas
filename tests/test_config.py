@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from agents.config import CONFIG_ENVIRONMENT_VARIABLE, ToolBinding, load_config
+from agents.config import CONFIG_ENVIRONMENT_VARIABLE, ConfigError, ToolBinding, load_config
+from agents.decision import TurnCap
 from agents.main import CONFIGURATION_ERROR_EXIT_CODE, main
-from tests.support.configfiles import MAX_TOOL_CALLS, PERSONA_NAME
+from tests.support.configfiles import MAX_TOOL_CALLS, MAX_TURNS, PERSONA_NAME, TURN_PERIOD_SECONDS
 from tests.support.realm import API_GROUP
 
 APP_TABLE = (
@@ -143,6 +144,7 @@ def test_a_valid_file_gives_the_agent_its_persona_the_app_its_tools_and_the_runn
     [agent], [app] = config.agents, config.apps
     assert agent.persona is not None
     assert (agent.persona.name, agent.persona.prompt) == (PERSONA_NAME, files.persona_prompt)
+    assert agent.turn_cap == TurnCap(MAX_TURNS, TURN_PERIOD_SECONDS)
     assert app.binding == ToolBinding(("say",), MAX_TOOL_CALLS)
     assert config.gateway is not None
     assert (config.gateway.api_group, config.gateway.gateway.key_file) == (API_GROUP, files.key_path)
@@ -156,6 +158,68 @@ def test_a_configuration_without_tools_in_any_app_needs_no_gateway_and_no_person
     assert config.gateway is None
     assert [app.binding for app in config.apps] == [None]
     assert [agent.persona for agent in config.agents] == [None]
+    assert [agent.turn_cap for agent in config.agents] == [None]
+
+
+@pytest.mark.parametrize("field", ["max_turns", "turn_period_seconds"])
+def test_a_turn_cap_amount_that_is_missing_stops_the_start_and_names_the_field(files, monkeypatch, capsys, field):
+    files.text = "\n".join(line for line in files.text.splitlines() if not line.startswith(field))
+
+    error = fails_at_start(files.write(), monkeypatch, capsys)
+
+    assert field in error
+
+
+def test_a_whole_number_of_seconds_is_taken_for_the_turn_period(files):
+    files.text = "\n".join(
+        "turn_period_seconds = 90" if line.startswith("turn_period_seconds") else line
+        for line in files.text.splitlines()
+    )
+
+    [agent] = load_config(files.write()).agents
+
+    assert agent.turn_cap == TurnCap(MAX_TURNS, 90.0)
+
+
+@pytest.mark.parametrize("field", ["max_turns", "turn_period_seconds"])
+@pytest.mark.parametrize("amount", ["true", '"5"'])
+def test_a_turn_cap_amount_of_another_toml_type_stops_the_start_and_names_the_field(
+    files, monkeypatch, capsys, field, amount
+):
+    files.text = "\n".join(
+        f"{field} = {amount}" if line.startswith(field) else line for line in files.text.splitlines()
+    )
+
+    error = fails_at_start(files.write(), monkeypatch, capsys)
+
+    assert f"agents.0.{field}" in error
+
+
+@pytest.mark.parametrize("field", ["max_turns", "turn_period_seconds"])
+def test_a_second_agent_without_a_turn_cap_amount_is_refused_and_the_field_is_named(files, field):
+    second_agent = f'[[agents]]\nclient_id = "agent-bach"\nsecret_file = "{files.secret_path}"\n'
+    second_agent += f'persona_file = "{files.persona_path}"\n'
+    second_agent += "".join(f"{key} = 1\n" for key in ("max_turns", "turn_period_seconds") if key != field)
+    files.text += second_agent
+
+    environment = files.write()
+
+    with pytest.raises(ConfigError, match=field):
+        load_config(environment)
+
+
+@pytest.mark.parametrize("field", ["max_turns", "turn_period_seconds"])
+@pytest.mark.parametrize("amount", ["0", "-1"])
+def test_a_turn_cap_amount_that_is_not_positive_stops_the_start_and_names_the_field(
+    files, monkeypatch, capsys, field, amount
+):
+    files.text = "\n".join(
+        f"{field} = {amount}" if line.startswith(field) else line for line in files.text.splitlines()
+    )
+
+    error = fails_at_start(files.write(), monkeypatch, capsys)
+
+    assert f"agents.0.{field}" in error
 
 
 @pytest.mark.parametrize(

@@ -201,9 +201,9 @@ class Reports:
     def events(self) -> list[tuple[str, str | None]]:
         return [(change.event.value, change.code) for change in self.changes]
 
-    async def until(self, event: str, *, limit_seconds: float = 10.0) -> None:
-        """Returns once a change of this event has been reported; fails after the limit."""
+    async def until(self, event: str, *, count: int = 1, limit_seconds: float = 10.0) -> None:
+        """Returns once this many changes of this event have been reported; fails after the limit."""
         async with asyncio.timeout(limit_seconds):
-            while not any(change.event.value == event for change in self.changes):
+            while sum(change.event.value == event for change in self.changes) < count:
                 self._added.clear()
                 await self._added.wait()

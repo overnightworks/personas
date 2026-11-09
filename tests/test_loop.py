@@ -20,7 +20,7 @@ from agents.decision import (
     backoff_delay,
 )
 from agents.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer, leaves_of
-from agents.loop import AgentLoop, Boundaries
+from agents.loop import AgentLoop, Boundaries, TurnCounter
 from tests.support.fakes import (
     FakeClock,
     FakeReadyMarker,
@@ -405,7 +405,7 @@ class TurnAndLifecycle:
         self._turn_failure = turn_failure
         tokens = FakeTokens(self.clock, [jwt_grant() for _ in range(5)])
         boundaries = Boundaries(tokens, self.open, self.clock, self.reports, FakeReadyMarker(), backend=self._no_model)
-        self.loop = AgentLoop(config.agents[0], config.apps[0], boundaries)
+        self.loop = AgentLoop(config.agents[0], config.apps[0], boundaries, TurnCounter())
 
     @asynccontextmanager
     async def open(self, app, token):

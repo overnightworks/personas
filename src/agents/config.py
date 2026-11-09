@@ -3,7 +3,8 @@
 The file holds the realm's token endpoint, the ready file's path, the apps (an MCP URL and its scope) and the agents
 (a client id and the path of the file holding its client secret). Which apps an agent may reach
 is the realm's group membership, never this file. An app that binds tools to its agents' turns
-names them with their call bound, and then the model gateway and each agent's persona file are required.
+names them with their call bound, and then the model gateway and each agent's persona file and turn cap
+(``max_turns`` in ``turn_period_seconds``) are required.
 Every value is validated at start and an error names the field or path, never a secret.
 """
 
@@ -21,13 +22,14 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    PositiveFloat,
     PositiveInt,
     ValidationError,
     field_validator,
     model_validator,
 )
 
-from agents.decision import TURN_ROLE
+from agents.decision import TURN_ROLE, TurnCap
 from agents.secret import Secret
 
 if TYPE_CHECKING:
@@ -60,6 +62,7 @@ class AgentCredentials:
     client_id: str
     client_secret: Secret
     persona: AgentDefinition | None = None
+    turn_cap: TurnCap | None = None
 
 
 @dataclass(frozen=True)
@@ -100,6 +103,14 @@ class _AgentEntry(_Entry):
     client_id: str = Field(min_length=1)
     secret_file: Path
     persona_file: Path | None = None
+    max_turns: PositiveInt | None = Field(default=None, strict=True)
+    turn_period_seconds: PositiveFloat | None = Field(default=None, strict=True)
+
+    @property
+    def turn_cap(self) -> TurnCap | None:
+        if self.max_turns is None or self.turn_period_seconds is None:
+            return None
+        return TurnCap(self.max_turns, self.turn_period_seconds)
 
 
 class _FileModel(_Entry):
@@ -114,8 +125,9 @@ class _FileModel(_Entry):
         if any(app.binding for app in self.apps):
             if self.gateway is None:
                 raise ValueError("gateway: required when an app binds tools")
-            if any(agent.persona_file is None for agent in self.agents):
-                raise ValueError("persona_file: required for every agent when an app binds tools")
+            for field_name in ("persona_file", "max_turns", "turn_period_seconds"):
+                if any(getattr(agent, field_name) is None for agent in self.agents):
+                    raise ValueError(f"{field_name}: required for every agent when an app binds tools")
         return self
 
     @field_validator("ready_file")
@@ -199,7 +211,10 @@ def load_config(environment: Mapping[str, str]) -> Config:
         apps=tuple(AppTarget(str(app.mcp_url), app.scope, app.binding) for app in parsed.apps),
         agents=tuple(
             AgentCredentials(
-                agent.client_id, _read_secret(index, agent.secret_file), _read_persona(index, agent.persona_file)
+                agent.client_id,
+                _read_secret(index, agent.secret_file),
+                _read_persona(index, agent.persona_file),
+                agent.turn_cap,
             )
             for index, agent in enumerate(parsed.agents)
         ),

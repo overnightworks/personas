@@ -19,6 +19,7 @@ class Event(StrEnum):
     JOINED = "joined"
     REFUSED = "refused"
     TURN_ENDED = "turn_ended"
+    CAPPED = "capped"
 
 
 @dataclass(frozen=True)

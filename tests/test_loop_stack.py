@@ -29,7 +29,7 @@ from mcp_types import (
 )
 
 from agents import app_session
-from agents.decision import SUSPENDED_RETRY_SECONDS, TOOL_NOT_DECLARED_CODE, backoff_delay, status_code
+from agents.decision import SUSPENDED_RETRY_SECONDS, TOOL_NOT_DECLARED_CODE, TurnCap, backoff_delay, status_code
 from agents.failures import INVALID_ANSWER_CODE, LISTEN_NOT_HONORED_CODE, UNSUPPORTED_VERSION_CODE
 from agents.reporting import Event
 from tests.support.gateway import Gateway, says
@@ -42,6 +42,7 @@ from tests.support.hopin import (
     LIST_TOOLS,
     LISTEN,
     READ,
+    Line,
     active,
     formatted,
     invited,
@@ -764,3 +765,128 @@ async def test_a_refused_and_an_answered_turn_log_a_code_and_no_secret_or_conten
 
     logged = formatted(caplog.get_records("call"))
     assert "turn_ended" in logged
+
+
+TURN_CAP = TurnCap(max_turns=1, period_seconds=120.0)
+SECOND_PLACE_ID = "room-8"
+SECOND_AGENT = "agent-bach"
+SECOND_SUBJECT = "agent-subject-2"
+
+
+def refused_turn() -> Reply:
+    """A turn that starts, asks the gateway once and ends short: it counts against the cap all the same."""
+    return Reply(status=HTTPStatus.TOO_MANY_REQUESTS)
+
+
+async def addressed_turn_ended(runner, text=ADDRESSED):
+    say_in_the_call(runner, text)
+    await runner.reports.until("turn_ended")
+
+
+async def test_a_line_addressed_to_him_over_the_cap_starts_no_turn_makes_no_gateway_call_and_is_not_answered_later(
+    runner, caplog
+):
+    runner.cap_turns(TURN_CAP)
+    runner.gateway = Gateway(refused_turn(), *says(PLACE_ID, ANSWER))
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    say_in_the_call(runner, ADDRESSED)
+    runner.start()
+    await runner.reports.until("turn_ended")
+    say_in_the_call(runner, f"{ADDRESSED} Capped.")
+    await runner.reports.until("capped")
+    runner.app.changes.changed(runner.app_principal, place_window_uri(CALL_PLACE))
+    runner.clock.time += TURN_CAP.period_seconds
+    say_in_the_call(runner, f"{ADDRESSED} After the period.")
+    await runner.app.said_count(1)
+
+    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [3]]
+    assert [event for event, _ in runner.reports.events()].count("capped") == 1
+    assert "capped client_id=agent-mozart" in formatted(caplog.get_records("call"))
+
+
+async def test_after_the_period_has_passed_an_addressed_line_starts_a_turn_again(runner):
+    runner.cap_turns(TURN_CAP)
+    runner.gateway = Gateway(refused_turn(), *says(PLACE_ID, ANSWER))
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    say_in_the_call(runner, ADDRESSED)
+    runner.start()
+    await runner.reports.until("turn_ended")
+    runner.clock.time += TURN_CAP.period_seconds
+    say_in_the_call(runner, f"{ADDRESSED} Again.")
+    await runner.app.said_count(1)
+
+    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [2]]
+    assert "capped" not in [event for event, _ in runner.reports.events()]
+
+
+async def test_while_capped_an_addressed_line_in_a_second_place_is_skipped_too_and_not_answered_once_the_cap_frees(
+    runner,
+):
+    runner.cap_turns(TURN_CAP)
+    runner.gateway = Gateway(refused_turn(), *says(PLACE_ID, ANSWER))
+    runner.app.stand(SUBJECT, active(PLACE_ID), active(SECOND_PLACE_ID))
+    say_in_the_call(runner, ADDRESSED)
+    runner.start()
+    await runner.reports.until("turn_ended")
+    # The read the turn's end wakes is held inside the second place, so both new lines land in the next one alone.
+    first_place_read = runner.app.hold_next_window_read()
+    await runner.app.until_window_read_held()
+    second_place_read = runner.app.hold_next_window_read()
+    first_place_read.set()
+    await runner.app.until_window_read_held()
+    say_in_the_call(runner, f"{ADDRESSED} Capped.")
+    quietly_said_elsewhere = f"{ADDRESSED} Capped elsewhere."
+    runner.app.lines[SECOND_PLACE_ID] = [Line(1, PERSON, "Ada", quietly_said_elsewhere)]
+    runner.app.content.add(quietly_said_elsewhere)
+    second_place_read.set()
+    await runner.reports.until("capped", count=2)
+    runner.clock.time += TURN_CAP.period_seconds
+    say_in_the_call(runner, f"{ADDRESSED} After the period.")
+    await runner.app.said_count(1)
+
+    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [3]]
+
+
+async def test_two_apps_of_one_agent_share_one_cap(runner):
+    runner.cap_turns(TURN_CAP)
+    runner.add_app()
+    runner.gateway = Gateway(refused_turn(), refused_turn())
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    say_in_the_call(runner, ADDRESSED)
+    runner.start()
+    await runner.reports.until("turn_ended")
+    await runner.reports.until("capped")
+
+    assert len(runner.gateway.openings()) == 1
+
+
+async def test_leaving_and_rejoining_a_place_does_not_reset_the_cap(runner):
+    def becomes_active_once_joined(change):
+        if change.event is Event.JOINED:
+            runner.app.stand(SUBJECT, active(PLACE_ID))
+
+    runner.cap_turns(TURN_CAP)
+    runner.gateway = Gateway(refused_turn(), refused_turn())
+    runner.on_report = becomes_active_once_joined
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    say_in_the_call(runner, ADDRESSED)
+    runner.start()
+    await runner.reports.until("turn_ended")
+    runner.app.stand(SUBJECT, invited(PLACE_ID, "inv-3"))
+    await runner.reports.until("capped")
+
+    assert len(runner.gateway.openings()) == 1
+
+
+async def test_two_agents_each_have_a_cap_of_their_own(runner):
+    runner.cap_turns(TURN_CAP)
+    runner.add_agent(SECOND_AGENT, SECOND_SUBJECT)
+    runner.gateway = Gateway(refused_turn(), refused_turn())
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    runner.app.stand(SECOND_SUBJECT, active(PLACE_ID))
+    say_in_the_call(runner, ADDRESSED)
+    runner.start()
+    await runner.gateway.until_requested(2)
+
+    assert len(runner.gateway.openings()) == 2
+    assert "capped" not in [event for event, _ in runner.reports.events()]
