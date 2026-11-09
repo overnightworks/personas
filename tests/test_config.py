@@ -169,7 +169,7 @@ def test_a_turn_cap_amount_set_without_the_other_stops_the_start_and_names_the_m
 
     error = fails_at_start(files.write(), monkeypatch, capsys)
 
-    assert field in error
+    assert f"{field}: required" in error
 
 
 def test_an_agent_that_binds_tools_and_sets_no_turn_cap_amount_has_no_cap(files):
