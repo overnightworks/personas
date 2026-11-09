@@ -39,16 +39,24 @@ def transport_closing_with_late_answers(*, echo: type[Exception], echoes: int = 
     return failing
 
 
-def transport_closing_with_leaves(*leaves: Exception):
-    """A stand-in for ``streamable_http_client`` whose close raises exactly these leaves when its body was cancelled."""
+def transport_closing_with_leaves(*leaves: Exception, only_close: int | None = None):
+    """A stand-in for ``streamable_http_client`` whose close raises exactly these leaves when its body was cancelled.
+
+    ``only_close`` counts the closes of a cancelled body from one and limits the failure to that one.
+    """
     real = app_session.streamable_http_client
+    closes = 0
 
     @asynccontextmanager
     async def failing(url, *, http_client):
+        nonlocal closes
         async with real(url, http_client=http_client) as streams:
             try:
                 yield streams
             except asyncio.CancelledError:
+                closes += 1
+                if only_close not in (None, closes):
+                    raise
                 raise ExceptionGroup("the transport", list(leaves)) from None
 
     return failing
@@ -62,11 +70,11 @@ class ClosingHold:
         self.release = asyncio.Event()
         self.cancelled = asyncio.Event()
 
-    def transport(self):
-        """A stand-in for ``streamable_http_client`` whose first close waits for ``release``.
+    def transport(self, *, nth: int = 1, of_url: str | None = None):
+        """A stand-in for ``streamable_http_client`` whose ``nth`` close waits for ``release``.
 
         ``closing`` is set when that close starts to wait, and ``cancelled`` when the task was cancelled while it
-        waited.
+        waited. With ``of_url`` only the closes of that URL are counted.
         """
         real = app_session.streamable_http_client
         closes = 0
@@ -74,12 +82,13 @@ class ClosingHold:
         @asynccontextmanager
         async def waiting(url, *, http_client):
             nonlocal closes
+            counted = of_url in (None, str(url))
             async with real(url, http_client=http_client) as streams:
                 try:
                     yield streams
                 finally:
-                    closes += 1
-                    if closes == 1:
+                    closes += counted
+                    if counted and closes == nth:
                         self.closing.set()
                         try:
                             await self.release.wait()
@@ -90,11 +99,12 @@ class ClosingHold:
         return waiting
 
 
-def transport_whose_second_session_loses_a_child(failing: asyncio.Event):
-    """A stand-in for ``streamable_http_client`` whose second open runs a child that fails once ``failing`` is set.
+def transport_whose_session_loses_a_child(failing: asyncio.Event, *, nth: int = 2, of_url: str | None = None):
+    """A stand-in for ``streamable_http_client`` whose ``nth`` open runs a child that fails once ``failing`` is set.
 
     The child fails with a late-answer error, as the SDK's request task does, so anyio cancels the session's own
-    task with no one else having done so. The first open is the lifecycle's, the second a turn's.
+    task with no one else having done so. The first open is the lifecycle's, the second a turn's. With ``of_url``
+    only the opens of that URL are counted, so a scenario names the app's own open and not its place among the others.
     """
     real = app_session.streamable_http_client
     opens = 0
@@ -102,10 +112,11 @@ def transport_whose_second_session_loses_a_child(failing: asyncio.Event):
     @asynccontextmanager
     async def losing(url, *, http_client):
         nonlocal opens
-        opens += 1
-        is_the_second = opens == 2
+        counted = of_url in (None, str(url))
+        opens += counted
+        is_the_one = counted and opens == nth
         async with real(url, http_client=http_client) as streams, anyio.create_task_group() as group:
-            if is_the_second:
+            if is_the_one:
 
                 async def child() -> None:
                     await failing.wait()

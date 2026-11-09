@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from personas.config import CONFIG_ENVIRONMENT_VARIABLE, ConfigError, ToolBinding, load_config
+from personas.config import CONFIG_ENVIRONMENT_VARIABLE, DEFAULT_CALL_SECONDS, ConfigError, ToolBinding, load_config
 from personas.decision import TurnCap
 from personas.main import CONFIGURATION_ERROR_EXIT_CODE, main
 from tests.support.configfiles import MAX_TOOL_CALLS, MAX_TURNS, PERSONA_NAME, TURN_PERIOD_SECONDS
@@ -13,6 +13,12 @@ from tests.support.realm import API_GROUP
 APP_TABLE = (
     '[[apps]]\nmcp_url = "https://hopin.test/mcp"\nscope = "mcp-hopin"\n'
     f'tools = ["say"]\nmax_tool_calls = {MAX_TOOL_CALLS}\n'
+)
+
+
+TOOLS_ONLY_TABLE = (
+    '[[apps]]\nmcp_url = "https://songmaker.test/mcp"\nscope = "mcp-songmaker"\nlistens = false\n'
+    'tools = ["create_song", "generate_song"]\nmax_tool_calls = 5\n'
 )
 
 
@@ -322,3 +328,81 @@ def test_a_persona_file_that_is_unusable_stops_the_start_and_names_the_field(fil
 
     assert "agents.0.persona_file" in error
     assert files.persona_prompt not in error
+
+
+def test_a_tools_only_app_has_its_tools_its_call_bound_and_the_default_call_bound_unless_set(files):
+    files.text += TOOLS_ONLY_TABLE
+    files.text += (
+        TOOLS_ONLY_TABLE.replace("songmaker", "other").replace("create_song", "make").replace("generate_song", "play")
+        + "call_seconds = 4.5\n"
+    )
+
+    hopin, songmaker, other = load_config(files.write()).apps
+
+    assert (hopin.listens, songmaker.listens, other.listens) == (True, False, False)
+    assert songmaker.binding == ToolBinding(("create_song", "generate_song"), 5)
+    assert (songmaker.call_seconds, other.call_seconds) == (DEFAULT_CALL_SECONDS, 4.5)
+
+
+@pytest.mark.parametrize(
+    ("break_it", "named", "reason"),
+    [
+        (lambda text: text + TOOLS_ONLY_TABLE.replace("create_song", "say"), "apps", "shares a tool name"),
+        (
+            lambda text: text + TOOLS_ONLY_TABLE.replace("generate_song", "say").replace("songmaker", "x"),
+            "apps",
+            "shares a tool name",
+        ),
+        (
+            lambda text: (
+                text
+                + TOOLS_ONLY_TABLE
+                + TOOLS_ONLY_TABLE.replace("songmaker", "other").replace('"create_song"', '"play"')
+            ),
+            "apps",
+            "shares a tool name",
+        ),
+        (
+            lambda text: text + TOOLS_ONLY_TABLE.replace('tools = ["create_song", "generate_song"]\n', ""),
+            "apps.1",
+            "listens = false needs tools",
+        ),
+        (
+            lambda text: text.replace('scope = "mcp-hopin"\n', 'scope = "mcp-hopin"\nlistens = false\n'),
+            "apps",
+            "no app listens",
+        ),
+        (lambda text: text + TOOLS_ONLY_TABLE + "call_seconds = 0\n", "apps.1.call_seconds", "greater than 0"),
+        (
+            lambda text: text.replace('scope = "mcp-hopin"\n', 'scope = "mcp-hopin"\ncall_seconds = 5\n'),
+            "apps.0",
+            "call_seconds is for an app that does not listen",
+        ),
+    ],
+    ids=[
+        "a tool name the first app has too",
+        "a tool name a listening app has too",
+        "a tool name another tools-only app has too",
+        "a tools-only app without tools",
+        "no listening app",
+        "no call time",
+        "a call time on a listening app",
+    ],
+)
+def test_a_tool_name_two_apps_of_one_turn_share_and_a_file_without_a_listening_app_are_refused(
+    files, monkeypatch, capsys, break_it, named, reason
+):
+    files.text = break_it(files.text)
+
+    error = fails_at_start(files.write(), monkeypatch, capsys)
+
+    assert named in error
+    assert reason in error
+
+
+def test_two_listening_apps_may_each_bind_the_same_tool(files):
+    files.text += APP_TABLE.replace("hopin", "other")
+
+    apps = load_config(files.write()).apps
+
+    assert [app.binding for app in apps] == [ToolBinding(("say",), MAX_TOOL_CALLS)] * 2

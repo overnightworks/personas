@@ -20,11 +20,12 @@ class Event(StrEnum):
     REFUSED = "refused"
     TURN_ENDED = "turn_ended"
     CAPPED = "capped"
+    TOOLS_ONLY_APP_FAILED = "tools_only_app_failed"
 
 
 @dataclass(frozen=True)
 class StateChange:
-    """One change of an agent's loop for one app, with the HTTP status, refusal or turn code if any."""
+    """One change of an agent's loop for one app, with the HTTP status, refusal, failure or turn code if any."""
 
     event: Event
     client_id: str
