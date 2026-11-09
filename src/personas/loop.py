@@ -31,6 +31,7 @@ from personas.decision import (
     backoff_delay,
     backoff_reason,
     bound_declarations,
+    call_within_bound,
     decisive_failure,
     forget_gone,
     is_defect,
@@ -40,10 +41,11 @@ from personas.decision import (
     reserve_turn,
     sets_where_reading_starts,
     sync_checkpoints,
+    turn_call_bound,
     turn_input,
     turn_invalid,
 )
-from personas.failures import CallFailure, leaves_of
+from personas.failures import CallFailure, Unreachable, leaves_of
 from personas.reporting import Event, Reporter, StateChange
 from personas.tokens import TokenFacts, facts_of
 
@@ -53,6 +55,7 @@ if TYPE_CHECKING:
     from agent_runtime_client.agents import AgentDefinition
     from agent_runtime_client.backend import AgentBackend
     from agent_runtime_client.member import PlaceRef, Standing
+    from agent_runtime_client.tools import ToolDeclaration
     from agent_runtime_client.turn import JsonObject
 
     from personas.app_session import AppSession, SessionOpener
@@ -65,6 +68,8 @@ if TYPE_CHECKING:
 type BackendFactory = Callable[[Iterable[HandTool]], AgentBackend]
 
 _STREAM_ENDED: Final = object()
+_CALL_BOUND_TEXT: Final = "this app takes no more calls in this turn"
+_APP_FAILED_TEXT: Final = "the app did not answer"
 
 
 @dataclass(frozen=True)
@@ -105,6 +110,12 @@ class UnrequestedCancellationError(Exception):
 
 def _unrequested_unless_cancelling(asked: asyncio.Task[object]) -> UnrequestedCancellationError | None:
     return None if asked.cancelling() else UnrequestedCancellationError()
+
+
+def _unreachable_unless_cancelling() -> Unreachable | None:
+    """The failure of a session that ended cancelled while the running task was not: its own child ended it."""
+    task = asyncio.current_task()
+    return None if task is not None and task.cancelling() else Unreachable("the session ended")
 
 
 async def _ending_loud_when_cancelled[T](work: Awaitable[T], loud_end: Callable[[], Exception | None]) -> T:
@@ -149,6 +160,32 @@ class _TurnSetup:
 
 
 @dataclass
+class _Calls:
+    """How many calls an app took in this turn, against its own bound."""
+
+    bound: int
+    made: int = 0
+
+    def take(self) -> bool:
+        if not call_within_bound(self.made, self.bound):
+            return False
+        self.made += 1
+        return True
+
+
+@dataclass(frozen=True)
+class _HeldTools:
+    """What a turn holds: the hand tools of every app that answered, and the calls the turn may make in all."""
+
+    tools: tuple[HandTool, ...]
+    max_tool_calls: int
+
+    @property
+    def declarations(self) -> tuple[ToolDeclaration, ...]:
+        return tuple(each.declaration for each in self.tools)
+
+
+@dataclass
 class TurnCounter:
     """The start times of one agent's recent turns, shared by all its loops and kept for the process."""
 
@@ -185,13 +222,23 @@ class AgentLoop:
     retry, and resumes once a read answers again. A network failure, a lost stream or a 5xx backs off,
     logged once until a read answers. In an app that binds tools, the lines of the agent's call places are
     read too, and one addressed to him starts a turn; at most one turn runs per loop, over its own session,
-    and a failure of the turn's calls goes into the one reaction of the loop.
+    and a failure of the turn's calls to this app goes into the one reaction of the loop. The turn also holds the
+    bound tools of the tools-only apps: each request to one runs in a session of its own under the token for its
+    own scope, and its failure never reaches the reaction.
     """
 
-    def __init__(self, agent: AgentCredentials, app: AppTarget, boundaries: Boundaries, counter: TurnCounter) -> None:
+    def __init__(
+        self,
+        agent: AgentCredentials,
+        app: AppTarget,
+        boundaries: Boundaries,
+        counter: TurnCounter,
+        tools_only: tuple[AppTarget, ...] = (),
+    ) -> None:
         self._agent = agent
         self._counter = counter
         self._app = app
+        self._tools_only = tuple((each, each.binding) for each in tools_only if each.binding is not None)
         self._boundaries = boundaries
         self._token: Token | None = None
         self._memory = Memory()
@@ -437,31 +484,120 @@ class AgentLoop:
 
     async def _run_session_body(self, setup: _TurnSetup, admitted: _Admitted, session: AppSession) -> None:
         _raise_if_cancelled()
-        declarations = bound_declarations(await session.declared_tools(), setup.binding.tools)
-        if declarations is None:
+        held = await self._hold_tools(setup, session)
+        if held is None:
             self._report_turn_end(TOOL_NOT_DECLARED_CODE)
             return
-        tools = tuple(HandTool(each, partial(self._relay, session, each.name)) for each in declarations)
         request = TurnRequest(
             agent=setup.persona.name,
             turn=Turn(system=setup.persona.prompt, messages=[TurnMessage(role=TurnRole.USER, text=admitted.input)]),
             roles=setup.persona.roles,
-            tools=declarations,
+            tools=held.declarations,
             model=setup.persona.model,
             max_duration_seconds=setup.persona.max_duration_seconds,
-            max_tool_calls=setup.binding.max_tool_calls,
+            max_tool_calls=held.max_tool_calls,
         )
         person = TurnPerson(admitted.facts.principal, TURN_ROLE, admitted.groups)
-        async with aclosing(setup.backend(tools).run(request, person)) as events:
+        async with aclosing(setup.backend(held.tools).run(request, person)) as events:
             async for _ in events:
                 continue
 
-    async def _relay(self, session: AppSession, name: str, _principal: Principal, arguments: JsonObject) -> ToolOutcome:
+    async def _hold_tools(self, setup: _TurnSetup, session: AppSession) -> _HeldTools | None:
+        """The tools of the place's app and of each tools-only app that answers, each app counting its own calls.
+
+        ``None`` when the place's app declares a bound tool no more. A tools-only app that fails or declares one
+        no more is left out, and the turn holds the rest.
+        """
+        own = bound_declarations(await session.declared_tools(), setup.binding.tools)
+        if own is None:
+            return None
+        own_calls = _Calls(setup.binding.max_tool_calls)
+        tools = [HandTool(each, partial(self._relay, session, each.name, own_calls)) for each in own]
+        bounds = [own_calls.bound]
+        failed_apps: set[str] = set()
+        for app, binding in self._tools_only:
+            declared = await self._ask_tools_only(app, lambda session: session.declared_tools())
+            if isinstance(declared, CallFailure):
+                self._report_tools_only_failure(app, failed_apps, backoff_reason(declared))
+                continue
+            listed = bound_declarations(declared, binding.tools)
+            if listed is None:
+                self._report_tools_only_failure(app, failed_apps, TOOL_NOT_DECLARED_CODE)
+                continue
+            calls = _Calls(binding.max_tool_calls)
+            tools.extend(
+                HandTool(each, partial(self._relay_tools_only, app, each.name, calls, failed_apps)) for each in listed
+            )
+            bounds.append(calls.bound)
+        return _HeldTools(tuple(tools), turn_call_bound(bounds))
+
+    async def _relay(
+        self, session: AppSession, name: str, calls: _Calls, _principal: Principal, arguments: JsonObject
+    ) -> ToolOutcome:
+        if not calls.take():
+            return ToolOutcome(_CALL_BOUND_TEXT, is_error=True)
         try:
             await self._use_current_token(session)
             return await session.invoke(name, arguments)
         except Exception as error:
             raise _RelayFailed(error) from None
+
+    async def _relay_tools_only(
+        self,
+        app: AppTarget,
+        name: str,
+        calls: _Calls,
+        failed_apps: set[str],
+        _principal: Principal,
+        arguments: JsonObject,
+    ) -> ToolOutcome:
+        if not calls.take():
+            return ToolOutcome(_CALL_BOUND_TEXT, is_error=True)
+        try:
+            answer = await self._ask_tools_only(app, lambda session: session.invoke(name, arguments))
+        except Exception as error:
+            raise _RelayFailed(error) from None
+        if isinstance(answer, CallFailure):
+            self._report_tools_only_failure(app, failed_apps, backoff_reason(answer))
+            return ToolOutcome(_APP_FAILED_TEXT, is_error=True)
+        return answer
+
+    async def _ask_tools_only[Answer](
+        self, app: AppTarget, ask: Callable[[AppSession], Awaitable[Answer]]
+    ) -> Answer | CallFailure:
+        """Asks a tools-only app in a session of its own, under the token for its own scope.
+
+        The session lives only for this request. A failure of the call, a session that died of its own child and
+        an expiry of the app's call time come back as the failure; any other error is raised, and a turn whose
+        place left stops.
+        """
+        try:
+            return await _ending_loud_when_cancelled(self._within_call_time(app, ask), _unreachable_unless_cancelling)
+        except Exception as error:
+            _raise_if_cancelled()
+            failure = decisive_failure(tuple(leaves_of(error)), already_renewed=False)
+            if failure is None:
+                raise
+            return failure
+
+    async def _within_call_time[Answer](self, app: AppTarget, ask: Callable[[AppSession], Awaitable[Answer]]) -> Answer:
+        """The token, the session and the request, all under the call time of the app."""
+        bound = asyncio.timeout(app.call_seconds)
+        try:
+            async with bound:
+                granted = await self._boundaries.tokens.fetch(self._agent, app.scope)
+                async with self._boundaries.open_session(app, granted.value) as session:
+                    return await ask(session)
+        except TimeoutError:
+            if not bound.expired():
+                raise
+            raise Unreachable("the app did not answer in time") from None
+
+    def _report_tools_only_failure(self, app: AppTarget, failed_apps: set[str], code: str) -> None:
+        """One report per app and turn."""
+        if app.mcp_url not in failed_apps:
+            failed_apps.add(app.mcp_url)
+            self._report(Event.TOOLS_ONLY_APP_FAILED, code, app)
 
     async def _react(self, failure: CallFailure) -> None:
         match reaction_to(failure, already_renewed=self._renewed_after_401):
@@ -488,8 +624,8 @@ class AgentLoop:
         self._failures += 1
         await self._boundaries.clock.sleep(backoff_delay(self._failures))
 
-    def _report(self, event: Event, code: str | None = None) -> None:
-        self._boundaries.report(StateChange(event, self._agent.client_id, self._app.mcp_url, code))
+    def _report(self, event: Event, code: str | None = None, app: AppTarget | None = None) -> None:
+        self._boundaries.report(StateChange(event, self._agent.client_id, (app or self._app).mcp_url, code))
 
 
 async def _run_loop(loop: AgentLoop, runner: asyncio.Task[object]) -> None:
@@ -502,12 +638,14 @@ async def _run_loop(loop: AgentLoop, runner: asyncio.Task[object]) -> None:
 
 
 async def run_all(config: Config, boundaries: Boundaries) -> NoReturn:
-    """One loop for every agent and every app; a loop never ends on its own."""
+    """One loop for every agent and every app that listens; a loop never ends on its own."""
     runner = asyncio.current_task()
     assert runner is not None  # noqa: S101 - run_all runs inside a task
     async with asyncio.TaskGroup() as group:
+        tools_only = tuple(app for app in config.apps if not app.listens)
         for agent in config.agents:
             counter = TurnCounter()
             for app in config.apps:
-                group.create_task(_run_loop(AgentLoop(agent, app, boundaries, counter), runner))
+                if app.listens:
+                    group.create_task(_run_loop(AgentLoop(agent, app, boundaries, counter, tools_only), runner))
     raise AssertionError("a loop ended")  # pragma: no cover

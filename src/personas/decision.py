@@ -18,7 +18,7 @@ from agent_runtime_client.member import PlaceEntry, PlaceRef, PlaceWindow, Stand
 from personas.failures import CallFailure, StatusFailure, TokenStatusFailure, UnusableAnswer
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     from agent_runtime_client.tools import ToolDeclaration
     from agent_runtime_client.turn import AgentRole
@@ -129,9 +129,12 @@ def status_code(status: int) -> str:
 
 
 def backoff_reason(failure: CallFailure) -> str:
-    """The code a backoff logs: the HTTP status of a server error, else a fixed word for the network."""
+    """The code a failure logs: the HTTP status of a server error, the code of an unusable answer, else a fixed word
+    for the network."""
     if isinstance(failure, StatusFailure):
         return status_code(failure.status)
+    if isinstance(failure, UnusableAnswer):
+        return failure.code
     return NETWORK_FAILURE_CODE
 
 
@@ -301,6 +304,16 @@ def bound_declarations(declared: Sequence[ToolDeclaration], names: Sequence[str]
     if not all(name in by_name for name in names):
         return None
     return tuple(by_name[name] for name in names)
+
+
+def turn_call_bound(bounds: Iterable[int]) -> int:
+    """The calls one turn may make: the sum of the bounds of the apps whose tools it holds."""
+    return sum(bounds)
+
+
+def call_within_bound(made: int, bound: int) -> bool:
+    """Whether an app whose bound is ``bound`` takes one more call after ``made``."""
+    return made < bound
 
 
 @dataclass(frozen=True)

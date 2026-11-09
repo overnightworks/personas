@@ -39,16 +39,24 @@ def transport_closing_with_late_answers(*, echo: type[Exception], echoes: int = 
     return failing
 
 
-def transport_closing_with_leaves(*leaves: Exception):
-    """A stand-in for ``streamable_http_client`` whose close raises exactly these leaves when its body was cancelled."""
+def transport_closing_with_leaves(*leaves: Exception, only_close: int | None = None):
+    """A stand-in for ``streamable_http_client`` whose close raises exactly these leaves when its body was cancelled.
+
+    ``only_close`` counts the closes of a cancelled body from one and limits the failure to that one.
+    """
     real = app_session.streamable_http_client
+    closes = 0
 
     @asynccontextmanager
     async def failing(url, *, http_client):
+        nonlocal closes
         async with real(url, http_client=http_client) as streams:
             try:
                 yield streams
             except asyncio.CancelledError:
+                closes += 1
+                if only_close not in (None, closes):
+                    raise
                 raise ExceptionGroup("the transport", list(leaves)) from None
 
     return failing
@@ -90,8 +98,8 @@ class ClosingHold:
         return waiting
 
 
-def transport_whose_second_session_loses_a_child(failing: asyncio.Event):
-    """A stand-in for ``streamable_http_client`` whose second open runs a child that fails once ``failing`` is set.
+def transport_whose_session_loses_a_child(failing: asyncio.Event, *, nth: int = 2):
+    """A stand-in for ``streamable_http_client`` whose ``nth`` open runs a child that fails once ``failing`` is set.
 
     The child fails with a late-answer error, as the SDK's request task does, so anyio cancels the session's own
     task with no one else having done so. The first open is the lifecycle's, the second a turn's.
@@ -103,9 +111,9 @@ def transport_whose_second_session_loses_a_child(failing: asyncio.Event):
     async def losing(url, *, http_client):
         nonlocal opens
         opens += 1
-        is_the_second = opens == 2
+        is_the_one = opens == nth
         async with real(url, http_client=http_client) as streams, anyio.create_task_group() as group:
-            if is_the_second:
+            if is_the_one:
 
                 async def child() -> None:
                     await failing.wait()

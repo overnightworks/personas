@@ -23,7 +23,7 @@ from tests.support.hopin import DISCOVER, LIMIT_SECONDS, LIST_TOOLS, READ, activ
 from tests.support.transport import (
     ClosingHold,
     transport_closing_with_late_answers,
-    transport_whose_second_session_loses_a_child,
+    transport_whose_session_loses_a_child,
 )
 
 pytestmark = pytest.mark.anyio
@@ -335,7 +335,7 @@ async def test_a_turn_whose_session_anyio_cancelled_with_late_answers_alone_whil
     runner, monkeypatch
 ):
     failing = asyncio.Event()
-    monkeypatch.setattr(app_session, "streamable_http_client", transport_whose_second_session_loses_a_child(failing))
+    monkeypatch.setattr(app_session, "streamable_http_client", transport_whose_session_loses_a_child(failing))
     await a_turn_in_its_first_round(runner)
 
     failing.set()

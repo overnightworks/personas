@@ -20,6 +20,7 @@ from agent_runtime_client.tools import ToolDeclaration
 from personas.app_session import READ_SECONDS
 from personas.decision import (
     BACKOFF_CAP_SECONDS,
+    NETWORK_FAILURE_CODE,
     RENEW_BEFORE_EXPIRY_SECONDS,
     Accept,
     Joined,
@@ -38,7 +39,9 @@ from personas.decision import (
     addressed,
     after_refusal,
     backoff_delay,
+    backoff_reason,
     bound_declarations,
+    call_within_bound,
     decisive_failure,
     forget_gone,
     perceive,
@@ -47,6 +50,7 @@ from personas.decision import (
     reserve_turn,
     sets_where_reading_starts,
     sync_checkpoints,
+    turn_call_bound,
     turn_input,
     turn_invalid,
 )
@@ -453,3 +457,26 @@ def test_a_start_exactly_one_period_old_no_longer_counts():
 
 def test_a_start_just_inside_the_period_still_counts():
     assert reserve_turn((NOW - CAP.period_seconds + 1, NOW - 50, NOW - 10), NOW, CAP) is None
+
+
+def test_a_turns_call_bound_is_the_sum_of_the_bounds_of_the_apps_whose_tools_it_holds():
+    assert turn_call_bound([4, 5, 2]) == 11
+    assert turn_call_bound([4]) == 4
+
+
+@pytest.mark.parametrize(("made", "within"), [(0, True), (2, True), (3, False), (4, False)])
+def test_an_app_takes_calls_until_its_own_bound_is_reached(made, within):
+    assert call_within_bound(made, 3) is within
+
+
+@pytest.mark.parametrize(
+    ("failure", "code"),
+    [
+        (StatusFailure(503), "http_503"),
+        (UnusableAnswer("invalid_answer"), "invalid_answer"),
+        (Unreachable("cut"), NETWORK_FAILURE_CODE),
+    ],
+    ids=["a status", "an unusable answer", "the network"],
+)
+def test_a_failure_is_logged_with_its_status_its_answer_code_or_the_word_for_the_network(failure, code):
+    assert backoff_reason(failure) == code

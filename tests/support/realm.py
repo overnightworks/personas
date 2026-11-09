@@ -45,15 +45,21 @@ class FakeRealm:
         groups: Sequence[str] = (API_GROUP,),
         agent_name: str = AGENT_NAME,
     ) -> None:
-        self._app = app
+        self._apps = {scope: app}
         self._clients = {agent.client_id: (agent, subject)}
-        self._scope = scope
         self.groups = list(groups)
         self.agent_name = agent_name
         self.issued: list[str] = []
+        self.issued_for: dict[str, list[str]] = {scope: []}
         self.refusing = False
+        self.refused_scopes: set[str] = set()
         self.reaches_app = True
         self.refusals: asyncio.Queue[None] = asyncio.Queue()
+
+    def add_app(self, scope: str, app: FakeApp) -> None:
+        """Lets the agents ask for a token for one more scope, which lets them into this app alone."""
+        self._apps[scope] = app
+        self.issued_for[scope] = []
 
     def add_client(self, agent: AgentCredentials, subject: str) -> None:
         """Lets one more agent ask for tokens, each with a subject of its own."""
@@ -69,15 +75,16 @@ class FakeRealm:
             agent is not None
             and form.get("grant_type") == "client_credentials"
             and form.get("client_secret") == agent.client_secret.reveal()
-            and form.get("scope") == self._scope
+            and form.get("scope") in self._apps
         )
-        if self.refusing or not asked_as_agent:
+        if self.refusing or not asked_as_agent or form["scope"] in self.refused_scopes:
             self.refusals.put_nowait(None)
             return httpx2.Response(401, json={"error": "invalid_client"})
         claims = {"iss": ISSUER, "sub": subject, "groups": self.groups, "agent_name": self.agent_name}
         token = jwt_of(claims)
         self.issued.append(token)
+        self.issued_for[form["scope"]].append(token)
         if self.reaches_app:
-            self._app.let_in(token, subject)
+            self._apps[form["scope"]].let_in(token, subject)
         body = {"access_token": token, "expires_in": LIFETIME_SECONDS, "token_type": "Bearer"}
         return httpx2.Response(200, content=json.dumps(body))

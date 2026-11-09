@@ -35,6 +35,8 @@ from tests.support.fakes import (
 from tests.support.gateway import Gateway
 from tests.support.hopin import AGENT_SUBJECT, ISSUER, FakeApp, formatted
 from tests.support.realm import TOKEN_ENDPOINT, FakeRealm
+from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG
+from tests.support.songmaker import SCOPE as TOOLS_ONLY_SCOPE
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterable, Iterator
@@ -48,6 +50,7 @@ if TYPE_CHECKING:
     from personas.failures import CallFailure
     from personas.reporting import StateChange
     from personas.tokens import GrantedToken
+    from tests.support.songmaker import ToolsOnlyApp
 
 SCENARIO_LIMIT_SECONDS = 10
 
@@ -126,6 +129,24 @@ class Harness:
         self.reports = Reports()
         self.token_client = httpx2.AsyncClient(transport=self.realm.transport())
         self.task: asyncio.Task[object] | None = None
+        self.tools_only_apps: list[ToolsOnlyApp] = []
+
+    def add_tools_only_app(self, app: ToolsOnlyApp, url: str) -> None:
+        """Binds the tools of an app that listens to nothing and lets the agent's tokens for its scope into it."""
+        self.files.text += (
+            f'[[apps]]\nmcp_url = "{url}"\nscope = "{TOOLS_ONLY_SCOPE}"\nlistens = false\n'
+            f'tools = ["{CREATE_SONG}", "{GENERATE_SONG}"]\nmax_tool_calls = {CALLS}\n'
+        )
+        self.config = load_config(self.files.write())
+        self.realm.add_app(TOOLS_ONLY_SCOPE, app)
+        self.tools_only_apps.append(app)
+
+    def bound_tools_only_calls_to(self, seconds: float) -> None:
+        """Gives every tools-only app this call time; the amounts of a scenario are its own."""
+        self.config = replace(
+            self.config,
+            apps=tuple(replace(each, call_seconds=seconds) if not each.listens else each for each in self.config.apps),
+        )
 
     def cap_turns(self, cap: TurnCap | None) -> None:
         """Gives every agent this cap, or none; the amounts of a scenario are its own."""
@@ -168,6 +189,7 @@ class Harness:
             self.files.persona_prompt,
             *self.realm.issued,
             *self.app.kept_out_of_logs(),
+            *(held for each in self.tools_only_apps for held in each.kept_out_of_logs()),
         ]
 
 

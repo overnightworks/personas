@@ -4,6 +4,8 @@ The file holds the realm's token endpoint, the ready file's path, the apps (an M
 (a client id and the path of the file holding its client secret). Which apps an agent may reach
 is the realm's group membership, never this file. An app that binds tools to its agents' turns
 names them with their call bound, and then the model gateway and each agent's persona file are required.
+An app with ``listens = false`` serves tools only: it starts no turn, its bound tools reach the turns of the apps that
+listen, and ``call_seconds`` bounds each request to it. No tool name is shared with a tools-only app.
 An agent has a turn cap only when it sets ``max_turns`` in ``turn_period_seconds``, both or neither;
 with neither its turns are bounded by the budget and the off switches alone.
 Every value is validated at start and an error names the field or path, never a secret.
@@ -37,6 +39,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 CONFIG_ENVIRONMENT_VARIABLE: Final = "PERSONAS_CONFIG"
+DEFAULT_CALL_SECONDS: Final = 30.0
 
 
 class ConfigError(Exception):
@@ -56,6 +59,8 @@ class AppTarget:
     mcp_url: str
     scope: str
     binding: ToolBinding | None = None
+    listens: bool = True
+    call_seconds: float = DEFAULT_CALL_SECONDS
 
 
 @dataclass(frozen=True)
@@ -84,6 +89,16 @@ class _AppEntry(_Entry):
     scope: str = Field(min_length=1)
     tools: tuple[str, ...] = ()
     max_tool_calls: PositiveInt | None = None
+    listens: bool = True
+    call_seconds: PositiveFloat | None = None
+
+    @model_validator(mode="after")
+    def _a_tools_only_app_has_tools_and_only_it_a_call_time(self) -> Self:
+        if not self.listens and not self.tools:
+            raise ValueError("listens = false needs tools")
+        if self.listens and self.call_seconds is not None:
+            raise ValueError("call_seconds is for an app that does not listen")
+        return self
 
     @model_validator(mode="after")
     def _tools_come_with_their_call_bound(self) -> Self:
@@ -151,6 +166,22 @@ class _FileModel(_Entry):
             raise ValueError("an mcp_url is listed twice")
         return apps
 
+    @field_validator("apps")
+    @classmethod
+    def _a_turn_holds_no_tool_name_twice(cls, apps: tuple[_AppEntry, ...]) -> tuple[_AppEntry, ...]:
+        for index, app in enumerate(apps):
+            held_elsewhere = {name for other in apps[:index] + apps[index + 1 :] for name in other.tools}
+            if not app.listens and held_elsewhere & set(app.tools):
+                raise ValueError("a tools-only app shares a tool name with another app")
+        return apps
+
+    @field_validator("apps")
+    @classmethod
+    def _some_app_listens(cls, apps: tuple[_AppEntry, ...]) -> tuple[_AppEntry, ...]:
+        if not any(app.listens for app in apps):
+            raise ValueError("no app listens")
+        return apps
+
     @field_validator("agents")
     @classmethod
     def _one_entry_per_agent(cls, agents: tuple[_AgentEntry, ...]) -> tuple[_AgentEntry, ...]:
@@ -215,7 +246,10 @@ def load_config(environment: Mapping[str, str]) -> Config:
     return Config(
         token_endpoint=str(parsed.token_endpoint),
         ready_file=parsed.ready_file,
-        apps=tuple(AppTarget(str(app.mcp_url), app.scope, app.binding) for app in parsed.apps),
+        apps=tuple(
+            AppTarget(str(app.mcp_url), app.scope, app.binding, app.listens, app.call_seconds or DEFAULT_CALL_SECONDS)
+            for app in parsed.apps
+        ),
         agents=tuple(
             AgentCredentials(
                 agent.client_id,

@@ -179,11 +179,14 @@ class FakeApp:
 
     def __post_init__(self) -> None:
         self._front = McpPersonFront(
-            [PersonTool(_ACCEPT_DECLARATION, self._accept), PersonTool(_SAY_DECLARATION, self._say)],
+            self._tools(),
             resolve_person=lambda scope: Principal(iss=ISSUER, sub=scope[_SUBJECT_KEY]),
             resources=self,
             changes=self.changes,
         )
+
+    def _tools(self) -> list[PersonTool]:
+        return [PersonTool(_ACCEPT_DECLARATION, self._accept), PersonTool(_SAY_DECLARATION, self._say)]
 
     def let_in(self, bearer: str, subject: str) -> None:
         self.bearers[bearer] = subject

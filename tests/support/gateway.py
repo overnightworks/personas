@@ -82,6 +82,15 @@ class Gateway(FakeGateway):
             if len(body["messages"]) == TURN_OPENING_MESSAGES
         ]
 
+    def tool_results(self, request_number: int) -> list[str]:
+        """The tool messages the request that arrived as this number (from one) carried, in order."""
+        messages = json.loads(self.requests[request_number - 1].content)["messages"]
+        return [message["content"] for message in messages if message["role"] == "tool"]
+
+    def offered_tools(self) -> list[str]:
+        """The names of the tools the first request offered."""
+        return [tool["function"]["name"] for tool in json.loads(self.requests[0].content)["tools"]]
+
     def round_sizes(self) -> list[int]:
         """The number of messages of each request in arrival order: a turn's rounds grow, a new turn starts at two."""
         return [len(json.loads(request.content)["messages"]) for request in self.requests]
