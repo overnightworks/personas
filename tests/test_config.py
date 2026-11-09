@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from personas.config import CONFIG_ENVIRONMENT_VARIABLE, ConfigError, ToolBinding, load_config
+from personas.config import CONFIG_ENVIRONMENT_VARIABLE, DEFAULT_CALL_SECONDS, ConfigError, ToolBinding, load_config
 from personas.decision import TurnCap
 from personas.main import CONFIGURATION_ERROR_EXIT_CODE, main
 from tests.support.configfiles import MAX_TOOL_CALLS, MAX_TURNS, PERSONA_NAME, TURN_PERIOD_SECONDS
@@ -330,7 +330,7 @@ def test_a_persona_file_that_is_unusable_stops_the_start_and_names_the_field(fil
     assert files.persona_prompt not in error
 
 
-def test_a_tools_only_app_has_its_tools_its_call_bound_and_a_thirty_second_call_bound_unless_set(files):
+def test_a_tools_only_app_has_its_tools_its_call_bound_and_the_default_call_bound_unless_set(files):
     files.text += TOOLS_ONLY_TABLE
     files.text += (
         TOOLS_ONLY_TABLE.replace("songmaker", "other").replace("create_song", "make").replace("generate_song", "play")
@@ -341,7 +341,7 @@ def test_a_tools_only_app_has_its_tools_its_call_bound_and_a_thirty_second_call_
 
     assert (hopin.listens, songmaker.listens, other.listens) == (True, False, False)
     assert songmaker.binding == ToolBinding(("create_song", "generate_song"), 5)
-    assert (songmaker.call_seconds, other.call_seconds) == (30.0, 4.5)
+    assert (songmaker.call_seconds, other.call_seconds) == (DEFAULT_CALL_SECONDS, 4.5)
 
 
 @pytest.mark.parametrize(

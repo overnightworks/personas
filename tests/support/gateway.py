@@ -53,6 +53,8 @@ class Gateway(FakeGateway):
         self._holds: dict[int, asyncio.Event] = {}
         self._arrivals = 0
         self._arrived = asyncio.Event()
+        self.cancelling_at_arrival: list[int] = []
+        """The cancel requests pending on the task that made each request, in arrival order: a turn's own task."""
 
     def hold_request(self, number: int) -> asyncio.Event:
         """The request that arrives as this number (from one) waits, once it arrived, until the event is set."""
@@ -61,6 +63,8 @@ class Gateway(FakeGateway):
 
     async def handle_async_request(self, request):
         self._arrivals += 1
+        task = asyncio.current_task()
+        self.cancelling_at_arrival.append(task.cancelling() if task is not None else 0)
         held = self._holds.pop(self._arrivals, None)
         self._arrived.set()
         if held is not None:

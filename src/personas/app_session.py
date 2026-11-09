@@ -319,8 +319,9 @@ async def open_mcp_session(
     A bare ``ClientSession`` discovers the revision: the SDK's own client would fall back to
     ``initialize`` on any error, so a 401 on the probe would enter a path this runner does not have.
     Several leaves, failures or defects, leave as one ``ExceptionGroup`` holding each of them. A session whose
-    task was being cancelled when the body left and that closes with late answers alone raises the cancellation:
-    the SDK's task groups lower the task's cancellation count and turn it into those answers.
+    task was being cancelled while it discovered the revision or when the body left, and that closes with late
+    answers alone, raises the cancellation: the SDK's task groups lower the task's cancellation count and turn it
+    into those answers.
     """
     auth = _BearerAuth(token)
     timeout = httpx2.Timeout(CONNECT_SECONDS, read=stream_seconds)
@@ -332,15 +333,18 @@ async def open_mcp_session(
             streamable_http_client(app.mcp_url, http_client=client) as (read_stream, write_stream),
             _ValidatingSession(read_stream, write_stream) as session,
         ):
-            await _discover(session, auth)
+            try:
+                await _discover(session, auth)
+            except asyncio.CancelledError:
+                cancelled_in_body = _task_is_being_cancelled()
+                raise
             try:
                 yield _McpAppSession(session, auth, stream_seconds)
             except Exception as error:
                 raised_in_body = error
                 raise
             except asyncio.CancelledError:
-                task = asyncio.current_task()
-                cancelled_in_body = task is not None and task.cancelling() > 0
+                cancelled_in_body = _task_is_being_cancelled()
                 raise
     except Exception as error:
         # The SDK's task groups wrap what is raised inside them, so every leaf is looked at: a failure
@@ -355,6 +359,11 @@ async def open_mcp_session(
         if len(leaves) == 1:
             raise leaves[0] from None
         raise ExceptionGroup("the session failed", cast("list[Exception]", leaves)) from None
+
+
+def _task_is_being_cancelled() -> bool:
+    task = asyncio.current_task()
+    return task is not None and task.cancelling() > 0
 
 
 async def _discover(session: ClientSession, auth: _BearerAuth) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from http import HTTPStatus
 
+import anyio
 import pytest
 from agent_runtime_client.backend.fake_gateway import completion, tool_call, tool_round
 from agent_runtime_client.tools import ToolOutcome
@@ -17,17 +18,18 @@ from personas.tokens import HttpTokenSource
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import CALL, LIMIT_SECONDS, LIST_TOOLS, LISTEN, SAY_TOOL
+from tests.support.hopin import CALL, DISCOVER, LIMIT_SECONDS, LIST_TOOLS, LISTEN, SAY_TOOL
 from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG, SCOPE, ToolsOnlyApp
-from tests.support.transport import transport_closing_with_leaves, transport_whose_session_loses_a_child
+from tests.support.transport import (
+    transport_closing_with_late_answers,
+    transport_closing_with_leaves,
+    transport_whose_session_loses_a_child,
+)
 
 pytestmark = pytest.mark.anyio
 
 FAILED = "tools_only_app_failed"
 SHORT_CALL_SECONDS = 0.3
-HOPIN_SCOPE = "mcp-app"
-LOST_CHILD_OPEN = 4
-"""The opens of a scenario in order: the lifecycle's, the turn's, the tool listing's, the first call's."""
 
 
 @pytest.fixture
@@ -36,6 +38,11 @@ async def songmaker(runner):
     async with app.serving() as url:
         runner.add_tools_only_app(app, url)
         yield app
+
+
+def songmaker_url(runner) -> str:
+    (url,) = (each.mcp_url for each in runner.config.apps if not each.listens)
+    return url
 
 
 def calling(*names: str, prefix: str = "call") -> object:
@@ -59,13 +66,6 @@ async def addressed_in_the_call(runner):
 
 def failed_apps(runner):
     return [change.code for change in runner.reports.changes if change.event.value == FAILED]
-
-
-def the_turn_task():
-    (task,) = (
-        each for each in asyncio.all_tasks() if getattr(each.get_coro(), "__qualname__", "").endswith("_take_turn")
-    )
-    return task
 
 
 async def hangs(reply):
@@ -115,26 +115,27 @@ async def test_each_app_sees_only_the_bearers_issued_for_its_own_scope(runner, s
     hopin_bearers = runner.app.presented - {""}
     assert songmaker_bearers
     assert songmaker_bearers <= set(runner.realm.issued_for[SCOPE])
-    assert hopin_bearers <= set(runner.realm.issued_for[HOPIN_SCOPE])
+    assert hopin_bearers <= set(runner.realm.issued_for[runner.config.apps[0].scope])
     assert songmaker_bearers.isdisjoint(hopin_bearers)
 
 
 @pytest.mark.parametrize(
-    ("arrange", "code"),
+    ("arrange", "code", "call_seconds"),
     [
-        (lambda app: setattr(app, "refuse_with", HTTPStatus.FORBIDDEN), "http_403"),
-        (lambda app: setattr(app, "refuse_with", HTTPStatus.INTERNAL_SERVER_ERROR), "http_500"),
-        (lambda app: app.script(LIST_TOOLS, cuts), "network"),
-        (lambda app: app.script(LIST_TOOLS, hangs), "network"),
+        (lambda app: setattr(app, "refuse_with", HTTPStatus.FORBIDDEN), "http_403", None),
+        (lambda app: setattr(app, "refuse_with", HTTPStatus.INTERNAL_SERVER_ERROR), "http_500", None),
+        (lambda app: app.script(LIST_TOOLS, cuts), "network", None),
+        (lambda app: app.script(LIST_TOOLS, hangs), "network", SHORT_CALL_SECONDS),
     ],
     ids=["refused", "failing", "cut", "hanging"],
 )
 async def test_a_tools_only_app_whose_listing_fails_at_turn_start_is_absent_and_the_turn_answers_in_its_place(
-    runner, songmaker, arrange, code
+    runner, songmaker, arrange, code, call_seconds
 ):
     arrange(songmaker)
     songmaker.refused_method = LIST_TOOLS
-    runner.bound_tools_only_calls_to(SHORT_CALL_SECONDS)
+    if call_seconds is not None:
+        runner.bound_tools_only_calls_to(call_seconds)
     runner.gateway = Gateway(saying(ANSWER), completion("done"))
 
     await addressed_in_the_call(runner)
@@ -166,15 +167,16 @@ async def test_a_tools_only_app_that_declares_one_bound_tool_no_more_is_absent_a
     assert runner.reports.events() == [("started", None), (FAILED, TOOL_NOT_DECLARED_CODE)]
 
 
-async def a_call_that_fails_and_a_turn_that_goes_on(runner, songmaker, code):
+async def a_call_that_fails_and_a_turn_that_goes_on(runner, songmaker, code, *, call_seconds=None):
     """The model calls one tool of the tools-only app, whose call is scripted to fail, and then says."""
-    runner.bound_tools_only_calls_to(SHORT_CALL_SECONDS)
+    if call_seconds is not None:
+        runner.bound_tools_only_calls_to(call_seconds)
     runner.gateway = Gateway(calling(CREATE_SONG), saying(ANSWER), completion("done"))
     second_round = runner.gateway.hold_request(2)
     await addressed_in_the_call(runner)
     await runner.gateway.until_requested(2)
 
-    assert the_turn_task().cancelling() == 0
+    assert runner.gateway.cancelling_at_arrival[1] == 0
     second_round.set()
     await runner.app.said_count(1)
 
@@ -188,16 +190,20 @@ async def a_call_that_fails_and_a_turn_that_goes_on(runner, songmaker, code):
 
 
 @pytest.mark.parametrize(
-    ("handler", "code"),
-    [(refuses_with_a_server_error, "http_500"), (cuts, "network"), (hangs, "network")],
+    ("handler", "code", "call_seconds"),
+    [
+        (refuses_with_a_server_error, "http_500", None),
+        (cuts, "network", None),
+        (hangs, "network", SHORT_CALL_SECONDS),
+    ],
     ids=["a server error", "a cut connection", "a hang past the call time"],
 )
 async def test_a_tools_only_call_that_fails_shows_the_model_an_error_and_the_turn_goes_on_and_answers(
-    runner, songmaker, handler, code
+    runner, songmaker, handler, code, call_seconds
 ):
     songmaker.script(CALL, handler)
 
-    await a_call_that_fails_and_a_turn_that_goes_on(runner, songmaker, code)
+    await a_call_that_fails_and_a_turn_that_goes_on(runner, songmaker, code, call_seconds=call_seconds)
 
 
 async def test_a_session_of_a_tools_only_call_whose_sdk_child_is_lost_shows_the_model_an_error_and_the_runner_goes_on(
@@ -205,7 +211,9 @@ async def test_a_session_of_a_tools_only_call_whose_sdk_child_is_lost_shows_the_
 ):
     failing = asyncio.Event()
     monkeypatch.setattr(
-        app_session, "streamable_http_client", transport_whose_session_loses_a_child(failing, nth=LOST_CHILD_OPEN)
+        app_session,
+        "streamable_http_client",
+        transport_whose_session_loses_a_child(failing, nth=2, of_url=songmaker_url(runner)),
     )
 
     async def loses_its_child(reply):
@@ -215,6 +223,82 @@ async def test_a_session_of_a_tools_only_call_whose_sdk_child_is_lost_shows_the_
     songmaker.script(CALL, loses_its_child)
 
     await a_call_that_fails_and_a_turn_that_goes_on(runner, songmaker, "network")
+
+
+async def test_a_tools_only_call_that_fails_twice_in_one_turn_is_reported_once(runner, songmaker):
+    songmaker.script(CALL, refuses_with_a_server_error, refuses_with_a_server_error)
+    runner.gateway = Gateway(calling(CREATE_SONG, GENERATE_SONG), saying(ANSWER), completion("done"))
+
+    await addressed_in_the_call(runner)
+    await runner.app.said_count(1)
+
+    assert [each.startswith("Error") for each in runner.gateway.tool_results(2)] == [True, True]
+    assert runner.reports.events() == [("started", None), (FAILED, "http_500")]
+
+
+async def a_loss_while_the_app_session_opens_and_a_turn_that_answers(runner, songmaker, monkeypatch, transport):
+    monkeypatch.setattr(app_session, "streamable_http_client", transport)
+    runner.gateway = Gateway(saying(ANSWER), completion("done"))
+
+    await addressed_in_the_call(runner)
+    await runner.app.said_count(1)
+
+    assert runner.gateway.offered_tools() == [SAY_TOOL]
+    assert runner.reports.events() == [("started", None), (FAILED, "network")]
+    assert not runner.task.done()
+
+
+async def test_a_child_lost_while_the_listing_session_discovers_leaves_the_app_absent_and_the_runner_goes_on(
+    runner, songmaker, monkeypatch
+):
+    failing = asyncio.Event()
+
+    async def loses_its_child(reply):
+        failing.set()
+        await asyncio.Event().wait()
+
+    songmaker.script(DISCOVER, loses_its_child)
+    transport = transport_whose_session_loses_a_child(failing, nth=1, of_url=songmaker_url(runner))
+
+    await a_loss_while_the_app_session_opens_and_a_turn_that_answers(runner, songmaker, monkeypatch, transport)
+
+
+async def test_a_child_lost_while_a_calls_session_discovers_shows_the_model_an_error_and_the_runner_goes_on(
+    runner, songmaker, monkeypatch
+):
+    failing = asyncio.Event()
+    monkeypatch.setattr(
+        app_session,
+        "streamable_http_client",
+        transport_whose_session_loses_a_child(failing, nth=2, of_url=songmaker_url(runner)),
+    )
+    runner.gateway = Gateway(calling(CREATE_SONG), saying(ANSWER), completion("done"))
+    first_round = runner.gateway.hold_request(1)
+    await addressed_in_the_call(runner)
+    await runner.gateway.until_requested(1)
+
+    async def loses_its_child(reply):
+        failing.set()
+        await asyncio.Event().wait()
+
+    songmaker.script(DISCOVER, loses_its_child)
+    first_round.set()
+    await runner.app.said_count(1)
+
+    assert runner.gateway.tool_results(2)[0].startswith("Error")
+    assert runner.reports.events() == [("started", None), (FAILED, "network")]
+    assert not runner.task.done()
+
+
+@pytest.mark.parametrize("hung", [DISCOVER, LIST_TOOLS], ids=["discovery", "listing"])
+async def test_a_hang_past_the_call_time_whose_close_gives_late_answers_leaves_the_app_absent_and_the_turn_answers(
+    runner, songmaker, monkeypatch, hung
+):
+    songmaker.script(hung, hangs)
+    runner.bound_tools_only_calls_to(SHORT_CALL_SECONDS)
+    transport = transport_closing_with_late_answers(echo=anyio.BrokenResourceError, only_close=1)
+
+    await a_loss_while_the_app_session_opens_and_a_turn_that_answers(runner, songmaker, monkeypatch, transport)
 
 
 async def test_a_token_the_realm_refuses_for_the_tools_only_scope_leaves_the_app_absent_without_a_reaction(

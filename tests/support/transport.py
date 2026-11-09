@@ -98,11 +98,12 @@ class ClosingHold:
         return waiting
 
 
-def transport_whose_session_loses_a_child(failing: asyncio.Event, *, nth: int = 2):
+def transport_whose_session_loses_a_child(failing: asyncio.Event, *, nth: int = 2, of_url: str | None = None):
     """A stand-in for ``streamable_http_client`` whose ``nth`` open runs a child that fails once ``failing`` is set.
 
     The child fails with a late-answer error, as the SDK's request task does, so anyio cancels the session's own
-    task with no one else having done so. The first open is the lifecycle's, the second a turn's.
+    task with no one else having done so. The first open is the lifecycle's, the second a turn's. With ``of_url``
+    only the opens of that URL are counted, so a scenario names the app's own open and not its place among the others.
     """
     real = app_session.streamable_http_client
     opens = 0
@@ -110,8 +111,9 @@ def transport_whose_session_loses_a_child(failing: asyncio.Event, *, nth: int = 
     @asynccontextmanager
     async def losing(url, *, http_client):
         nonlocal opens
-        opens += 1
-        is_the_one = opens == nth
+        counted = of_url in (None, str(url))
+        opens += counted
+        is_the_one = counted and opens == nth
         async with real(url, http_client=http_client) as streams, anyio.create_task_group() as group:
             if is_the_one:
 
