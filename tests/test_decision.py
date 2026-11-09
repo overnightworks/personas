@@ -39,10 +39,10 @@ from personas.decision import (
     addressed,
     after_refusal,
     backoff_delay,
-    backoff_reason,
     bound_declarations,
     call_within_bound,
     decisive_failure,
+    failure_code,
     forget_gone,
     perceive,
     reaction_to,
@@ -479,4 +479,4 @@ def test_an_app_takes_calls_until_its_own_bound_is_reached(made, within):
     ids=["a status", "an unusable answer", "the network"],
 )
 def test_a_failure_is_logged_with_its_status_its_answer_code_or_the_word_for_the_network(failure, code):
-    assert backoff_reason(failure) == code
+    assert failure_code(failure) == code

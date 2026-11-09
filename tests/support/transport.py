@@ -70,11 +70,11 @@ class ClosingHold:
         self.release = asyncio.Event()
         self.cancelled = asyncio.Event()
 
-    def transport(self):
-        """A stand-in for ``streamable_http_client`` whose first close waits for ``release``.
+    def transport(self, *, nth: int = 1, of_url: str | None = None):
+        """A stand-in for ``streamable_http_client`` whose ``nth`` close waits for ``release``.
 
         ``closing`` is set when that close starts to wait, and ``cancelled`` when the task was cancelled while it
-        waited.
+        waited. With ``of_url`` only the closes of that URL are counted.
         """
         real = app_session.streamable_http_client
         closes = 0
@@ -82,12 +82,13 @@ class ClosingHold:
         @asynccontextmanager
         async def waiting(url, *, http_client):
             nonlocal closes
+            counted = of_url in (None, str(url))
             async with real(url, http_client=http_client) as streams:
                 try:
                     yield streams
                 finally:
-                    closes += 1
-                    if closes == 1:
+                    closes += counted
+                    if counted and closes == nth:
                         self.closing.set()
                         try:
                             await self.release.wait()

@@ -35,7 +35,7 @@ flowchart LR
 - **The image** (`Dockerfile`) installs the locked dependencies and the runner as a wheel into a slim Python image, runs as the non-root uid 1001 and starts `personas`, which as PID 1 handles SIGTERM itself and needs no init. It holds no configuration and no secret; the deployment supplies `PERSONAS_CONFIG` and the secret files.
 - **The release path** (`.github/workflows/release.yml`) calls quality's reusable workflows: the gate judges the commit, the image is built and pushed to GHCR, and the tag follows. The README owns the release instructions.
 - **The ready marker** (`readiness.py`) is the file named by `ready_file` in the configuration. The runner removes it before any loop starts and creates it the first time any loop's read of its standing answers; it is never removed afterwards, and a failure to remove or create it ends the runner with its path named. The platform's probe is `test -e <ready_file>`, so no interpreter starts per probe and the runner opens no port.
-- **The log** holds each state change once (started, suspended, resumed, backoff, joined, refused, turn_ended, capped, tools_only_app_failed) with the client id, the app and a status, refusal or turn code, and no secret, token, gateway key, chat line or tool content.
+- **The log** holds each state change once (started, suspended, resumed, backoff, joined, refused, turn_ended, capped, tools_only_app_failed) with the client id, the app and a status, refusal, turn or failure code, and no secret, token, gateway key, chat line or tool content.
 
 ## 3. Checks
 

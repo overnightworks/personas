@@ -21,6 +21,7 @@ from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, DISCOVER, LIMIT_SECONDS, LIST_TOOLS, LISTEN, SAY_TOOL
 from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG, SCOPE, ToolsOnlyApp
 from tests.support.transport import (
+    ClosingHold,
     transport_closing_with_late_answers,
     transport_closing_with_leaves,
     transport_whose_session_loses_a_child,
@@ -353,6 +354,34 @@ async def test_a_turn_whose_place_left_during_a_tools_only_call_stops_with_no_fu
     assert len(runner.gateway.requests) == 1
     assert runner.app.said == []
     assert not runner.task.done()
+
+
+async def test_a_defect_in_a_tools_only_request_whose_place_then_leaves_while_it_closes_ends_the_runner_loud(
+    runner, songmaker, monkeypatch
+):
+    defect = ValueError("a defect")
+
+    async def raise_it(self, name, arguments):
+        raise defect
+
+    closing = ClosingHold()
+    monkeypatch.setattr("personas.app_session._McpAppSession.invoke", raise_it)
+    monkeypatch.setattr(app_session, "streamable_http_client", closing.transport(nth=2, of_url=songmaker_url(runner)))
+    runner.gateway = Gateway(calling(CREATE_SONG), saying(ANSWER), completion("done"))
+    await addressed_in_the_call(runner)
+    try:
+        async with asyncio.timeout(LIMIT_SECONDS):
+            await closing.closing.wait()
+        runner.app.stand(SUBJECT)
+        async with asyncio.timeout(LIMIT_SECONDS):
+            await closing.cancelled.wait()
+    finally:
+        closing.release.set()
+
+    ended = await ended_by(runner.task)
+
+    assert list(leaves_of(ended)) == [defect]
+    assert runner.reports.events() == [("started", None)]
 
 
 async def test_a_tools_only_call_whose_cancelled_session_leaves_as_a_failure_still_stops_the_turn(

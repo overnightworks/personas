@@ -29,10 +29,10 @@ from personas.decision import (
     addressed,
     after_refusal,
     backoff_delay,
-    backoff_reason,
     bound_declarations,
     call_within_bound,
     decisive_failure,
+    failure_code,
     forget_gone,
     is_defect,
     perceive,
@@ -518,7 +518,7 @@ class AgentLoop:
         for app, binding in self._tools_only:
             declared = await self._ask_tools_only(app, lambda session: session.declared_tools())
             if isinstance(declared, CallFailure):
-                self._report_tools_only_failure(app, failed_apps, backoff_reason(declared))
+                self._report_tools_only_failure(app, failed_apps, failure_code(declared))
                 continue
             listed = bound_declarations(declared, binding.tools)
             if listed is None:
@@ -558,7 +558,7 @@ class AgentLoop:
         except Exception as error:
             raise _RelayFailed(error) from None
         if isinstance(answer, CallFailure):
-            self._report_tools_only_failure(app, failed_apps, backoff_reason(answer))
+            self._report_tools_only_failure(app, failed_apps, failure_code(answer))
             return ToolOutcome(_APP_FAILED_TEXT, is_error=True)
         return answer
 
@@ -587,7 +587,11 @@ class AgentLoop:
             async with bound:
                 granted = await self._boundaries.tokens.fetch(self._agent, app.scope)
                 async with self._boundaries.open_session(app, granted.value) as session:
-                    return await ask(session)
+                    try:
+                        return await ask(session)
+                    except Exception as error:
+                        self._record_defect(error)
+                        raise
         except TimeoutError:
             if not bound.expired():
                 raise
@@ -620,7 +624,7 @@ class AgentLoop:
     async def _back_off(self, failure: CallFailure) -> None:
         if not self._backing_off:
             self._backing_off = True
-            self._report(Event.BACKOFF, backoff_reason(failure))
+            self._report(Event.BACKOFF, failure_code(failure))
         self._failures += 1
         await self._boundaries.clock.sleep(backoff_delay(self._failures))
 
