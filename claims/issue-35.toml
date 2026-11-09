@@ -1,0 +1,8 @@
+claim_id = "7e8f78c716b9452baf5bfcc63e322238"
+agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
+role = "builder"
+base = "413eaab50d18c80531a6ec914c889a2d905a38d0"
+branch = "claude/issue-35-the-runner-stops-cleanly-on-sigterm"
+scope = [".github/workflows/ci.yml", "README.md", "docs/ARCHITECTURE.md", "src/agents/main.py", "tests"]
+opened_commit = "2bf07ba8165b47d1177ff1f294653611dba0fd69"
+whole_reason = "The handler, its exit code, the image proof in CI and the README sentence platform#281 reads are one stop; split, the README promises a stop CI does not prove."
