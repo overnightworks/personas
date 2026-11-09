@@ -184,7 +184,6 @@ class FakeApp:
     async def _accept(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
         taken = AcceptInvitationArguments.model_validate(arguments)
         self.accepted.append(taken)
-        self.content.update([taken.place.id, taken.invitation])
         if self.accept_outcomes:
             return self.accept_outcomes.pop(0)
         return ToolOutcome(json.dumps({"name": ACCEPTED_NAME}), is_error=False)
@@ -206,6 +205,8 @@ class FakeApp:
         document = json.loads(body) if body else {}
         method = document.get("method", "")
         self.log.add(method)
+        if method == CALL:
+            self._take_in(document.get("params") or {})
         headers = {name.decode(): value.decode() for name, value in scope["headers"]}
         bearer = headers.get("authorization", "").removeprefix("Bearer ")
         self.presented.add(bearer)
@@ -226,6 +227,12 @@ class FakeApp:
         else:
             scope[_SUBJECT_KEY] = self.bearers[bearer]
             await self._front(scope, _replayed(body, receive), noting)
+
+    def _take_in(self, call: dict[str, Any]) -> None:
+        """Content a request carries counts as held before any scripted answer, refusal or status can ignore it."""
+        arguments = call.get("arguments") or {}
+        place = arguments.get("place") or {}
+        self.content.update(value for value in (place.get("id"), arguments.get("invitation")) if isinstance(value, str))
 
     def _noting_acknowledgements(self, send: Callable[..., Any]) -> Callable[..., Any]:
         async def noting(message: dict[str, Any]) -> None:
