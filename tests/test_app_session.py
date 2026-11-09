@@ -607,10 +607,11 @@ async def test_an_invoked_tool_gives_the_outcome_the_app_answered_an_error_one_t
 async def test_an_invoked_tool_the_app_refuses_is_a_failure(app, bearer):
     app.refuse_with = HTTPStatus.SERVICE_UNAVAILABLE
     app.refused_method = CALL
+    arguments = {"place": "room-7", "text": secrets.token_hex(4)}
 
     async with opened(app, bearer) as session:
         with pytest.raises(StatusFailure) as failure:
-            await session.invoke(SAY_TOOL, {"place": "room-7", "text": secrets.token_hex(4)})
+            await session.invoke(SAY_TOOL, arguments)
 
     assert failure.value.status == HTTPStatus.SERVICE_UNAVAILABLE
 

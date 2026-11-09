@@ -99,10 +99,6 @@ class _Admitted:
     input: str
 
 
-async def _granted_groups(facts: TokenFacts) -> frozenset[str]:
-    return facts.groups
-
-
 class AgentLoop:
     """Keeps one stream of changes open for one agent in one app, accepts what it is invited to and answers.
 
@@ -277,10 +273,10 @@ class AgentLoop:
                 max_duration_seconds=setup.persona.max_duration_seconds,
                 max_tool_calls=setup.binding.max_tool_calls,
             )
-            person = TurnPerson(admitted.facts.principal, TURN_ROLE, partial(_granted_groups, admitted.facts))
+            person = TurnPerson(admitted.facts.principal, TURN_ROLE, partial(asyncio.sleep, 0, admitted.facts.groups))
             async with aclosing(setup.backend(tools).run(request, person)) as events:
                 async for _ in events:
-                    pass
+                    continue
 
     async def _relay(self, session: AppSession, name: str, _principal: Principal, arguments: JsonObject) -> ToolOutcome:
         await self._use_current_token(session)

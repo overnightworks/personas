@@ -169,7 +169,9 @@ def _segments(payload: bytes) -> str:
     ],
 )
 def test_a_token_that_is_no_jwt_with_these_claims_is_an_unusable_answer(token):
+    granted = Secret(token)
+
     with pytest.raises(UnusableAnswer) as failure:
-        facts_of(Secret(token))
+        facts_of(granted)
 
     assert failure.value.code == INVALID_ANSWER_CODE
