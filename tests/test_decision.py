@@ -188,9 +188,8 @@ def test_the_failure_that_decides_is_the_refusal_before_the_renewal_before_the_b
         (ValueError("a defect"),),
         (Unreachable("down"), ValueError("a defect")),
         (ValueError("a defect"), StatusFailure(403)),
-        (),
     ],
-    ids=["only a defect", "failure then defect", "defect then refusal", "no leaf"],
+    ids=["only a defect", "failure then defect", "defect then refusal"],
 )
 def test_no_failure_decides_when_any_leaf_is_no_call_failure(leaves):
     assert decisive_failure(leaves, already_renewed=False) is None

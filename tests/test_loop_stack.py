@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from contextlib import asynccontextmanager
 from http import HTTPStatus
 
+import anyio
 import pytest
 from agent_runtime_client.member import (
     STANDING_URI,
@@ -23,6 +25,7 @@ from mcp_types import (
     TextResourceContents,
 )
 
+from agents import app_session
 from agents.decision import SUSPENDED_RETRY_SECONDS, backoff_delay, status_code
 from agents.failures import INVALID_ANSWER_CODE, LISTEN_NOT_HONORED_CODE, UNSUPPORTED_VERSION_CODE
 from tests.support.hopin import (
@@ -134,6 +137,30 @@ async def test_a_stream_that_never_completes_is_cut_at_the_runners_deadline_and_
 
     assert runner.reports.events()[:2] == [("started", None), ("backoff", "network")]
     assert backoff_delay(1) in runner.clock.slept
+
+
+async def test_an_answer_that_lands_after_the_session_closed_backs_off_and_does_not_end_the_runner(runner, monkeypatch):
+    real = app_session.streamable_http_client
+    closings = []
+
+    @asynccontextmanager
+    async def failing_as_the_first_session_closes(url, *, http_client):
+        async with real(url, http_client=http_client) as streams:
+            try:
+                yield streams
+            except Exception as error:
+                closings.append(error)
+                if len(closings) == 1:
+                    raise ExceptionGroup("the transport", [error, anyio.BrokenResourceError()]) from None
+                raise
+
+    monkeypatch.setattr(app_session, "streamable_http_client", failing_as_the_first_session_closes)
+    runner.app.pulses_on_read = True
+    runner.start(stream_seconds=SHORT_STREAM_SECONDS)
+    await runner.reports.until("backoff")
+    await runner.app.log.until(LISTEN, 2)
+
+    assert runner.reports.events()[:2] == [("started", None), ("backoff", "network")]
 
 
 async def test_a_stream_with_no_acknowledgement_until_past_the_deadline_backs_off_and_is_reopened_and_read(runner):

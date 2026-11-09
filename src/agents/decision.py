@@ -150,7 +150,7 @@ def decisive_failure(leaves: Sequence[BaseException], *, already_renewed: bool) 
     failures = [leaf for leaf in leaves if isinstance(leaf, CallFailure)]
     if len(failures) < len(leaves):
         return None
-    return min(failures, key=lambda failure: _rank(reaction_to(failure, already_renewed=already_renewed)), default=None)
+    return min(failures, key=lambda failure: _rank(reaction_to(failure, already_renewed=already_renewed)))
 
 
 def _rank(reaction: Reaction | Suspend) -> int:

@@ -9,16 +9,25 @@ import subprocess
 from contextlib import asynccontextmanager
 from http import HTTPStatus
 
+import anyio
 import pytest
 from agent_runtime_client.member import ACCEPT_INVITATION_TOOL, STANDING_URI, AcceptInvitationArguments, PlaceRef
 from agent_runtime_client.tools import ToolOutcome
 from mcp_types import INVALID_PARAMS, ListToolsResult, Tool
 from pydantic import ValidationError
 
+from agents import app_session
 from agents.app_session import open_mcp_session
 from agents.config import AppTarget
 from agents.decision import Accept, Refusal, status_code
-from agents.failures import INVALID_ANSWER_CODE, LISTEN_NOT_HONORED_CODE, StatusFailure, Unreachable, UnusableAnswer
+from agents.failures import (
+    INVALID_ANSWER_CODE,
+    LISTEN_NOT_HONORED_CODE,
+    StatusFailure,
+    Unreachable,
+    UnusableAnswer,
+    leaves_of,
+)
 from agents.main import configure_logging
 from agents.secret import Secret
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
@@ -254,24 +263,56 @@ async def raises_after_a_refused_call(app, bearer, raised):
         raise raised
 
 
-async def test_a_defect_the_body_raises_after_the_app_answered_4xx_reaches_the_caller_unchanged(app, bearer):
-    defect = BodyError("the caller's own code failed")
+@pytest.mark.parametrize(
+    "own", [BodyError("the caller's own code failed"), OSError("a local file failed")], ids=["defect", "os error"]
+)
+async def test_a_leaf_the_body_raises_after_the_app_answered_4xx_reaches_the_caller_unchanged(app, bearer, own):
+    with pytest.raises(type(own)) as caught:
+        await raises_after_a_refused_call(app, bearer, ExceptionGroup("own", [own]))
 
-    with pytest.raises(BodyError) as caught:
-        await raises_after_a_refused_call(app, bearer, defect)
-
-    assert caught.value is defect
+    assert caught.value is own
 
 
-async def test_every_leaf_of_a_group_the_body_raises_reaches_the_caller(app, bearer):
+@pytest.mark.parametrize(
+    "own",
+    [
+        OSError("a local file failed"),
+        TimeoutError("the caller's own wait timed out"),
+        ValidationError.from_exception_data("a local record", []),
+    ],
+    ids=["os error", "timeout", "validation error"],
+)
+async def test_every_leaf_of_nested_groups_the_body_raises_reaches_the_caller(app, bearer, own):
     failure, defect = Unreachable("raised by the caller"), BodyError("the caller's own code failed")
-
-    both = ExceptionGroup("both", [failure, defect])
+    nested = ExceptionGroup("outer", [failure, ExceptionGroup("inner", [own, defect])])
 
     with pytest.raises(ExceptionGroup) as caught:
-        await raises_in_the_stream_body(app, bearer, both)
+        await raises_in_the_stream_body(app, bearer, nested)
 
-    assert caught.value.exceptions == (failure, defect)
+    assert list(leaves_of(caught.value)) == [failure, own, defect]
+
+
+@pytest.mark.parametrize("status", [HTTPStatus.FORBIDDEN, HTTPStatus.SERVICE_UNAVAILABLE])
+async def test_an_error_answer_whose_body_does_not_decode_is_told_by_its_status(app, bearer, status):
+    async def answers_undecodably(reply):
+        await reply.undecodable(status)
+
+    app.script(CALL, answers_undecodably)
+
+    with pytest.raises(StatusFailure) as failure:
+        await accepts_a_place(app, bearer)
+
+    assert failure.value.status == status
+
+
+async def test_an_ok_answer_whose_body_does_not_decode_is_unreachable(app, bearer):
+    async def answers_undecodably(reply):
+        await reply.undecodable(HTTPStatus.OK)
+
+    app.script(CALL, answers_undecodably)
+
+    with pytest.raises(Unreachable):
+        await accepts_a_place(app, bearer)
 
 
 async def test_a_stream_that_outlasts_its_deadline_by_sending_on_is_unreachable(app, bearer):
@@ -286,10 +327,45 @@ async def test_a_stream_that_outlasts_its_deadline_by_sending_on_is_unreachable(
 
     app.script(LISTEN, sends_the_next_once_the_last_was_read)
 
-    with pytest.raises(Unreachable):
+    with pytest.raises((Unreachable, ExceptionGroup)) as caught:
         await listens_and_reads_on_every_wake(app, bearer, stream_seconds=SHORT_STREAM_SECONDS)
 
+    assert all(isinstance(leaf, Unreachable) for leaf in leaves_of(caught.value))
     assert app.log.count(READ) > 1
+
+
+@pytest.fixture
+def transport_failing_as_it_closes(monkeypatch):
+    """The SDK's transport, whose request task finds its read stream closed when an answer lands late."""
+    real = app_session.streamable_http_client
+
+    @asynccontextmanager
+    async def failing(url, *, http_client):
+        async with real(url, http_client=http_client) as streams:
+            try:
+                yield streams
+            except Exception as error:
+                raise ExceptionGroup("the transport", [error, anyio.BrokenResourceError()]) from None
+            except asyncio.CancelledError:
+                raise ExceptionGroup("the transport", [anyio.BrokenResourceError()]) from None
+
+    monkeypatch.setattr(app_session, "streamable_http_client", failing)
+
+
+@pytest.mark.usefixtures("transport_failing_as_it_closes")
+async def test_an_answer_that_lands_after_the_session_closed_is_unreachable_beside_the_failure_that_closed_it(
+    app, bearer
+):
+    with pytest.raises(ExceptionGroup) as caught:
+        await raises_in_the_stream_body(app, bearer, Unreachable("the stream outlasted its deadline"))
+
+    assert [type(leaf) for leaf in leaves_of(caught.value)] == [Unreachable, Unreachable]
+
+
+@pytest.mark.usefixtures("transport_failing_as_it_closes")
+async def test_an_answer_that_lands_after_a_cancelled_session_closed_stays_the_error_it_is(app, bearer):
+    with pytest.raises(anyio.BrokenResourceError):
+        await raises_in_the_stream_body(app, bearer, asyncio.CancelledError())
 
 
 async def test_traffic_with_no_acknowledgement_until_past_the_deadline_is_unreachable(app, bearer):

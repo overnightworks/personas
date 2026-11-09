@@ -8,6 +8,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from typing import Final, Protocol, cast, override
 
+import anyio
 import httpx2
 from agent_runtime_client.member import (
     ACCEPT_INVITATION_TOOL,
@@ -99,7 +100,14 @@ class _InvalidToolResult(Exception):  # noqa: N818
     """The app's result does not meet the output schema it advertised; carries none of its content."""
 
 
-_CALL_ERRORS: Final = (MCPError, SubscriptionLost, ValidationError, _InvalidToolResult, httpx2.TransportError, OSError)
+_CALL_ERRORS: Final = (
+    MCPError,
+    SubscriptionLost,
+    ValidationError,
+    _InvalidToolResult,
+    httpx2.HTTPError,
+    OSError,
+)
 """The errors of the SDK and its transport that tell a call failed; any other error is a defect."""
 
 
@@ -213,11 +221,18 @@ def _failure_of(error: BaseException, auth: _BearerAuth) -> CallFailure:
     return Unreachable("the app did not answer")
 
 
-def _settled(leaf: BaseException, raised_in_body: Exception | None, auth: _BearerAuth) -> BaseException:
-    """A failure or what the caller's body raised stays as it was; an error of a call becomes its failure."""
-    if isinstance(leaf, CallFailure) or leaf is raised_in_body or not isinstance(leaf, _CALL_ERRORS):
+def _settled(leaf: BaseException, from_body: set[int], auth: _BearerAuth, *, beside_others: bool) -> BaseException:
+    """A failure or a leaf the caller's body raised stays as it was; an error of a call becomes its failure.
+
+    The transport's task finds its read stream closed when an answer lands after the session ended: beside
+    the error that ended it that is a lost answer. Alone it is how a cancelled session unwinds, and it stays
+    as it was so that no cancellation turns into a failure the loop backs off from.
+    """
+    if isinstance(leaf, CallFailure) or id(leaf) in from_body:
         return leaf
-    return _failure_of(leaf, auth)
+    if isinstance(leaf, _CALL_ERRORS) or (beside_others and isinstance(leaf, anyio.BrokenResourceError)):
+        return _failure_of(leaf, auth)
+    return leaf
 
 
 @asynccontextmanager
@@ -228,6 +243,7 @@ async def open_mcp_session(
 
     A bare ``ClientSession`` discovers the revision: the SDK's own client would fall back to
     ``initialize`` on any error, so a 401 on the probe would enter a path this runner does not have.
+    Several failures leave as one ``ExceptionGroup`` holding each of them.
     """
     auth = _BearerAuth(token)
     timeout = httpx2.Timeout(CONNECT_SECONDS, read=stream_seconds)
@@ -248,7 +264,9 @@ async def open_mcp_session(
         # The SDK's task groups wrap what is raised inside them, so every leaf is looked at: a failure
         # of the call and what the caller's own code raised stay as they were, an error of the
         # connection becomes its failure and a defect stays a defect. The loop picks what decides.
-        leaves = [_settled(leaf, raised_in_body, auth) for leaf in leaves_of(error)]
+        from_body = {id(own) for own in leaves_of(raised_in_body)} if raised_in_body else set[int]()
+        found = list(leaves_of(error))
+        leaves = [_settled(leaf, from_body, auth, beside_others=len(found) > 1) for leaf in found]
         if len(leaves) == 1:
             raise leaves[0] from None
         raise ExceptionGroup("the session failed", cast("list[Exception]", leaves)) from None
