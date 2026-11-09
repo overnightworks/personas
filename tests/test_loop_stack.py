@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from contextlib import asynccontextmanager
 from http import HTTPStatus
 
 import anyio
@@ -40,6 +39,7 @@ from tests.support.hopin import (
     invited,
 )
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
+from tests.support.transport import transport_closing_with_late_answers
 
 pytestmark = pytest.mark.anyio
 
@@ -139,22 +139,14 @@ async def test_a_stream_that_never_completes_is_cut_at_the_runners_deadline_and_
     assert backoff_delay(1) in runner.clock.slept
 
 
-async def test_an_answer_that_lands_after_the_session_closed_backs_off_and_does_not_end_the_runner(runner, monkeypatch):
-    real = app_session.streamable_http_client
-    closings = []
-
-    @asynccontextmanager
-    async def failing_as_the_first_session_closes(url, *, http_client):
-        async with real(url, http_client=http_client) as streams:
-            try:
-                yield streams
-            except Exception as error:
-                closings.append(error)
-                if len(closings) == 1:
-                    raise ExceptionGroup("the transport", [error, anyio.BrokenResourceError()]) from None
-                raise
-
-    monkeypatch.setattr(app_session, "streamable_http_client", failing_as_the_first_session_closes)
+@pytest.mark.parametrize(
+    "echo", [anyio.BrokenResourceError, anyio.ClosedResourceError], ids=["broken stream", "closed stream"]
+)
+async def test_an_answer_that_lands_after_the_session_closed_backs_off_and_does_not_end_the_runner(
+    runner, monkeypatch, echo
+):
+    failing = transport_closing_with_late_answers(echo=echo, only_close=1)
+    monkeypatch.setattr(app_session, "streamable_http_client", failing)
     runner.app.pulses_on_read = True
     runner.start(stream_seconds=SHORT_STREAM_SECONDS)
     await runner.reports.until("backoff")

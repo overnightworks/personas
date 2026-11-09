@@ -33,6 +33,7 @@ from agents.secret import Secret
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, LIMIT_SECONDS, LISTEN, READ, FakeApp, active, formatted, invited
 from tests.support.loopback import serving
+from tests.support.transport import transport_closing_with_late_answers
 
 pytestmark = pytest.mark.anyio
 
@@ -336,28 +337,20 @@ async def test_a_stream_that_outlasts_its_deadline_by_sending_on_is_unreachable(
     assert app.log.count(READ) > 1
 
 
-@pytest.fixture
-def transport_failing_as_it_closes(monkeypatch):
-    """The SDK's transport, whose request task finds its read stream closed when an answer lands late."""
-    real = app_session.streamable_http_client
+@pytest.fixture(params=[anyio.BrokenResourceError, anyio.ClosedResourceError], ids=["broken stream", "closed stream"])
+def late_answer(request, monkeypatch):
+    def fails_as_it_closes(*, echoes=1):
+        failing = transport_closing_with_late_answers(echo=request.param, echoes=echoes)
+        monkeypatch.setattr(app_session, "streamable_http_client", failing)
+        return request.param
 
-    @asynccontextmanager
-    async def failing(url, *, http_client):
-        async with real(url, http_client=http_client) as streams:
-            try:
-                yield streams
-            except Exception as error:
-                raise ExceptionGroup("the transport", [error, anyio.BrokenResourceError()]) from None
-            except asyncio.CancelledError:
-                raise ExceptionGroup("the transport", [anyio.BrokenResourceError()]) from None
-
-    monkeypatch.setattr(app_session, "streamable_http_client", failing)
+    return fails_as_it_closes
 
 
-@pytest.mark.usefixtures("transport_failing_as_it_closes")
 async def test_an_answer_that_lands_after_the_session_closed_is_unreachable_beside_the_failure_that_closed_it(
-    app, bearer
+    app, bearer, late_answer
 ):
+    late_answer()
     deadline = Unreachable("the stream outlasted its deadline")
 
     with pytest.raises(ExceptionGroup) as caught:
@@ -366,12 +359,34 @@ async def test_an_answer_that_lands_after_the_session_closed_is_unreachable_besi
     assert [type(leaf) for leaf in leaves_of(caught.value)] == [Unreachable, Unreachable]
 
 
-@pytest.mark.usefixtures("transport_failing_as_it_closes")
-async def test_an_answer_that_lands_after_a_cancelled_session_closed_stays_the_error_it_is(app, bearer):
-    cancellation = asyncio.CancelledError()
+async def test_an_answer_refused_before_the_session_closed_does_not_outrank_the_failure_that_closed_it(
+    app, bearer, late_answer
+):
+    late_answer()
+    deadline = Unreachable("the stream outlasted its deadline")
 
-    with pytest.raises(anyio.BrokenResourceError):
-        await raises_in_the_stream_body(app, bearer, cancellation)
+    with pytest.raises(ExceptionGroup) as caught:
+        await raises_after_a_refused_call(app, bearer, deadline)
+
+    assert [type(leaf) for leaf in leaves_of(caught.value)] == [Unreachable, Unreachable]
+
+
+async def test_an_answer_that_lands_after_a_cancelled_session_closed_stays_the_error_it_is(app, bearer, late_answer):
+    echo = late_answer()
+
+    with pytest.raises(echo):
+        await raises_in_the_stream_body(app, bearer, asyncio.CancelledError())
+
+
+async def test_answers_that_all_land_after_a_cancelled_session_closed_stay_the_errors_they_are(
+    app, bearer, late_answer
+):
+    echo = late_answer(echoes=2)
+
+    with pytest.raises(ExceptionGroup) as caught:
+        await raises_in_the_stream_body(app, bearer, asyncio.CancelledError())
+
+    assert [type(leaf) for leaf in leaves_of(caught.value)] == [echo, echo]
 
 
 async def test_traffic_with_no_acknowledgement_until_past_the_deadline_is_unreachable(app, bearer):

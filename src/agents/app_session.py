@@ -110,6 +110,9 @@ _CALL_ERRORS: Final = (
 )
 """The errors of the SDK and its transport that tell a call failed; any other error is a defect."""
 
+_LATE_ANSWER_ERRORS: Final = (anyio.BrokenResourceError, anyio.ClosedResourceError)
+"""What the transport's task raises when an answer lands on a stream the session already closed."""
+
 
 class _ValidatingSession(ClientSession):
     """Names the SDK's validation failure, which it raises as a bare ``RuntimeError``."""
@@ -201,7 +204,8 @@ def _failure_of(error: BaseException, auth: _BearerAuth) -> CallFailure:
     """A call that gave no usable answer: told by the last HTTP status the app sent, else by the error.
 
     A protocol error or a result the SDK cannot validate is an unusable answer; only a broken or
-    silent connection is unreachable. The error is one of ``_CALL_ERRORS``: the status is read only for those.
+    silent connection is unreachable. The error is one of ``_CALL_ERRORS``: the status is read only for
+    those, never for a late answer's error, which no call raised.
     """
     if isinstance(error, MCPError) and error.code == UNSUPPORTED_PROTOCOL_VERSION:
         return UnusableAnswer(f"jsonrpc_{error.code}")
@@ -221,17 +225,20 @@ def _failure_of(error: BaseException, auth: _BearerAuth) -> CallFailure:
     return Unreachable("the app did not answer")
 
 
-def _settled(leaf: BaseException, from_body: set[int], auth: _BearerAuth, *, beside_others: bool) -> BaseException:
+def _settled(leaf: BaseException, from_body: set[int], auth: _BearerAuth, *, beside_a_failure: bool) -> BaseException:
     """A failure or a leaf the caller's body raised stays as it was; an error of a call becomes its failure.
 
     The transport's task finds its read stream closed when an answer lands after the session ended: beside
-    the error that ended it that is a lost answer. Alone it is how a cancelled session unwinds, and it stays
-    as it was so that no cancellation turns into a failure the loop backs off from.
+    a leaf that is no such error that is a lost answer, unreachable whatever status it carried. Alone it is
+    how a cancelled session unwinds, and it stays as it was so that no cancellation turns into a failure
+    the loop backs off from.
     """
     if isinstance(leaf, CallFailure) or id(leaf) in from_body:
         return leaf
-    if isinstance(leaf, _CALL_ERRORS) or (beside_others and isinstance(leaf, anyio.BrokenResourceError)):
+    if isinstance(leaf, _CALL_ERRORS):
         return _failure_of(leaf, auth)
+    if beside_a_failure and isinstance(leaf, _LATE_ANSWER_ERRORS):
+        return Unreachable("an answer landed after the session closed")
     return leaf
 
 
@@ -243,7 +250,7 @@ async def open_mcp_session(
 
     A bare ``ClientSession`` discovers the revision: the SDK's own client would fall back to
     ``initialize`` on any error, so a 401 on the probe would enter a path this runner does not have.
-    Several failures leave as one ``ExceptionGroup`` holding each of them.
+    Several leaves, failures or defects, leave as one ``ExceptionGroup`` holding each of them.
     """
     auth = _BearerAuth(token)
     timeout = httpx2.Timeout(CONNECT_SECONDS, read=stream_seconds)
@@ -266,7 +273,8 @@ async def open_mcp_session(
         # connection becomes its failure and a defect stays a defect. The loop picks what decides.
         from_body = {id(own) for own in leaves_of(raised_in_body)} if raised_in_body else set[int]()
         found = list(leaves_of(error))
-        leaves = [_settled(leaf, from_body, auth, beside_others=len(found) > 1) for leaf in found]
+        beside_a_failure = any(not isinstance(leaf, _LATE_ANSWER_ERRORS) for leaf in found)
+        leaves = [_settled(leaf, from_body, auth, beside_a_failure=beside_a_failure) for leaf in found]
         if len(leaves) == 1:
             raise leaves[0] from None
         raise ExceptionGroup("the session failed", cast("list[Exception]", leaves)) from None
