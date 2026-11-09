@@ -288,7 +288,10 @@ class AgentLoop:
         self._turn_ended.set()
 
     async def _take_turn(self, setup: _TurnSetup, admitted: _Admitted) -> None:
-        """Runs one turn over its own session; a turn that ends short is reported, any other error is the group's."""
+        """Runs one turn over its own session.
+
+        A turn the gateway ends short is reported; a failed relayed call and any other error go to the group.
+        """
         try:
             await self._run_turn(setup, admitted)
         except Exception as error:

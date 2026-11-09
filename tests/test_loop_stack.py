@@ -29,8 +29,15 @@ from mcp_types import (
 )
 
 from agents import app_session
+from agents.config import load_config
 from agents.decision import SUSPENDED_RETRY_SECONDS, TOOL_NOT_DECLARED_CODE, TurnCap, backoff_delay, status_code
-from agents.failures import INVALID_ANSWER_CODE, LISTEN_NOT_HONORED_CODE, UNSUPPORTED_VERSION_CODE
+from agents.failures import (
+    INVALID_ANSWER_CODE,
+    LISTEN_NOT_HONORED_CODE,
+    UNSUPPORTED_VERSION_CODE,
+    Unreachable,
+    leaves_of,
+)
 from agents.reporting import Event
 from tests.support.gateway import Gateway, says
 from tests.support.hopin import (
@@ -792,6 +799,47 @@ async def test_a_relayed_call_beside_a_late_answer_gives_one_reaction_and_no_tur
 
     assert runner.reports.events() == [("started", None), ("backoff", "network"), ("resumed", None)]
     assert len(runner.gateway.requests) == 1
+    assert not runner.task.done()
+
+
+async def test_a_relayed_call_that_fails_beside_a_defect_of_the_turns_teardown_ends_the_runner_loud_with_both(
+    runner, monkeypatch
+):
+    failing = transport_closing_with_late_answers(echo=RuntimeError, only_close=1)
+    monkeypatch.setattr(app_session, "streamable_http_client", failing)
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    runner.start()
+    await runner.app.log.until(READ)
+    runner.app.script(CALL, cuts)
+    say_in_the_call(runner, ADDRESSED)
+    assert runner.task is not None
+    async with asyncio.timeout(10):
+        (ended,) = await asyncio.gather(runner.task, return_exceptions=True)
+
+    assert sorted(type(leaf).__name__ for leaf in leaves_of(ended)) == [RuntimeError.__name__, Unreachable.__name__]
+    assert runner.reports.events() == [("started", None)]
+    assert len(runner.gateway.requests) == 1
+
+
+async def hangs(reply):
+    await asyncio.Event().wait()
+
+
+async def test_a_deadline_during_a_relayed_call_ends_the_turn_as_limit_exceeded_and_gives_no_reaction(runner):
+    runner.files.persona_path.write_text(runner.files.persona_text(max_duration_seconds=1), encoding="utf-8")
+    runner.config = load_config(runner.files.write())
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    runner.start()
+    await runner.app.log.until(READ)
+    runner.app.script(CALL, hangs)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.reports.until("turn_ended")
+
+    assert runner.reports.events() == [("started", None), ("turn_ended", "limit_exceeded")]
+    assert len(runner.gateway.requests) == 1
+    assert runner.task is not None
     assert not runner.task.done()
 
 
