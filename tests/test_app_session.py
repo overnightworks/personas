@@ -22,7 +22,7 @@ from agents.failures import INVALID_ANSWER_CODE, LISTEN_NOT_HONORED_CODE, Status
 from agents.main import configure_logging
 from agents.secret import Secret
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import CALL, LIMIT_SECONDS, FakeApp, active, invited
+from tests.support.hopin import CALL, LIMIT_SECONDS, LISTEN, READ, FakeApp, active, formatted, invited
 from tests.support.loopback import serving
 
 pytestmark = pytest.mark.anyio
@@ -31,9 +31,7 @@ SHORT_STREAM_SECONDS = 0.3
 POLLING_NAMES = ["agent_runtime_client.wait", "WaitAnswer", "WAIT_TOOL", "WaitToolError", "_cursor"]
 SEARCHED = ["src", "tests", "README.md", "docs"]
 THIS_FILE = ":(exclude)tests/test_app_session.py"
-KEEP_ALIVE_INTERVAL_SECONDS = 0.01
 PLACE = PlaceRef(kind="call", id="room-7")
-PLACE_CONTENT = ("room-7", "inv-3")
 
 
 @pytest.fixture
@@ -53,13 +51,13 @@ def bearer(app):
 
 @pytest.fixture(autouse=True)
 def nothing_secret_is_logged(app, bearer, library_loggers, caplog):
-    """At a test's end no log line holds a token or the content of a place."""
+    """At a test's end no log line, traceback included, holds a bearer the app saw or content it served or took."""
     configure_logging()
     caplog.set_level(logging.DEBUG)
     yield
-    logged = "\n".join(record.getMessage() for record in caplog.get_records("call"))
-    for held in (bearer.reveal(), *PLACE_CONTENT):
-        assert held not in logged
+    logged = formatted(caplog.get_records("call"))
+    assert bearer.reveal() in app.kept_out_of_logs()
+    assert not [held for held in app.kept_out_of_logs() if held in logged]
 
 
 def opened(app, bearer, **keywords):
@@ -183,8 +181,10 @@ async def test_a_renewed_token_is_the_bearer_of_the_next_call(app, bearer):
 
 
 async def test_a_bearer_the_app_does_not_know_is_a_401(app):
+    unknown = Secret(secrets.token_urlsafe(24))
+
     with pytest.raises(StatusFailure) as failure:
-        await opens(app, Secret(secrets.token_urlsafe(24)))
+        await opens(app, unknown)
 
     assert failure.value.status == HTTPStatus.UNAUTHORIZED
 
@@ -247,30 +247,37 @@ async def test_an_error_raised_in_the_stream_body_reaches_the_caller_unchanged(a
 
 
 async def test_a_stream_that_outlasts_its_deadline_by_sending_on_is_unreachable(app, bearer):
-    async def sends_on_and_on(reply):
+    async def sends_the_next_once_the_last_was_read(reply):
         await reply.open_stream()
         await reply.acknowledge([STANDING_URI])
+        reads = 0
         while True:
             await reply.pulse(STANDING_URI)
-            await asyncio.sleep(KEEP_ALIVE_INTERVAL_SECONDS)
+            reads += 1
+            await app.log.until(READ, reads)
 
-    app.script("subscriptions/listen", sends_on_and_on)
+    app.script(LISTEN, sends_the_next_once_the_last_was_read)
 
     with pytest.raises(Unreachable):
         await listens_and_reads_on_every_wake(app, bearer, stream_seconds=SHORT_STREAM_SECONDS)
 
+    assert app.log.count(READ) > 1
+
 
 async def test_traffic_with_no_acknowledgement_until_past_the_deadline_is_unreachable(app, bearer):
-    async def talks_without_acknowledging(reply):
-        await reply.open_stream()
-        while True:
-            await reply.keep_alive()
-            await asyncio.sleep(KEEP_ALIVE_INTERVAL_SECONDS)
+    talked = []
 
-    app.script("subscriptions/listen", talks_without_acknowledging)
+    async def talks_without_acknowledging(reply):
+        talked.append(reply)
+        await reply.open_stream()
+        await reply.keep_alives_until_closed()
+
+    app.script(LISTEN, talks_without_acknowledging)
 
     with pytest.raises(Unreachable):
         await listens(app, bearer, stream_seconds=SHORT_STREAM_SECONDS)
+
+    assert talked[0].keep_alives > 1
 
 
 async def test_an_accept_without_the_tool_is_a_protocol_error_that_is_an_unusable_answer(app, bearer):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -47,6 +48,8 @@ class Reply:
 
     rpc: Rpc
     send: Callable[[dict[str, Any]], Awaitable[None]]
+    receive: Callable[[], Awaitable[dict[str, Any]]]
+    keep_alives: int = 0
 
     async def result(self, result: BaseModel) -> None:
         await self.raw_result(result.model_dump(by_alias=True, mode="json", exclude_none=True))
@@ -82,6 +85,17 @@ class Reply:
 
     async def keep_alive(self) -> None:
         await self.send({"type": "http.response.body", "body": b": traffic\n\n", "more_body": True})
+        self.keep_alives += 1
+
+    async def keep_alives_until_closed(self) -> None:
+        """Writes keep-alives, paced by the connection's own backpressure, until the client closes it."""
+        closed = asyncio.create_task(self.receive())
+        try:
+            while not closed.done():
+                await self.keep_alive()
+                await asyncio.sleep(0)
+        finally:
+            closed.cancel()
 
     async def complete(self) -> None:
         result = SubscriptionsListenResult(_meta=self._meta)

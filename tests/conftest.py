@@ -27,7 +27,7 @@ from tests.support.fakes import (
     credentials,
     grant,
 )
-from tests.support.hopin import AGENT_SUBJECT, ISSUER, FakeApp
+from tests.support.hopin import AGENT_SUBJECT, ISSUER, FakeApp, formatted
 from tests.support.realm import TOKEN_ENDPOINT, FakeRealm
 
 if TYPE_CHECKING:
@@ -97,7 +97,6 @@ def scenario() -> Callable[..., Scenario]:
 
 
 SCOPE = "mcp-app"
-SCENARIO_CONTENT = ("room-7", "inv-3", "Mozart")
 
 
 class Harness:
@@ -133,7 +132,7 @@ class Harness:
         self.task = asyncio.create_task(run_all(config, boundaries))
 
     def secrets_and_content(self) -> list[str]:
-        return [self.agent.client_secret.reveal(), *self.realm.issued, *SCENARIO_CONTENT]
+        return [self.agent.client_secret.reveal(), *self.realm.issued, *self.app.kept_out_of_logs()]
 
 
 @pytest.fixture
@@ -159,7 +158,7 @@ async def runner(caplog: pytest.LogCaptureFixture, library_loggers: None, tmp_pa
             harness.task.cancel()
             await asyncio.gather(harness.task, return_exceptions=True)
     await harness.token_client.aclose()
-    logged = "\n".join(record.getMessage() for record in caplog.get_records("call"))
+    logged = formatted(caplog.get_records("call"))
     assert not harness.reports.changes or "client_id=" in logged
     for held in harness.secrets_and_content():
         assert held not in logged

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -67,6 +68,15 @@ def active(place_id: str) -> Standing:
     return Standing(place=PlaceRef(kind="call", id=place_id), state=StandingState.ACTIVE)
 
 
+ACCEPTED_NAME = "Mozart"
+
+
+def formatted(records: list[logging.LogRecord]) -> str:
+    """The records as a handler writes them, with the traceback of each."""
+    formatter = logging.Formatter()
+    return "\n".join(formatter.format(record) for record in records)
+
+
 class RequestLog:
     """What the app saw, in order: each request's method, and the acknowledgement of each stream."""
 
@@ -119,6 +129,8 @@ class FakeApp:
     scripted: defaultdict[str, list[Handler]] = field(default_factory=lambda: defaultdict(list[Handler]))
     held_read: asyncio.Event | None = None
     read_held: asyncio.Event = field(default_factory=asyncio.Event)
+    presented: set[str] = field(default_factory=set[str])
+    content: set[str] = field(default_factory=lambda: {ACCEPTED_NAME})
 
     def __post_init__(self) -> None:
         self._front = McpPersonFront(
@@ -130,11 +142,18 @@ class FakeApp:
 
     def let_in(self, bearer: str, subject: str) -> None:
         self.bearers[bearer] = subject
+        self.presented.add(bearer)
 
     def stand(self, subject: str, *standings: Standing) -> None:
         """Sets the subject's standings and signals the change, as an app does once the state is visible."""
         self.standings[subject] = list(standings)
+        for each in standings:
+            self.content.update([each.place.id, *([each.invitation.id] if each.invitation else [])])
         self.changes.changed(Principal(iss=ISSUER, sub=subject), STANDING_URI)
+
+    def kept_out_of_logs(self) -> set[str]:
+        """Every bearer this app let in or was shown, and every piece of content it served or took."""
+        return {*self.presented, *self.content} - {""}
 
     def hold_next_read(self) -> asyncio.Event:
         """The next read takes its snapshot, tells ``read_held`` and answers once the returned event is set."""
@@ -163,10 +182,12 @@ class FakeApp:
         return snapshot
 
     async def _accept(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
-        self.accepted.append(AcceptInvitationArguments.model_validate(arguments))
+        taken = AcceptInvitationArguments.model_validate(arguments)
+        self.accepted.append(taken)
+        self.content.update([taken.place.id, taken.invitation])
         if self.accept_outcomes:
             return self.accept_outcomes.pop(0)
-        return ToolOutcome(json.dumps({"name": "Mozart"}), is_error=False)
+        return ToolOutcome(json.dumps({"name": ACCEPTED_NAME}), is_error=False)
 
     @asynccontextmanager
     async def serving(self) -> AsyncIterator[str]:
@@ -187,8 +208,9 @@ class FakeApp:
         self.log.add(method)
         headers = {name.decode(): value.decode() for name, value in scope["headers"]}
         bearer = headers.get("authorization", "").removeprefix("Bearer ")
+        self.presented.add(bearer)
         noting = self._noting_acknowledgements(send)
-        reply = Reply(Rpc(document.get("id", 0), method, document.get("params") or {}), noting)
+        reply = Reply(Rpc(document.get("id", 0), method, document.get("params") or {}), noting, receive)
         if bearer not in self.bearers:
             self.refusals.put_nowait(HTTPStatus.UNAUTHORIZED)
             await reply.status(HTTPStatus.UNAUTHORIZED)
