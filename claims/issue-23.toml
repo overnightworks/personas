@@ -1,0 +1,8 @@
+claim_id = "84f3a7a9b02b4f62b2d1b122b36767fc"
+agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
+role = "builder"
+base = "ee409f00ab3fa98d9d7247c429fe7a9acaa93c46"
+branch = "claude/issue-23-mozart-answers-an-addressed-line-in-a-ca"
+scope = ["README.md", "docs/ARCHITECTURE.md", "pyproject.toml", "src/agents/app_session.py", "src/agents/config.py", "src/agents/decision.py", "src/agents/loop.py", "src/agents/main.py", "src/agents/reporting.py", "src/agents/tokens.py", "tests", "uv.lock"]
+opened_commit = "f9b3c578e18ebe699b49c1f40db58a19eac57803"
+whole_reason = "Token facts, persona and gateway settings, the window read and the relayed turn are one caller chain from main; any earlier cut leaves code no entry point reaches."
