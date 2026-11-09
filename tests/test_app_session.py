@@ -24,11 +24,11 @@ from mcp_types import (
 )
 from pydantic import ValidationError
 
-from agents import app_session
-from agents.app_session import open_mcp_session
-from agents.config import AppTarget
-from agents.decision import Accept, Refusal, status_code
-from agents.failures import (
+from personas import app_session
+from personas.app_session import open_mcp_session
+from personas.config import AppTarget
+from personas.decision import Accept, Refusal, status_code
+from personas.failures import (
     INVALID_ANSWER_CODE,
     LISTEN_NOT_HONORED_CODE,
     StatusFailure,
@@ -36,8 +36,8 @@ from agents.failures import (
     UnusableAnswer,
     leaves_of,
 )
-from agents.main import configure_logging
-from agents.secret import Secret
+from personas.main import configure_logging
+from personas.secret import Secret
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import (
     CALL,

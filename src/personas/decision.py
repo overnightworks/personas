@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Final
 
 from agent_runtime_client.member import PlaceEntry, PlaceRef, PlaceWindow, Standing, StandingState
 
-from agents.failures import CallFailure, StatusFailure, TokenStatusFailure, UnusableAnswer
+from personas.failures import CallFailure, StatusFailure, TokenStatusFailure, UnusableAnswer
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from agent_runtime_client.tools import ToolDeclaration
     from agent_runtime_client.turn import AgentRole
 
-    from agents.secret import Secret
+    from personas.secret import Secret
 
 CALL_PLACE_KIND: Final = "call"
 RENEW_BEFORE_EXPIRY_SECONDS: Final = 60.0

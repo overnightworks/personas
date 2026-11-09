@@ -10,18 +10,18 @@ from typing import TYPE_CHECKING
 
 from agent_runtime_client.member import MemberStanding, PlaceEntry, PlaceWindow, Standing
 
-from agents.config import AgentCredentials, AppTarget
-from agents.decision import Accept, Refusal
-from agents.failures import CallFailure
-from agents.secret import Secret
-from agents.tokens import GrantedToken
+from personas.config import AgentCredentials, AppTarget
+from personas.decision import Accept, Refusal
+from personas.failures import CallFailure
+from personas.secret import Secret
+from personas.tokens import GrantedToken
 from tests.support.hopin import GENERATION, ISSUER
 from tests.support.realm import AGENT_NAME, API_GROUP, jwt_of
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from agents.reporting import StateChange
+    from personas.reporting import StateChange
 
 
 class FakeClock:

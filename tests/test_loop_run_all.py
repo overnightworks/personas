@@ -6,9 +6,9 @@ import asyncio
 
 import pytest
 
-from agents import app_session
-from agents.failures import leaves_of
-from agents.loop import UnrequestedCancellationError
+from personas import app_session
+from personas.failures import leaves_of
+from personas.loop import UnrequestedCancellationError
 from tests.support.call import PLACE_ID
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import LIMIT_SECONDS, active

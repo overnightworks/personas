@@ -1,4 +1,4 @@
-"""The operator's configuration: one TOML file named by ``AGENTS_CONFIG``.
+"""The operator's configuration: one TOML file named by ``PERSONAS_CONFIG``.
 
 The file holds the realm's token endpoint, the ready file's path, the apps (an MCP URL and its scope) and the agents
 (a client id and the path of the file holding its client secret). Which apps an agent may reach
@@ -30,13 +30,13 @@ from pydantic import (
     model_validator,
 )
 
-from agents.decision import TURN_ROLE, TurnCap
-from agents.secret import Secret
+from personas.decision import TURN_ROLE, TurnCap
+from personas.secret import Secret
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-CONFIG_ENVIRONMENT_VARIABLE: Final = "AGENTS_CONFIG"
+CONFIG_ENVIRONMENT_VARIABLE: Final = "PERSONAS_CONFIG"
 
 
 class ConfigError(Exception):

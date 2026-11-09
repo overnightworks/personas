@@ -13,8 +13,8 @@ from agent_runtime_client.member import PlaceRef
 from agent_runtime_client.tools import ToolDeclaration, ToolEffect
 from agent_runtime_client.turn import RejectionCode
 
-from agents.config import load_config
-from agents.decision import (
+from personas.config import load_config
+from personas.decision import (
     BACKOFF_CAP_SECONDS,
     RENEW_BEFORE_EXPIRY_SECONDS,
     SUSPENDED_RETRY_SECONDS,
@@ -22,8 +22,8 @@ from agents.decision import (
     Refusal,
     backoff_delay,
 )
-from agents.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer, leaves_of
-from agents.loop import AgentLoop, Boundaries, TurnCounter
+from personas.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer, leaves_of
+from personas.loop import AgentLoop, Boundaries, TurnCounter
 from tests.support.fakes import (
     FakeClock,
     FakeReadyMarker,

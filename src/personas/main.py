@@ -1,4 +1,4 @@
-"""The entry point: the console script ``agents``, which composes the real boundaries."""
+"""The entry point: the console script ``personas``, which composes the real boundaries."""
 
 from __future__ import annotations
 
@@ -13,14 +13,14 @@ from typing import TYPE_CHECKING, Final
 import httpx2
 from agent_runtime_client.backend.gateway import GatewayBackend
 
-from agents.app_session import open_mcp_session
-from agents.clock import SystemClock
-from agents.config import Config, ConfigError, load_config
-from agents.failures import leaves_of
-from agents.loop import Boundaries, run_all
-from agents.readiness import FileReadyMarker, ReadinessError, ReadyMarker
-from agents.reporting import log_state_change
-from agents.tokens import HttpTokenSource
+from personas.app_session import open_mcp_session
+from personas.clock import SystemClock
+from personas.config import Config, ConfigError, load_config
+from personas.failures import leaves_of
+from personas.loop import Boundaries, run_all
+from personas.readiness import FileReadyMarker, ReadinessError, ReadyMarker
+from personas.reporting import log_state_change
+from personas.tokens import HttpTokenSource
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable, Iterable
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from agent_runtime_client.config import AgentConfig
     from agent_runtime_client.tools import HandTool
 
-    from agents.loop import BackendFactory
+    from personas.loop import BackendFactory
 
 type Compose = Callable[[Config, ReadyMarker], AbstractAsyncContextManager[Boundaries]]
 
@@ -90,7 +90,7 @@ def main(compose: Compose = real_boundaries) -> None:
     try:
         config = load_config(os.environ)
     except ConfigError as error:
-        sys.stderr.write(f"agents: {error}\n")
+        sys.stderr.write(f"personas: {error}\n")
         raise SystemExit(CONFIGURATION_ERROR_EXIT_CODE) from None
     configure_logging()
     marker = FileReadyMarker(config.ready_file)
@@ -99,5 +99,5 @@ def main(compose: Compose = real_boundaries) -> None:
         marker.clear()
         asyncio.run(_run(config, marker, compose))
     except* ReadinessError as group:
-        sys.stderr.write(f"agents: {next(leaves_of(group))}\n")
+        sys.stderr.write(f"personas: {next(leaves_of(group))}\n")
         raise SystemExit(READINESS_ERROR_EXIT_CODE) from None

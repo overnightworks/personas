@@ -13,14 +13,14 @@ from agent_runtime_client.backend.fake_gateway import completion
 from agent_runtime_client.backend.gateway import GatewayBackend
 from agent_runtime_client.turn import Principal
 
-from agents.app_session import READ_SECONDS, open_mcp_session
-from agents.config import load_config
-from agents.loop import AgentLoop, Boundaries, TurnCounter, run_all
-from agents.main import QUIET_LIBRARIES, configure_logging
-from agents.readiness import FileReadyMarker
-from agents.reporting import log_state_change
-from agents.secret import Secret
-from agents.tokens import HttpTokenSource
+from personas.app_session import READ_SECONDS, open_mcp_session
+from personas.config import load_config
+from personas.loop import AgentLoop, Boundaries, TurnCounter, run_all
+from personas.main import QUIET_LIBRARIES, configure_logging
+from personas.readiness import FileReadyMarker
+from personas.reporting import log_state_change
+from personas.secret import Secret
+from personas.tokens import HttpTokenSource
 from tests.support.configfiles import Files
 from tests.support.fakes import (
     FakeClock,
@@ -44,10 +44,10 @@ if TYPE_CHECKING:
     from agent_runtime_client.member import MemberStanding
     from agent_runtime_client.tools import HandTool
 
-    from agents.decision import Refusal, TurnCap
-    from agents.failures import CallFailure
-    from agents.reporting import StateChange
-    from agents.tokens import GrantedToken
+    from personas.decision import Refusal, TurnCap
+    from personas.failures import CallFailure
+    from personas.reporting import StateChange
+    from personas.tokens import GrantedToken
 
 SCENARIO_LIMIT_SECONDS = 10
 

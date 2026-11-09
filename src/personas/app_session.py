@@ -38,9 +38,9 @@ from mcp_types import (
 )
 from pydantic import BaseModel, ValidationError
 
-from agents.config import AppTarget
-from agents.decision import Accept, Refusal, status_code
-from agents.failures import (
+from personas.config import AppTarget
+from personas.decision import Accept, Refusal, status_code
+from personas.failures import (
     INVALID_ANSWER_CODE,
     LATE_ANSWER_ERRORS,
     LISTEN_NOT_HONORED_CODE,
@@ -51,7 +51,7 @@ from agents.failures import (
     UnusableAnswer,
     leaves_of,
 )
-from agents.secret import Secret
+from personas.secret import Secret
 
 CONNECT_SECONDS: Final = 30.0
 READ_SECONDS: Final = 2 * LISTEN_BOUND_SECONDS
