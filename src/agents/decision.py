@@ -11,9 +11,9 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
-from agent_runtime_client.wait import StandingState, WaitAnswer
+from agent_runtime_client.member import PlaceRef, Standing, StandingState
 
-from agents.failures import CallFailure, StatusFailure, TokenStatusFailure, UnusableAnswer, WaitToolError
+from agents.failures import CallFailure, StatusFailure, TokenStatusFailure, UnusableAnswer
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -29,7 +29,6 @@ BACKOFF_CAP_SECONDS: Final = 30.0
 _DOUBLINGS_TO_CAP: Final = math.ceil(math.log2(BACKOFF_CAP_SECONDS / BACKOFF_BASE_SECONDS))
 SUSPENDED_RETRY_SECONDS: Final = 30.0
 """How often a suspended loop asks the realm and then the app again."""
-WAIT_ERROR_CODE: Final = "wait_error"
 
 
 class Refusal(StrEnum):
@@ -56,7 +55,7 @@ class Suspend:
 
 @dataclass(frozen=True)
 class Accept:
-    place_id: str
+    place: PlaceRef
     invitation_id: str
     epoch: int
 
@@ -75,11 +74,11 @@ class Memory:
     refused: Mapping[str, Refusal] = field(default_factory=dict[str, Refusal])
 
 
-def accepts_for(answer: WaitAnswer, memory: Memory) -> tuple[Accept, ...]:
+def accepts_for(standings: tuple[Standing, ...], memory: Memory) -> tuple[Accept, ...]:
     """One accept for each invited call standing whose invitation was not refused as stale."""
     return tuple(
-        Accept(standing.place.id, standing.invitation.id, standing.invitation.epoch)
-        for standing in answer.standings
+        Accept(standing.place, standing.invitation.id, standing.invitation.epoch)
+        for standing in standings
         if standing.state is StandingState.INVITED
         and standing.invitation is not None
         and standing.place.kind == CALL_PLACE_KIND
@@ -87,9 +86,9 @@ def accepts_for(answer: WaitAnswer, memory: Memory) -> tuple[Accept, ...]:
     )
 
 
-def forget_gone(memory: Memory, answer: WaitAnswer) -> Memory:
-    """Drop the last refusal of an invitation the answer no longer holds; a stale one stays refused."""
-    present = {standing.invitation.id for standing in answer.standings if standing.invitation is not None}
+def forget_gone(memory: Memory, standings: tuple[Standing, ...]) -> Memory:
+    """Drop the last refusal of an invitation the standings no longer hold; a stale one stays refused."""
+    present = {standing.invitation.id for standing in standings if standing.invitation is not None}
     return Memory(
         stale=memory.stale,
         refused={invitation: code for invitation, code in memory.refused.items() if invitation in present},
@@ -131,8 +130,6 @@ def reaction_to(failure: CallFailure, *, already_renewed: bool) -> Reaction | Su
     A server error and a failure of the network back off. An app's first 401 renews the token once.
     """
     match failure:
-        case WaitToolError():
-            return Suspend(WAIT_ERROR_CODE)
         case UnusableAnswer(code=code):
             return Suspend(code)
         case StatusFailure(status=status):

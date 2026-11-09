@@ -43,10 +43,10 @@ dependencies, hatchling is pinned as in skat, and `uv sync` installs.
 - `Image` builds the `Dockerfile` on every pull request and push without
   pushing it, and checks that the image refuses to start with no
   `AGENTS_CONFIG`. `release.yml` is the only path that pushes an image.
-- `quality/config.toml` configures the shared gate: `mandatory_jobs` names
-  `Documents`, `Lint and test` and `Image`, and there is no `legacy` key. The required check is
-  `quality / verdict`; overnightworks/quality's README owns the gate's
-  semantics. A new check joins `mandatory_jobs` with its job.
+- `quality/config.toml` configures the shared gate: `mandatory_jobs` names `Documents`,
+  `Lint and test` and `Image`, and there is no `legacy` key. The required check is
+  `quality / verdict`; overnightworks/quality's README owns the gate's semantics. A new check
+  joins `mandatory_jobs` with its job.
 - The root holds only what the gate's `root-layout` rule allows; a new root
   entry needs a `[[root.allow]]` entry with its reason.
 - `sonar.sources` names `src/agents`, `.github` whole and `Dockerfile`; add each directory of

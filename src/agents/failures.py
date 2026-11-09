@@ -6,6 +6,10 @@ from typing import Final
 
 INVALID_ANSWER_CODE: Final = "invalid_answer"
 """The code of an answer that arrived but is not the kind of answer asked for."""
+LISTEN_NOT_HONORED_CODE: Final = "listen_not_honored"
+"""The code of a stream the app acknowledged without the subscription the runner asked for."""
+UNSUPPORTED_VERSION_CODE: Final = "unsupported_version"
+"""The code of an app that shares no protocol revision with the runner."""
 
 
 # The base of the failures below, which name their kind; a suffix would repeat it.
@@ -27,10 +31,6 @@ class TokenStatusFailure(StatusFailure):
 
 class Unreachable(CallFailure):
     """The server was not reached or timed out."""
-
-
-class WaitToolError(CallFailure):
-    """The ``wait`` tool answered with an error result."""
 
 
 class UnusableAnswer(CallFailure):

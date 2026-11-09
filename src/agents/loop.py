@@ -24,7 +24,7 @@ from agents.failures import CallFailure
 from agents.reporting import Event, Reporter, StateChange
 
 if TYPE_CHECKING:
-    from agent_runtime_client.wait import WaitAnswer
+    from agent_runtime_client.member import Standing
 
     from agents.app_session import AppSession, SessionOpener
     from agents.clock import Clock
@@ -55,11 +55,11 @@ def _raise_if_cancelled() -> None:
 
 
 class AgentLoop:
-    """Keeps one ``wait`` in flight for one agent in one app and accepts what it is invited to.
+    """Keeps one stream of changes open for one agent in one app and accepts what it is invited to.
 
     A refusal by the realm or the app suspends the loop: it makes no further call until its next
-    retry, and resumes once ``wait`` answers again. A network failure or a 5xx backs off, logged once until
-    ``wait`` answers.
+    retry, and resumes once a read answers again. A network failure, a lost stream or a 5xx backs off,
+    logged once until a read answers.
     """
 
     def __init__(self, agent: AgentCredentials, app: AppTarget, boundaries: Boundaries) -> None:
@@ -67,7 +67,6 @@ class AgentLoop:
         self._app = app
         self._boundaries = boundaries
         self._token: Token | None = None
-        self._cursor: str | None = None
         self._memory = Memory()
         self._failures = 0
         self._renewed_after_401 = False
@@ -81,8 +80,6 @@ class AgentLoop:
             try:
                 await self._serve()
             except CallFailure as failure:
-                # The next wait starts without a cursor, so its answer is the whole standing again.
-                self._cursor = None
                 await self._react(failure)
 
     async def _serve(self) -> NoReturn:
@@ -90,13 +87,20 @@ class AgentLoop:
         async with self._boundaries.open_session(self._app, token.value) as session:
             while True:
                 await self._use_current_token(session)
-                answer = await session.wait(self._cursor)
-                self._cursor = answer.cursor
-                self._resume_if_unwell()
-                self._boundaries.ready.announce()
-                self._memory = forget_gone(self._memory, answer)
-                await self._accept_invitations(session, answer)
-                self._served()
+                async with session.changes() as changes:
+                    await self._reconcile(session)
+                    async for _ in changes:
+                        await self._reconcile(session)
+
+    async def _reconcile(self, session: AppSession) -> None:
+        """Reads the standing as it is now and acts on it; a wake says only that it may have changed."""
+        await self._use_current_token(session)
+        standing = await session.read_standing()
+        self._resume_if_unwell()
+        self._boundaries.ready.announce()
+        self._memory = forget_gone(self._memory, standing.standings)
+        await self._accept_invitations(session, standing.standings)
+        self._served()
 
     async def _use_current_token(self, session: AppSession) -> None:
         session.use_token((await self._current_token()).value)
@@ -109,19 +113,19 @@ class AgentLoop:
         return self._token
 
     def _served(self) -> None:
-        """A wait and every accept it led to went through: the failure counters start over."""
+        """A read and every accept it led to went through: the failure counters start over."""
         self._failures = 0
         self._renewed_after_401 = False
 
     def _resume_if_unwell(self) -> None:
-        """A wait answered: the app is reachable and accepts the token, whatever an accept then does."""
+        """A read answered: the app is reachable and accepts the token, whatever an accept then does."""
         if self._suspension is not None or self._backing_off:
             self._suspension = None
             self._backing_off = False
             self._report(Event.RESUMED)
 
-    async def _accept_invitations(self, session: AppSession, answer: WaitAnswer) -> None:
-        for accept in accepts_for(answer, self._memory):
+    async def _accept_invitations(self, session: AppSession, standings: tuple[Standing, ...]) -> None:
+        for accept in accepts_for(standings, self._memory):
             await self._use_current_token(session)
             refusal = await session.accept(accept)
             if refusal is None:

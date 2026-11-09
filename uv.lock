@@ -28,6 +28,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "ruff" },
+    { name = "uvicorn" },
     { name = "vulture" },
 ]
 
@@ -36,18 +37,19 @@ requires-dist = [
     { name = "httpx2", specifier = ">=2.16.0" },
     { name = "mcp", specifier = ">=2.3.0" },
     { name = "mcp-types", specifier = ">=2.3.0" },
-    { name = "overnightworks-agent-runtime-client", git = "https://github.com/overnightworks/agent-runtime?rev=v0.25.0" },
+    { name = "overnightworks-agent-runtime-client", git = "https://github.com/overnightworks/agent-runtime?rev=v0.26.0" },
     { name = "pydantic", specifier = ">=2.12" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "anyio", specifier = ">=4.16.0" },
-    { name = "overnightworks-agent-runtime-client", extras = ["mcp-server"], git = "https://github.com/overnightworks/agent-runtime?rev=v0.25.0" },
+    { name = "overnightworks-agent-runtime-client", extras = ["mcp-server"], git = "https://github.com/overnightworks/agent-runtime?rev=v0.26.0" },
     { name = "pyright", specifier = ">=1.1.414" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-cov", specifier = ">=7.0.0" },
     { name = "ruff", specifier = ">=0.17.0" },
+    { name = "uvicorn", specifier = ">=0.54.0" },
     { name = "vulture", specifier = ">=2.15" },
 ]
 
@@ -452,8 +454,8 @@ wheels = [
 
 [[package]]
 name = "overnightworks-agent-runtime-client"
-version = "0.25.0"
-source = { git = "https://github.com/overnightworks/agent-runtime?rev=v0.25.0#8de4e2e8ab32c673a11d5f0e5fb43428cb9664c9" }
+version = "0.26.0"
+source = { git = "https://github.com/overnightworks/agent-runtime?rev=v0.26.0#d6a76d01b80dc9434607bf0c91cdd6a6e999430e" }
 dependencies = [
     { name = "pydantic" },
     { name = "ruamel-yaml" },
@@ -462,6 +464,7 @@ dependencies = [
 [package.optional-dependencies]
 mcp-server = [
     { name = "anyio" },
+    { name = "mcp" },
 ]
 
 [[package]]
