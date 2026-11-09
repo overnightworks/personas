@@ -1,0 +1,7 @@
+claim_id = "a345fd2fdfb74206829ecc2b0a1a06d3"
+agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
+role = "builder"
+base = "cba3c2ac826467d455e83e822c11fba3f202932d"
+branch = "claude/issue-39-agents-agents-md-has-the-fleet-s-shape"
+scope = ["AGENTS.md", "docs/ARCHITECTURE.md"]
+opened_commit = "c56b8559d630afeb8f7953c3076b95808b51eaf0"
