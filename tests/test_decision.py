@@ -7,7 +7,14 @@ import json
 import secrets
 
 import pytest
-from agent_runtime_client.member import LEASE_SECONDS, LISTEN_BOUND_SECONDS, PlaceRef, Standing, StandingState
+from agent_runtime_client.member import (
+    LEASE_SECONDS,
+    LISTEN_BOUND_SECONDS,
+    PlaceRef,
+    PlaceWindow,
+    Standing,
+    StandingState,
+)
 from agent_runtime_client.tools import ToolDeclaration
 
 from agents.app_session import READ_SECONDS
@@ -15,10 +22,14 @@ from agents.decision import (
     BACKOFF_CAP_SECONDS,
     RENEW_BEFORE_EXPIRY_SECONDS,
     Accept,
+    Joined,
     Memory,
+    Paused,
+    Perception,
     Reaction,
+    Reading,
     Refusal,
-    Seen,
+    Restarted,
     Suspend,
     Token,
     TurnCap,
@@ -30,16 +41,18 @@ from agents.decision import (
     bound_declarations,
     decisive_failure,
     forget_gone,
+    perceive,
     reaction_to,
     renewal_due,
     reserve_turn,
+    sets_where_reading_starts,
+    sync_checkpoints,
     turn_input,
-    unread,
 )
 from agents.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer
 from agents.secret import Secret
 from tests.support.fakes import line, window_of
-from tests.support.hopin import active, invited
+from tests.support.hopin import GENERATION, active, invited, paused
 
 TRANSIENT_REFUSALS = [Refusal.SPONSOR_AWAY, Refusal.TWO_SEATS, Refusal.BUSY, Refusal.UNRECOGNISED]
 
@@ -216,21 +229,109 @@ def test_only_the_active_call_places_are_read():
     assert active_call_places((active("room-7"), paused, other, invited("room-9", "inv-3"))) == (PLACE,)
 
 
-@pytest.mark.parametrize(
-    ("seen", "expected"),
-    [
-        (None, [1, 2, 3]),
-        (Seen("generation-1", 0), [1, 2, 3]),
-        (Seen("generation-1", 2), [3]),
-        (Seen("generation-1", 3), []),
-        (Seen("generation-2", 3), [1, 2, 3]),
-    ],
-    ids=["nothing seen", "seen up to nothing", "seen up to the second", "seen all", "another generation"],
-)
-def test_the_unread_lines_are_the_ones_after_what_was_seen_and_reading_otherwise_starts_at_seq_1(seen, expected):
-    window = window_of(line(1, "a"), line(2, "b"), line(3, "c"))
+OTHER_GENERATION = "generation-2"
+OTHER_PLACE = PlaceRef(kind="call", id="room-8")
 
-    assert [each.seq for each in unread(window, seen)] == expected
+
+@pytest.mark.parametrize(
+    ("checkpoints", "standings", "expected"),
+    [
+        ({}, (active("room-7"),), {PLACE: Restarted()}),
+        ({PLACE: Reading(GENERATION, 4)}, (active("room-7"),), {PLACE: Reading(GENERATION, 4)}),
+        ({PLACE: Joined()}, (active("room-7"),), {PLACE: Joined()}),
+        ({PLACE: Paused()}, (active("room-7"),), {PLACE: Paused()}),
+        ({}, (paused("room-7"),), {PLACE: Paused()}),
+        ({PLACE: Reading(GENERATION, 4)}, (paused("room-7"),), {PLACE: Paused()}),
+        ({PLACE: Joined()}, (paused("room-7"),), {PLACE: Paused()}),
+        ({PLACE: Reading(GENERATION, 4)}, (invited("room-7", "inv-3"),), {}),
+        ({PLACE: Joined()}, (invited("room-7", "inv-3"),), {}),
+        ({PLACE: Reading(GENERATION, 4)}, (), {}),
+        ({OTHER_PLACE: Reading(GENERATION, 2)}, (active("room-7"),), {PLACE: Restarted()}),
+    ],
+    ids=[
+        "an active place this process did not join starts as restarted",
+        "an active place keeps its reading",
+        "an active place keeps its join",
+        "an active place keeps its pause",
+        "a paused place with no entry is paused",
+        "a paused place that was read is paused",
+        "a paused place that was joined is paused",
+        "a place invited again drops its reading",
+        "a place invited again drops its join",
+        "a place gone from the standing drops its entry",
+        "an entry of a place gone is dropped beside a new one",
+    ],
+)
+def test_the_standing_decides_which_checkpoints_exist(checkpoints, standings, expected):
+    assert sync_checkpoints(checkpoints, standings) == expected
+
+
+def test_a_place_of_another_kind_gets_no_checkpoint():
+    table = Standing(place=PlaceRef(kind="table", id="table-1"), state=StandingState.ACTIVE)
+
+    assert sync_checkpoints({}, (table,)) == {}
+
+
+@pytest.mark.parametrize(
+    ("checkpoint", "sets_start"),
+    [(Restarted(), True), (Paused(), True), (Joined(), False), (Reading(GENERATION, 2), False)],
+    ids=["restarted", "paused", "joined", "reading"],
+)
+def test_only_a_restarted_or_paused_checkpoint_waits_for_a_read_to_set_where_reading_starts(checkpoint, sets_start):
+    assert sets_where_reading_starts(checkpoint) is sets_start
+
+
+@pytest.mark.parametrize(
+    ("checkpoint", "window", "expected"),
+    [
+        (Restarted(), window_of(line(1, "a"), line(2, "b"), line(3, "c")), (Reading(GENERATION, 3), [], False)),
+        (Paused(), window_of(line(1, "a"), line(2, "b"), line(3, "c")), (Reading(GENERATION, 3), [], False)),
+        (Restarted(), PlaceWindow(generation=GENERATION, starts_at=5, entries=()), (Reading(GENERATION, 4), [], False)),
+        (Restarted(), window_of(line(4, "a"), line(5, "b")), (Reading(GENERATION, 5), [], False)),
+        (Joined(), window_of(line(1, "a"), line(2, "b"), line(3, "c")), (Reading(GENERATION, 3), [1, 2, 3], False)),
+        (Joined(), PlaceWindow(generation=GENERATION, starts_at=1, entries=()), (Reading(GENERATION, 0), [], False)),
+        (Joined(), window_of(line(4, "a"), line(5, "b")), (Reading(GENERATION, 5), [4, 5], True)),
+        (
+            Reading(GENERATION, 2),
+            window_of(line(1, "a"), line(2, "b"), line(3, "c")),
+            (Reading(GENERATION, 3), [3], False),
+        ),
+        (
+            Reading(GENERATION, 3),
+            window_of(line(1, "a"), line(2, "b"), line(3, "c")),
+            (Reading(GENERATION, 3), [], False),
+        ),
+        (Reading(GENERATION, 1), window_of(line(5, "a"), line(6, "b")), (Reading(GENERATION, 6), [5, 6], True)),
+        (Reading(GENERATION, 4), window_of(line(5, "a"), line(6, "b")), (Reading(GENERATION, 6), [5, 6], False)),
+        (
+            Reading(OTHER_GENERATION, 3),
+            window_of(line(1, "a"), line(2, "b"), line(3, "c")),
+            (Reading(GENERATION, 3), [1, 2, 3], False),
+        ),
+        (Reading(OTHER_GENERATION, 3), window_of(line(4, "a"), line(5, "b")), (Reading(GENERATION, 5), [4, 5], True)),
+    ],
+    ids=[
+        "restarted: reads to the highest line and takes none",
+        "paused: reads to the highest line and takes none",
+        "restarted on an empty window: reads to the line before the window",
+        "restarted on a window that starts late: reads to its highest line",
+        "joined: every line is new",
+        "joined on an empty window: nothing is new",
+        "joined on a window that starts after seq 1: lines were missed",
+        "reading: the lines after the last one are new",
+        "reading: nothing after the last one",
+        "reading: the window moved past the last one",
+        "reading: the window starts right after the last one",
+        "another generation: reading starts over at seq 1",
+        "another generation on a window that starts after seq 1: lines were missed",
+    ],
+)
+def test_a_window_is_perceived_from_its_checkpoint(checkpoint, window, expected):
+    reading, new, missed = expected
+    perception = perceive(window, checkpoint)
+
+    assert perception == Perception(reading, perception.new, missed)
+    assert [each.seq for each in perception.new] == new
 
 
 @pytest.mark.parametrize(
@@ -288,7 +389,7 @@ def test_a_turn_is_told_facts_only_the_room_the_lines_which_are_new_and_which_ar
     own, theirs, new = secrets.token_hex(4), secrets.token_hex(4), secrets.token_hex(4)
     window = window_of(line(4, theirs, name="Ada"), line(5, own, own=True, name="Mozart"), line(6, new, name="Ada"))
 
-    facts = json.loads(turn_input(PLACE, "Mozart", window, window.entries[2:]))
+    facts = json.loads(turn_input(PLACE, "Mozart", window, window.entries[2:], missed=False))
 
     assert (facts["kind"], facts["id"], facts["you"]) == (PLACE.kind, PLACE.id, "Mozart")
     assert [(each["seq"], each["text"], each["own"], each["new"]) for each in facts["lines"]] == [
@@ -296,6 +397,13 @@ def test_a_turn_is_told_facts_only_the_room_the_lines_which_are_new_and_which_ar
         (5, own, True, False),
         (6, new, False, True),
     ]
+
+
+@pytest.mark.parametrize("missed", [False, True])
+def test_a_turn_is_told_whether_older_lines_were_not_seen(missed):
+    window = window_of(line(4, "a"))
+
+    assert json.loads(turn_input(PLACE, "Mozart", window, window.entries, missed=missed))["missed"] is missed
 
 
 CAP = TurnCap(max_turns=3, period_seconds=100.0)

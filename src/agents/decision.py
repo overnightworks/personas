@@ -173,11 +173,50 @@ def _rank(reaction: Reaction | Suspend) -> int:
 
 
 @dataclass(frozen=True)
-class Seen:
-    """How far one place's window was read: the run of seq numbers it belongs to and the last line taken."""
+class Restarted:
+    """This process did not join the place: what its window holds was said before and is never taken."""
+
+
+@dataclass(frozen=True)
+class Joined:
+    """The agent's own accept just made it a member: its window holds every line said since."""
+
+
+@dataclass(frozen=True)
+class Paused:
+    """The sponsor is away: lines said meanwhile are never taken."""
+
+
+@dataclass(frozen=True)
+class Reading:
+    """How far one run of a window was read: its generation and the last seq taken."""
 
     generation: str
     last_seq: int
+
+
+type Checkpoint = Restarted | Joined | Paused | Reading
+
+
+def sync_checkpoints(
+    checkpoints: Mapping[PlaceRef, Checkpoint], standings: tuple[Standing, ...]
+) -> dict[PlaceRef, Checkpoint]:
+    """The checkpoints after a standing read: a call place paused is paused, one active keeps its entry or starts as
+    restarted, and a place that is gone or invited again has none."""
+    synced: dict[PlaceRef, Checkpoint] = {}
+    for standing in standings:
+        if standing.place.kind != CALL_PLACE_KIND:
+            continue
+        if standing.state is StandingState.PAUSED:
+            synced[standing.place] = Paused()
+        elif standing.state is StandingState.ACTIVE:
+            synced[standing.place] = checkpoints.get(standing.place, Restarted())
+    return synced
+
+
+def sets_where_reading_starts(checkpoint: Checkpoint) -> bool:
+    """A read of a restarted or paused place only sets its checkpoint: nothing in it is taken, so it starts no turn."""
+    return isinstance(checkpoint, Restarted | Paused)
 
 
 def active_call_places(standings: tuple[Standing, ...]) -> tuple[PlaceRef, ...]:
@@ -207,11 +246,33 @@ def reserve_turn(started: tuple[float, ...], now: float, cap: TurnCap) -> tuple[
     return (*inside, now)
 
 
-def unread(window: PlaceWindow, seen: Seen | None) -> tuple[PlaceEntry, ...]:
-    """The lines after ``seen``; with none, or another run of seq numbers, reading starts at seq 1."""
-    if seen is None or seen.generation != window.generation:
-        return window.entries
-    return tuple(line for line in window.entries if line.seq > seen.last_seq)
+@dataclass(frozen=True)
+class Perception:
+    """What reading a window from a checkpoint yields: the checkpoint after it, the lines taken and whether older ones
+    were never seen."""
+
+    checkpoint: Reading
+    new: tuple[PlaceEntry, ...]
+    missed: bool
+
+
+def perceive(window: PlaceWindow, checkpoint: Checkpoint) -> Perception:
+    """Reads a window from a checkpoint: a restart or a pause takes nothing, a join and a new run take every line."""
+    if sets_where_reading_starts(checkpoint):
+        highest = window.entries[-1].seq if window.entries else window.starts_at - 1
+        return Perception(Reading(window.generation, highest), (), missed=False)
+    match checkpoint:
+        case Reading(generation=window.generation, last_seq=last_seq):
+            return _take_after(window, last_seq)
+        case _:
+            return _take_after(window, 0)
+
+
+def _take_after(window: PlaceWindow, last_seq: int) -> Perception:
+    new = tuple(line for line in window.entries if line.seq > last_seq)
+    return Perception(
+        Reading(window.generation, new[-1].seq if new else last_seq), new, missed=window.starts_at > last_seq + 1
+    )
 
 
 def addressed(line: PlaceEntry, name: str) -> bool:
@@ -242,11 +303,13 @@ class _TurnRoom:
     kind: str
     id: str
     you: str
+    missed: bool
     lines: tuple[_TurnLine, ...]
 
 
-def turn_input(place: PlaceRef, name: str, window: PlaceWindow, new: Sequence[PlaceEntry]) -> str:
-    """The facts of a turn: the room, the agent's name, every line of the window, which are new and which are his own.
+def turn_input(place: PlaceRef, name: str, window: PlaceWindow, new: Sequence[PlaceEntry], *, missed: bool) -> str:
+    """The facts of a turn: the room, the agent's name, every line of the window, which are new and which are his own,
+    and whether older lines were never seen.
 
     It holds no instruction; those live in the persona.
     """
@@ -254,4 +317,4 @@ def turn_input(place: PlaceRef, name: str, window: PlaceWindow, new: Sequence[Pl
     lines = tuple(
         _TurnLine(line.seq, line.kind, line.name, line.text, line.own, line.seq in new_seqs) for line in window.entries
     )
-    return json.dumps(asdict(_TurnRoom(place.kind, place.id, name, lines)), ensure_ascii=False)
+    return json.dumps(asdict(_TurnRoom(place.kind, place.id, name, missed, lines)), ensure_ascii=False)

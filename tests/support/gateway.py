@@ -36,6 +36,11 @@ class TurnOpening:
     user: str
 
     @property
+    def missed(self) -> bool:
+        """Whether the turn was told that lines older than its window were not seen."""
+        return bool(self.room["missed"])
+
+    @property
     def new_seqs(self) -> list[int]:
         return [line["seq"] for line in self.room["lines"] if line["new"]]
 
