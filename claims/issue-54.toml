@@ -1,0 +1,8 @@
+claim_id = "cae38c1f33a54f2b9c68d68f826a7fe6"
+agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
+role = "builder"
+base = "e7fe5be62f53ef7380929b015a77c8dfbec12ec0"
+branch = "claude/issue-54-the-tests-run-in-random-order-with-the-s"
+scope = ["AGENTS.md", "pyproject.toml", "tests", "uv.lock"]
+opened_commit = "305da32826cac21883a4362f8304f532436c8d3c"
+whole_reason = "The dependency and any order-dependent test it exposes are one change; tests is in scope only for such a test."
