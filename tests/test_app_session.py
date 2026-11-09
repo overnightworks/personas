@@ -267,8 +267,10 @@ async def raises_after_a_refused_call(app, bearer, raised):
     "own", [BodyError("the caller's own code failed"), OSError("a local file failed")], ids=["defect", "os error"]
 )
 async def test_a_leaf_the_body_raises_after_the_app_answered_4xx_reaches_the_caller_unchanged(app, bearer, own):
+    group = ExceptionGroup("own", [own])
+
     with pytest.raises(type(own)) as caught:
-        await raises_after_a_refused_call(app, bearer, ExceptionGroup("own", [own]))
+        await raises_after_a_refused_call(app, bearer, group)
 
     assert caught.value is own
 
@@ -356,16 +358,20 @@ def transport_failing_as_it_closes(monkeypatch):
 async def test_an_answer_that_lands_after_the_session_closed_is_unreachable_beside_the_failure_that_closed_it(
     app, bearer
 ):
+    deadline = Unreachable("the stream outlasted its deadline")
+
     with pytest.raises(ExceptionGroup) as caught:
-        await raises_in_the_stream_body(app, bearer, Unreachable("the stream outlasted its deadline"))
+        await raises_in_the_stream_body(app, bearer, deadline)
 
     assert [type(leaf) for leaf in leaves_of(caught.value)] == [Unreachable, Unreachable]
 
 
 @pytest.mark.usefixtures("transport_failing_as_it_closes")
 async def test_an_answer_that_lands_after_a_cancelled_session_closed_stays_the_error_it_is(app, bearer):
+    cancellation = asyncio.CancelledError()
+
     with pytest.raises(anyio.BrokenResourceError):
-        await raises_in_the_stream_body(app, bearer, asyncio.CancelledError())
+        await raises_in_the_stream_body(app, bearer, cancellation)
 
 
 async def test_traffic_with_no_acknowledgement_until_past_the_deadline_is_unreachable(app, bearer):
