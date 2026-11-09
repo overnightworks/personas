@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from agents.config import CONFIG_ENVIRONMENT_VARIABLE, ToolBinding, load_config
+from agents.config import CONFIG_ENVIRONMENT_VARIABLE, ConfigError, ToolBinding, load_config
 from agents.decision import TurnCap
 from agents.main import CONFIGURATION_ERROR_EXIT_CODE, main
 from tests.support.configfiles import MAX_TOOL_CALLS, MAX_TURNS, PERSONA_NAME, TURN_PERIOD_SECONDS
@@ -168,6 +168,44 @@ def test_a_turn_cap_amount_that_is_missing_stops_the_start_and_names_the_field(f
     error = fails_at_start(files.write(), monkeypatch, capsys)
 
     assert field in error
+
+
+def test_a_whole_number_of_seconds_is_taken_for_the_turn_period(files):
+    files.text = "\n".join(
+        "turn_period_seconds = 90" if line.startswith("turn_period_seconds") else line
+        for line in files.text.splitlines()
+    )
+
+    [agent] = load_config(files.write()).agents
+
+    assert agent.turn_cap == TurnCap(MAX_TURNS, 90.0)
+
+
+@pytest.mark.parametrize("field", ["max_turns", "turn_period_seconds"])
+@pytest.mark.parametrize("amount", ["true", '"5"'])
+def test_a_turn_cap_amount_of_another_toml_type_stops_the_start_and_names_the_field(
+    files, monkeypatch, capsys, field, amount
+):
+    files.text = "\n".join(
+        f"{field} = {amount}" if line.startswith(field) else line for line in files.text.splitlines()
+    )
+
+    error = fails_at_start(files.write(), monkeypatch, capsys)
+
+    assert f"agents.0.{field}" in error
+
+
+@pytest.mark.parametrize("field", ["max_turns", "turn_period_seconds"])
+def test_a_second_agent_without_a_turn_cap_amount_is_refused_and_the_field_is_named(files, field):
+    second_agent = f'[[agents]]\nclient_id = "agent-bach"\nsecret_file = "{files.secret_path}"\n'
+    second_agent += f'persona_file = "{files.persona_path}"\n'
+    second_agent += "".join(f"{key} = 1\n" for key in ("max_turns", "turn_period_seconds") if key != field)
+    files.text += second_agent
+
+    environment = files.write()
+
+    with pytest.raises(ConfigError, match=field):
+        load_config(environment)
 
 
 @pytest.mark.parametrize("field", ["max_turns", "turn_period_seconds"])

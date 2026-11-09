@@ -163,7 +163,7 @@ class Harness:
 
     def secrets_and_content(self) -> list[str]:
         return [
-            self.agent.client_secret.reveal(),
+            *(agent.client_secret.reveal() for agent in self.config.agents),
             self.files.gateway_key,
             self.files.persona_prompt,
             *self.realm.issued,

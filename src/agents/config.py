@@ -103,8 +103,8 @@ class _AgentEntry(_Entry):
     client_id: str = Field(min_length=1)
     secret_file: Path
     persona_file: Path | None = None
-    max_turns: PositiveInt | None = None
-    turn_period_seconds: PositiveFloat | None = None
+    max_turns: PositiveInt | None = Field(default=None, strict=True)
+    turn_period_seconds: PositiveFloat | None = Field(default=None, strict=True)
 
     @property
     def turn_cap(self) -> TurnCap | None:

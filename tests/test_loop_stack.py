@@ -42,6 +42,7 @@ from tests.support.hopin import (
     LIST_TOOLS,
     LISTEN,
     READ,
+    Line,
     active,
     formatted,
     invited,
@@ -767,6 +768,7 @@ async def test_a_refused_and_an_answered_turn_log_a_code_and_no_secret_or_conten
 
 
 TURN_CAP = TurnCap(max_turns=1, period_seconds=120.0)
+SECOND_PLACE_ID = "room-8"
 SECOND_AGENT = "agent-bach"
 SECOND_SUBJECT = "agent-subject-2"
 
@@ -815,6 +817,34 @@ async def test_after_the_period_has_passed_an_addressed_line_starts_a_turn_again
 
     assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [2]]
     assert "capped" not in [event for event, _ in runner.reports.events()]
+
+
+async def test_while_capped_an_addressed_line_in_a_second_place_is_skipped_too_and_not_answered_once_the_cap_frees(
+    runner,
+):
+    runner.cap_turns(TURN_CAP)
+    runner.gateway = Gateway(refused_turn(), *says(PLACE_ID, ANSWER))
+    runner.app.stand(SUBJECT, active(PLACE_ID), active(SECOND_PLACE_ID))
+    say_in_the_call(runner, ADDRESSED)
+    runner.start()
+    await runner.reports.until("turn_ended")
+    # The read the turn's end wakes is held inside the second place, so both new lines land in the next one alone.
+    first_place_read = runner.app.hold_next_window_read()
+    await runner.app.until_window_read_held()
+    second_place_read = runner.app.hold_next_window_read()
+    first_place_read.set()
+    await runner.app.until_window_read_held()
+    say_in_the_call(runner, f"{ADDRESSED} Capped.")
+    quietly_said_elsewhere = f"{ADDRESSED} Capped elsewhere."
+    runner.app.lines[SECOND_PLACE_ID] = [Line(1, PERSON, "Ada", quietly_said_elsewhere)]
+    runner.app.content.add(quietly_said_elsewhere)
+    second_place_read.set()
+    await runner.reports.until("capped", count=2)
+    runner.clock.time += TURN_CAP.period_seconds
+    say_in_the_call(runner, f"{ADDRESSED} After the period.")
+    await runner.app.said_count(1)
+
+    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [3]]
 
 
 async def test_two_apps_of_one_agent_share_one_cap(runner):
