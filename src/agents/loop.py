@@ -33,6 +33,7 @@ from agents.decision import (
     bound_declarations,
     decisive_failure,
     forget_gone,
+    is_defect,
     perceive,
     reaction_to,
     renewal_due,
@@ -47,7 +48,7 @@ from agents.reporting import Event, Reporter, StateChange
 from agents.tokens import TokenFacts, facts_of
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator, Callable, Coroutine, Iterable
+    from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Coroutine, Iterable
 
     from agent_runtime_client.agents import AgentDefinition
     from agent_runtime_client.backend import AgentBackend
@@ -79,9 +80,9 @@ class Boundaries:
 
 
 def _raise_if_cancelled() -> None:
-    """Stops a loop whose cancellation an SDK task group swallowed while a session was opening.
+    """Stops a task whose cancellation was swallowed on the way, as by a fetch or an SDK task group.
 
-    The task still counts the request; without this the loop would open the next session instead of ending.
+    The task still counts the request; without this the loop would go on instead of ending.
     """
     task = asyncio.current_task()
     if task is not None and task.cancelling():
@@ -89,17 +90,37 @@ def _raise_if_cancelled() -> None:
 
 
 def _defect_of(task: asyncio.Task[object]) -> BaseException | None:
-    """The error a finished task raised when a leaf of it is no ``CallFailure``; reading it marks it retrieved."""
+    """The error a finished task raised when a leaf of it is a defect; reading it marks it retrieved."""
     if not task.done() or task.cancelled():
         return None
     error = task.exception()
-    if error is None or all(isinstance(leaf, CallFailure) for leaf in leaves_of(error)):
+    if error is None or not any(is_defect(leaf) for leaf in leaves_of(error)):
         return None
     return error
 
 
-class UnrequestedCancellation(Exception):  # noqa: N818
-    """A loop ended cancelled while the task running the runner was not being cancelled."""
+class UnrequestedCancellationError(Exception):
+    """A task ended cancelled while the task that should have been cancelled was not."""
+
+
+def _unrequested_unless_cancelling(asked: asyncio.Task[object]) -> UnrequestedCancellationError | None:
+    return None if asked.cancelling() else UnrequestedCancellationError()
+
+
+async def _ending_loud_when_cancelled[T](work: Awaitable[T], loud_end: Callable[[], Exception | None]) -> T:
+    """Runs work; when it is cancelled and ``loud_end`` gives an error, that error ends it, caused by the cancellation.
+
+    Every cancellation is re-raised where it is caught; the loud end is decided in the ``finally``.
+    """
+    cancelled: asyncio.CancelledError | None = None
+    try:
+        return await work
+    except asyncio.CancelledError as error:
+        cancelled = error
+        raise
+    finally:
+        if cancelled is not None and (loud := loud_end()) is not None:
+            raise loud from cancelled
 
 
 class _RelayFailed(TurnStopped):
@@ -129,12 +150,13 @@ class TurnCounter:
 
 @dataclass(frozen=True)
 class ActiveTurn:
-    """The running turn: its task, its place, whether the loop asked it to end and whether it reported its end."""
+    """The running turn: its task and place, the loop's request to end it, its end report and a relayed defect."""
 
     task: asyncio.Task[None]
     place: PlaceRef
     cancel_requested: bool = False
     end_reported: bool = False
+    relay_defect: Exception | None = None
 
 
 @dataclass(frozen=True)
@@ -225,7 +247,7 @@ class AgentLoop:
             change.cancel()
             ended.cancel()
             # A defect of the change task comes out of aclose, so it ends the runner even when it lost the race to
-            # the body's error, which stays in its traceback as its context.
+            # the body's error, which its traceback does not keep.
             if (defect := _defect_of(change)) is not None:
                 raise defect
 
@@ -346,25 +368,44 @@ class AgentLoop:
         self._report(Event.TURN_ENDED, code)
 
     async def _take_turn(self, setup: _TurnSetup, admitted: _Admitted) -> None:
+        """Runs one turn; a cancelled one ends the runner loud with a defect it met, or when nobody cancelled it."""
+        task = asyncio.current_task()
+        assert task is not None  # noqa: S101 - a turn runs inside a task
+        await _ending_loud_when_cancelled(self._judge_turn(setup, admitted), partial(self._loud_end_of, task))
+
+    def _loud_end_of(self, task: asyncio.Task[object]) -> Exception | None:
+        """What ends the runner when the turn's session has left and the turn is cancelled.
+
+        A defect a relayed call raised comes first: the cancellation can reach the session's teardown after it
+        and leave the defect only as the cancellation's context. A turn's own count is above 0 on a cancel by
+        the loop, the group or the runner; it is 0 when only anyio's own scope cancellation ended its session.
+        """
+        assert self._turn is not None  # noqa: S101 - the turn's record lives until its task has ended
+        return self._turn.relay_defect or _unrequested_unless_cancelling(task)
+
+    async def _judge_turn(self, setup: _TurnSetup, admitted: _Admitted) -> None:
         """Runs one turn over its own session.
 
         A turn the gateway ends short is reported; a failed relayed call and any other error go to the group.
+        A cancelled turn hands the group only a defect, so a failure of its call and late answers end as the
+        cancellation.
         """
         try:
             await self._run_turn(setup, admitted)
         except Exception as error:
-            _raise_if_cancelled()
             leaves = list(leaves_of(error))
             relay_stop = next((leaf for leaf in leaves if isinstance(leaf, _RelayFailed)), None)
             stopped = relay_stop or next((leaf for leaf in leaves if isinstance(leaf, TurnStopped)), None)
-            if stopped is None:
-                raise
             # The stop only carries the failure out of the backend; the failure goes to the group, never the stop.
-            if relay_stop is None:
-                self._report_turn_end(stopped.code.value)
-            # What left the session beside the stop (a late answer) still goes to the group, to be judged there.
+            # What left the session beside the stop (a late answer) goes there too, to be judged there.
             rest: list[BaseException] = [relay_stop.failure] if relay_stop is not None else []
             rest.extend(leaf for leaf in leaves if leaf is not stopped)
+            if not any(is_defect(leaf) for leaf in rest):
+                _raise_if_cancelled()
+            if stopped is None:
+                raise
+            if relay_stop is None:
+                self._report_turn_end(stopped.code.value)
             if len(rest) == 1:
                 raise rest[0] from None
             if rest:
@@ -398,6 +439,9 @@ class AgentLoop:
             await self._use_current_token(session)
             return await session.invoke(name, arguments)
         except Exception as error:
+            if is_defect(error):
+                assert self._turn is not None  # noqa: S101 - only the running turn relays
+                self._turn = replace(self._turn, relay_defect=error)
             raise _RelayFailed(error) from None
 
     async def _react(self, failure: CallFailure) -> None:
@@ -429,18 +473,13 @@ class AgentLoop:
         self._boundaries.report(StateChange(event, self._agent.client_id, self._app.mcp_url, code))
 
 
-async def _run_loop(loop: AgentLoop, runner: asyncio.Task[object]) -> NoReturn:
+async def _run_loop(loop: AgentLoop, runner: asyncio.Task[object]) -> None:
     """Runs a loop; one that ends cancelled while its runner is not being cancelled ends the runner loud.
 
     The runner's own count says so: it is above zero on a cancellation of the runner and while its group aborts
     after a loop's loud end. A loop task's count is not read, a cancelled lifecycle session lowers it.
     """
-    try:
-        await loop.run()
-    except asyncio.CancelledError:
-        if not runner.cancelling():
-            raise UnrequestedCancellation from None
-        raise
+    return await _ending_loud_when_cancelled(loop.run(), partial(_unrequested_unless_cancelling, runner))
 
 
 async def run_all(config: Config, boundaries: Boundaries) -> NoReturn:

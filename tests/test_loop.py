@@ -551,14 +551,30 @@ async def test_a_cancelled_turn_whose_opener_swallowed_it_reports_nothing_calls_
     assert swallowed.reports.events() == [("started", None), ("joined", None)]
 
 
-class TurnEndingInTheStepItsPlaceLeaves(TurnAndLifecycle):
-    """A turn that stops short and a lifecycle whose read shows the turn's place gone, released in one step.
+class _TurnThatEnds:
+    """A backend whose turn ends at once, or after a relayed call that fails."""
 
-    The turn runs first and ends; the lifecycle's read is answered before the turn's end is handled.
+    def __init__(self, tools, *, relays: bool) -> None:
+        self._tools = tools
+        self._relays = relays
+
+    async def run(self, request, person):
+        if self._relays:
+            await self._tools[0].handler(person.principal, {})
+        for event in ():
+            yield event
+
+
+class TurnEndingInTheStepItsPlaceLeaves(TurnAndLifecycle):
+    """A turn that ends and a lifecycle whose read shows the turn's place gone, released in one step.
+
+    The turn runs first and ends, with a stop, normally or with a failed relayed call; the lifecycle's read is
+    answered before the turn's end is handled.
     """
 
-    def __init__(self, files) -> None:
+    def __init__(self, files, ending: str) -> None:
         super().__init__(files, Unreachable("down"), Unreachable("down"))
+        self._ending = ending
 
     @asynccontextmanager
     async def open(self, app, token):
@@ -566,8 +582,22 @@ class TurnEndingInTheStepItsPlaceLeaves(TurnAndLifecycle):
         if self._opened == 2:
             self.turn_waiting.set()
             await self.release.wait()
-            raise TurnStopped(TurnStopKind.REFUSED, RejectionCode.BUSY)
+            if self._ending == "stop":
+                raise TurnStopped(TurnStopKind.REFUSED, RejectionCode.BUSY)
         yield self
+
+    async def declared_tools(self):
+        return (
+            ToolDeclaration(
+                name="say", description="Says a line.", parameters={"type": "object"}, effect=ToolEffect.SIDE_EFFECTING
+            ),
+        )
+
+    async def invoke(self, name, arguments):
+        raise Unreachable("down")
+
+    def _no_model(self, tools):
+        return _TurnThatEnds(tools, relays=self._ending == "relayed failure")
 
     async def read_standing(self):
         self._reads += 1
@@ -582,8 +612,15 @@ class TurnEndingInTheStepItsPlaceLeaves(TurnAndLifecycle):
         return self.standing_of_a_joined_place(self._reads)
 
 
-async def test_a_turn_that_ends_on_its_own_in_the_step_its_place_leaves_reports_only_its_own_end(files):
-    together = TurnEndingInTheStepItsPlaceLeaves(files)
+@pytest.mark.parametrize(
+    ("ending", "own_reports"),
+    [("stop", [("turn_ended", "busy")]), ("completion", []), ("relayed failure", [])],
+    ids=["a stop it reported", "a completion", "a failed relayed call"],
+)
+async def test_a_turn_that_ends_on_its_own_in_the_step_its_place_leaves_reports_only_its_own_end(
+    files, ending, own_reports
+):
+    together = TurnEndingInTheStepItsPlaceLeaves(files, ending)
     task = asyncio.create_task(together.loop.run())
     try:
         async with asyncio.timeout(LIMIT_SECONDS):
@@ -594,8 +631,7 @@ async def test_a_turn_that_ends_on_its_own_in_the_step_its_place_leaves_reports_
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
 
-    assert together.reports.events() == [("started", None), ("joined", None), ("turn_ended", "busy")]
-    assert together.clock.slept == []
+    assert [event for event in together.reports.events() if event[0] == "turn_ended"] == own_reports
 
 
 class TokenFetchSwallowingTheCancellation:
@@ -656,12 +692,17 @@ class _WakesFailingAfterOne:
         self._woken = True
 
 
-class DefectInTheWakesWhileTheReadFails(ScriptedSessions):
-    """A stream that fails with a defect while the second read waits; that read then fails with a connection failure."""
+class WakesFailingWhileTheReadFails(ScriptedSessions):
+    """A stream that fails with ``wakes_failure`` while the second read waits, which then fails with ``read_failure``.
 
-    def __init__(self, files, defect: Exception) -> None:
+    A third read, after a reaction, waits and tells ``reopened``.
+    """
+
+    def __init__(self, files, wakes_failure: Exception, read_failure: Exception) -> None:
         self.raised = asyncio.Event()
-        self._defect = defect
+        self.reopened = asyncio.Event()
+        self._wakes_failure = wakes_failure
+        self._read_failure = read_failure
         self._reads = 0
         super().__init__(files, None)
 
@@ -671,21 +712,22 @@ class DefectInTheWakesWhileTheReadFails(ScriptedSessions):
 
     @asynccontextmanager
     async def changes(self):
-        yield _WakesFailingAfterOne(self._defect, self.raised)
+        yield _WakesFailingAfterOne(self._wakes_failure, self.raised)
 
     async def read_standing(self):
         self._reads += 1
         if self._reads == 1:
             return read_of()
         if self._reads > 2:
+            self.reopened.set()
             await asyncio.Event().wait()
         await self.raised.wait()
-        raise Unreachable("down")
+        raise self._read_failure
 
 
 async def test_a_defect_of_the_wake_stream_that_loses_the_race_to_a_failing_read_ends_the_runner_loud(files):
     defect = ValueError("a defect")
-    failing = DefectInTheWakesWhileTheReadFails(files, defect)
+    failing = WakesFailingWhileTheReadFails(files, defect, Unreachable("down"))
     task = asyncio.create_task(failing.loop.run())
     async with asyncio.timeout(LIMIT_SECONDS):
         (ended,) = await asyncio.gather(task, return_exceptions=True)
@@ -693,6 +735,20 @@ async def test_a_defect_of_the_wake_stream_that_loses_the_race_to_a_failing_read
     assert isinstance(ended, ExceptionGroup)
     assert list(leaves_of(ended)) == [defect]
     assert failing.clock.slept == []
+
+
+async def test_a_failure_of_the_wake_stream_that_loses_the_race_to_a_failing_read_leaves_the_read_to_decide(files):
+    failing = WakesFailingWhileTheReadFails(files, Unreachable("down"), StatusFailure(403))
+    task = asyncio.create_task(failing.loop.run())
+    try:
+        async with asyncio.timeout(LIMIT_SECONDS):
+            await failing.reopened.wait()
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert failing.clock.slept == [SUSPENDED_RETRY_SECONDS]
+    assert failing.reports.events() == [("started", None), ("suspended", "http_403")]
 
 
 class DefectInARelayedCall(ScriptedSessions):

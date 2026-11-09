@@ -1,9 +1,11 @@
-"""The SDK's transport whose request task finds its read stream closed when an answer lands late."""
+"""Stand-ins for the SDK's transport: late answers, chosen leaves, a waiting close, a failing child, a stray cancel."""
 
 from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+
+import anyio
 
 from agents import app_session
 
@@ -60,15 +62,14 @@ class ClosingHold:
         self.release = asyncio.Event()
         self.cancelled = asyncio.Event()
 
-    def transport(self, *, only_close: int = 1):
-        """A stand-in for ``streamable_http_client`` whose ``only_close``-th close waits for ``release``.
+    def transport(self):
+        """A stand-in for ``streamable_http_client`` whose first close waits for ``release``.
 
-        Closes count from one. ``closing`` is set when that close starts to wait, and ``cancelled`` when the task
-        was cancelled while it waited.
+        ``closing`` is set when that close starts to wait, and ``cancelled`` when the task was cancelled while it
+        waited.
         """
         real = app_session.streamable_http_client
         closes = 0
-        hold = self
 
         @asynccontextmanager
         async def waiting(url, *, http_client):
@@ -78,15 +79,42 @@ class ClosingHold:
                     yield streams
                 finally:
                     closes += 1
-                    if closes == only_close:
-                        hold.closing.set()
+                    if closes == 1:
+                        self.closing.set()
                         try:
-                            await hold.release.wait()
+                            await self.release.wait()
                         except asyncio.CancelledError:
-                            hold.cancelled.set()
+                            self.cancelled.set()
                             raise
 
         return waiting
+
+
+def transport_whose_second_session_loses_a_child(failing: asyncio.Event):
+    """A stand-in for ``streamable_http_client`` whose second open runs a child that fails once ``failing`` is set.
+
+    The child fails with a late-answer error, as the SDK's request task does, so anyio cancels the session's own
+    task with no one else having done so. The first open is the lifecycle's, the second a turn's.
+    """
+    real = app_session.streamable_http_client
+    opens = 0
+
+    @asynccontextmanager
+    async def losing(url, *, http_client):
+        nonlocal opens
+        opens += 1
+        is_the_second = opens == 2
+        async with real(url, http_client=http_client) as streams, anyio.create_task_group() as group:
+            if is_the_second:
+
+                async def child() -> None:
+                    await failing.wait()
+                    raise anyio.BrokenResourceError
+
+                group.start_soon(child)
+            yield streams
+
+    return losing
 
 
 def transport_cancelled_once():

@@ -11,11 +11,17 @@ from mcp_types import ListToolsResult
 
 from agents import app_session
 from agents.decision import TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE
+from agents.failures import leaves_of
+from agents.loop import UnrequestedCancellationError
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, says
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import LIMIT_SECONDS, LIST_TOOLS, active, paused
-from tests.support.transport import ClosingHold, transport_closing_with_late_answers
+from tests.support.transport import (
+    ClosingHold,
+    transport_closing_with_late_answers,
+    transport_whose_second_session_loses_a_child,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -179,3 +185,44 @@ async def test_a_runner_cancelled_while_its_lifecycle_session_unwinds_with_late_
     runner.task.cancel()
 
     assert isinstance(await ended_by(runner.task), asyncio.CancelledError)
+
+
+async def test_a_defect_of_a_relayed_call_in_a_turn_whose_place_then_leaves_ends_the_runner_loud_without_a_cancel(
+    runner, monkeypatch
+):
+    defect = ValueError("a defect")
+
+    async def invoke_defect(self, name, arguments):
+        raise defect
+
+    closing = ClosingHold()
+    monkeypatch.setattr(app_session, "streamable_http_client", closing.transport())
+    monkeypatch.setattr("agents.app_session._McpAppSession.invoke", invoke_defect)
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED)
+    try:
+        async with asyncio.timeout(LIMIT_SECONDS):
+            await closing.closing.wait()
+        runner.app.stand(SUBJECT)
+        async with asyncio.timeout(LIMIT_SECONDS):
+            await closing.cancelled.wait()
+    finally:
+        closing.release.set()
+    ended = await ended_by(runner.task)
+
+    assert list(leaves_of(ended)) == [defect]
+    assert runner.reports.events() == [("started", None)]
+
+
+async def test_a_turn_whose_session_anyio_cancelled_with_late_answers_alone_while_nobody_cancelled_it_ends_loud(
+    runner, monkeypatch
+):
+    failing = asyncio.Event()
+    monkeypatch.setattr(app_session, "streamable_http_client", transport_whose_second_session_loses_a_child(failing))
+    await a_turn_in_its_first_round(runner)
+
+    failing.set()
+    ended = await ended_by(runner.task)
+
+    assert [type(leaf) for leaf in leaves_of(ended)] == [UnrequestedCancellationError]

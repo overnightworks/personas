@@ -8,7 +8,7 @@ import pytest
 
 from agents import app_session
 from agents.failures import leaves_of
-from agents.loop import UnrequestedCancellation
+from agents.loop import UnrequestedCancellationError
 from tests.support.call import PLACE_ID
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import LIMIT_SECONDS, active
@@ -36,7 +36,7 @@ async def test_a_loop_cancelled_by_nobody_ends_the_runner_loud_and_adds_no_other
     ended = await ended_by(runner.task)
 
     assert isinstance(ended, ExceptionGroup)
-    assert [type(leaf) for leaf in leaves_of(ended)] == [UnrequestedCancellation]
+    assert [type(leaf) for leaf in leaves_of(ended)] == [UnrequestedCancellationError]
 
 
 async def test_a_runner_cancelled_with_several_loops_running_ends_cancelled_and_adds_no_defect(runner):

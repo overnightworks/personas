@@ -153,14 +153,19 @@ def reaction_to(failure: CallFailure, *, already_renewed: bool) -> Reaction | Su
             return Reaction.BACKOFF
 
 
+def is_defect(leaf: BaseException) -> bool:
+    """Whether a leaf is a defect: any leaf that is no failure of a call."""
+    return not isinstance(leaf, CallFailure)
+
+
 def decisive_failure(leaves: Sequence[BaseException], *, already_renewed: bool) -> CallFailure | None:
     """The one failure that decides the reaction to several: a refusal before a renewal before a backoff.
 
-    Any leaf that is no failure of a call is a defect, and then no failure decides. Of equal ranks the first wins.
+    With a defect among the leaves no failure decides. Of equal ranks the first wins.
     """
-    failures = [leaf for leaf in leaves if isinstance(leaf, CallFailure)]
-    if len(failures) < len(leaves):
+    if any(is_defect(leaf) for leaf in leaves):
         return None
+    failures = [leaf for leaf in leaves if isinstance(leaf, CallFailure)]
     return min(failures, key=lambda failure: _rank(reaction_to(failure, already_renewed=already_renewed)))
 
 
