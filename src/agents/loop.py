@@ -36,6 +36,7 @@ from agents.decision import (
     reaction_to,
     renewal_due,
     reserve_turn,
+    sets_where_reading_starts,
     sync_checkpoints,
     turn_input,
 )
@@ -265,13 +266,17 @@ class AgentLoop:
     ) -> bool:
         """Reads the active call places' windows; a line addressed to the agent starts the one turn.
 
+        While a turn runs it reads only the windows that set where reading starts, which take no line.
         It says whether a window was lost, which dropped its place's checkpoint.
         """
-        if self._turn_setup is None or self._turn is not None:
+        if self._turn_setup is None:
             return False
+        places = active_call_places(standings)
+        if self._turn is not None:
+            places = tuple(place for place in places if sets_where_reading_starts(self._checkpoints[place]))
         facts = facts_of((await self._current_token()).value)
         lost = False
-        for place in active_call_places(standings):
+        for place in places:
             await self._use_current_token(session)
             window = await session.read_place(place)
             if window is None:

@@ -6,7 +6,7 @@ import pytest
 from agent_runtime_client.member import STANDING_URI
 
 from agents.reporting import Event
-from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
+from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, says
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import WINDOW_LINES, active, invited, paused
@@ -40,6 +40,33 @@ async def test_lines_said_during_a_pause_are_not_answered_after_the_resume_and_a
     await runner.app.said_count(1)
 
     assert [opening.new_seqs for opening in runner.gateway.openings()] == [[2]]
+
+
+async def test_a_pause_and_a_resume_seen_while_a_turn_runs_elsewhere_leave_the_line_said_after_the_resume_to_answer(
+    runner,
+):
+    other = "room-8"
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER), *says(other, "There."))
+    held_turn = runner.gateway.hold_request(1)
+    runner.app.stand(SUBJECT, active(PLACE_ID), active(other))
+    runner.start()
+    await runner.app.until_window_read(PLACE_ID)
+    await runner.app.until_window_read(other)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.gateway.until_requested(1)
+    runner.app.stand(SUBJECT, active(PLACE_ID), paused(other))
+    await runner.app.until_standing_read(runner.app.reads[STANDING_URI] + 1)
+    runner.app.speak(other, PERSON, "Ada", f"{ADDRESSED} During the pause.")
+    runner.app.stand(SUBJECT, active(PLACE_ID), active(other))
+    await runner.app.until_window_read(other, runner.app.window_reads(other) + 1)
+    runner.app.speak(other, PERSON, "Ada", f"{ADDRESSED} After the resume.")
+    held_turn.set()
+    await runner.app.said_count(2)
+
+    assert [(opening.room["id"], opening.new_seqs) for opening in runner.gateway.openings()] == [
+        (PLACE_ID, [1]),
+        (other, [2]),
+    ]
 
 
 async def test_when_the_window_moved_past_his_position_the_turn_is_told_lines_were_missed_and_none_is_answered_twice(

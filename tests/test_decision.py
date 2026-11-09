@@ -45,13 +45,14 @@ from agents.decision import (
     reaction_to,
     renewal_due,
     reserve_turn,
+    sets_where_reading_starts,
     sync_checkpoints,
     turn_input,
 )
 from agents.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer
 from agents.secret import Secret
 from tests.support.fakes import line, window_of
-from tests.support.hopin import active, invited
+from tests.support.hopin import GENERATION, active, invited, paused
 
 TRANSIENT_REFUSALS = [Refusal.SPONSOR_AWAY, Refusal.TWO_SEATS, Refusal.BUSY, Refusal.UNRECOGNISED]
 
@@ -228,13 +229,8 @@ def test_only_the_active_call_places_are_read():
     assert active_call_places((active("room-7"), paused, other, invited("room-9", "inv-3"))) == (PLACE,)
 
 
-GENERATION = "generation-1"
 OTHER_GENERATION = "generation-2"
 OTHER_PLACE = PlaceRef(kind="call", id="room-8")
-
-
-def _paused(place: PlaceRef) -> Standing:
-    return Standing(place=place, state=StandingState.PAUSED)
 
 
 @pytest.mark.parametrize(
@@ -244,9 +240,9 @@ def _paused(place: PlaceRef) -> Standing:
         ({PLACE: Reading(GENERATION, 4)}, (active("room-7"),), {PLACE: Reading(GENERATION, 4)}),
         ({PLACE: Joined()}, (active("room-7"),), {PLACE: Joined()}),
         ({PLACE: Paused()}, (active("room-7"),), {PLACE: Paused()}),
-        ({}, (_paused(PLACE),), {PLACE: Paused()}),
-        ({PLACE: Reading(GENERATION, 4)}, (_paused(PLACE),), {PLACE: Paused()}),
-        ({PLACE: Joined()}, (_paused(PLACE),), {PLACE: Paused()}),
+        ({}, (paused("room-7"),), {PLACE: Paused()}),
+        ({PLACE: Reading(GENERATION, 4)}, (paused("room-7"),), {PLACE: Paused()}),
+        ({PLACE: Joined()}, (paused("room-7"),), {PLACE: Paused()}),
         ({PLACE: Reading(GENERATION, 4)}, (invited("room-7", "inv-3"),), {}),
         ({PLACE: Joined()}, (invited("room-7", "inv-3"),), {}),
         ({PLACE: Reading(GENERATION, 4)}, (), {}),
@@ -274,6 +270,15 @@ def test_a_place_of_another_kind_gets_no_checkpoint():
     table = Standing(place=PlaceRef(kind="table", id="table-1"), state=StandingState.ACTIVE)
 
     assert sync_checkpoints({}, (table,)) == {}
+
+
+@pytest.mark.parametrize(
+    ("checkpoint", "sets_start"),
+    [(Restarted(), True), (Paused(), True), (Joined(), False), (Reading(GENERATION, 2), False)],
+    ids=["restarted", "paused", "joined", "reading"],
+)
+def test_only_a_restarted_or_paused_checkpoint_waits_for_a_read_to_set_where_reading_starts(checkpoint, sets_start):
+    assert sets_where_reading_starts(checkpoint) is sets_start
 
 
 @pytest.mark.parametrize(

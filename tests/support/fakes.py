@@ -15,7 +15,7 @@ from agents.decision import Accept, Refusal
 from agents.failures import CallFailure
 from agents.secret import Secret
 from agents.tokens import GrantedToken
-from tests.support.hopin import ISSUER
+from tests.support.hopin import GENERATION, ISSUER
 from tests.support.realm import AGENT_NAME, API_GROUP, jwt_of
 
 if TYPE_CHECKING:
@@ -56,7 +56,7 @@ def line(seq: int, text: str, *, own: bool = False, name: str = "Ada") -> PlaceE
     return PlaceEntry(seq=seq, kind="message", name=name, text=text, own=own)
 
 
-def window_of(*lines: PlaceEntry, generation: str = "generation-1") -> PlaceWindow:
+def window_of(*lines: PlaceEntry, generation: str = GENERATION) -> PlaceWindow:
     return PlaceWindow(generation=generation, starts_at=lines[0].seq if lines else 1, entries=lines)
 
 

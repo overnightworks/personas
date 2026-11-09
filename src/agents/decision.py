@@ -214,6 +214,11 @@ def sync_checkpoints(
     return synced
 
 
+def sets_where_reading_starts(checkpoint: Checkpoint) -> bool:
+    """A read of a restarted or paused place only sets its checkpoint: nothing in it is taken, so it starts no turn."""
+    return isinstance(checkpoint, Restarted | Paused)
+
+
 def active_call_places(standings: tuple[Standing, ...]) -> tuple[PlaceRef, ...]:
     return tuple(
         standing.place
