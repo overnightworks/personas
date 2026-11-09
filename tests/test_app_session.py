@@ -266,8 +266,10 @@ async def test_a_defect_the_body_raises_after_the_app_answered_4xx_reaches_the_c
 async def test_every_leaf_of_a_group_the_body_raises_reaches_the_caller(app, bearer):
     failure, defect = Unreachable("raised by the caller"), BodyError("the caller's own code failed")
 
+    both = ExceptionGroup("both", [failure, defect])
+
     with pytest.raises(ExceptionGroup) as caught:
-        await raises_in_the_stream_body(app, bearer, ExceptionGroup("both", [failure, defect]))
+        await raises_in_the_stream_body(app, bearer, both)
 
     assert caught.value.exceptions == (failure, defect)
 
