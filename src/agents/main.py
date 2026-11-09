@@ -10,17 +10,25 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import TYPE_CHECKING, Final
 
 import httpx2
+from agent_runtime_client.backend.gateway import GatewayBackend
 
 from agents.app_session import open_mcp_session
 from agents.clock import SystemClock
 from agents.config import Config, ConfigError, load_config
+from agents.failures import leaves_of
 from agents.loop import Boundaries, run_all
 from agents.readiness import FileReadyMarker, ReadinessError, ReadyMarker
 from agents.reporting import log_state_change
 from agents.tokens import HttpTokenSource
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Callable
+    from collections.abc import AsyncGenerator, Callable, Iterable
+
+    from agent_runtime_client.backend import AgentBackend
+    from agent_runtime_client.config import AgentConfig
+    from agent_runtime_client.tools import HandTool
+
+    from agents.loop import BackendFactory
 
 type Compose = Callable[[Config, ReadyMarker], AbstractAsyncContextManager[Boundaries]]
 
@@ -29,6 +37,16 @@ READINESS_ERROR_EXIT_CODE: Final = 3
 QUIET_LIBRARIES: Final = ("httpx2", "httpcore2", "mcp", "client")
 """Their records carry request details and response content; only the runner's own state changes are logged."""
 SILENT_LEVEL: Final = logging.CRITICAL + 1
+
+
+def _gateway_backends(gateway: AgentConfig | None) -> BackendFactory | None:
+    if gateway is None:
+        return None
+
+    def backend(tools: Iterable[HandTool]) -> AgentBackend:
+        return GatewayBackend(gateway, tools=tools)
+
+    return backend
 
 
 @asynccontextmanager
@@ -40,6 +58,7 @@ async def real_boundaries(config: Config, ready: ReadyMarker) -> AsyncGenerator[
             clock=SystemClock(),
             report=log_state_change,
             ready=ready,
+            backend=_gateway_backends(config.gateway),
         )
 
 
@@ -67,5 +86,5 @@ def main(compose: Compose = real_boundaries) -> None:
         marker.clear()
         asyncio.run(_run(config, marker, compose))
     except* ReadinessError as group:
-        sys.stderr.write(f"agents: {group.exceptions[0]}\n")
+        sys.stderr.write(f"agents: {next(leaves_of(group))}\n")
         raise SystemExit(READINESS_ERROR_EXIT_CODE) from None

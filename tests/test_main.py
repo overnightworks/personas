@@ -10,20 +10,28 @@ from typing import TYPE_CHECKING
 
 import httpx2
 import pytest
+from agent_runtime_client.backend.gateway import GatewayBackend
+from agent_runtime_client.turn_events import FinalEvent
 
 from agents.app_session import open_mcp_session
 from agents.config import CONFIG_ENVIRONMENT_VARIABLE, load_config
+from agents.failures import leaves_of
 from agents.loop import Boundaries
 from agents.main import QUIET_LIBRARIES, READINESS_ERROR_EXIT_CODE, configure_logging, main, real_boundaries
 from agents.readiness import FileReadyMarker
-from agents.reporting import Event
+from agents.reporting import Event, log_state_change
 from agents.tokens import HttpTokenSource
 from tests.support.fakes import FakeClock
-from tests.support.hopin import AGENT_SUBJECT, FakeApp, invited
+from tests.support.gateway import Gateway, says
+from tests.support.hopin import AGENT_SUBJECT, FakeApp, active, formatted, invited
 from tests.support.realm import FakeRealm
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from collections.abc import AsyncGenerator, AsyncIterator, Iterable
+
+    from agent_runtime_client.agents import TurnRequest
+    from agent_runtime_client.backend import AgentBackend, TurnEvent, TurnPerson
+    from agent_runtime_client.tools import HandTool
 
     from agents.config import AppTarget, Config
     from agents.readiness import ReadyMarker
@@ -48,6 +56,19 @@ class Stop(Exception):  # noqa: N818 - a test's way to end a runner whose loops 
     """Raised by the report once an agent joined, which is after its first read answered."""
 
 
+class StopsAfterTheAnswer:
+    """The gateway backend, which raises ``Stop`` once the turn has its final answer."""
+
+    def __init__(self, inner: AgentBackend) -> None:
+        self._inner = inner
+
+    async def run(self, request: TurnRequest, person: TurnPerson) -> AsyncIterator[TurnEvent]:
+        async for event in self._inner.run(request, person):
+            yield event
+            if isinstance(event, FinalEvent):
+                raise Stop
+
+
 class World:
     """The real entry point, loops and adapters over a fake realm and app that answer for real."""
 
@@ -55,15 +76,23 @@ class World:
         self.files = files
         self.app = FakeApp()
         self.tokens_requested_with_marker: list[bool] = []
+        self.gateway = Gateway(*says("room-7", files.persona_prompt))
+        self.issued: list[str] = []
         self.app.stand(AGENT_SUBJECT, invited("room-7", "inv-3"))
 
     def _report(self, change: StateChange) -> None:
+        log_state_change(change)
         if change.event is Event.JOINED:
             raise Stop
 
     @asynccontextmanager
     async def compose(self, config: Config, ready: ReadyMarker) -> AsyncGenerator[Boundaries]:
         realm = FakeRealm(self.app, config.agents[0], AGENT_SUBJECT, config.apps[0].scope)
+        self.issued = realm.issued
+
+        def gateway_backend(tools: Iterable[HandTool]) -> AgentBackend:
+            assert config.gateway is not None
+            return StopsAfterTheAnswer(GatewayBackend(config.gateway, tools=tools, transport=self.gateway))
 
         async def note_request(request: httpx2.Request) -> None:
             self.tokens_requested_with_marker.append(self.files.ready_path.exists())
@@ -81,6 +110,7 @@ class World:
                 clock=FakeClock(),
                 report=self._report,
                 ready=ready,
+                backend=gateway_backend,
             )
 
     def start(self) -> None:
@@ -143,3 +173,36 @@ def test_the_real_boundaries_hand_the_loops_the_marker_they_were_given(files):
             return boundaries.ready
 
     assert asyncio.run(boundaries_ready()) is marker
+
+
+def test_an_addressed_line_gets_one_say_through_the_entry_point_and_nothing_secret_or_said_reaches_the_log(
+    world, library_loggers, caplog
+):
+    answer = world.files.persona_prompt
+    world.app.stand(AGENT_SUBJECT, active("room-7"))
+    world.app.speak("room-7", "visitor-subject", "Ada", "Mozart, are you there?")
+    caplog.set_level(logging.DEBUG)
+
+    with pytest.raises(ExceptionGroup) as ended:
+        world.start()
+
+    assert [type(leaf) for leaf in leaves_of(ended.value)] == [Stop]
+    assert world.app.said == [(AGENT_SUBJECT, "room-7", answer)]
+    logged = formatted(caplog.get_records("call"))
+    assert "started" in logged
+    for held in (world.files.secret, world.files.gateway_key, *world.issued, *world.app.kept_out_of_logs()):
+        assert held not in logged
+
+
+@pytest.mark.parametrize("binds_tools", [True, False], ids=["tools bound", "lifecycle only"])
+def test_the_real_boundaries_run_turns_through_the_gateway_exactly_when_the_configuration_has_one(files, binds_tools):
+    files.text = files.valid_text(binds_tools=binds_tools)
+    config = load_config(files.write())
+
+    async def composed_backend() -> object:
+        async with real_boundaries(config, FileReadyMarker(config.ready_file)) as boundaries:
+            return None if boundaries.backend is None else boundaries.backend(())
+
+    backend = asyncio.run(composed_backend())
+
+    assert isinstance(backend, GatewayBackend) is binds_tools
