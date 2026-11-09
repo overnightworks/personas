@@ -35,7 +35,7 @@ from tests.support.fakes import (
     window_of,
 )
 from tests.support.gateway import Gateway, says
-from tests.support.hopin import active, invited
+from tests.support.hopin import LIMIT_SECONDS, active, invited
 
 pytestmark = pytest.mark.anyio
 
@@ -592,7 +592,7 @@ async def test_a_relayed_call_that_raises_a_defect_ends_the_runner_loud_with_eve
     defect = ValueError("a defect")
     raising = DefectInARelayedCall(files, defect, *beside)
     task = asyncio.create_task(raising.loop.run())
-    async with asyncio.timeout(10):
+    async with asyncio.timeout(LIMIT_SECONDS):
         (ended,) = await asyncio.gather(task, return_exceptions=True)
 
     assert isinstance(ended, ExceptionGroup)

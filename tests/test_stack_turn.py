@@ -33,6 +33,7 @@ from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import (
     CALL,
     DISCOVER,
+    LIMIT_SECONDS,
     LIST_TOOLS,
     LISTEN,
     READ,
@@ -397,7 +398,7 @@ async def test_a_relayed_call_that_fails_beside_a_defect_of_the_turns_teardown_e
     monkeypatch.setattr(app_session, "streamable_http_client", failing)
     await relayed_say_fails(runner, cuts)
     assert runner.task is not None
-    async with asyncio.timeout(10):
+    async with asyncio.timeout(LIMIT_SECONDS):
         (ended,) = await asyncio.gather(runner.task, return_exceptions=True)
 
     assert sorted(type(leaf).__name__ for leaf in leaves_of(ended)) == [RuntimeError.__name__, Unreachable.__name__]
@@ -419,9 +420,12 @@ async def test_a_deadline_during_a_relayed_call_ends_the_turn_as_limit_exceeded_
     runner.app.script(CALL, hangs)
     say_in_the_call(runner, ADDRESSED)
     await runner.reports.until("turn_ended")
+    say_in_the_call(runner, f"{ADDRESSED} Again.")
+    await runner.gateway.until_requested(2)
 
     assert runner.reports.events() == [("started", None), ("turn_ended", "limit_exceeded")]
-    assert len(runner.gateway.requests) == 1
+    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [2]]
+    assert runner.clock.slept == []
     assert runner.task is not None
     assert not runner.task.done()
 
