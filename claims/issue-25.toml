@@ -1,0 +1,8 @@
+claim_id = "e1ec7619f4744c4f8dd5b0506f393147"
+agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
+role = "builder"
+base = "9c4b30fb8bf7a9408ad15f898a40c4646cc38887"
+branch = "claude/issue-25-a-per-agent-turn-rate-cap-bounds-mozart"
+scope = ["README.md", "docs/ARCHITECTURE.md", "src/agents/config.py", "src/agents/decision.py", "src/agents/loop.py", "src/agents/reporting.py", "tests"]
+opened_commit = "93dd83dece1c85c871fcf0e6fe1d5b6980da5ed4"
+whole_reason = "The cap has three owners (its amounts in config, its rule in decision, its use in the loop) and one event; splitting leaves a rule nothing calls."
