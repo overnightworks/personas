@@ -1,0 +1,8 @@
+claim_id = "10d741b8e23a45d38ff029fc922ace12"
+agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
+role = "builder"
+base = "853230dc81b2e4d41f4272203d6ad8b7df109949"
+branch = "claude/issue-44-personas-takes-agent-runtime-v0-28-0"
+scope = ["pyproject.toml", "tests", "uv.lock"]
+opened_commit = "f3171d3313691bdfdc6a54d00c036d67fedd1059"
+whole_reason = "The pin, its lock and the test gateway that must speak the pinned library's wire are one change; split, either the lock or the tests fail."
