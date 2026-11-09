@@ -13,6 +13,7 @@ from agent_runtime_client.backend import TurnPerson, TurnStopKind, TurnStopped
 from agent_runtime_client.tools import HandTool, ToolOutcome
 from agent_runtime_client.turn import FailureCode, Principal, Turn, TurnMessage, TurnRole
 
+from personas.app_session import task_is_being_cancelled
 from personas.decision import (
     SUSPENDED_RETRY_SECONDS,
     TOOL_NOT_DECLARED_CODE,
@@ -89,8 +90,7 @@ def _raise_if_cancelled() -> None:
 
     The task still counts the request; without this the loop would go on instead of ending.
     """
-    task = asyncio.current_task()
-    if task is not None and task.cancelling():
+    if task_is_being_cancelled():
         raise asyncio.CancelledError
 
 
@@ -114,8 +114,7 @@ def _unrequested_unless_cancelling(asked: asyncio.Task[object]) -> UnrequestedCa
 
 def _unreachable_unless_cancelling() -> Unreachable | None:
     """The failure of a session that ended cancelled while the running task was not: its own child ended it."""
-    task = asyncio.current_task()
-    return None if task is not None and task.cancelling() else Unreachable("the session ended")
+    return None if task_is_being_cancelled() else Unreachable("the session ended")
 
 
 async def _ending_loud_when_cancelled[T](work: Awaitable[T], loud_end: Callable[[], Exception | None]) -> T:
@@ -445,6 +444,7 @@ class AgentLoop:
             await self._run_turn(setup, admitted)
         except Exception as error:
             _raise_if_cancelled()
+            self._end_with_recorded_defect()
             leaves = list(leaves_of(error))
             relay_stop = next((leaf for leaf in leaves if isinstance(leaf, _RelayFailed)), None)
             stopped = relay_stop or next((leaf for leaf in leaves if isinstance(leaf, TurnStopped)), None)
@@ -461,6 +461,21 @@ class AgentLoop:
                 raise rest[0] from None
             if rest:
                 raise BaseExceptionGroup("the turn's session failed", rest) from None
+        else:
+            self._end_with_recorded_defect()
+
+    def _end_with_recorded_defect(self) -> None:
+        """A defect a request of the turn met ends the runner however the turn ends, before any end is reported.
+
+        A request's session cut short while it closes, by the app's call time or by the turn's duration, leaves
+        the defect only in this record.
+        """
+        if (defect := self._recorded_defect()) is not None:
+            raise defect from None
+
+    def _recorded_defect(self) -> Exception | None:
+        assert self._turn is not None  # noqa: S101 - the turn's record lives until its task has ended
+        return self._turn.defect
 
     async def _run_turn(self, setup: _TurnSetup, admitted: _Admitted) -> None:
         token = await self._current_token()
@@ -595,6 +610,8 @@ class AgentLoop:
         except TimeoutError:
             if not bound.expired():
                 raise
+            if (defect := self._recorded_defect()) is not None:
+                raise defect from None
             raise Unreachable("the app did not answer in time") from None
 
     def _report_tools_only_failure(self, app: AppTarget, failed_apps: set[str], code: str) -> None:

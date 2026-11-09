@@ -12,6 +12,7 @@ from agent_runtime_client.tools import ToolOutcome
 from mcp_types import ListToolsResult, Tool
 
 from personas import app_session
+from personas.config import load_config
 from personas.decision import TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE, TurnCap
 from personas.failures import leaves_of
 from personas.tokens import HttpTokenSource
@@ -382,6 +383,82 @@ async def test_a_defect_in_a_tools_only_request_whose_place_then_leaves_while_it
 
     assert list(leaves_of(ended)) == [defect]
     assert runner.reports.events() == [("started", None)]
+
+
+def raising_in_the_tools_only_request(runner, monkeypatch, where, defect):
+    """The listing session or the first call of the tools-only app raises ``defect`` once."""
+    session_class = app_session._McpAppSession  # noqa: SLF001 - the session is where the app's request raises
+    real_invoke = session_class.invoke
+    real_declared = session_class.declared_tools
+    raised = False
+
+    async def invoke(self, name, arguments):
+        nonlocal raised
+        if where == "call" and name == CREATE_SONG and not raised:
+            raised = True
+            raise defect
+        return await real_invoke(self, name, arguments)
+
+    async def declared_tools(self):
+        nonlocal raised
+        if where == "listing" and self.auth.token.reveal() in runner.realm.issued_for[SCOPE] and not raised:
+            raised = True
+            raise defect
+        return await real_declared(self)
+
+    monkeypatch.setattr(session_class, "invoke", invoke)
+    monkeypatch.setattr(session_class, "declared_tools", declared_tools)
+
+
+@pytest.mark.parametrize("where", ["listing", "call"])
+async def test_a_defect_in_a_tools_only_request_whose_close_outlasts_the_apps_call_time_ends_the_runner_loud(
+    runner, songmaker, monkeypatch, where
+):
+    defect = ValueError("a defect")
+    raising_in_the_tools_only_request(runner, monkeypatch, where, defect)
+    runner.bound_tools_only_calls_to(SHORT_CALL_SECONDS)
+    closing = ClosingHold()
+    nth = 1 if where == "listing" else 2
+    monkeypatch.setattr(app_session, "streamable_http_client", closing.transport(nth=nth, of_url=songmaker_url(runner)))
+    runner.gateway = Gateway(calling(CREATE_SONG), saying(ANSWER), completion("done"))
+    await addressed_in_the_call(runner)
+    try:
+        async with asyncio.timeout(LIMIT_SECONDS):
+            await closing.cancelled.wait()
+    finally:
+        closing.release.set()
+
+    ended = await ended_by(runner.task)
+
+    assert list(leaves_of(ended)) == [defect]
+    assert runner.reports.events() == [("started", None)]
+    assert len(runner.gateway.requests) == (0 if where == "listing" else 1)
+    assert runner.app.said == []
+
+
+async def test_a_defect_in_a_tools_only_call_whose_close_outlasts_the_turns_duration_ends_the_runner_loud(
+    runner, songmaker, monkeypatch
+):
+    runner.files.persona_path.write_text(runner.files.persona_text(max_duration_seconds=1), encoding="utf-8")
+    runner.config = load_config(runner.files.write())
+    defect = ValueError("a defect")
+    raising_in_the_tools_only_request(runner, monkeypatch, "call", defect)
+    closing = ClosingHold()
+    monkeypatch.setattr(app_session, "streamable_http_client", closing.transport(nth=2, of_url=songmaker_url(runner)))
+    runner.gateway = Gateway(calling(CREATE_SONG), saying(ANSWER), completion("done"))
+    await addressed_in_the_call(runner)
+    try:
+        async with asyncio.timeout(LIMIT_SECONDS):
+            await closing.cancelled.wait()
+    finally:
+        closing.release.set()
+
+    ended = await ended_by(runner.task)
+
+    assert list(leaves_of(ended)) == [defect]
+    assert runner.reports.events() == [("started", None)]
+    assert len(runner.gateway.requests) == 1
+    assert runner.app.said == []
 
 
 async def test_a_tools_only_call_whose_cancelled_session_leaves_as_a_failure_still_stops_the_turn(

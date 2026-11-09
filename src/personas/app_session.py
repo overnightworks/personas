@@ -336,7 +336,7 @@ async def open_mcp_session(
             try:
                 await _discover(session, auth)
             except asyncio.CancelledError:
-                cancelled_in_body = _task_is_being_cancelled()
+                cancelled_in_body = task_is_being_cancelled()
                 raise
             try:
                 yield _McpAppSession(session, auth, stream_seconds)
@@ -344,7 +344,7 @@ async def open_mcp_session(
                 raised_in_body = error
                 raise
             except asyncio.CancelledError:
-                cancelled_in_body = _task_is_being_cancelled()
+                cancelled_in_body = task_is_being_cancelled()
                 raise
     except Exception as error:
         # The SDK's task groups wrap what is raised inside them, so every leaf is looked at: a failure
@@ -361,7 +361,8 @@ async def open_mcp_session(
         raise ExceptionGroup("the session failed", cast("list[Exception]", leaves)) from None
 
 
-def _task_is_being_cancelled() -> bool:
+def task_is_being_cancelled() -> bool:
+    """Whether the running task has a cancellation requested that it has not yet taken."""
     task = asyncio.current_task()
     return task is not None and task.cancelling() > 0
 
