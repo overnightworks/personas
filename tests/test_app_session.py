@@ -52,7 +52,7 @@ from tests.support.hopin import (
     invited,
 )
 from tests.support.loopback import serving
-from tests.support.transport import transport_closing_with_late_answers
+from tests.support.transport import transport_closing_with_late_answers, transport_closing_with_leaves
 
 pytestmark = pytest.mark.anyio
 
@@ -390,7 +390,9 @@ async def test_an_answer_refused_before_the_session_closed_does_not_outrank_the_
     assert [type(leaf) for leaf in leaves_of(caught.value)] == [Unreachable, Unreachable]
 
 
-async def test_an_answer_that_lands_after_a_cancelled_session_closed_stays_the_error_it_is(app, bearer, late_answer):
+async def test_an_answer_landing_after_a_session_closed_by_an_unrequested_cancellation_stays_the_error_it_is(
+    app, bearer, late_answer
+):
     echo = late_answer()
     cancellation = asyncio.CancelledError()
 
@@ -398,7 +400,7 @@ async def test_an_answer_that_lands_after_a_cancelled_session_closed_stays_the_e
         await raises_in_the_stream_body(app, bearer, cancellation)
 
 
-async def test_answers_that_all_land_after_a_cancelled_session_closed_stay_the_errors_they_are(
+async def test_answers_all_landing_after_a_session_closed_by_an_unrequested_cancellation_stay_the_errors_they_are(
     app, bearer, late_answer
 ):
     echo = late_answer(echoes=2)
@@ -408,6 +410,48 @@ async def test_answers_that_all_land_after_a_cancelled_session_closed_stay_the_e
         await raises_in_the_stream_body(app, bearer, cancellation)
 
     assert [type(leaf) for leaf in leaves_of(caught.value)] == [echo, echo]
+
+
+async def waits_in_the_stream_body(app, bearer, inside):
+    async with opened(app, bearer) as session, session.changes():
+        inside.set()
+        await asyncio.Event().wait()
+
+
+async def cancelled_in_the_stream_body(app, bearer):
+    """Runs a session whose body waits and cancels its task there; what the task ended with."""
+    inside = asyncio.Event()
+    task = asyncio.create_task(waits_in_the_stream_body(app, bearer, inside))
+    async with asyncio.timeout(LIMIT_SECONDS):
+        await inside.wait()
+    task.cancel()
+    async with asyncio.timeout(LIMIT_SECONDS):
+        (ended,) = await asyncio.gather(task, return_exceptions=True)
+    return ended
+
+
+async def test_late_answers_alone_after_a_session_body_was_left_by_a_cancellation_end_as_the_cancellation(
+    app, bearer, late_answer
+):
+    late_answer(echoes=2)
+
+    ended = await cancelled_in_the_stream_body(app, bearer)
+
+    assert isinstance(ended, asyncio.CancelledError)
+
+
+async def test_a_defect_beside_late_answers_after_a_cancellation_stays_with_them_as_the_errors_they_are(
+    app, bearer, monkeypatch
+):
+    defect = ValueError("a defect")
+    monkeypatch.setattr(
+        app_session, "streamable_http_client", transport_closing_with_leaves(defect, anyio.BrokenResourceError())
+    )
+
+    ended = await cancelled_in_the_stream_body(app, bearer)
+
+    assert isinstance(ended, ExceptionGroup)
+    assert [type(leaf) for leaf in leaves_of(ended)] == [ValueError, Unreachable]
 
 
 async def test_traffic_with_no_acknowledgement_until_past_the_deadline_is_unreachable(app, bearer):

@@ -38,6 +38,8 @@ TURN_ROLE: Final[AgentRole] = "user"
 """The app role a turn acts under: an agent holds no admin right."""
 TOOL_NOT_DECLARED_CODE: Final = "tool_not_declared"
 """The code of a turn that ends because the app no longer declares a tool the configuration binds."""
+TURN_CANCELLED_CODE: Final = "cancelled"
+"""The code of a turn the loop cancelled because its place left the standing."""
 
 
 class Refusal(StrEnum):
@@ -225,6 +227,11 @@ def active_call_places(standings: tuple[Standing, ...]) -> tuple[PlaceRef, ...]:
         for standing in standings
         if standing.state is StandingState.ACTIVE and standing.place.kind == CALL_PLACE_KIND
     )
+
+
+def turn_invalid(place: PlaceRef, standings: tuple[Standing, ...]) -> bool:
+    """A turn ends with its place: it is invalid once the place is gone, invited again or paused."""
+    return not any(standing.place == place and standing.state is StandingState.ACTIVE for standing in standings)
 
 
 @dataclass(frozen=True)

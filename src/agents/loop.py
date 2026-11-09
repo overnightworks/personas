@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import aclosing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from typing import TYPE_CHECKING, Final, NoReturn
 
@@ -16,6 +16,7 @@ from agent_runtime_client.turn import FailureCode, Principal, Turn, TurnMessage,
 from agents.decision import (
     SUSPENDED_RETRY_SECONDS,
     TOOL_NOT_DECLARED_CODE,
+    TURN_CANCELLED_CODE,
     TURN_ROLE,
     Joined,
     Memory,
@@ -39,8 +40,9 @@ from agents.decision import (
     sets_where_reading_starts,
     sync_checkpoints,
     turn_input,
+    turn_invalid,
 )
-from agents.failures import LATE_ANSWER_ERRORS, CallFailure, leaves_of
+from agents.failures import CallFailure, leaves_of
 from agents.reporting import Event, Reporter, StateChange
 from agents.tokens import TokenFacts, facts_of
 
@@ -86,6 +88,20 @@ def _raise_if_cancelled() -> None:
         raise asyncio.CancelledError
 
 
+def _defect_of(task: asyncio.Task[object]) -> BaseException | None:
+    """The error a finished task raised when a leaf of it is no ``CallFailure``; reading it marks it retrieved."""
+    if not task.done() or task.cancelled():
+        return None
+    error = task.exception()
+    if error is None or all(isinstance(leaf, CallFailure) for leaf in leaves_of(error)):
+        return None
+    return error
+
+
+class UnrequestedCancellation(Exception):  # noqa: N818
+    """A loop ended cancelled while the task running the runner was not being cancelled."""
+
+
 class _RelayFailed(TurnStopped):
     """The stop a failed relayed call gives the backend, which ends the turn at once; it holds the failure."""
 
@@ -109,6 +125,16 @@ class TurnCounter:
     """The start times of one agent's recent turns, shared by all its loops and kept for the process."""
 
     started: tuple[float, ...] = ()
+
+
+@dataclass(frozen=True)
+class ActiveTurn:
+    """The running turn: its task, its place, whether the loop asked it to end and whether it reported its end."""
+
+    task: asyncio.Task[None]
+    place: PlaceRef
+    cancel_requested: bool = False
+    end_reported: bool = False
 
 
 @dataclass(frozen=True)
@@ -145,9 +171,8 @@ class AgentLoop:
         self._suspension: str | None = None
         self._backing_off = False
         self._checkpoints: dict[PlaceRef, Checkpoint] = {}
-        self._turn: asyncio.Task[None] | None = None
+        self._turn: ActiveTurn | None = None
         self._turn_ended = asyncio.Event()
-        self._turn_failed = False
         persona, binding, backend, cap = agent.persona, app.binding, boundaries.backend, agent.turn_cap
         self._turn_setup = (
             None
@@ -169,22 +194,16 @@ class AgentLoop:
 
     async def _serve(self) -> NoReturn:
         token = await self._current_token()
-        self._turn_failed = False
-        async with asyncio.TaskGroup() as turns:
-            try:
-                async with self._boundaries.open_session(self._app, token.value) as session:
-                    while True:
-                        await self._use_current_token(session)
-                        async with session.changes() as changes, aclosing(self._wakes(changes)) as wakes:
-                            await self._reconcile(session, turns)
-                            async for _ in wakes:
-                                await self._reconcile(session, turns)
-            except Exception as error:
-                if self._turn_failed and all(isinstance(leaf, LATE_ANSWER_ERRORS) for leaf in leaves_of(error)):
-                    # The SDK's task groups consume the cancellation a turn's failure sent, so the session
-                    # leaves with the late answers alone; the failure is in the group.
-                    raise asyncio.CancelledError from None
-                raise
+        async with (
+            asyncio.TaskGroup() as turns,
+            self._boundaries.open_session(self._app, token.value) as session,
+        ):
+            while True:
+                await self._use_current_token(session)
+                async with session.changes() as changes, aclosing(self._wakes(changes)) as wakes:
+                    await self._reconcile(session, turns)
+                    async for _ in wakes:
+                        await self._reconcile(session, turns)
 
     async def _wakes(self, changes: AsyncIterator[object]) -> AsyncGenerator[None]:
         """A wake for each change the app signals and for each end of a turn; it ends when the stream does."""
@@ -203,10 +222,12 @@ class AgentLoop:
                     change = asyncio.ensure_future(anext(changes, _STREAM_ENDED))
                     yield
         finally:
-            if change.done() and not change.cancelled():
-                change.exception()
             change.cancel()
             ended.cancel()
+            # A defect of the change task comes out of aclose, so it ends the runner even when it lost the race to
+            # the body's error, which stays in its traceback as its context.
+            if (defect := _defect_of(change)) is not None:
+                raise defect
 
     async def _reconcile(self, session: AppSession, turns: asyncio.TaskGroup) -> None:
         """Reads the standing as it is now and acts on it; a wake says only that it may have changed."""
@@ -224,8 +245,16 @@ class AgentLoop:
         self._boundaries.ready.announce()
         self._memory = forget_gone(self._memory, standing.standings)
         self._checkpoints = sync_checkpoints(self._checkpoints, standing.standings)
+        self._cancel_turn_if_its_place_left(standing.standings)
         await self._accept_invitations(session, standing.standings)
         return standing.standings
+
+    def _cancel_turn_if_its_place_left(self, standings: tuple[Standing, ...]) -> None:
+        """A turn ends with its place; its slot stays taken until its task has ended."""
+        turn = self._turn
+        if turn is not None and not turn.cancel_requested and turn_invalid(turn.place, standings):
+            self._turn = replace(turn, cancel_requested=True)
+            turn.task.cancel()
 
     async def _use_current_token(self, session: AppSession) -> None:
         session.use_token((await self._current_token()).value)
@@ -295,18 +324,26 @@ class AgentLoop:
                 continue
             self._counter.started = started
             admitted = _Admitted(facts, turn_input(place, facts.name, window, perception.new, missed=perception.missed))
-            self._start_turn(turns, self._turn_setup, admitted)
+            self._start_turn(turns, self._turn_setup, place, admitted)
             return lost
         return lost
 
-    def _start_turn(self, turns: asyncio.TaskGroup, setup: _TurnSetup, admitted: _Admitted) -> None:
-        self._turn = turns.create_task(self._take_turn(setup, admitted))
-        self._turn.add_done_callback(self._turn_over)
+    def _start_turn(self, turns: asyncio.TaskGroup, setup: _TurnSetup, place: PlaceRef, admitted: _Admitted) -> None:
+        task = turns.create_task(self._take_turn(setup, admitted))
+        self._turn = ActiveTurn(task, place)
+        task.add_done_callback(self._turn_over)
 
-    def _turn_over(self, turn: asyncio.Task[None]) -> None:
-        self._turn = None
-        self._turn_failed = self._turn_failed or (not turn.cancelled() and turn.exception() is not None)
+    def _turn_over(self, task: asyncio.Task[None]) -> None:
+        turn, self._turn = self._turn, None
+        if turn is not None and turn.cancel_requested and task.cancelled() and not turn.end_reported:
+            self._report(Event.TURN_ENDED, TURN_CANCELLED_CODE)
         self._turn_ended.set()
+
+    def _report_turn_end(self, code: str) -> None:
+        """A turn reports its end at most once; the record tells the loop, which then reports no cancel."""
+        assert self._turn is not None  # noqa: S101 - only the running turn's task reports its end
+        self._turn = replace(self._turn, end_reported=True)
+        self._report(Event.TURN_ENDED, code)
 
     async def _take_turn(self, setup: _TurnSetup, admitted: _Admitted) -> None:
         """Runs one turn over its own session.
@@ -324,7 +361,7 @@ class AgentLoop:
                 raise
             # The stop only carries the failure out of the backend; the failure goes to the group, never the stop.
             if relay_stop is None:
-                self._report(Event.TURN_ENDED, stopped.code.value)
+                self._report_turn_end(stopped.code.value)
             # What left the session beside the stop (a late answer) still goes to the group, to be judged there.
             rest: list[BaseException] = [relay_stop.failure] if relay_stop is not None else []
             rest.extend(leaf for leaf in leaves if leaf is not stopped)
@@ -339,7 +376,7 @@ class AgentLoop:
             _raise_if_cancelled()
             declarations = bound_declarations(await session.declared_tools(), setup.binding.tools)
             if declarations is None:
-                self._report(Event.TURN_ENDED, TOOL_NOT_DECLARED_CODE)
+                self._report_turn_end(TOOL_NOT_DECLARED_CODE)
                 return
             tools = tuple(HandTool(each, partial(self._relay, session, each.name)) for each in declarations)
             request = TurnRequest(
@@ -392,11 +429,27 @@ class AgentLoop:
         self._boundaries.report(StateChange(event, self._agent.client_id, self._app.mcp_url, code))
 
 
+async def _run_loop(loop: AgentLoop, runner: asyncio.Task[object]) -> NoReturn:
+    """Runs a loop; one that ends cancelled while its runner is not being cancelled ends the runner loud.
+
+    The runner's own count says so: it is above zero on a cancellation of the runner and while its group aborts
+    after a loop's loud end. A loop task's count is not read, a cancelled lifecycle session lowers it.
+    """
+    try:
+        await loop.run()
+    except asyncio.CancelledError:
+        if not runner.cancelling():
+            raise UnrequestedCancellation from None
+        raise
+
+
 async def run_all(config: Config, boundaries: Boundaries) -> NoReturn:
     """One loop for every agent and every app; a loop never ends on its own."""
+    runner = asyncio.current_task()
+    assert runner is not None  # noqa: S101 - run_all runs inside a task
     async with asyncio.TaskGroup() as group:
         for agent in config.agents:
             counter = TurnCounter()
             for app in config.apps:
-                group.create_task(AgentLoop(agent, app, boundaries, counter).run())
+                group.create_task(_run_loop(AgentLoop(agent, app, boundaries, counter), runner))
     raise AssertionError("a loop ended")  # pragma: no cover
