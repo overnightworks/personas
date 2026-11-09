@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import signal
 import sys
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import TYPE_CHECKING, Final
@@ -62,9 +63,21 @@ async def real_boundaries(config: Config, ready: ReadyMarker) -> AsyncGenerator[
         )
 
 
-async def _run(config: Config, ready: ReadyMarker, compose: Compose) -> None:
+async def _compose_and_run(config: Config, ready: ReadyMarker, compose: Compose) -> None:
     async with compose(config, ready) as boundaries:
         await run_all(config, boundaries)
+
+
+async def _run(config: Config, ready: ReadyMarker, compose: Compose) -> None:
+    """Runs the runner as its own task, which a SIGTERM cancels; that cancellation is the clean stop.
+
+    Waiting on the task, not awaiting it, leaves the cancellation unraised, so any error the task ends with is a defect.
+    """
+    runner = asyncio.create_task(_compose_and_run(config, ready, compose))
+    asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, runner.cancel)
+    await asyncio.wait({runner})
+    if not runner.cancelled():
+        runner.result()
 
 
 def configure_logging() -> None:

@@ -16,6 +16,8 @@ Install with `uv sync`, point `AGENTS_CONFIG` at a TOML file and start `agents`.
 
 The runner opens no port. It removes `ready_file` at start, so a marker left by an earlier run never counts, and creates it the first time any loop's read of its standing answers: the start worked, the realm gave a token and an app accepted it. A refused token, a suspended loop, a network failure or a 5xx does not create it, so a wrong secret or URL shows as not ready. The marker stays afterwards; a later suspension or outage is in the log. If the file cannot be removed or created, the runner exits non-zero naming the path. The platform's readiness probe is `test -e <ready_file>`.
 
+The runner stops on SIGTERM with exit code 0 and needs no init, in the image or the deployment. The deployment supplies the configuration, the persona files included, and the secret files; the image holds none of them.
+
 The commands for working on the runner are in [AGENTS.md](AGENTS.md).
 
 ## Release it

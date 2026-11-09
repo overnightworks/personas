@@ -101,6 +101,36 @@ jobs:
           if docker run --rm agents-image 2>stderr.txt; then exit 1; fi
           grep AGENTS_CONFIG stderr.txt
 
+      # The runner is PID 1 here, which ignores a signal it has no handler for. Its token endpoint refuses
+      # connections, so its loop backs off and the stop reaches it mid-loop.
+      - name: Check that a container stop ends the runner with exit code 0 before the timeout
+        run: |
+          configuration="$(mktemp --directory)"
+          chmod 755 "$configuration"
+          openssl rand -hex 16 > "$configuration/runner.secret"
+          chmod 644 "$configuration/runner.secret"
+          cat > "$configuration/agents.toml" <<'EOF'
+          token_endpoint = "http://127.0.0.1:9/token"
+          ready_file = "/tmp/ready"
+          [[apps]]
+          mcp_url = "http://127.0.0.1:9/mcp"
+          scope = "mcp-app"
+          [[agents]]
+          client_id = "agent-runner"
+          secret_file = "/configuration/runner.secret"
+          EOF
+          docker run --detach --name stopped-runner \
+            --volume "$configuration:/configuration:ro" \
+            --env AGENTS_CONFIG=/configuration/agents.toml agents-image
+          until docker logs stopped-runner 2>&1 | grep --quiet backoff; do
+            test "$(docker inspect --format '{{.State.Running}}' stopped-runner)" = true
+            sleep 1
+          done
+          started="$(date +%s)"
+          docker stop --time 10 stopped-runner
+          test "$(docker inspect --format '{{.State.ExitCode}}' stopped-runner)" = 0
+          test "$(( $(date +%s) - started ))" -lt 10
+
   quality:
     name: quality
     needs: [docs, ci, image]
