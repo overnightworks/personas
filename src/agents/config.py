@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Final, Self
 
 from agent_runtime_client.agents import AgentDefinition, AgentFileError, load_agent
 from agent_runtime_client.config import AgentConfig  # noqa: TC002 - pydantic resolves the field's type at run time
-from agent_runtime_client.turn import ModelKind, model_kind_of
 from pydantic import (
     AnyHttpUrl,
     BaseModel,
@@ -180,7 +179,7 @@ def _read_persona(index: int, path: Path | None) -> AgentDefinition | None:
         raise ConfigError(f"{field_name}: cannot read {path}") from None
     if not persona.offered_to(TURN_ROLE):
         raise ConfigError(f"{field_name}: appRoles must include {TURN_ROLE}, the role a turn acts under")
-    if persona.picture_size is not None or model_kind_of(persona.model) is ModelKind.IMAGE:
+    if persona.picture_size is not None:
         raise ConfigError(f"{field_name}: a picture agent cannot take a turn")
     return persona
 

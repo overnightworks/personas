@@ -218,7 +218,6 @@ def test_tools_need_their_call_bound_and_the_gateway_and_a_persona_to_run_with(
             .replace("model: text/", "model: image/")
             .replace("---\n" + files.persona_prompt, "picture:\n  size: 64x64\n---\n" + files.persona_prompt)
         ),
-        lambda files: files.persona_path.write_text(files.persona_text().replace("model: text/", "model: image/")),
         lambda files: files.persona_path.write_text(
             files.persona_text().replace("---\n" + files.persona_prompt, "tools: [say]\n---\n")
         ),
@@ -235,7 +234,6 @@ def test_tools_need_their_call_bound_and_the_gateway_and_a_persona_to_run_with(
         "roles invalid",
         "no user role",
         "picture agent",
-        "image model",
         "undeclared tool",
         "call bound without tools",
         "relative path",

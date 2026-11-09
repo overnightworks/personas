@@ -98,6 +98,7 @@ class _Admitted:
     input: str
 
     def groups(self) -> Coroutine[None, None, frozenset[str]]:
+        """The library's GroupSource wants an awaitable; the groups are already known."""
         return asyncio.sleep(0, self.facts.groups)
 
 
