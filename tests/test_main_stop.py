@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import signal
 import socket
 import subprocess
@@ -12,12 +11,15 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import agents
 from tests.support.configfiles import Files
 
 if TYPE_CHECKING:
     from typing import TextIO
 
 WAIT_SECONDS = 30
+ENTRY_POINT_CALL = "from agents.main import main; main()"
+"""What the console script `agents` runs; the test environment does not install the project's scripts."""
 REALM_TOKEN_ENDPOINT = "https://realm.test/protocol/openid-connect/token"
 
 
@@ -37,10 +39,9 @@ def _flag_when_logged(stream: TextIO, needle: str, seen: threading.Event) -> Non
 def test_a_sigterm_ends_a_backing_off_runner_with_exit_code_0(tmp_path: Path):
     files = Files(tmp_path)
     files.text = files.text.replace(REALM_TOKEN_ENDPOINT, _refused_token_endpoint())
-    console_script = shutil.which("agents", path=str(Path(sys.executable).parent))
-    assert console_script is not None
-    runner = subprocess.Popen(  # noqa: S603 - the repository's own console script
-        [console_script], env={**os.environ, **files.write()}, stderr=subprocess.PIPE, text=True
+    environment = {**os.environ, **files.write(), "PYTHONPATH": str(Path(agents.__file__).parent.parent)}
+    runner = subprocess.Popen(  # noqa: S603 - the interpreter running the tests
+        [sys.executable, "-c", ENTRY_POINT_CALL], env=environment, stderr=subprocess.PIPE, text=True
     )
     assert runner.stderr is not None
     backing_off = threading.Event()
