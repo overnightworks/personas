@@ -41,7 +41,7 @@ from agents.reporting import Event, Reporter, StateChange
 from agents.tokens import TokenFacts, facts_of
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterable
+    from collections.abc import AsyncGenerator, AsyncIterator, Callable, Coroutine, Iterable
 
     from agent_runtime_client.agents import AgentDefinition
     from agent_runtime_client.backend import AgentBackend
@@ -97,8 +97,8 @@ class _Admitted:
     facts: TokenFacts
     input: str
 
-    async def groups(self) -> frozenset[str]:
-        return self.facts.groups
+    def groups(self) -> Coroutine[None, None, frozenset[str]]:
+        return asyncio.sleep(0, self.facts.groups)
 
 
 class AgentLoop:
