@@ -9,6 +9,12 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # A superseded pull-request run is cancelled; a run on main never is,
+  # because the release waits for main's run to finish.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   docs:
     name: Documents
@@ -70,9 +76,9 @@ jobs:
 
       # Which files are measured is pyproject.toml's to say (the source key
       # under [tool.coverage.run]). The xml is the report the quality gate's
-      # scan reads.
+      # scan reads. The workers' coverage data is combined by pytest-cov.
       - name: Test with coverage
-        run: pytest -q --cov-report=xml
+        run: pytest -q -n auto --cov-report=xml
 
       - name: Upload the coverage report
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
