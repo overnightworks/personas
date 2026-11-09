@@ -692,6 +692,54 @@ async def test_a_turn_whose_session_fails_before_the_model_is_asked_leads_to_one
     assert len(runner.realm.issued) == (2 if fails is refuses_the_token else 1)
 
 
+@pytest.mark.parametrize(
+    "echo", [anyio.BrokenResourceError, anyio.ClosedResourceError], ids=["broken stream", "closed stream"]
+)
+async def test_a_turn_ended_short_beside_a_late_answer_is_reported_and_costs_one_backoff_and_no_second_turn(
+    runner, monkeypatch, echo
+):
+    failing = transport_closing_with_late_answers(echo=echo, only_close=1)
+    monkeypatch.setattr(app_session, "streamable_http_client", failing)
+    runner.gateway = Gateway(Reply(status=HTTPStatus.TOO_MANY_REQUESTS))
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    say_in_the_call(runner, ADDRESSED)
+    runner.start()
+    await runner.reports.until("resumed")
+    await runner.app.log.until(LISTEN, 2)
+
+    assert runner.reports.events() == [
+        ("started", None),
+        ("turn_ended", "busy"),
+        ("backoff", "network"),
+        ("resumed", None),
+    ]
+    assert not runner.task.done()
+    assert len(runner.gateway.requests) == 1
+
+
+@pytest.mark.parametrize(
+    "echo", [anyio.BrokenResourceError, anyio.ClosedResourceError], ids=["broken stream", "closed stream"]
+)
+async def test_a_turn_failure_cancelling_a_lifecycle_that_unwinds_with_a_late_answer_gives_one_reaction(
+    runner, monkeypatch, echo
+):
+    failing = transport_closing_with_late_answers(echo=echo, only_close=2)
+    monkeypatch.setattr(app_session, "streamable_http_client", failing)
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    runner.start()
+    await runner.app.log.until(READ)
+    runner.app.script(DISCOVER, cuts)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.app.log.until(LISTEN, 2)
+    await runner.app.log.until(READ, 3)
+    say_in_the_call(runner, f"{ADDRESSED} Again.")
+    await runner.app.said_count(1)
+
+    assert runner.reports.events() == [("started", None), ("backoff", "network"), ("resumed", None)]
+    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[2]]
+
+
 async def test_a_window_the_app_lost_is_skipped_and_is_no_suspension(runner):
     runner.gateway = Gateway(*says("room-8", ANSWER))
     runner.app.stand(SUBJECT, active(PLACE_ID), active("room-8"))
@@ -716,6 +764,3 @@ async def test_a_refused_and_an_answered_turn_log_a_code_and_no_secret_or_conten
 
     logged = formatted(caplog.get_records("call"))
     assert "turn_ended" in logged
-    assert {ADDRESSED, ANSWER, runner.files.persona_prompt, runner.files.gateway_key}.isdisjoint(
-        {held for held in runner.secrets_and_content() if held in logged}
-    )

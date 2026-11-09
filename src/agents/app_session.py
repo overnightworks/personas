@@ -8,7 +8,6 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from typing import Final, Protocol, cast, override
 
-import anyio
 import httpx2
 from agent_runtime_client.member import (
     ACCEPT_INVITATION_TOOL,
@@ -43,6 +42,7 @@ from agents.config import AppTarget
 from agents.decision import Accept, Refusal, status_code
 from agents.failures import (
     INVALID_ANSWER_CODE,
+    LATE_ANSWER_ERRORS,
     LISTEN_NOT_HONORED_CODE,
     UNSUPPORTED_VERSION_CODE,
     CallFailure,
@@ -135,9 +135,6 @@ _CALL_ERRORS: Final = (
     OSError,
 )
 """The errors of the SDK and its transport that tell a call failed; any other error is a defect."""
-
-_LATE_ANSWER_ERRORS: Final = (anyio.BrokenResourceError, anyio.ClosedResourceError)
-"""What the transport's task raises when an answer lands on a stream the session already closed."""
 
 
 class _ValidatingSession(ClientSession):
@@ -308,7 +305,7 @@ def _settled(leaf: BaseException, from_body: set[int], auth: _BearerAuth, *, bes
         return leaf
     if isinstance(leaf, _CALL_ERRORS):
         return _failure_of(leaf, auth)
-    if beside_no_echo and isinstance(leaf, _LATE_ANSWER_ERRORS):
+    if beside_no_echo and isinstance(leaf, LATE_ANSWER_ERRORS):
         return Unreachable("an answer landed after the session closed")
     return leaf
 
@@ -344,7 +341,7 @@ async def open_mcp_session(
         # connection becomes its failure and a defect stays a defect. The loop picks what decides.
         from_body = {id(own) for own in leaves_of(raised_in_body)} if raised_in_body else set[int]()
         found = list(leaves_of(error))
-        beside_no_echo = any(not isinstance(leaf, _LATE_ANSWER_ERRORS) for leaf in found)
+        beside_no_echo = any(not isinstance(leaf, LATE_ANSWER_ERRORS) for leaf in found)
         leaves = [_settled(leaf, from_body, auth, beside_no_echo=beside_no_echo) for leaf in found]
         if len(leaves) == 1:
             raise leaves[0] from None

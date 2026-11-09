@@ -148,6 +148,7 @@ class Harness:
         return [
             self.agent.client_secret.reveal(),
             self.files.gateway_key,
+            self.files.persona_prompt,
             *self.realm.issued,
             *self.app.kept_out_of_logs(),
         ]

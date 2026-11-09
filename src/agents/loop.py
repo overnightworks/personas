@@ -11,11 +11,12 @@ from typing import TYPE_CHECKING, Final, NoReturn
 from agent_runtime_client.agents import TurnRequest
 from agent_runtime_client.backend import TurnPerson, TurnStopped
 from agent_runtime_client.tools import HandTool, ToolOutcome
-from agent_runtime_client.turn import AgentRole, Principal, Turn, TurnMessage, TurnRole
+from agent_runtime_client.turn import Principal, Turn, TurnMessage, TurnRole
 
 from agents.decision import (
     SUSPENDED_RETRY_SECONDS,
     TOOL_NOT_DECLARED_CODE,
+    TURN_ROLE,
     Memory,
     Reaction,
     Seen,
@@ -35,7 +36,7 @@ from agents.decision import (
     turn_input,
     unread,
 )
-from agents.failures import CallFailure, leaves_of
+from agents.failures import LATE_ANSWER_ERRORS, CallFailure, leaves_of
 from agents.reporting import Event, Reporter, StateChange
 from agents.tokens import TokenFacts, facts_of
 
@@ -55,8 +56,6 @@ if TYPE_CHECKING:
 
 type BackendFactory = Callable[[Iterable[HandTool]], AgentBackend]
 
-TURN_ROLE: Final[AgentRole] = "user"
-"""The app role a turn acts under: an agent holds no admin right."""
 _STREAM_ENDED: Final = object()
 
 
@@ -98,6 +97,9 @@ class _Admitted:
     facts: TokenFacts
     input: str
 
+    async def groups(self) -> frozenset[str]:
+        return self.facts.groups
+
 
 class AgentLoop:
     """Keeps one stream of changes open for one agent in one app, accepts what it is invited to and answers.
@@ -122,6 +124,7 @@ class AgentLoop:
         self._seen: dict[PlaceRef, Seen] = {}
         self._turn: asyncio.Task[None] | None = None
         self._turn_ended = asyncio.Event()
+        self._turn_failed = False
         persona, binding, backend = agent.persona, app.binding, boundaries.backend
         self._turn_setup = (
             None if persona is None or binding is None or backend is None else _TurnSetup(persona, binding, backend)
@@ -141,13 +144,22 @@ class AgentLoop:
 
     async def _serve(self) -> NoReturn:
         token = await self._current_token()
-        async with asyncio.TaskGroup() as turns, self._boundaries.open_session(self._app, token.value) as session:
-            while True:
-                await self._use_current_token(session)
-                async with session.changes() as changes, aclosing(self._wakes(changes)) as wakes:
-                    await self._reconcile(session, turns)
-                    async for _ in wakes:
-                        await self._reconcile(session, turns)
+        self._turn_failed = False
+        async with asyncio.TaskGroup() as turns:
+            try:
+                async with self._boundaries.open_session(self._app, token.value) as session:
+                    while True:
+                        await self._use_current_token(session)
+                        async with session.changes() as changes, aclosing(self._wakes(changes)) as wakes:
+                            await self._reconcile(session, turns)
+                            async for _ in wakes:
+                                await self._reconcile(session, turns)
+            except Exception as error:
+                if self._turn_failed and all(isinstance(leaf, LATE_ANSWER_ERRORS) for leaf in leaves_of(error)):
+                    # The SDK's task groups consume the cancellation a turn's failure sent, so the session
+                    # leaves with the late answers alone; the failure is in the group.
+                    raise asyncio.CancelledError from None
+                raise
 
     async def _wakes(self, changes: AsyncIterator[object]) -> AsyncGenerator[None]:
         """A wake for each change the app signals and for each end of a turn; it ends when the stream does."""
@@ -166,6 +178,8 @@ class AgentLoop:
                     change = asyncio.ensure_future(anext(changes, _STREAM_ENDED))
                     yield
         finally:
+            if change.done() and not change.cancelled():
+                change.exception()
             change.cancel()
             ended.cancel()
 
@@ -240,20 +254,28 @@ class AgentLoop:
         self._turn = turns.create_task(self._take_turn(setup, admitted))
         self._turn.add_done_callback(self._turn_over)
 
-    def _turn_over(self, _turn: asyncio.Task[None]) -> None:
+    def _turn_over(self, turn: asyncio.Task[None]) -> None:
         self._turn = None
+        self._turn_failed = self._turn_failed or (not turn.cancelled() and turn.exception() is not None)
         self._turn_ended.set()
 
     async def _take_turn(self, setup: _TurnSetup, admitted: _Admitted) -> None:
         """Runs one turn over its own session; a turn that ends short is reported, any other error is the group's."""
         try:
             await self._run_turn(setup, admitted)
-        except TurnStopped as stopped:
+        except Exception as error:
             _raise_if_cancelled()
+            leaves = list(leaves_of(error))
+            stopped = next((leaf for leaf in leaves if isinstance(leaf, TurnStopped)), None)
+            if stopped is None:
+                raise
             self._report(Event.TURN_ENDED, stopped.code.value)
-        except Exception:
-            _raise_if_cancelled()
-            raise
+            # What left the session beside the stop (a late answer) still goes to the group, to be judged there.
+            rest = [leaf for leaf in leaves if leaf is not stopped]
+            if len(rest) == 1:
+                raise rest[0] from None
+            if rest:
+                raise BaseExceptionGroup("the turn's session failed", rest) from None
 
     async def _run_turn(self, setup: _TurnSetup, admitted: _Admitted) -> None:
         token = await self._current_token()
@@ -273,7 +295,7 @@ class AgentLoop:
                 max_duration_seconds=setup.persona.max_duration_seconds,
                 max_tool_calls=setup.binding.max_tool_calls,
             )
-            person = TurnPerson(admitted.facts.principal, TURN_ROLE, partial(asyncio.sleep, 0, admitted.facts.groups))
+            person = TurnPerson(admitted.facts.principal, TURN_ROLE, admitted.groups)
             async with aclosing(setup.backend(tools).run(request, person)) as events:
                 async for _ in events:
                     continue

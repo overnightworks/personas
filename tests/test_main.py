@@ -195,7 +195,9 @@ def test_an_addressed_line_gets_one_say_through_the_entry_point_and_nothing_secr
 
 
 @pytest.mark.parametrize("binds_tools", [True, False], ids=["tools bound", "lifecycle only"])
-def test_the_real_boundaries_run_turns_through_the_gateway_exactly_when_the_configuration_has_one(files, binds_tools):
+def test_the_real_boundaries_run_turns_through_the_gateway_exactly_when_the_configuration_has_one(
+    files, library_loggers, binds_tools
+):
     files.text = files.valid_text(binds_tools=binds_tools)
     config = load_config(files.write())
 

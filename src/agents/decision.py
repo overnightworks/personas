@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from agent_runtime_client.tools import ToolDeclaration
+    from agent_runtime_client.turn import AgentRole
 
     from agents.secret import Secret
 
@@ -33,6 +34,8 @@ BACKOFF_CAP_SECONDS: Final = 30.0
 _DOUBLINGS_TO_CAP: Final = math.ceil(math.log2(BACKOFF_CAP_SECONDS / BACKOFF_BASE_SECONDS))
 SUSPENDED_RETRY_SECONDS: Final = 30.0
 """How often a suspended loop asks the realm and then the app again."""
+TURN_ROLE: Final[AgentRole] = "user"
+"""The app role a turn acts under: an agent holds no admin right."""
 TOOL_NOT_DECLARED_CODE: Final = "tool_not_declared"
 """The code of a turn that ends because the app no longer declares a tool the configuration binds."""
 

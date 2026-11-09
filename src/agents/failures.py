@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final, cast
 
+import anyio
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -13,6 +15,8 @@ LISTEN_NOT_HONORED_CODE: Final = "listen_not_honored"
 """The code of a stream the app acknowledged without the subscription the runner asked for."""
 UNSUPPORTED_VERSION_CODE: Final = "unsupported_version"
 """The code of an app that shares no protocol revision with the runner."""
+LATE_ANSWER_ERRORS: Final = (anyio.BrokenResourceError, anyio.ClosedResourceError)
+"""What the transport's task raises when an answer lands after its session ended."""
 
 
 # The base of the failures below, which name their kind; a suffix would repeat it.

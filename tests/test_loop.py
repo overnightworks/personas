@@ -6,7 +6,9 @@ import asyncio
 from contextlib import asynccontextmanager
 
 import pytest
+from agent_runtime_client.backend import TurnStopKind, TurnStopped
 from agent_runtime_client.member import PlaceRef
+from agent_runtime_client.turn import RejectionCode
 
 from agents.config import load_config
 from agents.decision import (
@@ -457,6 +459,7 @@ async def test_a_lifecycle_and_a_turn_failing_together_give_one_reaction_and_a_r
             await together.reopened.wait()
     finally:
         task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
     assert together.clock.slept == [SUSPENDED_RETRY_SECONDS]
     assert together.reports.events() == [("started", None), ("suspended", "http_403")]
@@ -475,3 +478,53 @@ async def test_a_failure_of_a_call_and_a_defect_together_give_no_reaction_and_ev
     assert sorted(leaves_of(ended.value), key=repr) == sorted([failure, defect], key=repr)
     assert together.clock.slept == []
     assert together.reports.events() == [("started", None)]
+
+
+class SwallowedCancellation(TurnAndLifecycle):
+    """A turn whose session opener swallows the cancellation it is given and hands back ``outcome`` instead.
+
+    The SDK's task group can do that; ``outcome`` is raised, or the session is handed back when it is ``None``.
+    """
+
+    def __init__(self, files, outcome: Exception | None) -> None:
+        super().__init__(files, Unreachable("down"), Unreachable("down"))
+        self.outcome = outcome
+        self.relayed: list[str] = []
+
+    @asynccontextmanager
+    async def open(self, app, token):
+        self._opened += 1
+        if self._opened == 2:
+            self.turn_waiting.set()
+            try:
+                await self.release.wait()
+            except asyncio.CancelledError:
+                if self.outcome is not None:
+                    raise self.outcome from None
+        yield self
+
+    async def declared_tools(self):
+        self.relayed.append("declared_tools")
+        return ()
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [Unreachable("down"), TurnStopped(TurnStopKind.REFUSED, RejectionCode.BUSY), None],
+    ids=["a connection failure", "a stop", "the session itself"],
+)
+async def test_a_cancelled_turn_whose_opener_swallowed_it_reports_nothing_calls_nothing_and_leaves_no_reaction(
+    files, outcome
+):
+    swallowed = SwallowedCancellation(files, outcome)
+    task = asyncio.create_task(swallowed.loop.run())
+    async with asyncio.timeout(10):
+        await swallowed.lifecycle_waiting.wait()
+    task.cancel()
+    async with asyncio.timeout(10):
+        (ended,) = await asyncio.gather(task, return_exceptions=True)
+
+    assert isinstance(ended, asyncio.CancelledError)
+    assert swallowed.relayed == []
+    assert swallowed.clock.slept == []
+    assert swallowed.reports.events() == [("started", None)]
