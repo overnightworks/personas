@@ -20,14 +20,15 @@
 - A new root entry needs a `[[root.allow]]` entry with its reason in `quality/config.toml`.
 - A new directory of code joins `sonar.sources` in `sonar-project.properties` in the change that brings it.
 - lychee's arguments live in `.github/workflows/ci.yml`; the root holds no lychee config.
-- Only `.github/workflows/release.yml` pushes an image; `ci.yml` builds it without pushing.
+- Only `.github/workflows/release.yml` pushes an image.
 
 ## Owners
 
 - The operator: the words of `docs/VISION.md`, and a yes for each release version before an agent dispatches `release.yml`.
 - overnightworks/agent-runtime: the client library and its wire contract; agents takes its releases.
 - overnightworks/quality: the shared gate (`quality / verdict`) and its rules.
-- overnightworks/platform: the realm, the model gateway and the runner's deployment.
+- overnightworks/hal: the realm and the model gateway.
+- overnightworks/platform: the runner's deployment.
 
 ## Documents
 
