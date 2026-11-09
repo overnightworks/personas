@@ -258,10 +258,10 @@ class Perception:
 
 def perceive(window: PlaceWindow, checkpoint: Checkpoint) -> Perception:
     """Reads a window from a checkpoint: a restart or a pause takes nothing, a join and a new run take every line."""
+    if sets_where_reading_starts(checkpoint):
+        highest = window.entries[-1].seq if window.entries else window.starts_at - 1
+        return Perception(Reading(window.generation, highest), (), missed=False)
     match checkpoint:
-        case Restarted() | Paused():
-            highest = window.entries[-1].seq if window.entries else window.starts_at - 1
-            return Perception(Reading(window.generation, highest), (), missed=False)
         case Reading(generation=window.generation, last_seq=last_seq):
             return _take_after(window, last_seq)
         case _:
