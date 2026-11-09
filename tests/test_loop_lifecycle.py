@@ -29,7 +29,9 @@ from personas.failures import (
     INVALID_ANSWER_CODE,
     LISTEN_NOT_HONORED_CODE,
     UNSUPPORTED_VERSION_CODE,
+    leaves_of,
 )
+from personas.loop import AgentLoop
 from tests.support.call import CALL_PLACE
 from tests.support.hopin import (
     ACKNOWLEDGED,
@@ -43,7 +45,7 @@ from tests.support.hopin import (
     invited,
 )
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.transport import transport_closing_with_late_answers
+from tests.support.transport import transport_closing_with_late_answers, transport_whose_close_loses_a_child
 
 pytestmark = pytest.mark.anyio
 
@@ -427,3 +429,31 @@ async def test_an_app_that_refuses_with_403_leaves_no_marker(runner):
     await runner.reports.until("suspended")
 
     assert not runner.ready_file.exists()
+
+
+async def test_a_defect_in_the_lifecycle_sessions_body_whose_close_loses_a_child_ends_the_runner_loud(
+    runner, monkeypatch
+):
+    defect = ValueError("a defect")
+
+    real_reconcile = AgentLoop._reconcile  # noqa: SLF001 - the lifecycle's body is where the defect arises
+    raised = False
+
+    async def raise_once(self, session, turns):
+        nonlocal raised
+        if raised:
+            return await real_reconcile(self, session, turns)
+        raised = True
+        raise defect
+
+    monkeypatch.setattr(AgentLoop, "_reconcile", raise_once)
+    monkeypatch.setattr(app_session, "streamable_http_client", transport_whose_close_loses_a_child(OSError))
+    runner.start()
+
+    with pytest.raises(BaseException) as ended:  # noqa: PT011 - the leaves are asserted below
+        async with asyncio.timeout(LIMIT_SECONDS):
+            await runner.task
+
+    assert sorted(type(leaf).__name__ for leaf in leaves_of(ended.value)) == ["Unreachable", "ValueError"]
+    assert [leaf for leaf in leaves_of(ended.value) if leaf is defect] == [defect]
+    assert runner.reports.events() == [("started", None)]
