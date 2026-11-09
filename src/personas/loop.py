@@ -608,7 +608,8 @@ class AgentLoop:
             failure = decisive_failure(tuple(leaves_of(error)), already_renewed=False)
             if failure is None:
                 raise
-            if (defect := self._recorded_defect()) is not None:
+            defect = self._recorded_defect()
+            if defect is not None:
                 raise defect from failure
             return failure
 

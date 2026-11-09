@@ -29,6 +29,7 @@ from personas.failures import (
     INVALID_ANSWER_CODE,
     LISTEN_NOT_HONORED_CODE,
     UNSUPPORTED_VERSION_CODE,
+    Unreachable,
     leaves_of,
 )
 from personas.loop import AgentLoop
@@ -450,10 +451,9 @@ async def test_a_defect_in_the_lifecycle_sessions_body_whose_close_loses_a_child
     monkeypatch.setattr(app_session, "streamable_http_client", transport_whose_close_loses_a_child(OSError))
     runner.start()
 
-    with pytest.raises(BaseException) as ended:  # noqa: PT011 - the leaves are asserted below
+    with pytest.RaisesGroup(ValueError, Unreachable, flatten_subgroups=True) as ended:
         async with asyncio.timeout(LIMIT_SECONDS):
             await runner.task
 
-    assert sorted(type(leaf).__name__ for leaf in leaves_of(ended.value)) == ["Unreachable", "ValueError"]
     assert [leaf for leaf in leaves_of(ended.value) if leaf is defect] == [defect]
     assert runner.reports.events() == [("started", None)]
