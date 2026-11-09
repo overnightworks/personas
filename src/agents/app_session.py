@@ -225,7 +225,7 @@ def _failure_of(error: BaseException, auth: _BearerAuth) -> CallFailure:
     return Unreachable("the app did not answer")
 
 
-def _settled(leaf: BaseException, from_body: set[int], auth: _BearerAuth, *, beside_a_failure: bool) -> BaseException:
+def _settled(leaf: BaseException, from_body: set[int], auth: _BearerAuth, *, beside_no_echo: bool) -> BaseException:
     """A failure or a leaf the caller's body raised stays as it was; an error of a call becomes its failure.
 
     The transport's task finds its read stream closed when an answer lands after the session ended: beside
@@ -237,7 +237,7 @@ def _settled(leaf: BaseException, from_body: set[int], auth: _BearerAuth, *, bes
         return leaf
     if isinstance(leaf, _CALL_ERRORS):
         return _failure_of(leaf, auth)
-    if beside_a_failure and isinstance(leaf, _LATE_ANSWER_ERRORS):
+    if beside_no_echo and isinstance(leaf, _LATE_ANSWER_ERRORS):
         return Unreachable("an answer landed after the session closed")
     return leaf
 
@@ -273,8 +273,8 @@ async def open_mcp_session(
         # connection becomes its failure and a defect stays a defect. The loop picks what decides.
         from_body = {id(own) for own in leaves_of(raised_in_body)} if raised_in_body else set[int]()
         found = list(leaves_of(error))
-        beside_a_failure = any(not isinstance(leaf, _LATE_ANSWER_ERRORS) for leaf in found)
-        leaves = [_settled(leaf, from_body, auth, beside_a_failure=beside_a_failure) for leaf in found]
+        beside_no_echo = any(not isinstance(leaf, _LATE_ANSWER_ERRORS) for leaf in found)
+        leaves = [_settled(leaf, from_body, auth, beside_no_echo=beside_no_echo) for leaf in found]
         if len(leaves) == 1:
             raise leaves[0] from None
         raise ExceptionGroup("the session failed", cast("list[Exception]", leaves)) from None
