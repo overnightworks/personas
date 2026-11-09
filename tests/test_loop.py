@@ -327,3 +327,25 @@ async def test_a_place_gone_between_the_read_and_the_accept_is_the_refusal_and_n
 
     assert run.reports.events() == [("started", None), ("refused", "stale_invitation")]
     assert run.clock.slept == []
+
+
+async def test_a_refusal_and_a_network_failure_leaving_one_session_together_suspend_the_loop_once(scenario):
+    together = ExceptionGroup("the session failed", [Unreachable("down"), StatusFailure(403)])
+    run = scenario([together, read_of()])
+
+    await run.play()
+
+    assert run.clock.slept == [SUSPENDED_RETRY_SECONDS]
+    assert run.reports.events() == [("started", None), ("suspended", "http_403"), ("resumed", None)]
+
+
+async def test_a_failure_together_with_a_programming_error_ends_the_runner_with_both_and_no_reaction(scenario):
+    failure, defect = Unreachable("down"), ValueError("a defect")
+    run = scenario([ExceptionGroup("the session failed", [failure, defect]), read_of()])
+
+    with pytest.raises(ExceptionGroup) as ended:
+        await run.play()
+
+    assert ended.value.exceptions == (failure, defect)
+    assert run.clock.slept == []
+    assert run.reports.events() == [("started", None)]

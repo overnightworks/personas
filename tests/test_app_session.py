@@ -246,6 +246,32 @@ async def test_an_error_raised_in_the_stream_body_reaches_the_caller_unchanged(a
     assert caught.value is raised
 
 
+async def raises_after_a_refused_call(app, bearer, raised):
+    async with opened(app, bearer) as session:
+        del app.bearers[bearer.reveal()]
+        with pytest.raises(StatusFailure):
+            await session.read_standing()
+        raise raised
+
+
+async def test_a_defect_the_body_raises_after_the_app_answered_4xx_reaches_the_caller_unchanged(app, bearer):
+    defect = BodyError("the caller's own code failed")
+
+    with pytest.raises(BodyError) as caught:
+        await raises_after_a_refused_call(app, bearer, defect)
+
+    assert caught.value is defect
+
+
+async def test_every_leaf_of_a_group_the_body_raises_reaches_the_caller(app, bearer):
+    failure, defect = Unreachable("raised by the caller"), BodyError("the caller's own code failed")
+
+    with pytest.raises(ExceptionGroup) as caught:
+        await raises_in_the_stream_body(app, bearer, ExceptionGroup("both", [failure, defect]))
+
+    assert caught.value.exceptions == (failure, defect)
+
+
 async def test_a_stream_that_outlasts_its_deadline_by_sending_on_is_unreachable(app, bearer):
     async def sends_the_next_once_the_last_was_read(reply):
         await reply.open_stream()

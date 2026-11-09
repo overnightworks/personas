@@ -16,11 +16,12 @@ from agents.decision import (
     after_refusal,
     backoff_delay,
     backoff_reason,
+    decisive_failure,
     forget_gone,
     reaction_to,
     renewal_due,
 )
-from agents.failures import CallFailure
+from agents.failures import CallFailure, leaves_of
 from agents.reporting import Event, Reporter, StateChange
 
 if TYPE_CHECKING:
@@ -79,7 +80,10 @@ class AgentLoop:
             _raise_if_cancelled()
             try:
                 await self._serve()
-            except CallFailure as failure:
+            except Exception as error:
+                failure = decisive_failure(tuple(leaves_of(error)), already_renewed=self._renewed_after_401)
+                if failure is None:
+                    raise
                 await self._react(failure)
 
     async def _serve(self) -> NoReturn:
