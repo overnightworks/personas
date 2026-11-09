@@ -9,7 +9,7 @@ dependencies = [
     "httpx2>=2.16.0",
     "mcp>=2.3.0",
     "mcp-types>=2.3.0",
-    "overnightworks-agent-runtime-client[backend] @ git+https://github.com/overnightworks/agent-runtime@v0.27.0",
+    "overnightworks-agent-runtime-client[backend] @ git+https://github.com/overnightworks/agent-runtime@v0.27.1",
     "pydantic>=2.12",
 ]
 
@@ -36,7 +36,7 @@ packages = ["src/agents"]
 [dependency-groups]
 dev = [
     "anyio>=4.16.0",
-    "overnightworks-agent-runtime-client[mcp-server] @ git+https://github.com/overnightworks/agent-runtime@v0.27.0",
+    "overnightworks-agent-runtime-client[mcp-server] @ git+https://github.com/overnightworks/agent-runtime@v0.27.1",
     "pyright>=1.1.414",
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
