@@ -444,7 +444,6 @@ class AgentLoop:
             await self._run_turn(setup, admitted)
         except Exception as error:
             _raise_if_cancelled()
-            self._end_with_recorded_defect()
             leaves = list(leaves_of(error))
             relay_stop = next((leaf for leaf in leaves if isinstance(leaf, _RelayFailed)), None)
             stopped = relay_stop or next((leaf for leaf in leaves if isinstance(leaf, TurnStopped)), None)
@@ -453,6 +452,7 @@ class AgentLoop:
             # The stop only carries the failure out of the backend; the failure goes to the group, never the stop.
             held = _failure_held_by(stopped)
             if held is None:
+                self._end_with_recorded_defect()
                 self._report_turn_end(stopped.code.value)
             # What left the session beside the stop (a late answer) still goes to the group, to be judged there.
             rest: list[BaseException] = [held] if held is not None else []
