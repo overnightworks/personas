@@ -12,7 +12,7 @@ from agent_runtime_client.member import (
 
 from agents.decision import TurnCap
 from agents.reporting import Event
-from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PERSON, PLACE_ID, say_in_the_call
+from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, says
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import (
@@ -45,9 +45,8 @@ async def test_a_line_addressed_to_him_over_the_cap_starts_no_turn_makes_no_gate
 ):
     runner.cap_turns(TURN_CAP)
     runner.gateway = Gateway(refused_turn(), *says(PLACE_ID, ANSWER))
-    runner.app.stand(SUBJECT, active(PLACE_ID))
+    await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
-    runner.start()
     await runner.reports.until("turn_ended")
     say_in_the_call(runner, f"{ADDRESSED} Capped.")
     await runner.reports.until("capped")
@@ -64,9 +63,8 @@ async def test_a_line_addressed_to_him_over_the_cap_starts_no_turn_makes_no_gate
 async def test_after_the_period_has_passed_an_addressed_line_starts_a_turn_again(runner):
     runner.cap_turns(TURN_CAP)
     runner.gateway = Gateway(refused_turn(), *says(PLACE_ID, ANSWER))
-    runner.app.stand(SUBJECT, active(PLACE_ID))
+    await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
-    runner.start()
     await runner.reports.until("turn_ended")
     runner.clock.time += TURN_CAP.period_seconds
     say_in_the_call(runner, f"{ADDRESSED} Again.")
@@ -82,8 +80,10 @@ async def test_while_capped_an_addressed_line_in_a_second_place_is_skipped_too_a
     runner.cap_turns(TURN_CAP)
     runner.gateway = Gateway(refused_turn(), *says(PLACE_ID, ANSWER))
     runner.app.stand(SUBJECT, active(PLACE_ID), active(SECOND_PLACE_ID))
-    say_in_the_call(runner, ADDRESSED)
     runner.start()
+    await runner.app.until_window_read(PLACE_ID)
+    await runner.app.until_window_read(SECOND_PLACE_ID)
+    say_in_the_call(runner, ADDRESSED)
     await runner.reports.until("turn_ended")
     # The read the turn's end wakes is held inside the second place, so both new lines land in the next one alone.
     first_place_read = runner.app.hold_next_window_read()
@@ -108,9 +108,8 @@ async def test_two_apps_of_one_agent_share_one_cap(runner):
     runner.cap_turns(TURN_CAP)
     runner.add_app()
     runner.gateway = Gateway(refused_turn(), refused_turn())
-    runner.app.stand(SUBJECT, active(PLACE_ID))
+    await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
-    runner.start()
     await runner.reports.until("turn_ended")
     await runner.reports.until("capped")
 
@@ -118,16 +117,16 @@ async def test_two_apps_of_one_agent_share_one_cap(runner):
 
 
 async def test_leaving_and_rejoining_a_place_does_not_reset_the_cap(runner):
-    def becomes_active_once_joined(change):
+    def addressed_once_joined(change):
         if change.event is Event.JOINED:
             runner.app.stand(SUBJECT, active(PLACE_ID))
+            say_in_the_call(runner, f"{ADDRESSED} In the new window.")
 
     runner.cap_turns(TURN_CAP)
     runner.gateway = Gateway(refused_turn(), refused_turn())
-    runner.on_report = becomes_active_once_joined
-    runner.app.stand(SUBJECT, active(PLACE_ID))
+    runner.on_report = addressed_once_joined
+    await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
-    runner.start()
     await runner.reports.until("turn_ended")
     runner.app.stand(SUBJECT, invited(PLACE_ID, "inv-3"))
     await runner.reports.until("capped")
@@ -141,8 +140,9 @@ async def test_two_agents_each_have_a_cap_of_their_own(runner):
     runner.gateway = Gateway(refused_turn(), refused_turn())
     runner.app.stand(SUBJECT, active(PLACE_ID))
     runner.app.stand(SECOND_SUBJECT, active(PLACE_ID))
-    say_in_the_call(runner, ADDRESSED)
     runner.start()
+    await runner.app.until_window_read(PLACE_ID, 2)
+    say_in_the_call(runner, ADDRESSED)
     await runner.gateway.until_requested(2)
 
     assert len(runner.gateway.openings()) == 2

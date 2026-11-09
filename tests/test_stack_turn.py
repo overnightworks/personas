@@ -27,7 +27,7 @@ from agents.failures import (
     leaves_of,
 )
 from agents.reporting import Event
-from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PERSON, PLACE_ID, say_in_the_call
+from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, says
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import (
@@ -48,9 +48,8 @@ pytestmark = pytest.mark.anyio
 
 async def test_an_addressed_line_gets_exactly_one_say_under_the_agents_own_fingerprint(runner):
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
-    runner.app.stand(SUBJECT, active(PLACE_ID))
+    await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
-    runner.start()
     await runner.app.said_count(1)
     await runner.gateway.until_requested(2)
 
@@ -91,45 +90,46 @@ async def test_an_unaddressed_line_makes_no_gateway_call(runner):
 
 
 async def test_after_his_own_accept_reading_starts_at_seq_1(runner):
-    def becomes_active_once_joined(change):
+    def addressed_once_joined(change):
         if change.event is Event.JOINED:
             runner.app.stand(SUBJECT, active(PLACE_ID))
+            say_in_the_call(runner, ADDRESSED)
 
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
-    runner.on_report = becomes_active_once_joined
+    runner.on_report = addressed_once_joined
     runner.app.stand(SUBJECT, invited(PLACE_ID, "inv-3"))
-    say_in_the_call(runner, ADDRESSED)
     runner.start()
     await runner.app.said_count(1)
 
     assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1]]
 
 
-async def test_a_place_he_joins_again_is_read_from_seq_1_again(runner):
-    def becomes_active_once_joined(change):
+async def test_a_place_he_joins_again_is_read_from_seq_1_of_the_new_window_and_nothing_of_the_old_one_is_answered(
+    runner,
+):
+    def addressed_once_joined(change):
         if change.event is Event.JOINED:
             runner.app.stand(SUBJECT, active(PLACE_ID))
+            say_in_the_call(runner, f"{ADDRESSED} In the new window.")
 
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER, "Once more."))
-    runner.on_report = becomes_active_once_joined
-    runner.app.stand(SUBJECT, active(PLACE_ID))
+    runner.on_report = addressed_once_joined
+    await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
-    runner.start()
     await runner.app.said_count(1)
     await runner.gateway.until_requested(2)
 
     runner.app.stand(SUBJECT, invited(PLACE_ID, "inv-3"))
     await runner.app.said_count(2)
 
-    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [1, 2]]
+    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [1]]
 
 
 async def test_a_duplicate_pulse_or_a_re_read_starts_no_second_turn_for_a_line(runner):
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER, "Another answer."))
     closing_round = runner.gateway.hold_request(2)
-    runner.app.stand(SUBJECT, active(PLACE_ID))
+    await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
-    runner.start()
     await runner.gateway.until_requested(2)
     for uri in (STANDING_URI, place_window_uri(CALL_PLACE), STANDING_URI, place_window_uri(CALL_PLACE)):
         runner.app.changes.changed(runner.app_principal, uri)
@@ -152,9 +152,8 @@ async def test_a_line_said_while_a_turn_ran_is_answered_once_that_turn_ends_thou
             first_round.set()
 
     runner.on_report = lets_the_turn_end_once_a_reconciliation_has_passed_it_by
-    runner.app.stand(SUBJECT, active(PLACE_ID))
+    await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
-    runner.start()
     await runner.gateway.until_requested(1)
     runner.app.standings[SUBJECT] = [active(PLACE_ID), invited("room-9", "inv-3")]
     say_in_the_call(runner, f"{ADDRESSED} Again.")
@@ -169,9 +168,8 @@ async def test_a_line_said_while_a_turn_ran_is_answered_once_that_turn_ends_thou
 async def test_one_turn_runs_at_a_time_and_a_line_said_meanwhile_is_answered_after_a_turn_that_spoke(runner):
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER, "Another answer."))
     first_round = runner.gateway.hold_request(1)
-    runner.app.stand(SUBJECT, active(PLACE_ID))
+    await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
-    runner.start()
     await runner.gateway.until_requested(1)
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     first_round.set()
@@ -184,9 +182,8 @@ async def test_one_turn_runs_at_a_time_and_a_line_said_meanwhile_is_answered_aft
 
 async def a_turn_ended_short(runner, code):
     """Runs the runner on one addressed line until its turn reported this code."""
-    runner.app.stand(SUBJECT, active(PLACE_ID))
+    await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
-    runner.start()
     await runner.reports.until("turn_ended")
 
     assert runner.reports.events() == [("started", None), ("turn_ended", code)]
@@ -234,9 +231,8 @@ async def test_a_tool_that_answers_gone_shows_the_model_that_and_leaves_the_life
     runner.app.say_outcomes.append(gone)
     runner.app.content.add(gone.content)
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
-    runner.app.stand(SUBJECT, active(PLACE_ID))
+    await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
-    runner.start()
     await runner.gateway.until_requested(2)
 
     assert gone.content in runner.gateway.requests[1].content.decode()
@@ -283,9 +279,7 @@ async def test_a_turn_whose_session_fails_before_the_model_is_asked_leads_to_one
     runner, method, fails, events
 ):
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
-    runner.app.stand(SUBJECT, active(PLACE_ID))
-    runner.start()
-    await runner.app.log.until(READ)
+    await restarted_in_the_call(runner)
     runner.app.script(method, fails)
     say_in_the_call(runner, ADDRESSED)
     await runner.app.log.until(LISTEN, 2)
@@ -307,9 +301,8 @@ async def test_a_turn_ended_short_beside_a_late_answer_is_reported_and_costs_one
     failing = transport_closing_with_late_answers(echo=echo, only_close=1)
     monkeypatch.setattr(app_session, "streamable_http_client", failing)
     runner.gateway = Gateway(Reply(status=HTTPStatus.TOO_MANY_REQUESTS))
-    runner.app.stand(SUBJECT, active(PLACE_ID))
+    await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
-    runner.start()
     await runner.reports.until("resumed")
     await runner.app.log.until(LISTEN, 2)
 
@@ -332,9 +325,7 @@ async def test_a_turn_failure_cancelling_a_lifecycle_that_unwinds_with_a_late_an
     failing = transport_closing_with_late_answers(echo=echo, only_close=2)
     monkeypatch.setattr(app_session, "streamable_http_client", failing)
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
-    runner.app.stand(SUBJECT, active(PLACE_ID))
-    runner.start()
-    await runner.app.log.until(READ)
+    await restarted_in_the_call(runner)
     runner.app.script(DISCOVER, cuts)
     say_in_the_call(runner, ADDRESSED)
     await runner.app.log.until(LISTEN, 2)
@@ -349,9 +340,7 @@ async def test_a_turn_failure_cancelling_a_lifecycle_that_unwinds_with_a_late_an
 async def relayed_say_fails(runner, fails):
     """An addressed line whose model calls ``say`` and whose first relayed call the app answers with ``fails``."""
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER)[:1], *says(PLACE_ID, ANSWER))
-    runner.app.stand(SUBJECT, active(PLACE_ID))
-    runner.start()
-    await runner.app.log.until(READ)
+    await restarted_in_the_call(runner)
     runner.app.script(CALL, fails)
     say_in_the_call(runner, ADDRESSED)
 
@@ -414,9 +403,7 @@ async def test_a_deadline_during_a_relayed_call_ends_the_turn_as_limit_exceeded_
     runner.files.persona_path.write_text(runner.files.persona_text(max_duration_seconds=1), encoding="utf-8")
     runner.config = load_config(runner.files.write())
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
-    runner.app.stand(SUBJECT, active(PLACE_ID))
-    runner.start()
-    await runner.app.log.until(READ)
+    await restarted_in_the_call(runner)
     runner.app.script(CALL, hangs)
     say_in_the_call(runner, ADDRESSED)
     await runner.reports.until("turn_ended")
@@ -434,9 +421,10 @@ async def test_a_window_the_app_lost_is_skipped_and_is_no_suspension(runner):
     runner.gateway = Gateway(*says("room-8", ANSWER))
     runner.app.stand(SUBJECT, active(PLACE_ID), active("room-8"))
     runner.app.vanished.add(PLACE_ID)
+    runner.start()
+    await runner.app.until_window_read("room-8")
     say_in_the_call(runner, ADDRESSED)
     runner.app.speak("room-8", PERSON, "Ada", ADDRESSED)
-    runner.start()
     await runner.app.said_count(1)
 
     assert runner.app.said == [(SUBJECT, "room-8", ANSWER)]
@@ -445,9 +433,8 @@ async def test_a_window_the_app_lost_is_skipped_and_is_no_suspension(runner):
 
 async def test_a_refused_and_an_answered_turn_log_a_code_and_no_secret_or_content(runner, caplog):
     runner.gateway = Gateway(Reply(status=HTTPStatus.TOO_MANY_REQUESTS), *says(PLACE_ID, ANSWER))
-    runner.app.stand(SUBJECT, active(PLACE_ID))
+    await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
-    runner.start()
     await runner.reports.until("turn_ended")
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.app.said_count(1)

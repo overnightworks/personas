@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import secrets
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -56,6 +57,8 @@ ACKNOWLEDGED = "acknowledged"
 
 SAY_TOOL = "say"
 GENERATION = "generation-1"
+WINDOW_LINES = 100
+"""How many of a place's newest lines its window holds, as hopin's chat window does."""
 
 _SAY_DECLARATION = ToolDeclaration(
     name=SAY_TOOL,
@@ -93,6 +96,11 @@ class Line:
 
 def active(place_id: str) -> Standing:
     return Standing(place=PlaceRef(kind="call", id=place_id), state=StandingState.ACTIVE)
+
+
+def paused(place_id: str) -> Standing:
+    """The sponsor is away: the member keeps the place and its window, and nobody reads it meanwhile."""
+    return Standing(place=PlaceRef(kind="call", id=place_id), state=StandingState.PAUSED)
 
 
 ACCEPTED_NAME = "Mozart"
@@ -151,6 +159,9 @@ class FakeApp:
     accept_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
     accepted: list[AcceptInvitationArguments] = field(default_factory=list[AcceptInvitationArguments])
     lines: dict[str, list[Line]] = field(default_factory=dict[str, list[Line]])
+    generations: dict[str, str] = field(default_factory=dict[str, str])
+    window_reads: dict[str, int] = field(default_factory=dict[str, int])
+    window_read_added: asyncio.Event = field(default_factory=asyncio.Event)
     vanished: set[str] = field(default_factory=set[str])
     say_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
     said: list[tuple[str, str, str]] = field(default_factory=list[tuple[str, str, str]])
@@ -188,13 +199,20 @@ class FakeApp:
     def speak(self, place_id: str, author: str, name: str, text: str) -> int:
         """Adds a line to a place and signals its window to every member standing there, once it is visible."""
         place_lines = self.lines.setdefault(place_id, [])
-        place_lines.append(Line(len(place_lines) + 1, author, name, text))
+        seq = place_lines[-1].seq + 1 if place_lines else 1
+        place_lines.append(Line(seq, author, name, text))
+        del place_lines[:-WINDOW_LINES]
         self.content.add(text)
         window = place_window_uri(PlaceRef(kind="call", id=place_id))
         for subject, standings in self.standings.items():
             if any(standing.place.id == place_id for standing in standings):
                 self.changes.changed(Principal(iss=ISSUER, sub=subject), window)
-        return len(place_lines)
+        return seq
+
+    def join(self, place_id: str) -> None:
+        """A join gives the place a new window: a fresh generation, numbered from seq 1, with none of the old lines."""
+        self.generations[place_id] = f"generation-{secrets.token_hex(4)}"
+        self.lines[place_id] = []
 
     def hold_next_window_read(self) -> asyncio.Event:
         """The next window read takes its snapshot, tells ``window_read_held`` and answers once the event is set."""
@@ -243,10 +261,12 @@ class FakeApp:
             for line in self.lines.get(place.id, [])
         )
         window = PlaceWindow(
-            generation=GENERATION,
-            starts_at=entries[0].seq if entries else len(self.lines.get(place.id, [])) + 1,
+            generation=self.generations.get(place.id, GENERATION),
+            starts_at=entries[0].seq if entries else 1,
             entries=entries,
         )
+        self.window_reads[place.id] = self.window_reads.get(place.id, 0) + 1
+        self.window_read_added.set()
         held, self.held_window_read = self.held_window_read, None
         if held is not None:
             self.window_read_held.set()
@@ -266,6 +286,13 @@ class FakeApp:
         async with asyncio.timeout(LIMIT_SECONDS):
             await self.window_read_held.wait()
 
+    async def until_window_read(self, place_id: str, count: int = 1) -> None:
+        """Returns once the place's window was read this many times; fails after the limit."""
+        async with asyncio.timeout(LIMIT_SECONDS):
+            while self.window_reads.get(place_id, 0) < count:
+                self.window_read_added.clear()
+                await self.window_read_added.wait()
+
     async def said_count(self, count: int) -> None:
         """Returns once this many lines were said through the tool; fails after the limit."""
         async with asyncio.timeout(LIMIT_SECONDS):
@@ -278,6 +305,7 @@ class FakeApp:
         self.accepted.append(taken)
         if self.accept_outcomes:
             return self.accept_outcomes.pop(0)
+        self.join(taken.place.id)
         return ToolOutcome(json.dumps({"name": ACCEPTED_NAME}), is_error=False)
 
     @asynccontextmanager
