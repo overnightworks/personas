@@ -14,6 +14,8 @@ if TYPE_CHECKING:
 PERSONA_NAME = "mozart"
 GATEWAY_ORIGIN = "http://gateway.test"
 MAX_TOOL_CALLS = 4
+MAX_TURNS = 50
+TURN_PERIOD_SECONDS = 3600.0
 
 
 class Files:
@@ -50,7 +52,10 @@ class Files:
                 f'[gateway.gateway]\norigin = "{GATEWAY_ORIGIN}"\nkey_file = "{self.key_path}"\n'
             )
             tools = f'tools = ["say"]\nmax_tool_calls = {MAX_TOOL_CALLS}\n'
-            persona = f'persona_file = "{self.persona_path}"\n'
+            persona = (
+                f'persona_file = "{self.persona_path}"\n'
+                f"max_turns = {MAX_TURNS}\nturn_period_seconds = {TURN_PERIOD_SECONDS}\n"
+            )
         return (
             'token_endpoint = "https://realm.test/protocol/openid-connect/token"\n'
             f'ready_file = "{self.ready_path}"\n{gateway}'

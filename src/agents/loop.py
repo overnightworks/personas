@@ -22,6 +22,7 @@ from agents.decision import (
     Seen,
     Suspend,
     Token,
+    TurnCap,
     accepts_for,
     active_call_places,
     addressed,
@@ -33,6 +34,7 @@ from agents.decision import (
     forget_gone,
     reaction_to,
     renewal_due,
+    reserve_turn,
     turn_input,
     unread,
 )
@@ -88,6 +90,14 @@ class _TurnSetup:
     persona: AgentDefinition
     binding: ToolBinding
     backend: BackendFactory
+    cap: TurnCap
+
+
+@dataclass
+class TurnCounter:
+    """The start times of one agent's recent turns, shared by all its loops and kept for the process."""
+
+    started: tuple[float, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -112,8 +122,9 @@ class AgentLoop:
     and a failure of the turn's calls goes into the one reaction of the loop.
     """
 
-    def __init__(self, agent: AgentCredentials, app: AppTarget, boundaries: Boundaries) -> None:
+    def __init__(self, agent: AgentCredentials, app: AppTarget, boundaries: Boundaries, counter: TurnCounter) -> None:
         self._agent = agent
+        self._counter = counter
         self._app = app
         self._boundaries = boundaries
         self._token: Token | None = None
@@ -126,9 +137,11 @@ class AgentLoop:
         self._turn: asyncio.Task[None] | None = None
         self._turn_ended = asyncio.Event()
         self._turn_failed = False
-        persona, binding, backend = agent.persona, app.binding, boundaries.backend
+        persona, binding, backend, cap = agent.persona, app.binding, boundaries.backend, agent.turn_cap
         self._turn_setup = (
-            None if persona is None or binding is None or backend is None else _TurnSetup(persona, binding, backend)
+            None
+            if persona is None or binding is None or backend is None or cap is None
+            else _TurnSetup(persona, binding, backend, cap)
         )
 
     async def run(self) -> NoReturn:
@@ -244,12 +257,18 @@ class AgentLoop:
             new = unread(window, self._seen.get(place))
             if not new:
                 continue
-            # The read position moves, the turn is created and its callback added with no await between,
-            # so a line starts at most one turn.
+            # The read position moves, the turn is reserved and created and its callback added with no await
+            # between, so a line starts at most one turn and a capped line is never answered later.
             self._seen[place] = Seen(window.generation, new[-1].seq)
-            if any(addressed(line, facts.name) for line in new):
-                self._start_turn(turns, self._turn_setup, _Admitted(facts, turn_input(place, facts.name, window, new)))
-                return
+            if not any(addressed(line, facts.name) for line in new):
+                continue
+            started = reserve_turn(self._counter.started, self._boundaries.clock.now(), self._turn_setup.cap)
+            if started is None:
+                self._report(Event.CAPPED)
+                continue
+            self._counter.started = started
+            self._start_turn(turns, self._turn_setup, _Admitted(facts, turn_input(place, facts.name, window, new)))
+            return
 
     def _start_turn(self, turns: asyncio.TaskGroup, setup: _TurnSetup, admitted: _Admitted) -> None:
         self._turn = turns.create_task(self._take_turn(setup, admitted))
@@ -338,6 +357,7 @@ async def run_all(config: Config, boundaries: Boundaries) -> NoReturn:
     """One loop for every agent and every app; a loop never ends on its own."""
     async with asyncio.TaskGroup() as group:
         for agent in config.agents:
+            counter = TurnCounter()
             for app in config.apps:
-                group.create_task(AgentLoop(agent, app, boundaries).run())
+                group.create_task(AgentLoop(agent, app, boundaries, counter).run())
     raise AssertionError("a loop ended")  # pragma: no cover

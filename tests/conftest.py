@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
+from dataclasses import replace
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -13,10 +15,11 @@ from agent_runtime_client.turn import Principal
 
 from agents.app_session import READ_SECONDS, open_mcp_session
 from agents.config import load_config
-from agents.loop import AgentLoop, Boundaries, run_all
+from agents.loop import AgentLoop, Boundaries, TurnCounter, run_all
 from agents.main import QUIET_LIBRARIES, configure_logging
 from agents.readiness import FileReadyMarker
 from agents.reporting import log_state_change
+from agents.secret import Secret
 from agents.tokens import HttpTokenSource
 from tests.support.configfiles import Files
 from tests.support.fakes import (
@@ -41,7 +44,7 @@ if TYPE_CHECKING:
     from agent_runtime_client.member import MemberStanding
     from agent_runtime_client.tools import HandTool
 
-    from agents.decision import Refusal
+    from agents.decision import Refusal, TurnCap
     from agents.failures import CallFailure
     from agents.reporting import StateChange
     from agents.tokens import GrantedToken
@@ -64,7 +67,7 @@ class Scenario:
         self.reports = reports
         self.ready = FakeReadyMarker()
         boundaries = Boundaries(tokens, session.open, clock, reports, self.ready)
-        self.loop = AgentLoop(credentials(), app_target(), boundaries)
+        self.loop = AgentLoop(credentials(), app_target(), boundaries, TurnCounter())
 
     async def play(self) -> None:
         """Runs the loop until the script is spent, which is when a boundary blocks, then stops it."""
@@ -123,6 +126,20 @@ class Harness:
         self.reports = Reports()
         self.token_client = httpx2.AsyncClient(transport=self.realm.transport())
         self.task: asyncio.Task[object] | None = None
+
+    def cap_turns(self, cap: TurnCap) -> None:
+        """Gives every agent this cap; the amounts of a scenario are its own."""
+        self.config = replace(self.config, agents=tuple(replace(each, turn_cap=cap) for each in self.config.agents))
+
+    def add_app(self) -> None:
+        """A second app of the same agents; it answers at the same address as the first."""
+        self.config = replace(self.config, apps=(*self.config.apps, *self.config.apps))
+
+    def add_agent(self, client_id: str, subject: str) -> None:
+        """A second agent with the first one's persona and cap, its own client and its own subject in the app."""
+        second = replace(self.config.agents[0], client_id=client_id, client_secret=Secret(secrets.token_hex(16)))
+        self.config = replace(self.config, agents=(*self.config.agents, second))
+        self.realm.add_client(second, subject)
 
     def _report(self, change: StateChange) -> None:
         self.reports(change)
