@@ -38,10 +38,11 @@ class Files:
         self.config_path = directory / "agents.toml"
         self.text = self.valid_text()
 
-    def persona_text(self) -> str:
+    def persona_text(self, max_duration_seconds: int = 30) -> str:
         return (
             f"---\nname: {PERSONA_NAME}\ndescription: persona-{secrets.token_hex(4)}\nappRoles: [admin, user]\n"
-            f"model: text/{secrets.token_hex(4)}\nmaxDurationSeconds: 30\n---\n{self.persona_prompt}\n"
+            f"model: text/{secrets.token_hex(4)}\nmaxDurationSeconds: {max_duration_seconds}\n---\n"
+            f"{self.persona_prompt}\n"
         )
 
     def valid_text(self, mcp_url: str = "https://hopin.test/mcp", scope: str = "mcp-hopin", *, binds_tools=True) -> str:
