@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import secrets
 
@@ -9,8 +10,11 @@ import httpx2
 import pytest
 
 from agents.failures import INVALID_ANSWER_CODE, TokenStatusFailure, Unreachable, UnusableAnswer
-from agents.tokens import HttpTokenSource
+from agents.secret import Secret
+from agents.tokens import HttpTokenSource, facts_of
 from tests.support.fakes import credentials
+from tests.support.hopin import ISSUER
+from tests.support.realm import jwt_of
 
 pytestmark = pytest.mark.anyio
 
@@ -95,3 +99,79 @@ async def test_the_request_asks_for_client_credentials_with_the_apps_scope():
             "scope": "mcp-app",
         }
     ]
+
+
+def _claims(**changes: object) -> dict[str, object]:
+    return {
+        "iss": ISSUER,
+        "sub": secrets.token_hex(8),
+        "groups": [secrets.token_hex(4), secrets.token_hex(4)],
+        "agent_name": secrets.token_hex(4),
+    } | changes
+
+
+def test_the_facts_of_a_token_are_its_principal_its_groups_and_the_agents_name():
+    claims = _claims()
+
+    facts = facts_of(Secret(jwt_of(claims)))
+
+    assert (facts.principal.iss, facts.principal.sub, facts.name) == (
+        claims["iss"],
+        claims["sub"],
+        claims["agent_name"],
+    )
+    assert facts.groups == frozenset(claims["groups"])
+
+
+def test_a_token_that_names_no_groups_has_none():
+    claims = {name: value for name, value in _claims().items() if name != "groups"}
+
+    assert facts_of(Secret(jwt_of(claims))).groups == frozenset()
+
+
+def _segments(payload: bytes) -> str:
+    return f"header.{base64.urlsafe_b64encode(payload).decode()}.signature"
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "no-dots-at-all",
+        "header.payload",
+        "header.payload.signature.extra",
+        "header.%%%not-base64%%%.signature",
+        _segments(b"not json"),
+        _segments(b'["iss"]'),
+        _segments(b"\xff\xfe"),
+        jwt_of(_claims(iss="")),
+        jwt_of(_claims(sub=7)),
+        jwt_of(_claims(agent_name=None)),
+        jwt_of(_claims(groups="a-group")),
+        jwt_of(_claims(groups=[7])),
+        jwt_of({name: value for name, value in _claims().items() if name != "sub"}),
+        jwt_of({name: value for name, value in _claims().items() if name != "agent_name"}),
+    ],
+    ids=[
+        "no segments",
+        "two segments",
+        "four segments",
+        "payload not base64",
+        "payload not JSON",
+        "payload not an object",
+        "payload not text",
+        "empty issuer",
+        "subject not text",
+        "name null",
+        "groups not a list",
+        "group not text",
+        "no subject",
+        "no name",
+    ],
+)
+def test_a_token_that_is_no_jwt_with_these_claims_is_an_unusable_answer(token):
+    granted = Secret(token)
+
+    with pytest.raises(UnusableAnswer) as failure:
+        facts_of(granted)
+
+    assert failure.value.code == INVALID_ANSWER_CODE

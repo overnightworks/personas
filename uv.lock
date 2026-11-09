@@ -17,7 +17,7 @@ dependencies = [
     { name = "httpx2" },
     { name = "mcp" },
     { name = "mcp-types" },
-    { name = "overnightworks-agent-runtime-client" },
+    { name = "overnightworks-agent-runtime-client", extra = ["backend"] },
     { name = "pydantic" },
 ]
 
@@ -39,7 +39,7 @@ requires-dist = [
     { name = "httpx2", specifier = ">=2.16.0" },
     { name = "mcp", specifier = ">=2.3.0" },
     { name = "mcp-types", specifier = ">=2.3.0" },
-    { name = "overnightworks-agent-runtime-client", git = "https://github.com/overnightworks/agent-runtime?rev=v0.27.0" },
+    { name = "overnightworks-agent-runtime-client", extras = ["backend"], git = "https://github.com/overnightworks/agent-runtime?rev=v0.27.0" },
     { name = "pydantic", specifier = ">=2.12" },
 ]
 
@@ -464,6 +464,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+backend = [
+    { name = "httpx2" },
+]
 mcp-server = [
     { name = "anyio" },
     { name = "mcp" },

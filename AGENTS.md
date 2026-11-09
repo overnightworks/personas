@@ -24,7 +24,8 @@ dependencies, hatchling is pinned as in skat, and `uv sync` installs.
   with his yes.
 - `src/agents/decision.py` decides everything that needs no process, network
   or clock; `loop.py` performs it through the boundaries `tokens.py`,
-  `app_session.py`, `clock.py` and `reporting.py`; `config.py` owns the TOML.
+  `app_session.py`, `clock.py` and `reporting.py` and the model gateway
+  (`Boundaries.backend`); `config.py` owns the TOML.
   Extend the owner of a question, never a second decider.
 - A secret or token lives in `secret.Secret` and reaches no log line, error
   message, repr or test literal; tests generate theirs.

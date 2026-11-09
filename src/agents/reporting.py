@@ -18,11 +18,12 @@ class Event(StrEnum):
     BACKOFF = "backoff"
     JOINED = "joined"
     REFUSED = "refused"
+    TURN_ENDED = "turn_ended"
 
 
 @dataclass(frozen=True)
 class StateChange:
-    """One change of an agent's loop for one app, with the HTTP status or refusal code if any."""
+    """One change of an agent's loop for one app, with the HTTP status, refusal or turn code if any."""
 
     event: Event
     client_id: str

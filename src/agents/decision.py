@@ -6,17 +6,22 @@ rule is called with the values it judges.
 
 from __future__ import annotations
 
+import json
 import math
-from dataclasses import dataclass, field
+import re
+from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
-from agent_runtime_client.member import PlaceRef, Standing, StandingState
+from agent_runtime_client.member import PlaceEntry, PlaceRef, PlaceWindow, Standing, StandingState
 
 from agents.failures import CallFailure, StatusFailure, TokenStatusFailure, UnusableAnswer
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+
+    from agent_runtime_client.tools import ToolDeclaration
+    from agent_runtime_client.turn import AgentRole
 
     from agents.secret import Secret
 
@@ -29,6 +34,10 @@ BACKOFF_CAP_SECONDS: Final = 30.0
 _DOUBLINGS_TO_CAP: Final = math.ceil(math.log2(BACKOFF_CAP_SECONDS / BACKOFF_BASE_SECONDS))
 SUSPENDED_RETRY_SECONDS: Final = 30.0
 """How often a suspended loop asks the realm and then the app again."""
+TURN_ROLE: Final[AgentRole] = "user"
+"""The app role a turn acts under: an agent holds no admin right."""
+TOOL_NOT_DECLARED_CODE: Final = "tool_not_declared"
+"""The code of a turn that ends because the app no longer declares a tool the configuration binds."""
 
 
 class Refusal(StrEnum):
@@ -161,3 +170,69 @@ def _rank(reaction: Reaction | Suspend) -> int:
             return 1
         case _:
             return 2
+
+
+@dataclass(frozen=True)
+class Seen:
+    """How far one place's window was read: the run of seq numbers it belongs to and the last line taken."""
+
+    generation: str
+    last_seq: int
+
+
+def active_call_places(standings: tuple[Standing, ...]) -> tuple[PlaceRef, ...]:
+    return tuple(
+        standing.place
+        for standing in standings
+        if standing.state is StandingState.ACTIVE and standing.place.kind == CALL_PLACE_KIND
+    )
+
+
+def unread(window: PlaceWindow, seen: Seen | None) -> tuple[PlaceEntry, ...]:
+    """The lines after ``seen``; with none, or another run of seq numbers, reading starts at seq 1."""
+    if seen is None or seen.generation != window.generation:
+        return window.entries
+    return tuple(line for line in window.entries if line.seq > seen.last_seq)
+
+
+def addressed(line: PlaceEntry, name: str) -> bool:
+    """Whether the line names the agent as a whole word, whatever the case; a line of his own never does."""
+    return not line.own and re.search(rf"(?<!\w){re.escape(name.casefold())}(?!\w)", line.text.casefold()) is not None
+
+
+def bound_declarations(declared: Sequence[ToolDeclaration], names: Sequence[str]) -> tuple[ToolDeclaration, ...] | None:
+    """The declarations of the bound tools in binding order, or ``None`` when the app declares one no more."""
+    by_name = {declaration.name: declaration for declaration in declared}
+    if not all(name in by_name for name in names):
+        return None
+    return tuple(by_name[name] for name in names)
+
+
+@dataclass(frozen=True)
+class _TurnLine:
+    seq: int
+    kind: str
+    name: str
+    text: str
+    own: bool
+    new: bool
+
+
+@dataclass(frozen=True)
+class _TurnRoom:
+    kind: str
+    id: str
+    you: str
+    lines: tuple[_TurnLine, ...]
+
+
+def turn_input(place: PlaceRef, name: str, window: PlaceWindow, new: Sequence[PlaceEntry]) -> str:
+    """The facts of a turn: the room, the agent's name, every line of the window, which are new and which are his own.
+
+    It holds no instruction; those live in the persona.
+    """
+    new_seqs = {line.seq for line in new}
+    lines = tuple(
+        _TurnLine(line.seq, line.kind, line.name, line.text, line.own, line.seq in new_seqs) for line in window.entries
+    )
+    return json.dumps(asdict(_TurnRoom(place.kind, place.id, name, lines)), ensure_ascii=False)

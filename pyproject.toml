@@ -9,7 +9,7 @@ dependencies = [
     "httpx2>=2.16.0",
     "mcp>=2.3.0",
     "mcp-types>=2.3.0",
-    "overnightworks-agent-runtime-client @ git+https://github.com/overnightworks/agent-runtime@v0.27.0",
+    "overnightworks-agent-runtime-client[backend] @ git+https://github.com/overnightworks/agent-runtime@v0.27.0",
     "pydantic>=2.12",
 ]
 

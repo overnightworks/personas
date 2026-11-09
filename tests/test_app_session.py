@@ -12,8 +12,16 @@ from http import HTTPStatus
 import anyio
 import pytest
 from agent_runtime_client.member import ACCEPT_INVITATION_TOOL, STANDING_URI, AcceptInvitationArguments, PlaceRef
-from agent_runtime_client.tools import ToolOutcome
-from mcp_types import INVALID_PARAMS, ListToolsResult, Tool
+from agent_runtime_client.tools import ToolEffect, ToolOutcome
+from mcp_types import (
+    INVALID_PARAMS,
+    BlobResourceContents,
+    ListToolsResult,
+    ReadResourceResult,
+    TextResourceContents,
+    Tool,
+    ToolAnnotations,
+)
 from pydantic import ValidationError
 
 from agents import app_session
@@ -31,7 +39,18 @@ from agents.failures import (
 from agents.main import configure_logging
 from agents.secret import Secret
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import CALL, LIMIT_SECONDS, LISTEN, READ, FakeApp, active, formatted, invited
+from tests.support.hopin import (
+    CALL,
+    LIMIT_SECONDS,
+    LIST_TOOLS,
+    LISTEN,
+    READ,
+    SAY_TOOL,
+    FakeApp,
+    active,
+    formatted,
+    invited,
+)
 from tests.support.loopback import serving
 from tests.support.transport import transport_closing_with_late_answers
 
@@ -470,6 +489,131 @@ async def test_a_malformed_notification_of_the_app_logs_none_of_its_content(app,
         await accepts_a_place(app, bearer)
 
     assert leaked not in caplog.text
+
+
+async def test_a_window_holds_the_lines_of_the_place_and_marks_the_members_own(app, bearer):
+    heard, own = secrets.token_hex(4), secrets.token_hex(4)
+    app.stand(SUBJECT, active("room-7"))
+    app.speak("room-7", "visitor", "Ada", heard)
+    app.speak("room-7", SUBJECT, "Mozart", own)
+
+    async with opened(app, bearer) as session:
+        window = await session.read_place(PLACE)
+
+    assert window is not None
+    assert [(each.seq, each.text, each.own) for each in window.entries] == [(1, heard, False), (2, own, True)]
+
+
+@pytest.mark.parametrize("arrangement", ["the app lost the place", "not in the place", "answered inside a 200"])
+async def test_a_window_the_app_shows_the_member_no_more_is_none(app, bearer, arrangement):
+    async def knows_no_such_resource(reply):
+        await reply.error(INVALID_PARAMS, status=HTTPStatus.OK)
+
+    app.stand(SUBJECT, active("room-7"))
+    if arrangement == "the app lost the place":
+        app.vanished.add("room-7")
+    elif arrangement == "not in the place":
+        app.stand(SUBJECT)
+    else:
+        app.script(READ, knows_no_such_resource)
+
+    async with opened(app, bearer) as session:
+        window = await session.read_place(PLACE)
+
+    assert window is None
+
+
+async def test_a_window_read_the_app_refuses_is_a_failure_and_no_missing_window(app, bearer):
+    app.stand(SUBJECT, active("room-7"))
+    app.refused_method = READ
+    app.refuse_with = HTTPStatus.FORBIDDEN
+
+    async with opened(app, bearer) as session:
+        with pytest.raises(StatusFailure):
+            await session.read_place(PLACE)
+
+
+@pytest.mark.parametrize(
+    "contents",
+    [
+        TextResourceContents(uri="member://standing/places/call/room-7", text="{}", mime_type="application/json"),
+        BlobResourceContents(uri="member://standing/places/call/room-7", blob="e30=", mime_type="application/json"),
+    ],
+    ids=["not a window", "not text"],
+)
+async def test_a_window_that_is_no_window_is_an_unusable_answer(app, bearer, contents):
+    async def answers_wrongly(reply):
+        await reply.result(ReadResourceResult(contents=[contents], ttl_ms=0, cache_scope="private"))
+
+    app.stand(SUBJECT, active("room-7"))
+    app.script(READ, answers_wrongly)
+
+    async with opened(app, bearer) as session:
+        with pytest.raises(UnusableAnswer) as failure:
+            await session.read_place(PLACE)
+
+    assert failure.value.code == INVALID_ANSWER_CODE
+
+
+async def test_the_declared_tools_are_the_ones_the_app_lists(app, bearer):
+    async with opened(app, bearer) as session:
+        declared = await session.declared_tools()
+
+    assert {each.name for each in declared} == {ACCEPT_INVITATION_TOOL, SAY_TOOL}
+
+
+async def test_a_tool_marked_read_only_is_declared_read_only(app, bearer):
+    async def lists_a_read_only_tool(reply):
+        tool = Tool(
+            name="peek",
+            description="Looks.",
+            input_schema={"type": "object"},
+            annotations=ToolAnnotations(read_only_hint=True),
+        )
+        await reply.result(ListToolsResult(tools=[tool]))
+
+    app.script(LIST_TOOLS, lists_a_read_only_tool)
+
+    async with opened(app, bearer) as session:
+        declared = await session.declared_tools()
+
+    assert [(each.name, each.effect) for each in declared] == [("peek", ToolEffect.READ_ONLY)]
+
+
+async def test_a_declaration_that_fails_validation_is_an_unusable_answer(app, bearer):
+    async def lists_a_tool_without_a_description(reply):
+        await reply.result(ListToolsResult(tools=[Tool(name="peek", input_schema={"type": "object"})]))
+
+    app.script(LIST_TOOLS, lists_a_tool_without_a_description)
+
+    async with opened(app, bearer) as session:
+        with pytest.raises(UnusableAnswer) as failure:
+            await session.declared_tools()
+
+    assert failure.value.code == INVALID_ANSWER_CODE
+
+
+@pytest.mark.parametrize("outcome", [ToolOutcome("said", is_error=False), ToolOutcome("gone", is_error=True)])
+async def test_an_invoked_tool_gives_the_outcome_the_app_answered_an_error_one_too(app, bearer, outcome):
+    app.say_outcomes.append(outcome)
+    app.content.add(outcome.content)
+
+    async with opened(app, bearer) as session:
+        invoked = await session.invoke(SAY_TOOL, {"place": "room-7", "text": secrets.token_hex(4)})
+
+    assert invoked == outcome
+
+
+async def test_an_invoked_tool_the_app_refuses_is_a_failure(app, bearer):
+    app.refuse_with = HTTPStatus.SERVICE_UNAVAILABLE
+    app.refused_method = CALL
+    arguments = {"place": "room-7", "text": secrets.token_hex(4)}
+
+    async with opened(app, bearer) as session:
+        with pytest.raises(StatusFailure) as failure:
+            await session.invoke(SAY_TOOL, arguments)
+
+    assert failure.value.status == HTTPStatus.SERVICE_UNAVAILABLE
 
 
 @pytest.mark.parametrize("name", POLLING_NAMES)

@@ -7,10 +7,12 @@ from typing import TYPE_CHECKING
 
 import httpx2
 import pytest
+from agent_runtime_client.backend.fake_gateway import completion
+from agent_runtime_client.backend.gateway import GatewayBackend
 from agent_runtime_client.turn import Principal
 
 from agents.app_session import READ_SECONDS, open_mcp_session
-from agents.config import AppTarget, Config
+from agents.config import load_config
 from agents.loop import AgentLoop, Boundaries, run_all
 from agents.main import QUIET_LIBRARIES, configure_logging
 from agents.readiness import FileReadyMarker
@@ -27,14 +29,17 @@ from tests.support.fakes import (
     credentials,
     grant,
 )
+from tests.support.gateway import Gateway
 from tests.support.hopin import AGENT_SUBJECT, ISSUER, FakeApp, formatted
 from tests.support.realm import TOKEN_ENDPOINT, FakeRealm
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Iterator
+    from collections.abc import AsyncIterator, Callable, Iterable, Iterator
     from pathlib import Path
 
+    from agent_runtime_client.backend import AgentBackend
     from agent_runtime_client.member import MemberStanding
+    from agent_runtime_client.tools import HandTool
 
     from agents.decision import Refusal
     from agents.failures import CallFailure
@@ -102,13 +107,17 @@ SCOPE = "mcp-app"
 class Harness:
     """The real runner (loop, token adapter, SDK session) against a fake realm and an app on a loopback socket."""
 
-    def __init__(self, ready_file: Path, app: FakeApp, app_url: str) -> None:
-        self.ready_file = ready_file
+    def __init__(self, files: Files, app: FakeApp, app_url: str) -> None:
+        files.text = files.valid_text(app_url, SCOPE)
+        self.config = load_config(files.write())
+        self.files = files
+        self.ready_file = files.ready_path
         self.app_url = app_url
         self.on_report: Callable[[StateChange], None] = lambda change: None
         self.app = app
         self.app_principal = Principal(iss=ISSUER, sub=AGENT_SUBJECT)
-        self.agent = credentials()
+        self.agent = self.config.agents[0]
+        self.gateway = Gateway(completion("done"))
         self.realm = FakeRealm(self.app, self.agent, AGENT_SUBJECT, SCOPE)
         self.clock = FakeClock()
         self.reports = Reports()
@@ -127,12 +136,22 @@ class Harness:
             clock=self.clock,
             report=self._report,
             ready=FileReadyMarker(self.ready_file),
+            backend=self._backend,
         )
-        config = Config(TOKEN_ENDPOINT, self.ready_file, (AppTarget(self.app_url, SCOPE),), (self.agent,))
-        self.task = asyncio.create_task(run_all(config, boundaries))
+        self.task = asyncio.create_task(run_all(self.config, boundaries))
+
+    def _backend(self, tools: Iterable[HandTool]) -> AgentBackend:
+        assert self.config.gateway is not None
+        return GatewayBackend(self.config.gateway, tools=tools, transport=self.gateway)
 
     def secrets_and_content(self) -> list[str]:
-        return [self.agent.client_secret.reveal(), *self.realm.issued, *self.app.kept_out_of_logs()]
+        return [
+            self.agent.client_secret.reveal(),
+            self.files.gateway_key,
+            self.files.persona_prompt,
+            *self.realm.issued,
+            *self.app.kept_out_of_logs(),
+        ]
 
 
 @pytest.fixture
@@ -146,13 +165,13 @@ def library_loggers() -> Iterator[None]:
 
 
 @pytest.fixture
-async def runner(caplog: pytest.LogCaptureFixture, library_loggers: None, tmp_path: Path) -> AsyncIterator[Harness]:
+async def runner(caplog: pytest.LogCaptureFixture, library_loggers: None, files: Files) -> AsyncIterator[Harness]:
     """The runner's world; at its end no log line holds a secret, a token or the content of a tool."""
     configure_logging()
     caplog.set_level(logging.DEBUG)
     app = FakeApp()
     async with app.serving() as app_url:
-        harness = Harness(tmp_path / "ready", app, app_url)
+        harness = Harness(files, app, app_url)
         yield harness
         if harness.task is not None:
             harness.task.cancel()
