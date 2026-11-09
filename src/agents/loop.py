@@ -17,9 +17,9 @@ from agents.decision import (
     SUSPENDED_RETRY_SECONDS,
     TOOL_NOT_DECLARED_CODE,
     TURN_ROLE,
+    Joined,
     Memory,
     Reaction,
-    Seen,
     Suspend,
     Token,
     TurnCap,
@@ -32,11 +32,12 @@ from agents.decision import (
     bound_declarations,
     decisive_failure,
     forget_gone,
+    perceive,
     reaction_to,
     renewal_due,
     reserve_turn,
+    sync_checkpoints,
     turn_input,
-    unread,
 )
 from agents.failures import LATE_ANSWER_ERRORS, CallFailure, leaves_of
 from agents.reporting import Event, Reporter, StateChange
@@ -53,6 +54,7 @@ if TYPE_CHECKING:
     from agents.app_session import AppSession, SessionOpener
     from agents.clock import Clock
     from agents.config import AgentCredentials, AppTarget, Config, ToolBinding
+    from agents.decision import Checkpoint
     from agents.readiness import ReadyMarker
     from agents.tokens import TokenSource
 
@@ -141,7 +143,7 @@ class AgentLoop:
         self._renewed_after_401 = False
         self._suspension: str | None = None
         self._backing_off = False
-        self._seen: dict[PlaceRef, Seen] = {}
+        self._checkpoints: dict[PlaceRef, Checkpoint] = {}
         self._turn: asyncio.Task[None] | None = None
         self._turn_ended = asyncio.Event()
         self._turn_failed = False
@@ -207,14 +209,22 @@ class AgentLoop:
 
     async def _reconcile(self, session: AppSession, turns: asyncio.TaskGroup) -> None:
         """Reads the standing as it is now and acts on it; a wake says only that it may have changed."""
+        standings = await self._take_standing(session)
+        if await self._answer_addressed_lines(session, turns, standings):
+            # A window the app lost dropped its place's checkpoint: the standing says where the place stands now.
+            await self._take_standing(session)
+        self._served()
+
+    async def _take_standing(self, session: AppSession) -> tuple[Standing, ...]:
+        """Reads the standing, keeps the checkpoints in line with it and accepts what it invites to."""
         await self._use_current_token(session)
         standing = await session.read_standing()
         self._resume_if_unwell()
         self._boundaries.ready.announce()
         self._memory = forget_gone(self._memory, standing.standings)
+        self._checkpoints = sync_checkpoints(self._checkpoints, standing.standings)
         await self._accept_invitations(session, standing.standings)
-        await self._answer_addressed_lines(session, turns, standing.standings)
-        self._served()
+        return standing.standings
 
     async def _use_current_token(self, session: AppSession) -> None:
         session.use_token((await self._current_token()).value)
@@ -243,7 +253,7 @@ class AgentLoop:
             await self._use_current_token(session)
             refusal = await session.accept(accept)
             if refusal is None:
-                self._seen.pop(accept.place, None)
+                self._checkpoints[accept.place] = Joined()
                 self._report(Event.JOINED)
                 continue
             self._memory, is_news = after_refusal(self._memory, accept, refusal)
@@ -252,31 +262,37 @@ class AgentLoop:
 
     async def _answer_addressed_lines(
         self, session: AppSession, turns: asyncio.TaskGroup, standings: tuple[Standing, ...]
-    ) -> None:
-        """Reads the active call places' windows; a line addressed to the agent starts the one turn."""
+    ) -> bool:
+        """Reads the active call places' windows; a line addressed to the agent starts the one turn.
+
+        It says whether a window was lost, which dropped its place's checkpoint.
+        """
         if self._turn_setup is None or self._turn is not None:
-            return
+            return False
         facts = facts_of((await self._current_token()).value)
+        lost = False
         for place in active_call_places(standings):
             await self._use_current_token(session)
             window = await session.read_place(place)
             if window is None:
+                del self._checkpoints[place]
+                lost = True
                 continue
-            new = unread(window, self._seen.get(place))
-            if not new:
-                continue
-            # The read position moves, the turn is reserved and created and its callback added with no await
+            perception = perceive(window, self._checkpoints[place])
+            # The checkpoint moves, the turn is reserved and created and its callback added with no await
             # between, so a line starts at most one turn and a capped line is never answered later.
-            self._seen[place] = Seen(window.generation, new[-1].seq)
-            if not any(addressed(line, facts.name) for line in new):
+            self._checkpoints[place] = perception.checkpoint
+            if not any(addressed(line, facts.name) for line in perception.new):
                 continue
             started = reserve_turn(self._counter.started, self._boundaries.clock.now(), self._turn_setup.cap)
             if started is None:
                 self._report(Event.CAPPED)
                 continue
             self._counter.started = started
-            self._start_turn(turns, self._turn_setup, _Admitted(facts, turn_input(place, facts.name, window, new)))
-            return
+            admitted = _Admitted(facts, turn_input(place, facts.name, window, perception.new, missed=perception.missed))
+            self._start_turn(turns, self._turn_setup, admitted)
+            return lost
+        return lost
 
     def _start_turn(self, turns: asyncio.TaskGroup, setup: _TurnSetup, admitted: _Admitted) -> None:
         self._turn = turns.create_task(self._take_turn(setup, admitted))

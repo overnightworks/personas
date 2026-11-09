@@ -27,7 +27,7 @@ from tests.support.hopin import AGENT_SUBJECT, FakeApp, active, formatted, invit
 from tests.support.realm import FakeRealm
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator, Iterable
+    from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterable
 
     from agent_runtime_client.agents import TurnRequest
     from agent_runtime_client.backend import AgentBackend, TurnEvent, TurnPerson
@@ -88,11 +88,16 @@ class World:
         self.gateway = Gateway(*says("room-7", files.persona_prompt))
         self.issued: list[str] = []
         self.app.stand(AGENT_SUBJECT, invited("room-7", "inv-3"))
+        self.on_joined: Callable[[], None] = self._stop
+
+    @staticmethod
+    def _stop() -> None:
+        raise Stop
 
     def _report(self, change: StateChange) -> None:
         log_state_change(change)
         if change.event is Event.JOINED:
-            raise Stop
+            self.on_joined()
 
     @asynccontextmanager
     async def compose(self, config: Config, ready: ReadyMarker) -> AsyncGenerator[Boundaries]:
@@ -188,8 +193,12 @@ def test_an_addressed_line_gets_one_say_through_the_entry_point_and_nothing_secr
     world, library_loggers, caplog
 ):
     answer = world.files.persona_prompt
-    world.app.stand(AGENT_SUBJECT, active("room-7"))
-    world.app.speak("room-7", "visitor-subject", "Ada", "Mozart, are you there?")
+
+    def addressed_once_joined() -> None:
+        world.app.stand(AGENT_SUBJECT, active("room-7"))
+        world.app.speak("room-7", "visitor-subject", "Ada", "Mozart, are you there?")
+
+    world.on_joined = addressed_once_joined
     caplog.set_level(logging.DEBUG)
 
     with pytest.raises(ExceptionGroup) as ended:

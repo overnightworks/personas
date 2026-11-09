@@ -160,8 +160,8 @@ class FakeApp:
     accepted: list[AcceptInvitationArguments] = field(default_factory=list[AcceptInvitationArguments])
     lines: dict[str, list[Line]] = field(default_factory=dict[str, list[Line]])
     generations: dict[str, str] = field(default_factory=dict[str, str])
-    window_reads: dict[str, int] = field(default_factory=dict[str, int])
-    window_read_added: asyncio.Event = field(default_factory=asyncio.Event)
+    reads: dict[str, int] = field(default_factory=dict[str, int])
+    read_added: asyncio.Event = field(default_factory=asyncio.Event)
     vanished: set[str] = field(default_factory=set[str])
     say_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
     said: list[tuple[str, str, str]] = field(default_factory=list[tuple[str, str, str]])
@@ -210,9 +210,10 @@ class FakeApp:
         return seq
 
     def join(self, place_id: str) -> None:
-        """A join gives the place a new window: a fresh generation, numbered from seq 1, with none of the old lines."""
+        """A join gives the place a new, existing window: a fresh generation, numbered from seq 1, with no old line."""
         self.generations[place_id] = f"generation-{secrets.token_hex(4)}"
         self.lines[place_id] = []
+        self.vanished.discard(place_id)
 
     def hold_next_window_read(self) -> asyncio.Event:
         """The next window read takes its snapshot, tells ``window_read_held`` and answers once the event is set."""
@@ -227,6 +228,7 @@ class FakeApp:
     def hold_next_read(self) -> asyncio.Event:
         """The next read takes its snapshot, tells ``read_held`` and answers once the returned event is set."""
         self.held_read = asyncio.Event()
+        self.read_held.clear()
         return self.held_read
 
     def script(self, method: str, *handlers: Handler) -> None:
@@ -239,6 +241,8 @@ class FakeApp:
         return [STANDING_URI, *(place_window_uri(each.place) for each in self.standings.get(principal.sub, []))]
 
     async def read(self, principal: Principal, uri: str) -> MemberStanding | PlaceWindow | None:
+        self.reads[uri] = self.reads.get(uri, 0) + 1
+        self.read_added.set()
         place = place_ref_from_window_uri(uri)
         if place is not None:
             return await self._window(principal, place)
@@ -254,24 +258,25 @@ class FakeApp:
         return snapshot
 
     async def _window(self, principal: Principal, place: PlaceRef) -> PlaceWindow | None:
+        window = self._snapshot(principal, place)
+        held, self.held_window_read = self.held_window_read, None
+        if held is not None:
+            self.window_read_held.set()
+            await held.wait()
+        return window
+
+    def _snapshot(self, principal: Principal, place: PlaceRef) -> PlaceWindow | None:
         if place.id in self.vanished or not any(each.place == place for each in self.standings.get(principal.sub, [])):
             return None
         entries = tuple(
             PlaceEntry(seq=line.seq, kind="message", name=line.name, text=line.text, own=line.author == principal.sub)
             for line in self.lines.get(place.id, [])
         )
-        window = PlaceWindow(
+        return PlaceWindow(
             generation=self.generations.get(place.id, GENERATION),
             starts_at=entries[0].seq if entries else 1,
             entries=entries,
         )
-        self.window_reads[place.id] = self.window_reads.get(place.id, 0) + 1
-        self.window_read_added.set()
-        held, self.held_window_read = self.held_window_read, None
-        if held is not None:
-            self.window_read_held.set()
-            await held.wait()
-        return window
 
     async def _say(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
         if self.say_outcomes:
@@ -286,12 +291,25 @@ class FakeApp:
         async with asyncio.timeout(LIMIT_SECONDS):
             await self.window_read_held.wait()
 
-    async def until_window_read(self, place_id: str, count: int = 1) -> None:
-        """Returns once the place's window was read this many times; fails after the limit."""
+    async def until_read(self, uri: str, count: int = 1) -> None:
+        """Returns once the resource was read this many times, answered or not; fails after the limit."""
         async with asyncio.timeout(LIMIT_SECONDS):
-            while self.window_reads.get(place_id, 0) < count:
-                self.window_read_added.clear()
-                await self.window_read_added.wait()
+            while self.reads.get(uri, 0) < count:
+                self.read_added.clear()
+                await self.read_added.wait()
+
+    async def until_window_read(self, place_id: str, count: int = 1) -> None:
+        await self.until_read(place_window_uri(PlaceRef(kind="call", id=place_id)), count)
+
+    async def until_standing_read(self, count: int = 1) -> None:
+        await self.until_read(STANDING_URI, count)
+
+    def window_reads(self, place_id: str) -> int:
+        return self.reads.get(place_window_uri(PlaceRef(kind="call", id=place_id)), 0)
+
+    async def until_read_held(self) -> None:
+        async with asyncio.timeout(LIMIT_SECONDS):
+            await self.read_held.wait()
 
     async def said_count(self, count: int) -> None:
         """Returns once this many lines were said through the tool; fails after the limit."""

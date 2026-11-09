@@ -371,23 +371,27 @@ async def test_a_failure_together_with_a_programming_error_ends_the_runner_with_
     assert run.reports.events() == [("started", None)]
 
 
-class _OneWake:
-    """A stream that wakes once and then stays silent."""
+class _Wakes:
+    """A stream that wakes a given number of times and then stays silent."""
 
-    def __init__(self) -> None:
-        self._woken = False
+    def __init__(self, count: int) -> None:
+        self._left = count
 
     def __aiter__(self):
         return self
 
     async def __anext__(self) -> None:
-        if self._woken:
+        if not self._left:
             await asyncio.Event().wait()
-        self._woken = True
+        self._left -= 1
 
 
 class ScriptedSessions:
-    """One loop over a stand-in that is the app's session; a subclass scripts what `open` and the reads do."""
+    """One loop over a stand-in that is the app's session; a subclass scripts what `open` and the reads do.
+
+    The place is invited at the first read and active at every later one, so the agent joins it and reads its window
+    from the first line; two wakes follow the first read.
+    """
 
     def __init__(self, files, backend) -> None:
         self.config = load_config(files.write())
@@ -403,7 +407,13 @@ class ScriptedSessions:
 
     @asynccontextmanager
     async def changes(self):
-        yield _OneWake()
+        yield _Wakes(2)
+
+    async def accept(self, accept):
+        return None
+
+    def standing_of_a_joined_place(self, reads: int):
+        return read_of(invited("room-7", "inv-3") if reads == 1 else active("room-7"))
 
     async def read_place(self, place):
         return self._windows.pop(0)
@@ -412,8 +422,9 @@ class ScriptedSessions:
 class TurnAndLifecycle(ScriptedSessions):
     """One loop whose turn and lifecycle both wait for one release and then fail in the same step.
 
-    The lifecycle reads the standing once, which starts a turn on an addressed line, and waits at its second
-    read. The turn waits at the opening of its session. A third session, after a reaction, waits at its first read.
+    The lifecycle joins at its first read and reads the standing again, which starts a turn on an addressed line,
+    and waits at its third read. The turn waits at the opening of its session. A third session, after a reaction,
+    waits at its first read.
     """
 
     def __init__(self, files, lifecycle_failure: Exception, turn_failure: Exception) -> None:
@@ -438,15 +449,15 @@ class TurnAndLifecycle(ScriptedSessions):
 
     async def read_standing(self):
         self._reads += 1
-        if self._reads == 2:
+        if self._reads == 3:
             await self.turn_waiting.wait()
             self.lifecycle_waiting.set()
             await self.release.wait()
             raise self._lifecycle_failure
-        if self._reads > 2:
+        if self._reads > 3:
             self.reopened.set()
             await asyncio.Event().wait()
-        return read_of(active("room-7"))
+        return self.standing_of_a_joined_place(self._reads)
 
     def _no_model(self, tools):
         raise AssertionError("the turn fails before it asks the model")
@@ -472,7 +483,7 @@ async def test_a_lifecycle_and_a_turn_failing_together_give_one_reaction_and_a_r
         await asyncio.gather(task, return_exceptions=True)
 
     assert together.clock.slept == [SUSPENDED_RETRY_SECONDS]
-    assert together.reports.events() == [("started", None), ("suspended", "http_403")]
+    assert together.reports.events() == [("started", None), ("joined", None), ("suspended", "http_403")]
 
 
 async def test_a_failure_of_a_call_and_a_defect_together_give_no_reaction_and_every_leaf_ends_the_runner(files):
@@ -487,7 +498,7 @@ async def test_a_failure_of_a_call_and_a_defect_together_give_no_reaction_and_ev
 
     assert sorted(leaves_of(ended.value), key=repr) == sorted([failure, defect], key=repr)
     assert together.clock.slept == []
-    assert together.reports.events() == [("started", None)]
+    assert together.reports.events() == [("started", None), ("joined", None)]
 
 
 class SwallowedCancellation(TurnAndLifecycle):
@@ -537,7 +548,7 @@ async def test_a_cancelled_turn_whose_opener_swallowed_it_reports_nothing_calls_
     assert isinstance(ended, asyncio.CancelledError)
     assert swallowed.relayed == []
     assert swallowed.clock.slept == []
-    assert swallowed.reports.events() == [("started", None)]
+    assert swallowed.reports.events() == [("started", None), ("joined", None)]
 
 
 class DefectInARelayedCall(ScriptedSessions):
@@ -569,9 +580,9 @@ class DefectInARelayedCall(ScriptedSessions):
 
     async def read_standing(self):
         self._reads += 1
-        if self._reads > 1:
+        if self._reads > 2:
             await asyncio.Event().wait()
-        return read_of(active("room-7"))
+        return self.standing_of_a_joined_place(self._reads)
 
     async def declared_tools(self):
         return (
@@ -600,4 +611,4 @@ async def test_a_relayed_call_that_raises_a_defect_ends_the_runner_loud_with_eve
     assert raising.requests_at_failure == 1
     assert len(raising.gateway.requests) == 1
     assert raising.clock.slept == []
-    assert raising.reports.events() == [("started", None)]
+    assert raising.reports.events() == [("started", None), ("joined", None)]
