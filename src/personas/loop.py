@@ -610,8 +610,7 @@ class AgentLoop:
         except TimeoutError:
             if not bound.expired():
                 raise
-            if (defect := self._recorded_defect()) is not None:
-                raise defect from None
+            self._end_with_recorded_defect()
             raise Unreachable("the app did not answer in time") from None
 
     def _report_tools_only_failure(self, app: AppTarget, failed_apps: set[str], code: str) -> None:
