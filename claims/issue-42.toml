@@ -1,0 +1,8 @@
+claim_id = "5ea6543cd4df4d58b603d4624f905e18"
+agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
+role = "builder"
+base = "cbfd8917e27f2a536f1173e958c2a86d3aafb3e6"
+branch = "claude/issue-42-agents-becomes-personas"
+scope = [".github", "AGENTS.md", "Dockerfile", "README.md", "docs", "pyproject.toml", "sonar-project.properties", "src", "tests", "uv.lock"]
+opened_commit = "300c501d2390805bd73329c23aaca2685fb95a5e"
+whole_reason = "The stem is one name: a repository called personas whose package, command, variable, Sonar key or image still says agents would break the naming rule and collide with the library that takes agents."
