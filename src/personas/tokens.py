@@ -12,11 +12,11 @@ import httpx2
 from agent_runtime_client.turn import NonEmptyUnicodeText, Principal
 from pydantic import BaseModel, ConfigDict
 
-from agents.failures import INVALID_ANSWER_CODE, TokenStatusFailure, Unreachable, UnusableAnswer
-from agents.secret import Secret
+from personas.failures import INVALID_ANSWER_CODE, TokenStatusFailure, Unreachable, UnusableAnswer
+from personas.secret import Secret
 
 if TYPE_CHECKING:
-    from agents.config import AgentCredentials
+    from personas.config import AgentCredentials
 
 TOKEN_TIMEOUT_SECONDS: Final = 30.0
 

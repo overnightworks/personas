@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from agent_runtime_client.member import STANDING_URI
 
-from agents.reporting import Event
+from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, says
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT

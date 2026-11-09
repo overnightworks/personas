@@ -50,7 +50,7 @@ jobs:
       # overnightworks library named in pyproject.toml (tool.uv), run with
       # exact build tools; --no-build refuses every other source distribution,
       # whose build script would run third-party code on the runner, so third-party
-      # packages are wheel-only. agents itself stays out of the environment: nothing
+      # packages are wheel-only. personas itself stays out of the environment: nothing
       # below needs it installed, because pytest puts src/ on the import path
       # (pyproject.toml, tool.pytest.ini_options.pythonpath). The steps below then
       # call their tool straight from that environment instead of installing again.
@@ -93,13 +93,13 @@ jobs:
           persist-credentials: false
 
       - name: Build the image without pushing it
-        run: docker build --tag agents-image .
+        run: docker build --tag personas-image .
 
       # The image holds no configuration, so the runner stops at start with the variable named.
       - name: Check that the runner refuses to start without a configuration
         run: |
-          if docker run --rm agents-image 2>stderr.txt; then exit 1; fi
-          grep AGENTS_CONFIG stderr.txt
+          if docker run --rm personas-image 2>stderr.txt; then exit 1; fi
+          grep PERSONAS_CONFIG stderr.txt
 
       # The runner is PID 1 here, which ignores a signal it has no handler for. Its token endpoint refuses
       # connections, so its loop backs off and the stop reaches it mid-loop.
@@ -109,7 +109,7 @@ jobs:
           chmod 755 "$configuration"
           openssl rand -hex 16 > "$configuration/runner.secret"
           chmod 644 "$configuration/runner.secret"
-          cat > "$configuration/agents.toml" <<'EOF'
+          cat > "$configuration/personas.toml" <<'EOF'
           token_endpoint = "http://127.0.0.1:9/token"
           ready_file = "/tmp/ready"
           [[apps]]
@@ -121,7 +121,7 @@ jobs:
           EOF
           docker run --detach --name stopped-runner \
             --volume "$configuration:/configuration:ro" \
-            --env AGENTS_CONFIG=/configuration/agents.toml agents-image
+            --env PERSONAS_CONFIG=/configuration/personas.toml personas-image
           until docker logs stopped-runner 2>&1 | grep --quiet backoff; do
             test "$(docker inspect --format '{{.State.Running}}' stopped-runner)" = true
             sleep 1

@@ -17,8 +17,8 @@ from agent_runtime_client.member import (
 )
 from agent_runtime_client.tools import ToolDeclaration
 
-from agents.app_session import READ_SECONDS
-from agents.decision import (
+from personas.app_session import READ_SECONDS
+from personas.decision import (
     BACKOFF_CAP_SECONDS,
     RENEW_BEFORE_EXPIRY_SECONDS,
     Accept,
@@ -50,8 +50,8 @@ from agents.decision import (
     turn_input,
     turn_invalid,
 )
-from agents.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer
-from agents.secret import Secret
+from personas.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer
+from personas.secret import Secret
 from tests.support.fakes import line, window_of
 from tests.support.hopin import GENERATION, active, invited, paused
 

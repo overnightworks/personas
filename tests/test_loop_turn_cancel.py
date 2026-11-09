@@ -12,10 +12,10 @@ from agent_runtime_client.backend.fake_gateway import Reply
 from agent_runtime_client.member import STANDING_URI
 from mcp_types import ListToolsResult
 
-from agents import app_session
-from agents.decision import TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE
-from agents.failures import Unreachable, leaves_of
-from agents.loop import UnrequestedCancellationError
+from personas import app_session
+from personas.decision import TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE
+from personas.failures import Unreachable, leaves_of
+from personas.loop import UnrequestedCancellationError
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, says
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
@@ -207,7 +207,7 @@ async def a_turn_removed_while_its_session_closes(runner, monkeypatch, *, seam=N
     closing = ClosingHold()
     monkeypatch.setattr(app_session, "streamable_http_client", closing.transport())
     if seam is not None:
-        monkeypatch.setattr(f"agents.app_session._McpAppSession.{seam}", raise_it)
+        monkeypatch.setattr(f"personas.app_session._McpAppSession.{seam}", raise_it)
     runner.gateway = gateway or Gateway(*says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)

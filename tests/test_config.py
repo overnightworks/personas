@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from agents.config import CONFIG_ENVIRONMENT_VARIABLE, ConfigError, ToolBinding, load_config
-from agents.decision import TurnCap
-from agents.main import CONFIGURATION_ERROR_EXIT_CODE, main
+from personas.config import CONFIG_ENVIRONMENT_VARIABLE, ConfigError, ToolBinding, load_config
+from personas.decision import TurnCap
+from personas.main import CONFIGURATION_ERROR_EXIT_CODE, main
 from tests.support.configfiles import MAX_TOOL_CALLS, MAX_TURNS, PERSONA_NAME, TURN_PERIOD_SECONDS
 from tests.support.realm import API_GROUP
 

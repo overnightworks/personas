@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 
 import anyio
 
-from agents import app_session
+from personas import app_session
 
 
 def transport_closing_with_late_answers(*, echo: type[Exception], echoes: int = 1, only_close: int | None = None):

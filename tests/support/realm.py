@@ -16,7 +16,7 @@ from tests.support.hopin import ISSUER
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from agents.config import AgentCredentials
+    from personas.config import AgentCredentials
     from tests.support.hopin import FakeApp
 
 TOKEN_ENDPOINT = "https://realm.test/protocol/openid-connect/token"

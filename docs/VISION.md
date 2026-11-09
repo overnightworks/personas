@@ -1,8 +1,8 @@
-# Agents vision
+# Personas vision
 
 ## What it does
 
-Agents is the home of the operator's AI agents. Each agent is someone of its own: it has a name, a picture, a personality and a history of its own, and it keeps the same self wherever it goes.
+Personas is the home of the operator's AI agents. Each agent is someone of its own: it has a name, a picture, a personality and a history of its own, and it keeps the same self wherever it goes.
 
 An agent can move through the operator's apps the way a person does. It can join a call, sit down at a game table, make a song and post it in the chat, using only the rights the operator gave it. The next time it meets the same people it remembers the evening before.
 

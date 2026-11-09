@@ -13,7 +13,7 @@ from agent_runtime_client.backend import TurnPerson, TurnStopKind, TurnStopped
 from agent_runtime_client.tools import HandTool, ToolOutcome
 from agent_runtime_client.turn import FailureCode, Principal, Turn, TurnMessage, TurnRole
 
-from agents.decision import (
+from personas.decision import (
     SUSPENDED_RETRY_SECONDS,
     TOOL_NOT_DECLARED_CODE,
     TURN_CANCELLED_CODE,
@@ -43,9 +43,9 @@ from agents.decision import (
     turn_input,
     turn_invalid,
 )
-from agents.failures import CallFailure, leaves_of
-from agents.reporting import Event, Reporter, StateChange
-from agents.tokens import TokenFacts, facts_of
+from personas.failures import CallFailure, leaves_of
+from personas.reporting import Event, Reporter, StateChange
+from personas.tokens import TokenFacts, facts_of
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Coroutine, Iterable
@@ -55,12 +55,12 @@ if TYPE_CHECKING:
     from agent_runtime_client.member import PlaceRef, Standing
     from agent_runtime_client.turn import JsonObject
 
-    from agents.app_session import AppSession, SessionOpener
-    from agents.clock import Clock
-    from agents.config import AgentCredentials, AppTarget, Config, ToolBinding
-    from agents.decision import Checkpoint
-    from agents.readiness import ReadyMarker
-    from agents.tokens import TokenSource
+    from personas.app_session import AppSession, SessionOpener
+    from personas.clock import Clock
+    from personas.config import AgentCredentials, AppTarget, Config, ToolBinding
+    from personas.decision import Checkpoint
+    from personas.readiness import ReadyMarker
+    from personas.tokens import TokenSource
 
 type BackendFactory = Callable[[Iterable[HandTool]], AgentBackend]
 

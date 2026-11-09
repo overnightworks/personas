@@ -19,14 +19,14 @@ from mcp_types import (
     ListToolsResult,
 )
 
-from agents import app_session
-from agents.config import load_config
-from agents.decision import TOOL_NOT_DECLARED_CODE
-from agents.failures import (
+from personas import app_session
+from personas.config import load_config
+from personas.decision import TOOL_NOT_DECLARED_CODE
+from personas.failures import (
     Unreachable,
     leaves_of,
 )
-from agents.reporting import Event
+from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, says
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT

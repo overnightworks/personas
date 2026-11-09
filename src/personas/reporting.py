@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
-_LOG: Final = logging.getLogger("agents")
+_LOG: Final = logging.getLogger("personas")
 
 
 class Event(StrEnum):

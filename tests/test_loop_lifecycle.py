@@ -23,9 +23,9 @@ from mcp_types import (
     TextResourceContents,
 )
 
-from agents import app_session
-from agents.decision import SUSPENDED_RETRY_SECONDS, backoff_delay, status_code
-from agents.failures import (
+from personas import app_session
+from personas.decision import SUSPENDED_RETRY_SECONDS, backoff_delay, status_code
+from personas.failures import (
     INVALID_ANSWER_CODE,
     LISTEN_NOT_HONORED_CODE,
     UNSUPPORTED_VERSION_CODE,

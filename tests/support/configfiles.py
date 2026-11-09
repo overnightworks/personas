@@ -5,7 +5,7 @@ from __future__ import annotations
 import secrets
 from typing import TYPE_CHECKING
 
-from agents.config import CONFIG_ENVIRONMENT_VARIABLE
+from personas.config import CONFIG_ENVIRONMENT_VARIABLE
 from tests.support.realm import API_GROUP
 
 if TYPE_CHECKING:
@@ -35,7 +35,7 @@ class Files:
         self.persona_path = directory / f"{PERSONA_NAME}.md"
         self.persona_path.write_text(self.persona_text(), encoding="utf-8")
         self.ready_path = directory / "ready"
-        self.config_path = directory / "agents.toml"
+        self.config_path = directory / "personas.toml"
         self.text = self.valid_text()
 
     def persona_text(self, max_duration_seconds: int = 30) -> str:

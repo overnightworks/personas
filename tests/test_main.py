@@ -13,14 +13,14 @@ import pytest
 from agent_runtime_client.backend.gateway import GatewayBackend
 from agent_runtime_client.turn_events import FinalEvent
 
-from agents.app_session import open_mcp_session
-from agents.config import CONFIG_ENVIRONMENT_VARIABLE, load_config
-from agents.failures import leaves_of
-from agents.loop import Boundaries
-from agents.main import QUIET_LIBRARIES, READINESS_ERROR_EXIT_CODE, configure_logging, main, real_boundaries
-from agents.readiness import FileReadyMarker
-from agents.reporting import Event, log_state_change
-from agents.tokens import HttpTokenSource
+from personas.app_session import open_mcp_session
+from personas.config import CONFIG_ENVIRONMENT_VARIABLE, load_config
+from personas.failures import leaves_of
+from personas.loop import Boundaries
+from personas.main import QUIET_LIBRARIES, READINESS_ERROR_EXIT_CODE, configure_logging, main, real_boundaries
+from personas.readiness import FileReadyMarker
+from personas.reporting import Event, log_state_change
+from personas.tokens import HttpTokenSource
 from tests.support.fakes import FakeClock
 from tests.support.gateway import Gateway, says
 from tests.support.hopin import AGENT_SUBJECT, FakeApp, active, formatted, invited
@@ -33,10 +33,10 @@ if TYPE_CHECKING:
     from agent_runtime_client.backend import AgentBackend, TurnEvent, TurnPerson
     from agent_runtime_client.tools import HandTool
 
-    from agents.config import AppTarget, Config
-    from agents.readiness import ReadyMarker
-    from agents.reporting import StateChange
-    from agents.secret import Secret
+    from personas.config import AppTarget, Config
+    from personas.readiness import ReadyMarker
+    from personas.reporting import StateChange
+    from personas.secret import Secret
     from tests.support.configfiles import Files
 
 

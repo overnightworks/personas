@@ -9,9 +9,9 @@ import secrets
 import httpx2
 import pytest
 
-from agents.failures import INVALID_ANSWER_CODE, TokenStatusFailure, Unreachable, UnusableAnswer
-from agents.secret import Secret
-from agents.tokens import HttpTokenSource, facts_of
+from personas.failures import INVALID_ANSWER_CODE, TokenStatusFailure, Unreachable, UnusableAnswer
+from personas.secret import Secret
+from personas.tokens import HttpTokenSource, facts_of
 from tests.support.fakes import credentials
 from tests.support.hopin import ISSUER
 from tests.support.realm import jwt_of

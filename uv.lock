@@ -9,53 +9,6 @@ build-constraints = [
 ]
 
 [[package]]
-name = "agents"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "anyio" },
-    { name = "httpx2" },
-    { name = "mcp" },
-    { name = "mcp-types" },
-    { name = "overnightworks-agent-runtime-client", extra = ["backend"] },
-    { name = "pydantic" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "anyio" },
-    { name = "overnightworks-agent-runtime-client", extra = ["mcp-server"] },
-    { name = "pyright" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
-    { name = "uvicorn" },
-    { name = "vulture" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "anyio", specifier = ">=4.16.0" },
-    { name = "httpx2", specifier = ">=2.16.0" },
-    { name = "mcp", specifier = ">=2.3.0" },
-    { name = "mcp-types", specifier = ">=2.3.0" },
-    { name = "overnightworks-agent-runtime-client", extras = ["backend"], git = "https://github.com/overnightworks/agent-runtime?rev=v0.27.1" },
-    { name = "pydantic", specifier = ">=2.12" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "anyio", specifier = ">=4.16.0" },
-    { name = "overnightworks-agent-runtime-client", extras = ["mcp-server"], git = "https://github.com/overnightworks/agent-runtime?rev=v0.27.1" },
-    { name = "pyright", specifier = ">=1.1.414" },
-    { name = "pytest", specifier = ">=9.0.2" },
-    { name = "pytest-cov", specifier = ">=7.0.0" },
-    { name = "ruff", specifier = ">=0.17.0" },
-    { name = "uvicorn", specifier = ">=0.54.0" },
-    { name = "vulture", specifier = ">=2.15" },
-]
-
-[[package]]
 name = "annotated-types"
 version = "0.8.0"
 source = { registry = "https://pypi.org/simple" }
@@ -470,6 +423,53 @@ backend = [
 mcp-server = [
     { name = "anyio" },
     { name = "mcp" },
+]
+
+[[package]]
+name = "overnightworks-personas"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "anyio" },
+    { name = "httpx2" },
+    { name = "mcp" },
+    { name = "mcp-types" },
+    { name = "overnightworks-agent-runtime-client", extra = ["backend"] },
+    { name = "pydantic" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "anyio" },
+    { name = "overnightworks-agent-runtime-client", extra = ["mcp-server"] },
+    { name = "pyright" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+    { name = "uvicorn" },
+    { name = "vulture" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anyio", specifier = ">=4.16.0" },
+    { name = "httpx2", specifier = ">=2.16.0" },
+    { name = "mcp", specifier = ">=2.3.0" },
+    { name = "mcp-types", specifier = ">=2.3.0" },
+    { name = "overnightworks-agent-runtime-client", extras = ["backend"], git = "https://github.com/overnightworks/agent-runtime?rev=v0.27.1" },
+    { name = "pydantic", specifier = ">=2.12" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "anyio", specifier = ">=4.16.0" },
+    { name = "overnightworks-agent-runtime-client", extras = ["mcp-server"], git = "https://github.com/overnightworks/agent-runtime?rev=v0.27.1" },
+    { name = "pyright", specifier = ">=1.1.414" },
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-cov", specifier = ">=7.0.0" },
+    { name = "ruff", specifier = ">=0.17.0" },
+    { name = "uvicorn", specifier = ">=0.54.0" },
+    { name = "vulture", specifier = ">=2.15" },
 ]
 
 [[package]]

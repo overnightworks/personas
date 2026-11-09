@@ -10,8 +10,8 @@ from agent_runtime_client.member import (
     place_window_uri,
 )
 
-from agents.decision import TurnCap
-from agents.reporting import Event
+from personas.decision import TurnCap
+from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, says
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT

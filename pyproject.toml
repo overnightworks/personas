@@ -1,5 +1,5 @@
 [project]
-name = "agents"
+name = "overnightworks-personas"
 version = "0.1.0"
 description = "The runner that signs agents in as themselves and keeps them waiting in the apps they may join"
 license = "MIT"
@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-agents = "agents.main:main"
+personas = "personas.main:main"
 
 [build-system]
 requires = ["hatchling==1.33.0"]
@@ -31,7 +31,7 @@ build-constraint-dependencies = ["setuptools==84.2.1", "wheel==0.48.0"]
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agents"]
+packages = ["src/personas"]
 
 [dependency-groups]
 dev = [
@@ -131,5 +131,5 @@ show_missing = true
 # --- Vulture ---
 
 [tool.vulture]
-paths = ["src/agents"]
+paths = ["src/personas"]
 min_confidence = 80
