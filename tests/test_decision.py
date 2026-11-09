@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import secrets
 
 import pytest
@@ -20,6 +21,7 @@ from agents.decision import (
     accepts_for,
     after_refusal,
     backoff_delay,
+    decisive_failure,
     forget_gone,
     reaction_to,
     renewal_due,
@@ -156,3 +158,38 @@ def test_a_token_is_renewed_before_a_stream_the_app_bounds_could_end_on_an_expir
 
 def test_the_runner_cuts_a_stream_before_the_lease_of_its_member_would_have_ended():
     assert READ_SECONDS < LEASE_SECONDS
+
+
+REFUSAL = UnusableAnswer("jsonrpc_-32602")
+RENEWABLE = StatusFailure(401)
+SERVER_ERROR = StatusFailure(503)
+NETWORK = Unreachable("down")
+# Lower is decided first: a refusal, then a renewal, then a backoff, which a server error and the network share.
+STRENGTH = {id(REFUSAL): 0, id(RENEWABLE): 1, id(SERVER_ERROR): 2, id(NETWORK): 2}
+STRENGTH_AFTER_RENEWAL = {**STRENGTH, id(RENEWABLE): 0}
+KINDS = [REFUSAL, RENEWABLE, SERVER_ERROR, NETWORK]
+ORDERS = [order for size in (2, 3) for order in itertools.permutations(KINDS, size)]
+
+
+@pytest.mark.parametrize("already_renewed", [False, True], ids=["first 401", "renewed 401"])
+@pytest.mark.parametrize("order", ORDERS, ids=lambda order: "-".join(str(failure) for failure in order))
+def test_the_failure_that_decides_is_the_refusal_before_the_renewal_before_the_backoff_and_else_the_first(
+    order, already_renewed
+):
+    strength = STRENGTH_AFTER_RENEWAL if already_renewed else STRENGTH
+    expected = min(order, key=lambda failure: strength[id(failure)])
+
+    assert decisive_failure(order, already_renewed=already_renewed) is expected
+
+
+@pytest.mark.parametrize(
+    "leaves",
+    [
+        (ValueError("a defect"),),
+        (Unreachable("down"), ValueError("a defect")),
+        (ValueError("a defect"), StatusFailure(403)),
+    ],
+    ids=["only a defect", "failure then defect", "defect then refusal"],
+)
+def test_no_failure_decides_when_any_leaf_is_no_call_failure(leaves):
+    assert decisive_failure(leaves, already_renewed=False) is None

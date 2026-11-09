@@ -103,7 +103,7 @@ class FakeSession:
     """
 
     clock: FakeClock
-    reads: list[MemberStanding | CallFailure]
+    reads: list[MemberStanding | Exception]
     accepts: list[Refusal | CallFailure | None] = field(default_factory=list[Refusal | CallFailure | None])
     seconds_per_read: float = 0.0
     seconds_per_accept: float = 0.0
@@ -136,7 +136,7 @@ class FakeSession:
             await asyncio.Event().wait()
         self.clock.time += self.seconds_per_read
         step = self.reads.pop(0)
-        if isinstance(step, CallFailure):
+        if isinstance(step, Exception):
             raise step
         return step
 

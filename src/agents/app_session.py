@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Generator, Iterator
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Generator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from typing import Final, Protocol, cast, override
 
+import anyio
 import httpx2
 from agent_runtime_client.member import (
     ACCEPT_INVITATION_TOOL,
@@ -41,6 +42,7 @@ from agents.failures import (
     StatusFailure,
     Unreachable,
     UnusableAnswer,
+    leaves_of,
 )
 from agents.secret import Secret
 
@@ -98,6 +100,20 @@ class _InvalidToolResult(Exception):  # noqa: N818
     """The app's result does not meet the output schema it advertised; carries none of its content."""
 
 
+_CALL_ERRORS: Final = (
+    MCPError,
+    SubscriptionLost,
+    ValidationError,
+    _InvalidToolResult,
+    httpx2.HTTPError,
+    OSError,
+)
+"""The errors of the SDK and its transport that tell a call failed; any other error is a defect."""
+
+_LATE_ANSWER_ERRORS: Final = (anyio.BrokenResourceError, anyio.ClosedResourceError)
+"""What the transport's task raises when an answer lands on a stream the session already closed."""
+
+
 class _ValidatingSession(ClientSession):
     """Names the SDK's validation failure, which it raises as a bare ``RuntimeError``."""
 
@@ -134,12 +150,12 @@ class _McpAppSession:
                     raise
         except CallFailure:
             raise
-        except Exception as error:
+        except _CALL_ERRORS as error:
             if error is raised_in_body:
                 raise
             if isinstance(error, TimeoutError) and deadline.expired():
                 raise Unreachable("the stream outlasted its deadline") from None
-            raise _failure_or_raise(error, self.auth) from None
+            raise _failure_of(error, self.auth) from None
 
     async def read_standing(self) -> MemberStanding:
         result = await self._asked(self.session.read_resource(STANDING_URI, allow_input_required=True))
@@ -164,8 +180,8 @@ class _McpAppSession:
         self.auth.last_status = None
         try:
             return await request
-        except Exception as error:
-            raise _failure_or_raise(error, self.auth) from None
+        except _CALL_ERRORS as error:
+            raise _failure_of(error, self.auth) from None
 
 
 async def _wakes_of(subscription: Subscription, auth: _BearerAuth) -> AsyncIterator[object]:
@@ -173,7 +189,7 @@ async def _wakes_of(subscription: Subscription, auth: _BearerAuth) -> AsyncItera
         async for wake in subscription:
             yield wake
     except SubscriptionLost as lost:
-        raise _failure_or_raise(lost, auth) from None
+        raise _failure_of(lost, auth) from None
 
 
 def _text_of(result: CallToolResult) -> str:
@@ -184,11 +200,12 @@ def _refusal_of(text: str) -> Refusal:
     return next((code for code in Refusal if code is not Refusal.UNRECOGNISED and code in text), Refusal.UNRECOGNISED)
 
 
-def _failure_of(error: BaseException, auth: _BearerAuth) -> CallFailure | None:
+def _failure_of(error: BaseException, auth: _BearerAuth) -> CallFailure:
     """A call that gave no usable answer: told by the last HTTP status the app sent, else by the error.
 
     A protocol error or a result the SDK cannot validate is an unusable answer; only a broken or
-    silent connection is unreachable. Any other error is not the app's and has no failure.
+    silent connection is unreachable. The error is one of ``_CALL_ERRORS``: the status is read only for
+    those, never for a late answer's error, which no call raised.
     """
     if isinstance(error, MCPError) and error.code == UNSUPPORTED_PROTOCOL_VERSION:
         return UnusableAnswer(f"jsonrpc_{error.code}")
@@ -205,24 +222,24 @@ def _failure_of(error: BaseException, auth: _BearerAuth) -> CallFailure | None:
         return Unreachable("the stream was lost")
     if isinstance(error, ValidationError | _InvalidToolResult):
         return UnusableAnswer(INVALID_ANSWER_CODE)
-    if isinstance(error, httpx2.TransportError | OSError):
-        return Unreachable("the app did not answer")
-    return None
+    return Unreachable("the app did not answer")
 
 
-def _failure_or_raise(error: Exception, auth: _BearerAuth) -> CallFailure:
-    failure = _failure_of(error, auth)
-    if failure is None:
-        raise error
-    return failure
+def _settled(leaf: BaseException, from_body: set[int], auth: _BearerAuth, *, beside_no_echo: bool) -> BaseException:
+    """A failure or a leaf the caller's body raised stays as it was; an error of a call becomes its failure.
 
-
-def _leaves(error: BaseException) -> Iterator[BaseException]:
-    if isinstance(error, BaseExceptionGroup):
-        for inner in cast("BaseExceptionGroup[BaseException]", error).exceptions:
-            yield from _leaves(inner)
-    else:
-        yield error
+    The transport's task finds its read stream closed when an answer lands after the session ended: beside
+    a leaf that is no such error that is a lost answer, unreachable whatever status it carried. Alone it is
+    how a cancelled session unwinds, and it stays as it was so that no cancellation turns into a failure
+    the loop backs off from.
+    """
+    if isinstance(leaf, CallFailure) or id(leaf) in from_body:
+        return leaf
+    if isinstance(leaf, _CALL_ERRORS):
+        return _failure_of(leaf, auth)
+    if beside_no_echo and isinstance(leaf, _LATE_ANSWER_ERRORS):
+        return Unreachable("an answer landed after the session closed")
+    return leaf
 
 
 @asynccontextmanager
@@ -233,6 +250,7 @@ async def open_mcp_session(
 
     A bare ``ClientSession`` discovers the revision: the SDK's own client would fall back to
     ``initialize`` on any error, so a 401 on the probe would enter a path this runner does not have.
+    Several leaves, failures or defects, leave as one ``ExceptionGroup`` holding each of them.
     """
     auth = _BearerAuth(token)
     timeout = httpx2.Timeout(CONNECT_SECONDS, read=stream_seconds)
@@ -250,20 +268,16 @@ async def open_mcp_session(
                 raised_in_body = error
                 raise
     except Exception as error:
-        # The SDK's task groups wrap what is raised inside them, so a failure of the call is looked
-        # for in the group. What the caller's own code raised stays as it was; any other error is the
-        # connection failing.
-        leaves = list(_leaves(error))
-        failure = next((leaf for leaf in leaves if isinstance(leaf, CallFailure)), None)
-        if failure is not None:
-            raise failure from None
-        if raised_in_body is not None:
-            raise raised_in_body from None
-        for leaf in leaves:
-            failure = _failure_of(leaf, auth)
-            if failure is not None:
-                raise failure from None
-        raise
+        # The SDK's task groups wrap what is raised inside them, so every leaf is looked at: a failure
+        # of the call and what the caller's own code raised stay as they were, an error of the
+        # connection becomes its failure and a defect stays a defect. The loop picks what decides.
+        from_body = {id(own) for own in leaves_of(raised_in_body)} if raised_in_body else set[int]()
+        found = list(leaves_of(error))
+        beside_no_echo = any(not isinstance(leaf, _LATE_ANSWER_ERRORS) for leaf in found)
+        leaves = [_settled(leaf, from_body, auth, beside_no_echo=beside_no_echo) for leaf in found]
+        if len(leaves) == 1:
+            raise leaves[0] from None
+        raise ExceptionGroup("the session failed", cast("list[Exception]", leaves)) from None
 
 
 async def _discover(session: ClientSession, auth: _BearerAuth) -> None:
@@ -272,5 +286,5 @@ async def _discover(session: ClientSession, auth: _BearerAuth) -> None:
         await session.discover()
     except RuntimeError:
         raise UnusableAnswer(UNSUPPORTED_VERSION_CODE) from None
-    except Exception as error:
-        raise _failure_or_raise(error, auth) from None
+    except _CALL_ERRORS as error:
+        raise _failure_of(error, auth) from None

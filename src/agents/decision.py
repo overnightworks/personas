@@ -16,7 +16,7 @@ from agent_runtime_client.member import PlaceRef, Standing, StandingState
 from agents.failures import CallFailure, StatusFailure, TokenStatusFailure, UnusableAnswer
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from agents.secret import Secret
 
@@ -140,3 +140,24 @@ def reaction_to(failure: CallFailure, *, already_renewed: bool) -> Reaction | Su
             return Suspend(status_code(status))
         case _:
             return Reaction.BACKOFF
+
+
+def decisive_failure(leaves: Sequence[BaseException], *, already_renewed: bool) -> CallFailure | None:
+    """The one failure that decides the reaction to several: a refusal before a renewal before a backoff.
+
+    Any leaf that is no failure of a call is a defect, and then no failure decides. Of equal ranks the first wins.
+    """
+    failures = [leaf for leaf in leaves if isinstance(leaf, CallFailure)]
+    if len(failures) < len(leaves):
+        return None
+    return min(failures, key=lambda failure: _rank(reaction_to(failure, already_renewed=already_renewed)))
+
+
+def _rank(reaction: Reaction | Suspend) -> int:
+    match reaction:
+        case Suspend():
+            return 0
+        case Reaction.RENEW:
+            return 1
+        case _:
+            return 2

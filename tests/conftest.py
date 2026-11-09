@@ -78,7 +78,7 @@ class Scenario:
 @pytest.fixture
 def scenario() -> Callable[..., Scenario]:
     def build(
-        reads: list[MemberStanding | CallFailure],
+        reads: list[MemberStanding | Exception],
         *,
         tokens: list[GrantedToken | CallFailure] | None = None,
         accepts: list[Refusal | CallFailure | None] | None = None,

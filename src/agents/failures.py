@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Final
+from typing import TYPE_CHECKING, Final, cast
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 INVALID_ANSWER_CODE: Final = "invalid_answer"
 """The code of an answer that arrived but is not the kind of answer asked for."""
@@ -39,3 +42,12 @@ class UnusableAnswer(CallFailure):
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
+
+
+def leaves_of(error: BaseException) -> Iterator[BaseException]:
+    """The errors an exception group holds, however deep; any other error is its own leaf."""
+    if isinstance(error, BaseExceptionGroup):
+        for inner in cast("BaseExceptionGroup[BaseException]", error).exceptions:
+            yield from leaves_of(inner)
+    else:
+        yield error
