@@ -1,8 +1,0 @@
-claim_id = "e83125575f3a46f0884bb3dbcb27baa5"
-agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
-role = "builder"
-base = "99ac63633efa38d61e5578d3f42ba2f9357cd2b6"
-branch = "claude/issue-37-mozart-s-turn-cap-is-off-unless-the-oper"
-scope = ["README.md", "docs/ARCHITECTURE.md", "src/agents/config.py", "src/agents/decision.py", "src/agents/loop.py", "tests"]
-opened_commit = "c00027b3e9adc38f44fd5eb91a82f812f6fae4ca"
-whole_reason = "The optional fields, the turn start without a cap and the documents that tell the operator how to turn it on are one setting; split, the configuration accepts a file the loop cannot run or the documents promise a switch that does not exist."
