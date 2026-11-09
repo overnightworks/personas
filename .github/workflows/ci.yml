@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 concurrency:
-  # A superseded pull-request run is cancelled; a run on main or the schedule
-  # never is, because the release waits for main's run to finish.
+  # A superseded pull-request run is cancelled; a run on main never is,
+  # because the release waits for main's run to finish.
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
