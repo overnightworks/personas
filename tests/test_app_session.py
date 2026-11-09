@@ -373,18 +373,20 @@ async def test_an_answer_refused_before_the_session_closed_does_not_outrank_the_
 
 async def test_an_answer_that_lands_after_a_cancelled_session_closed_stays_the_error_it_is(app, bearer, late_answer):
     echo = late_answer()
+    cancellation = asyncio.CancelledError()
 
     with pytest.raises(echo):
-        await raises_in_the_stream_body(app, bearer, asyncio.CancelledError())
+        await raises_in_the_stream_body(app, bearer, cancellation)
 
 
 async def test_answers_that_all_land_after_a_cancelled_session_closed_stay_the_errors_they_are(
     app, bearer, late_answer
 ):
     echo = late_answer(echoes=2)
+    cancellation = asyncio.CancelledError()
 
     with pytest.raises(ExceptionGroup) as caught:
-        await raises_in_the_stream_body(app, bearer, asyncio.CancelledError())
+        await raises_in_the_stream_body(app, bearer, cancellation)
 
     assert [type(leaf) for leaf in leaves_of(caught.value)] == [echo, echo]
 
