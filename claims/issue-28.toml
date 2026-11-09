@@ -1,8 +1,0 @@
-claim_id = "723b87d0e7a54e15bc67ae04308b53ee"
-agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
-role = "builder"
-base = "809f086c9da777e5d64252dc1e277a21e5ad44db"
-branch = "claude/issue-28-mozart-reads-from-where-he-stands-after"
-scope = ["README.md", "docs/ARCHITECTURE.md", "src/agents/decision.py", "src/agents/loop.py", "tests"]
-opened_commit = "771a56b3441375e26daf5dfa814003a2f9054a34"
-whole_reason = "The checkpoint type, its two pure transitions and the loop's use of them are one reading rule; any split leaves a type nothing reads or a loop on a rule that no longer exists."
