@@ -39,6 +39,19 @@ jobs:
     name: Lint and test
     timeout-minutes: 10
     runs-on: ubuntu-latest
+    # The throwaway server of the Postgres tests; the digest is the image scripts/test_postgres.sh runs, so keep them equal.
+    services:
+      postgres:
+        image: postgres:18.6-alpine3.24@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready --host 127.0.0.1 --username postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -79,6 +92,8 @@ jobs:
       # scan reads. The workers' coverage data is combined by pytest-cov. No -q:
       # it hides the header line that prints pytest-randomly's seed.
       - name: Test with coverage
+        env:
+          PERSONAS_TEST_POSTGRES_URL: postgresql+psycopg://postgres@localhost:5432/postgres
         run: pytest -n auto --cov-report=xml
 
       - name: Upload the coverage report

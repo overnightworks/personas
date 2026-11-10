@@ -51,6 +51,7 @@ from personas.failures import (
     Unreachable,
     UnusableAnswer,
     leaves_of,
+    task_is_being_cancelled,
 )
 from personas.secret import Secret
 
@@ -366,12 +367,6 @@ async def open_mcp_session(
         if len(leaves) == 1:
             raise leaves[0] from None
         raise ExceptionGroup("the session failed", cast("list[Exception]", leaves)) from None
-
-
-def task_is_being_cancelled() -> bool:
-    """Whether the running task has a cancellation requested that it has not yet taken."""
-    task = asyncio.current_task()
-    return task is not None and task.cancelling() > 0
 
 
 async def _discover(session: ClientSession, auth: _BearerAuth) -> None:

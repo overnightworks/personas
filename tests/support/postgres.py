@@ -1,0 +1,187 @@
+"""The tests' Postgres: one migrated template database per session and one database per test copied from it."""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import secrets
+from contextlib import asynccontextmanager, contextmanager
+from dataclasses import replace
+from typing import TYPE_CHECKING
+
+import pytest
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
+
+from personas.config import MemoryTarget
+from personas.memory import migrate
+from personas.secret import Secret
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Iterator
+
+    from sqlalchemy import Engine
+    from sqlalchemy.engine import URL
+
+URL_ENVIRONMENT_VARIABLE = "PERSONAS_TEST_POSTGRES_URL"
+WRAPPER = "scripts/test_postgres.sh"
+DATABASE_NAME_BYTES = 8
+LOOPBACK = "127.0.0.1"
+FORWARD_CHUNK_BYTES = 65536
+
+
+def server_url() -> URL:
+    """The throwaway server's URL; the wrapper and CI's service provide it."""
+    url = os.environ.get(URL_ENVIRONMENT_VARIABLE)
+    if not url:
+        pytest.fail(f"{URL_ENVIRONMENT_VARIABLE} names no Postgres; run the tests through {WRAPPER}")
+    return make_url(url)
+
+
+def engine_of(database: str) -> Engine:
+    """A synchronous engine on one database of the server, for the tests' own plain SQL."""
+    return create_engine(server_url().set(database=database), isolation_level="AUTOCOMMIT")
+
+
+def target_of(database: str) -> MemoryTarget:
+    """What the runner's configuration holds for this database; the password is the test's own."""
+    url = server_url()
+    assert url.host is not None
+    assert url.port is not None
+    assert url.username is not None
+    return MemoryTarget(url.host, url.port, database, url.username, Secret(secrets.token_hex(8)))
+
+
+@contextmanager
+def created_database(template: str | None = None) -> Iterator[str]:
+    """The name of a new database, a copy of ``template`` when one is named; it is dropped afterwards."""
+    name = f"personas_{secrets.token_hex(DATABASE_NAME_BYTES)}"
+    server = engine_of(server_url().database or "postgres")
+    with server.connect() as connection:
+        connection.execute(text(f'CREATE DATABASE "{name}"' + ("" if template is None else f' TEMPLATE "{template}"')))
+    try:
+        yield name
+    finally:
+        with server.connect() as connection:
+            connection.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+        server.dispose()
+
+
+@contextmanager
+def migrated_template() -> Iterator[str]:
+    """A database migrated once through the command's own code, which ``created_database`` copies for each test."""
+    with created_database() as name:
+        migrate(target_of(name))
+        yield name
+
+
+def kept_lines(target: MemoryTarget, columns: str) -> list[tuple[object, ...]]:
+    """The rows of the lines table, read with plain SQL in the order of agent and ``seq``."""
+    engine = engine_of(target.dbname)
+    try:
+        with engine.connect() as connection:
+            result = connection.execute(text(f"SELECT {columns} FROM lines ORDER BY client_id, seq"))  # noqa: S608 - test-chosen column names
+            return [tuple(row) for row in result]
+    finally:
+        engine.dispose()
+
+
+def run_sql(target: MemoryTarget, statement: str) -> None:
+    engine = engine_of(target.dbname)
+    try:
+        with engine.connect() as connection:
+            connection.execute(text(statement))
+    finally:
+        engine.dispose()
+
+
+def waiting_statements(target: MemoryTarget) -> int:
+    """How many statements of this database wait for a lock right now."""
+    engine = engine_of(target.dbname)
+    try:
+        with engine.connect() as connection:
+            return connection.execute(
+                text("SELECT count(*) FROM pg_stat_activity WHERE datname = :name AND wait_event_type = 'Lock'"),
+                {"name": target.dbname},
+            ).scalar_one()
+    finally:
+        engine.dispose()
+
+
+@contextmanager
+def lines_table_locked(target: MemoryTarget) -> Iterator[None]:
+    """Another session holds the lines table, so that a write to it waits."""
+    engine = create_engine(server_url().set(database=target.dbname))
+    with engine.connect() as connection:
+        connection.execute(text("LOCK TABLE lines IN ACCESS EXCLUSIVE MODE"))
+        try:
+            yield
+        finally:
+            connection.rollback()
+    engine.dispose()
+
+
+class Forwarder:
+    """A TCP forwarder in front of the server whose open connections can go dark: their bytes are then dropped."""
+
+    def __init__(self, target: MemoryTarget) -> None:
+        self._target = target
+        self._dark: set[asyncio.StreamWriter] = set()
+        self._open: set[asyncio.StreamWriter] = set()
+        self.dropped = asyncio.Event()
+
+    @asynccontextmanager
+    async def serving(self) -> AsyncIterator[MemoryTarget]:
+        """The target as seen through the forwarder; every connection is closed at the end."""
+        server = await asyncio.start_server(self._forward, LOOPBACK, 0)
+        port = server.sockets[0].getsockname()[1]
+        try:
+            yield replace(self._target, host=LOOPBACK, port=port)
+        finally:
+            server.close()
+            for writer in self._open:
+                writer.transport.abort()
+            await server.wait_closed()
+
+    def go_dark(self) -> None:
+        """Every connection open now stops answering, in both directions; new ones are forwarded."""
+        self._dark |= self._open
+
+    def reset_dark(self) -> None:
+        """Every dark connection is reset, as a peer that is gone answers a later packet."""
+        for writer in self._dark:
+            writer.transport.abort()
+
+    async def _forward(self, client_reader: asyncio.StreamReader, client_writer: asyncio.StreamWriter) -> None:
+        server_reader, server_writer = await asyncio.open_connection(self._target.host, self._target.port)
+        self._open |= {client_writer, server_writer}
+        await asyncio.gather(
+            self._pipe(client_reader, server_writer),
+            self._pipe(server_reader, client_writer),
+            return_exceptions=True,
+        )
+
+    async def _pipe(self, source: asyncio.StreamReader, sink: asyncio.StreamWriter) -> None:
+        try:
+            while data := await source.read(FORWARD_CHUNK_BYTES):
+                if sink in self._dark:
+                    self.dropped.set()
+                    continue
+                sink.write(data)
+                await sink.drain()
+        finally:
+            sink.transport.abort()
+            self._open.discard(sink)
+
+
+def tables_of(target: MemoryTarget) -> list[str]:
+    """The names of the tables in the database's public schema."""
+    engine = engine_of(target.dbname)
+    try:
+        with engine.connect() as connection:
+            result = connection.execute(
+                text("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY 1")
+            )
+            return [row[0] for row in result]
+    finally:
+        engine.dispose()

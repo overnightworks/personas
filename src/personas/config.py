@@ -8,6 +8,8 @@ An app with ``listens = false`` serves tools only: it starts no turn, its bound 
 listen, and ``call_seconds`` bounds each request to it. No tool name is shared with a tools-only app.
 An agent has a turn cap only when it sets ``max_turns`` in ``turn_period_seconds``, both or neither;
 with neither its turns are bounded by the budget and the off switches alone.
+The optional ``[memory]`` table names the Postgres database that keeps every line the agents read: its host, port,
+database, user, the file holding the password and ``write_seconds``, the bound on one write.
 Every value is validated at start and an error names the field or path, never a secret.
 """
 
@@ -40,6 +42,7 @@ if TYPE_CHECKING:
 
 CONFIG_ENVIRONMENT_VARIABLE: Final = "PERSONAS_CONFIG"
 DEFAULT_CALL_SECONDS: Final = 30.0
+DEFAULT_WRITE_SECONDS: Final = 2.0
 
 
 class ConfigError(Exception):
@@ -72,12 +75,25 @@ class AgentCredentials:
 
 
 @dataclass(frozen=True)
+class MemoryTarget:
+    """The database that keeps the lines, and how long one write to it may take."""
+
+    host: str
+    port: int
+    dbname: str
+    user: str
+    password: Secret
+    write_seconds: float = DEFAULT_WRITE_SECONDS
+
+
+@dataclass(frozen=True)
 class Config:
     token_endpoint: str
     ready_file: Path
     apps: tuple[AppTarget, ...]
     agents: tuple[AgentCredentials, ...]
     gateway: AgentConfig | None = None
+    memory: MemoryTarget | None = None
 
 
 class _Entry(BaseModel):
@@ -136,12 +152,22 @@ class _AgentEntry(_Entry):
         return TurnCap(self.max_turns, self.turn_period_seconds)
 
 
+class _MemoryEntry(_Entry):
+    host: str = Field(min_length=1)
+    port: int = Field(ge=1, le=65535, strict=True)
+    dbname: str = Field(min_length=1)
+    user: str = Field(min_length=1)
+    password_file: Path
+    write_seconds: PositiveFloat = Field(default=DEFAULT_WRITE_SECONDS, strict=True)
+
+
 class _FileModel(_Entry):
     token_endpoint: AnyHttpUrl
     ready_file: Path
     apps: tuple[_AppEntry, ...] = Field(min_length=1)
     agents: tuple[_AgentEntry, ...] = Field(min_length=1)
     gateway: AgentConfig | None = None
+    memory: _MemoryEntry | None = None
 
     @model_validator(mode="after")
     def _tools_need_a_gateway_and_personas(self) -> Self:
@@ -201,8 +227,7 @@ class _FileModel(_Entry):
             raise ConfigError("; ".join(problems)) from None
 
 
-def _read_secret(index: int, path: Path) -> Secret:
-    field_name = f"agents.{index}.secret_file"
+def _read_secret(field_name: str, path: Path) -> Secret:
     if not path.is_absolute():
         raise ConfigError(f"{field_name}: the path must be absolute")
     try:
@@ -234,6 +259,13 @@ def _read_persona(index: int, path: Path | None) -> AgentDefinition | None:
     return persona
 
 
+def _memory_target(entry: _MemoryEntry | None) -> MemoryTarget | None:
+    if entry is None:
+        return None
+    password = _read_secret("memory.password_file", entry.password_file)
+    return MemoryTarget(entry.host, entry.port, entry.dbname, entry.user, password, entry.write_seconds)
+
+
 def load_config(environment: Mapping[str, str]) -> Config:
     location = environment.get(CONFIG_ENVIRONMENT_VARIABLE)
     if not location:
@@ -253,11 +285,12 @@ def load_config(environment: Mapping[str, str]) -> Config:
         agents=tuple(
             AgentCredentials(
                 agent.client_id,
-                _read_secret(index, agent.secret_file),
+                _read_secret(f"agents.{index}.secret_file", agent.secret_file),
                 _read_persona(index, agent.persona_file),
                 agent.turn_cap,
             )
             for index, agent in enumerate(parsed.agents)
         ),
         gateway=parsed.gateway,
+        memory=_memory_target(parsed.memory),
     )

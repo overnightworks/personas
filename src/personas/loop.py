@@ -6,14 +6,13 @@ import asyncio
 from contextlib import aclosing
 from dataclasses import dataclass, replace
 from functools import partial
-from typing import TYPE_CHECKING, Final, Literal, NoReturn
+from typing import TYPE_CHECKING, Final, Literal, NoReturn, Protocol
 
 from agents.agent_file import TurnRequest
 from agents.backend import TurnPerson, TurnStopKind, TurnStopped
 from agents.tools import HandTool, ToolOutcome
 from agents.turn import FailureCode, Principal, Turn, TurnMessage, TurnRole
 
-from personas.app_session import task_is_being_cancelled
 from personas.decision import (
     SUSPENDED_RETRY_SECONDS,
     TOOL_NOT_DECLARED_CODE,
@@ -25,6 +24,7 @@ from personas.decision import (
     Suspend,
     Token,
     TurnCap,
+    WindowRead,
     accepts_for,
     active_call_places,
     addressed,
@@ -46,7 +46,7 @@ from personas.decision import (
     turn_input,
     turn_invalid,
 )
-from personas.failures import CallFailure, Unreachable, leaves_of
+from personas.failures import CallFailure, StoreUnavailable, Unreachable, leaves_of, task_is_being_cancelled
 from personas.reporting import Event, Reporter, StateChange
 from personas.tokens import TokenFacts, facts_of
 
@@ -55,7 +55,7 @@ if TYPE_CHECKING:
 
     from agents.agent_file import AgentDefinition
     from agents.backend import AgentBackend
-    from agents.member import PlaceRef, Standing
+    from agents.member import PlaceRef, PlaceWindow, Standing
     from agents.tools import ToolDeclaration
     from agents.turn import JsonObject
 
@@ -73,6 +73,14 @@ _CALL_BOUND_TEXT: Final = "this app takes no more calls in this turn"
 _APP_FAILED_TEXT: Final = "the app did not answer"
 
 
+class LineStore(Protocol):
+    """Keeps the lines of the windows the loops read; it owns the time one write may take."""
+
+    async def keep(self, read: WindowRead) -> None:
+        """Keeps every line of the window once; raises ``StoreUnavailable`` when it cannot now."""
+        ...
+
+
 @dataclass(frozen=True)
 class Boundaries:
     """Everything a loop touches outside itself."""
@@ -83,6 +91,7 @@ class Boundaries:
     report: Reporter
     ready: ReadyMarker
     backend: BackendFactory | None = None
+    lines: LineStore | None = None
 
 
 def _raise_if_cancelled() -> None:
@@ -245,6 +254,7 @@ class AgentLoop:
         self._renewed_after_401 = False
         self._suspension: str | None = None
         self._backing_off = False
+        self._store_failing = False
         self._checkpoints: dict[PlaceRef, Checkpoint] = {}
         self._turn: ActiveTurn | None = None
         self._turn_ended = asyncio.Event()
@@ -387,21 +397,48 @@ class AgentLoop:
                 del self._checkpoints[place]
                 lost = True
                 continue
-            perception = perceive(window, self._checkpoints[place])
-            # The checkpoint moves, the turn is reserved and created and its callback added with no await
-            # between, so a line starts at most one turn and a capped line is never answered later.
-            self._checkpoints[place] = perception.checkpoint
-            if not any(addressed(line, facts.name) for line in perception.new):
-                continue
-            started = reserve_turn(self._counter.started, self._boundaries.clock.now(), self._turn_setup.cap)
-            if started is None:
-                self._report(Event.CAPPED)
-                continue
-            self._counter.started = started
-            admitted = _Admitted(facts, turn_input(place, facts.name, window, perception.new, missed=perception.missed))
-            self._start_turn(turns, self._turn_setup, place, admitted)
-            return lost
+            read_at = self._boundaries.clock.wall()
+            turn_started = self._start_turn_if_addressed(turns, self._turn_setup, place, window, facts)
+            await self._keep(WindowRead(self._agent.client_id, self._app.mcp_url, place, window, read_at))
+            if turn_started:
+                return lost
         return lost
+
+    def _start_turn_if_addressed(
+        self, turns: asyncio.TaskGroup, setup: _TurnSetup, place: PlaceRef, window: PlaceWindow, facts: TokenFacts
+    ) -> bool:
+        """Moves the place's checkpoint and starts the turn when a new line addresses the agent and the cap allows it.
+
+        No await stands in it, so a line starts at most one turn and a capped line is never answered later.
+        """
+        perception = perceive(window, self._checkpoints[place])
+        self._checkpoints[place] = perception.checkpoint
+        if not any(addressed(line, facts.name) for line in perception.new):
+            return False
+        started = reserve_turn(self._counter.started, self._boundaries.clock.now(), setup.cap)
+        if started is None:
+            self._report(Event.CAPPED)
+            return False
+        self._counter.started = started
+        admitted = _Admitted(facts, turn_input(place, facts.name, window, perception.new, missed=perception.missed))
+        self._start_turn(turns, setup, place, admitted)
+        return True
+
+    async def _keep(self, read: WindowRead) -> None:
+        """Hands a window to the store, if there is one; its failure is reported once and never reaches the app."""
+        store = self._boundaries.lines
+        if store is None or not read.window.entries:
+            return
+        try:
+            await store.keep(read)
+        except StoreUnavailable as unavailable:
+            if not self._store_failing:
+                self._store_failing = True
+                self._report(Event.STORE_FAILED, unavailable.code)
+        else:
+            if self._store_failing:
+                self._store_failing = False
+                self._report(Event.STORE_RESUMED)
 
     def _start_turn(self, turns: asyncio.TaskGroup, setup: _TurnSetup, place: PlaceRef, admitted: _Admitted) -> None:
         task = turns.create_task(self._take_turn(setup, admitted))

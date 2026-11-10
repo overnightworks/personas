@@ -1,2 +1,6 @@
 [gate]
 mandatory_jobs = ["Documents", "Lint and test", "Image"]
+
+[[root.allow]]
+entry = "scripts/"
+reason = "the wrapper that starts the tests' throwaway Postgres is a script, and the repository's one place for scripts"

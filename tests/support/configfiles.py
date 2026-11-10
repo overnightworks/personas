@@ -34,6 +34,9 @@ class Files:
         self.persona_prompt = secrets.token_hex(16)
         self.persona_path = directory / f"{PERSONA_NAME}.md"
         self.persona_path.write_text(self.persona_text(), encoding="utf-8")
+        self.password = secrets.token_hex(16)
+        self.password_path = directory / "memory.password"
+        self.password_path.write_text(f"{self.password}\n", encoding="utf-8")
         self.ready_path = directory / "ready"
         self.config_path = directory / "personas.toml"
         self.text = self.valid_text()
@@ -63,6 +66,22 @@ class Files:
             f'[[apps]]\nmcp_url = "{mcp_url}"\nscope = "{scope}"\n{tools}'
             f'[[agents]]\nclient_id = "agent-mozart"\nsecret_file = "{self.secret_path}"\n{persona}'
         )
+
+    def memory_table(self, **overrides: str | None) -> str:
+        """A valid memory table; an override replaces a field's TOML value, or drops the field when None."""
+        fields = {
+            "host": '"db.test"',
+            "port": "5432",
+            "dbname": '"personas"',
+            "user": '"mozart"',
+            "password_file": f'"{self.password_path}"',
+        }
+        for name, value in overrides.items():
+            if value is None:
+                del fields[name]
+            else:
+                fields[name] = value
+        return "[memory]\n" + "".join(f"{name} = {value}\n" for name, value in fields.items())
 
     def write(self) -> dict[str, str]:
         self.config_path.write_text(self.text, encoding="utf-8")

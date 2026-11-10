@@ -20,6 +20,7 @@ from personas.config import CONFIG_ENVIRONMENT_VARIABLE, load_config
 from personas.failures import leaves_of
 from personas.loop import Boundaries
 from personas.main import QUIET_LIBRARIES, READINESS_ERROR_EXIT_CODE, configure_logging, main, real_boundaries
+from personas.memory import PostgresLineStore
 from personas.readiness import FileReadyMarker
 from personas.reporting import Event, log_state_change
 from personas.tokens import HttpTokenSource
@@ -257,3 +258,18 @@ def test_the_real_boundaries_run_turns_through_the_gateway_exactly_when_the_conf
     backend = asyncio.run(composed_backend())
 
     assert isinstance(backend, GatewayBackend) is binds_tools
+
+
+@pytest.mark.parametrize("has_memory", [True, False], ids=["memory table", "no memory table"])
+def test_the_real_boundaries_hold_a_store_exactly_when_the_configuration_has_a_memory_table(files, has_memory):
+    if has_memory:
+        files.text += files.memory_table()
+    config = load_config(files.write())
+
+    async def composed_store() -> object:
+        async with real_boundaries(config, FileReadyMarker(config.ready_file)) as boundaries:
+            return boundaries.lines
+
+    store = asyncio.run(composed_store())
+
+    assert isinstance(store, PostgresLineStore) is has_memory

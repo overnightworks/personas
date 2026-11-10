@@ -1,7 +1,8 @@
-"""How a call to the realm or an app fails; the loop decides what each failure means."""
+"""How a call to the realm, an app or the store fails; the loop decides what each failure means."""
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Final, cast
 
 import anyio
@@ -15,6 +16,12 @@ LISTEN_NOT_HONORED_CODE: Final = "listen_not_honored"
 """The code of a stream the app acknowledged without the subscription the runner asked for."""
 UNSUPPORTED_VERSION_CODE: Final = "unsupported_version"
 """The code of an app that shares no protocol revision with the runner."""
+STORE_UNREACHABLE_CODE: Final = "store_unreachable"
+"""The code of a store that could not be reached or ended the connection."""
+STORE_TIMEOUT_CODE: Final = "store_timeout"
+"""The code of a write that did not finish within its bound."""
+STORE_DEFECT_CODE: Final = "store_defect"
+"""The code of a database error that is no outage."""
 LATE_ANSWER_ERRORS: Final = (anyio.BrokenResourceError, anyio.ClosedResourceError)
 """What the transport's task raises when an answer lands after its session ended."""
 
@@ -48,6 +55,20 @@ class UnusableAnswer(CallFailure):
         self.code = code
 
 
+# Named for the state of the store, as Unreachable is; a suffix would repeat it.
+class StoreUnavailable(Exception):  # noqa: N818
+    """The store could not keep a window now; ``code`` says why and the loop goes on without memory."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+# Named for its kind; a suffix would repeat it.
+class StoreDefect(Exception):  # noqa: N818
+    """A database error that is no outage; the message holds a code and no parameter, row or secret."""
+
+
 def leaves_of(error: BaseException) -> Iterator[BaseException]:
     """The errors an exception group holds, however deep; any other error is its own leaf."""
     if isinstance(error, BaseExceptionGroup):
@@ -55,3 +76,9 @@ def leaves_of(error: BaseException) -> Iterator[BaseException]:
             yield from leaves_of(inner)
     else:
         yield error
+
+
+def task_is_being_cancelled() -> bool:
+    """Whether the running task has a cancellation requested that it has not yet taken."""
+    task = asyncio.current_task()
+    return task is not None and task.cancelling() > 0
