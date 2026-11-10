@@ -474,7 +474,7 @@ def test_two_earlier_visits_are_told_in_the_order_they_happened_each_as_its_own_
 
 def test_lines_beyond_the_size_bound_leave_the_oldest_out_keep_the_newest_and_say_so():
     lines = [
-        kept(MORNING, 1, "oldest", hours_before=9, name="Bo"),
+        kept(MORNING, 1, "oldest" * 20, hours_before=9, name="Bo"),
         kept(NOON, 1, "middle", hours_before=6, name="Bo"),
         kept(NOON, 2, "newest", hours_before=6, name="Bo"),
     ]

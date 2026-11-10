@@ -195,9 +195,9 @@ def _kept_line(row: Row[tuple[object, ...]]) -> KeptLine:
 class PostgresLineStore:
     """Keeps the lines of the windows the loops read in the database the configuration names.
 
-    It opens no connection until the first write. That write checks the schema is at its head, and a schema that
-    is not ends the runner. A pooled connection is not checked before its use: a stale one fails its write, and the
-    pool takes another for the next.
+    It opens no connection until the first write or read, which checks the schema is at its head; a schema that is
+    not ends the runner. A pooled connection is not checked before its use: a stale one fails its write or read, and
+    the pool takes another for the next.
     """
 
     def __init__(self, target: MemoryTarget) -> None:

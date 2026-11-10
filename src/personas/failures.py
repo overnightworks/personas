@@ -57,7 +57,7 @@ class UnusableAnswer(CallFailure):
 
 # Named for the state of the store, as Unreachable is; a suffix would repeat it.
 class StoreUnavailable(Exception):  # noqa: N818
-    """The store could not keep a window now; ``code`` says why and the loop goes on without memory."""
+    """The store could not keep a window or be read now; ``code`` says why and the loop goes on without memory."""
 
     def __init__(self, code: str) -> None:
         super().__init__(code)
