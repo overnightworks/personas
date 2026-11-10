@@ -455,19 +455,20 @@ def test_a_memory_table_tells_a_turn_the_default_day_unless_it_sets_how_far_back
 
 
 @pytest.mark.parametrize(
-    ("written", "expected"),
-    [({}, (30.0, 60.0)), ({"lines_keep_days": "inf", "sweep_minutes": "inf"}, (math.inf, math.inf))],
+    ("written", "days", "minutes"),
+    [({}, 30.0, 60.0), ({"lines_keep_days": "inf", "sweep_minutes": "inf"}, math.inf, math.inf)],
     ids=["defaults", "no limit"],
 )
 def test_a_memory_table_keeps_lines_thirty_days_and_sweeps_hourly_unless_it_sets_either_or_leaves_it_infinite(
-    files, written, expected
+    files, written, days, minutes
 ):
     files.text += files.memory_table(**written)
 
     memory = load_config(files.write()).memory
 
     assert memory is not None
-    assert (memory.lines_keep_days, memory.sweep_minutes) == expected
+    assert memory.lines_keep_days == days
+    assert memory.sweep_minutes == minutes
 
 
 def test_a_file_without_a_memory_table_opens_no_store(files):

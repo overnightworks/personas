@@ -97,9 +97,10 @@ async def real_boundaries(config: Config, ready: ReadyMarker) -> AsyncGenerator[
 async def run_with_sweep(config: Config, boundaries: Boundaries) -> NoReturn:
     """The loops, and beside them the sweep when the configuration has a memory; a defect of either ends both."""
     async with asyncio.TaskGroup() as group:
+        group.create_task(run_all(config, boundaries))
         if config.memory is not None and isinstance(boundaries.lines, SweptStore):
             group.create_task(sweep_lines(boundaries.lines, config.memory, boundaries.clock, boundaries.report))
-        await run_all(config, boundaries)
+    raise AssertionError("a loop ended")  # pragma: no cover
 
 
 async def _compose_and_run(config: Config, ready: ReadyMarker, compose: Compose) -> None:
