@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import secrets
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
@@ -92,10 +94,10 @@ def configured_for(files: Files, target: MemoryTarget, monkeypatch: pytest.Monke
 
 
 def listed(output: str) -> set[tuple[str, str, str, str, str, int, datetime, datetime]]:
-    """The visits a list printed, read from its columns below the header."""
+    """The visits a list printed, read as tab-separated records below the header."""
     rows = set()
-    for row in output.splitlines()[1:]:
-        agent, app, kind, place_id, generation, count, first, last = row.split("\t")
+    for record in list(csv.reader(io.StringIO(output), dialect="excel-tab"))[1:]:
+        agent, app, kind, place_id, generation, count, first, last = record
         rows.add(
             (
                 agent,
@@ -163,6 +165,19 @@ def test_the_list_for_one_agent_shows_only_that_agents_visits(files, database, m
 
 
 @pytest.mark.postgres
+def test_the_list_shows_a_visit_whose_place_id_holds_a_tab_and_a_line_break_as_one_record(
+    files, database, monkeypatch, capsys
+):
+    visit = Visit(APP, PlaceRef(kind="call", id="room\t1\nforged"), "generation-1")
+    kept_by_the_store(database, a_read(AGENT, visit, Spoken().lines(1, 1), 0))
+    configured_for(files, database, monkeypatch)
+
+    main(arguments=list(LIST))
+
+    assert listed(capsys.readouterr().out) == {a_row(AGENT, visit, 1, 0, 0)}
+
+
+@pytest.mark.postgres
 def test_the_list_of_an_empty_memory_shows_no_visit(files, database, monkeypatch, capsys):
     configured_for(files, database, monkeypatch)
 
@@ -226,8 +241,21 @@ def test_erasing_an_agent_without_lines_prints_zero_also_when_the_configuration_
         ["memory", "erase", "--all", "--everything"],
         ["memory", "list", "everything"],
         ["memory", "forget"],
+        ["memory", "erase", "--agent", AGENT, "--agent", OTHER_AGENT],
+        ["memory", "list", "--agent", AGENT, "--agent", OTHER_AGENT],
+        ["memory", "erase", "--al"],
     ],
-    ids=["memory-alone", "no-selector", "both-selectors", "unknown-option", "unknown-argument", "unknown-command"],
+    ids=[
+        "memory-alone",
+        "no-selector",
+        "both-selectors",
+        "unknown-option",
+        "unknown-argument",
+        "unknown-command",
+        "repeated-agent",
+        "repeated-agent-in-list",
+        "abbreviated-option",
+    ],
 )
 def test_a_memory_command_used_wrongly_is_refused_with_its_usage_and_every_line_remains(
     files, database, monkeypatch, capsys, arguments

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import csv
 import logging
 import os
 import signal
@@ -124,14 +125,32 @@ class _MemoryArgumentParser(argparse.ArgumentParser):
         raise SystemExit(CONFIGURATION_ERROR_EXIT_CODE)
 
 
+class _StoreOnce(argparse.Action):
+    """Refuses an option given twice, which argparse would otherwise settle silently by its last value."""
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: str | Sequence[object] | None,
+        option_string: str | None = None,
+    ) -> None:
+        if getattr(namespace, self.dest) is not None:
+            parser.error(f"argument {option_string}: given more than once")
+        setattr(namespace, self.dest, values)
+
+
 def _memory_request(arguments: Sequence[str]) -> argparse.Namespace:
-    parser = _MemoryArgumentParser(prog=f"personas {MEMORY_COMMAND}")
+    # Prefix matching is off, or a mistyped option such as ``--al`` would select every agent's lines.
+    parser = _MemoryArgumentParser(prog=f"personas {MEMORY_COMMAND}", allow_abbrev=False)
     commands = parser.add_subparsers(dest="command", required=True)
-    listing = commands.add_parser(LIST_COMMAND, help="one row per visit, without any line's content")
-    listing.add_argument("--agent", metavar="CLIENT_ID", help="only this agent's visits")
-    erasing = commands.add_parser(ERASE_COMMAND, help="delete kept lines and print how many")
+    listing = commands.add_parser(
+        LIST_COMMAND, help="one row per visit, without any line's content", allow_abbrev=False
+    )
+    listing.add_argument("--agent", action=_StoreOnce, metavar="CLIENT_ID", help="only this agent's visits")
+    erasing = commands.add_parser(ERASE_COMMAND, help="delete kept lines and print how many", allow_abbrev=False)
     selector = erasing.add_mutually_exclusive_group(required=True)
-    selector.add_argument("--agent", metavar="CLIENT_ID", help="every line this agent keeps")
+    selector.add_argument("--agent", action=_StoreOnce, metavar="CLIENT_ID", help="every line this agent keeps")
     selector.add_argument("--all", action="store_true", dest="every_agent", help="every line of every agent")
     return parser.parse_args(arguments)
 
@@ -167,11 +186,12 @@ def _migrate(config: Config) -> None:
 
 
 def _print_visits(visits: Iterable[KeptVisit]) -> None:
-    sys.stdout.write("\t".join(VISIT_COLUMNS) + "\n")
+    """Tab-separated; a field holding a tab or a line break, as a place id from an app may, is quoted."""
+    rows = csv.writer(sys.stdout, dialect="excel-tab", lineterminator="\n")
+    rows.writerow(VISIT_COLUMNS)
     for each in visits:
         place, times = each.visit.place, (each.first_read_at.isoformat(), each.last_read_at.isoformat())
-        row = (each.client_id, each.visit.app, place.kind, place.id, each.visit.generation, str(each.lines), *times)
-        sys.stdout.write("\t".join(row) + "\n")
+        rows.writerow((each.client_id, each.visit.app, place.kind, place.id, each.visit.generation, each.lines, *times))
 
 
 async def _perform_memory(target: MemoryTarget, request: argparse.Namespace) -> None:
