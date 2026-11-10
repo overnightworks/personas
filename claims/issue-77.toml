@@ -1,0 +1,8 @@
+claim_id = "79801caf02ea4588b01625b2015d0652"
+agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
+role = "builder"
+base = "d12396f42d98f247496e8ab2a3f144438ee47363"
+branch = "claude/issue-77-what-the-loop-does-with-the-store"
+scope = ["docs/ARCHITECTURE.md", "src/personas/loop.py", "src/personas/remembering.py", "src/personas/voice.py", "tests"]
+opened_commit = "3d8c03ed7a53245eb983591aacfa3c7919df4494"
+whole_reason = "One move of one unit out of loop.py; tests is a directory, touched only for an import line."
