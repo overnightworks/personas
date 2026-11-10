@@ -1,0 +1,8 @@
+claim_id = "93a4f5eec780420db3589a36e90ea767"
+agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
+role = "builder"
+base = "f864f9395cffe59ca0a0f11ee85fbdb1a7bcc9c5"
+branch = "claude/issue-65-back-the-same-day-mozart-knows-what-was"
+scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/config.py", "src/personas/decision.py", "src/personas/loop.py", "src/personas/memory.py", "tests"]
+opened_commit = "78bfbe9f01d5f267ff9bbdebd28c37398356e430"
+whole_reason = "The read, the pure selection, the turn's facts and the two settings are one path from a kept line to what a turn is told; split, a read or a selection has no caller."
