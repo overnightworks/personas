@@ -21,6 +21,7 @@ from agents.mcp_server import McpPersonFront, PersonRequest, PersonTool, Resourc
 from agents.mcp_wire import MCP_ENDPOINT_PATH
 from agents.member import (
     ACCEPT_INVITATION_TOOL,
+    SPEAK_TOOL,
     STANDING_URI,
     AcceptInvitationArguments,
     Invitation,
@@ -28,6 +29,8 @@ from agents.member import (
     PlaceEntry,
     PlaceRef,
     PlaceWindow,
+    SpeakArguments,
+    Spoken,
     Standing,
     StandingState,
     place_ref_from_window_uri,
@@ -70,6 +73,16 @@ _SAY_DECLARATION = ToolDeclaration(
     },
     effect=ToolEffect.SIDE_EFFECTING,
 )
+
+_SPEAK_DECLARATION = ToolDeclaration(
+    name=SPEAK_TOOL,
+    description="Speaks a sentence in a call.",
+    parameters=SpeakArguments.model_json_schema(),
+    effect=ToolEffect.SIDE_EFFECTING,
+)
+
+SPOKEN_DURATION_MS = 1500
+"""How long a sentence plays unless a test scripts the answer."""
 
 _ACCEPT_DECLARATION = ToolDeclaration(
     name=ACCEPT_INVITATION_TOOL,
@@ -165,6 +178,10 @@ class FakeApp:
     read_added: asyncio.Event = field(default_factory=asyncio.Event)
     vanished: set[str] = field(default_factory=set[str])
     say_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
+    speak_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
+    spoken: list[tuple[str, str, str]] = field(default_factory=list[tuple[str, str, str]])
+    spoken_added: asyncio.Event = field(default_factory=asyncio.Event)
+    speak_bearers: list[str] = field(default_factory=list[str])
     said: list[tuple[str, str, str]] = field(default_factory=list[tuple[str, str, str]])
     said_added: asyncio.Event = field(default_factory=asyncio.Event)
     held_window_read: asyncio.Event | None = None
@@ -187,7 +204,11 @@ class FakeApp:
         )
 
     def _tools(self) -> list[PersonTool]:
-        return [PersonTool(_ACCEPT_DECLARATION, self._accept), PersonTool(_SAY_DECLARATION, self._say)]
+        return [
+            PersonTool(_ACCEPT_DECLARATION, self._accept),
+            PersonTool(_SAY_DECLARATION, self._say),
+            PersonTool(_SPEAK_DECLARATION, self._speak),
+        ]
 
     def let_in(self, bearer: str, subject: str) -> None:
         self.bearers[bearer] = subject
@@ -298,6 +319,17 @@ class FakeApp:
         self.speak(place_id, request.principal.sub, ACCEPTED_NAME, text)
         return ToolOutcome("said", is_error=False)
 
+    async def _speak(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
+        """Takes a sentence, appends it as the member's own spoken line and answers how long it plays."""
+        taken = SpeakArguments.model_validate(arguments)
+        self.content.add(taken.text)
+        if self.speak_outcomes:
+            return self.speak_outcomes.pop(0)
+        self.spoken.append((request.principal.sub, taken.place.id, taken.text))
+        self.spoken_added.set()
+        self.speak(taken.place.id, request.principal.sub, ACCEPTED_NAME, taken.text, spoken=True)
+        return ToolOutcome(Spoken(duration_ms=SPOKEN_DURATION_MS).model_dump_json(), is_error=False)
+
     async def until_window_read_held(self) -> None:
         async with asyncio.timeout(LIMIT_SECONDS):
             await self.window_read_held.wait()
@@ -329,6 +361,13 @@ class FakeApp:
                 self.said_added.clear()
                 await self.said_added.wait()
 
+    async def spoken_count(self, count: int) -> None:
+        """Returns once this many sentences were spoken through the tool; fails after the limit."""
+        async with asyncio.timeout(LIMIT_SECONDS):
+            while len(self.spoken) < count:
+                self.spoken_added.clear()
+                await self.spoken_added.wait()
+
     async def _accept(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
         taken = AcceptInvitationArguments.model_validate(arguments)
         self.accepted.append(taken)
@@ -359,6 +398,8 @@ class FakeApp:
         headers = {name.decode(): value.decode() for name, value in scope["headers"]}
         bearer = headers.get("authorization", "").removeprefix("Bearer ")
         self.presented.add(bearer)
+        if method == CALL and (document.get("params") or {}).get("name") == SPEAK_TOOL:
+            self.speak_bearers.append(bearer)
         noting = self._noting_acknowledgements(send)
         reply = Reply(Rpc(document.get("id", 0), method, document.get("params") or {}), noting, receive)
         if bearer not in self.bearers:
@@ -392,6 +433,14 @@ class FakeApp:
             await send(message)
 
         return noting
+
+
+@dataclass
+class QuietApp(FakeApp):
+    """An app that lets its members say lines in a call but declares no ``speak``."""
+
+    def _tools(self) -> list[PersonTool]:
+        return [PersonTool(_ACCEPT_DECLARATION, self._accept), PersonTool(_SAY_DECLARATION, self._say)]
 
 
 async def _body_of(receive: Callable[..., Any]) -> bytes:

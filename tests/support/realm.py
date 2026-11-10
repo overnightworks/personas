@@ -47,6 +47,7 @@ class FakeRealm:
     ) -> None:
         self._apps = {scope: app}
         self._clients = {agent.client_id: (agent, subject)}
+        self._names: dict[str, str] = {}
         self.groups = list(groups)
         self.agent_name = agent_name
         self.issued: list[str] = []
@@ -61,9 +62,11 @@ class FakeRealm:
         self._apps[scope] = app
         self.issued_for[scope] = []
 
-    def add_client(self, agent: AgentCredentials, subject: str) -> None:
-        """Lets one more agent ask for tokens, each with a subject of its own."""
+    def add_client(self, agent: AgentCredentials, subject: str, name: str | None = None) -> None:
+        """Lets one more agent ask for tokens, each with a subject of its own and, if given, a name of its own."""
         self._clients[agent.client_id] = (agent, subject)
+        if name is not None:
+            self._names[agent.client_id] = name
 
     def transport(self) -> httpx2.MockTransport:
         return httpx2.MockTransport(self._answer)
@@ -80,7 +83,12 @@ class FakeRealm:
         if self.refusing or not asked_as_agent or form["scope"] in self.refused_scopes:
             self.refusals.put_nowait(None)
             return httpx2.Response(401, json={"error": "invalid_client"})
-        claims = {"iss": ISSUER, "sub": subject, "groups": self.groups, "agent_name": self.agent_name}
+        claims = {
+            "iss": ISSUER,
+            "sub": subject,
+            "groups": self.groups,
+            "agent_name": self._names.get(form["client_id"], self.agent_name),
+        }
         token = jwt_of(claims)
         self.issued.append(token)
         self.issued_for[form["scope"]].append(token)

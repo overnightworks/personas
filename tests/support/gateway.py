@@ -86,6 +86,34 @@ class Gateway(FakeGateway):
             if len(body["messages"]) == TURN_OPENING_MESSAGES
         ]
 
+    def system_of(self, request_number: int) -> str:
+        """The system text the request that arrived as this number (from one) carried."""
+        return json.loads(self.requests[request_number - 1].content)["messages"][0]["content"]
+
+    def told_in(self, request_number: int) -> str:
+        """Everything but the system text that the request that arrived as this number (from one) carried."""
+        messages = json.loads(self.requests[request_number - 1].content)["messages"]
+        return "\n".join(message["content"] for message in messages[1:])
+
+    def lines_told(self, request_number: int) -> list[JsonObject]:
+        """The lines of the last user message of the request that arrived as this number (from one), as written."""
+        messages = json.loads(self.requests[request_number - 1].content)["messages"]
+        return [json.loads(each) for each in messages[-1]["content"].splitlines()]
+
+    def heard_in(self, request_number: int) -> list[JsonObject]:
+        """Every line the request that arrived as this number (from one) told, as written, in order."""
+        messages = json.loads(self.requests[request_number - 1].content)["messages"]
+        return [
+            json.loads(each)
+            for message in messages
+            if message["role"] == "user"
+            for each in message["content"].splitlines()
+        ]
+
+    def user_of(self, request_number: int) -> str:
+        """The ``user`` the request that arrived as this number (from one) carried."""
+        return json.loads(self.requests[request_number - 1].content)["user"]
+
     def tool_results(self, request_number: int) -> list[str]:
         """The tool messages the request that arrived as this number (from one) carried, in order."""
         messages = json.loads(self.requests[request_number - 1].content)["messages"]

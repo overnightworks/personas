@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 import httpx2
 import pytest
+from agents.agent_file import load_agent
 from agents.backend.fake_gateway import completion
 from agents.backend.gateway import GatewayBackend
 from agents.turn import Principal
@@ -21,7 +22,7 @@ from personas.readiness import FileReadyMarker
 from personas.reporting import log_state_change
 from personas.secret import Secret
 from personas.tokens import HttpTokenSource
-from tests.support.configfiles import Files
+from tests.support.configfiles import MAX_TOOL_CALLS, Files
 from tests.support.fakes import (
     FakeClock,
     FakeReadyMarker,
@@ -46,6 +47,7 @@ if TYPE_CHECKING:
     from agents.member import MemberStanding
     from agents.tools import HandTool
 
+    from personas.app_session import SessionOpener
     from personas.config import MemoryTarget
     from personas.decision import Refusal, TurnCap
     from personas.failures import CallFailure
@@ -132,6 +134,7 @@ class Harness:
         self.token_client = httpx2.AsyncClient(transport=self.realm.transport())
         self.task: asyncio.Task[object] | None = None
         self.tools_only_apps: list[ToolsOnlyApp] = []
+        self.other_apps: list[FakeApp] = []
         self.lines: LineStore | None = None
 
     def remember_in(self, store: LineStore, target: MemoryTarget) -> None:
@@ -149,6 +152,24 @@ class Harness:
         self.realm.add_app(TOOLS_ONLY_SCOPE, app)
         self.tools_only_apps.append(app)
 
+    def add_listening_app(self, app: FakeApp, url: str, scope: str) -> None:
+        """Binds ``say`` in one more app the agents listen to, and lets their tokens for its scope into it.
+
+        It reloads the configuration, so it comes before the other changes of a scenario.
+        """
+        self.files.text += (
+            f'[[apps]]\nmcp_url = "{url}"\nscope = "{scope}"\ntools = ["say"]\nmax_tool_calls = {MAX_TOOL_CALLS}\n'
+        )
+        self.config = load_config(self.files.write())
+        self.realm.add_app(scope, app)
+        self.other_apps.append(app)
+
+    def give_voice(self) -> None:
+        """Gives every agent's persona a voice section."""
+        self.files.give_voice()
+        persona = load_agent(self.files.persona_path, [])
+        self.config = replace(self.config, agents=tuple(replace(each, persona=persona) for each in self.config.agents))
+
     def bound_tools_only_calls_to(self, seconds: float) -> None:
         """Gives every tools-only app this call time; the amounts of a scenario are its own."""
         self.config = replace(
@@ -164,21 +185,24 @@ class Harness:
         """A second app of the same agents; it answers at the same address as the first."""
         self.config = replace(self.config, apps=(*self.config.apps, *self.config.apps))
 
-    def add_agent(self, client_id: str, subject: str) -> None:
-        """A second agent with the first one's persona and cap, its own client and its own subject in the app."""
+    def add_agent(self, client_id: str, subject: str, name: str | None = None) -> None:
+        """A second agent with the first one's persona and cap, its own client and its own subject in the app.
+
+        Its token names it ``name``, or the first agent's name.
+        """
         second = replace(self.config.agents[0], client_id=client_id, client_secret=Secret(secrets.token_hex(16)))
         self.config = replace(self.config, agents=(*self.config.agents, second))
-        self.realm.add_client(second, subject)
+        self.realm.add_client(second, subject, name)
 
     def _report(self, change: StateChange) -> None:
         self.reports(change)
         log_state_change(change)
         self.on_report(change)
 
-    def start(self, *, stream_seconds: float = READ_SECONDS) -> None:
+    def start(self, *, stream_seconds: float = READ_SECONDS, open_session: SessionOpener | None = None) -> None:
         boundaries = Boundaries(
             tokens=HttpTokenSource(TOKEN_ENDPOINT, self.token_client),
-            open_session=partial(open_mcp_session, stream_seconds=stream_seconds),
+            open_session=open_session or partial(open_mcp_session, stream_seconds=stream_seconds),
             clock=self.clock,
             report=self._report,
             ready=FileReadyMarker(self.ready_file),
@@ -199,7 +223,7 @@ class Harness:
             self.files.persona_prompt,
             *self.realm.issued,
             *self.app.kept_out_of_logs(),
-            *(held for each in self.tools_only_apps for held in each.kept_out_of_logs()),
+            *(held for each in [*self.tools_only_apps, *self.other_apps] for held in each.kept_out_of_logs()),
         ]
 
 

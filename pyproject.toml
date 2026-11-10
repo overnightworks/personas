@@ -10,7 +10,7 @@ dependencies = [
     "httpx2>=2.16.0",
     "mcp>=2.3.0",
     "mcp-types>=2.3.0",
-    "overnightworks-agents[backend] @ git+https://github.com/overnightworks/agents@v0.30.0",
+    "overnightworks-agents[backend,voice] @ git+https://github.com/overnightworks/agents@v0.30.0",
     "psycopg[binary]>=3.2",
     "pydantic>=2.12",
     "sqlalchemy[asyncio]>=2.1.6",
