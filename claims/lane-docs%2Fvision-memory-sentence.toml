@@ -1,0 +1,7 @@
+claim_id = "e9a0226baee24f758d18e1fcf8e3e608"
+agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
+role = "builder"
+base = "4d4888737ed00e739481cb779ad5a34c49dd8ee2"
+branch = "docs/vision-memory-sentence"
+scope = ["docs/VISION.md"]
+opened_commit = "f8da53d0bc43cc1f41d12b2f72fd121532115062"
