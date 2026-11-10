@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Final, cast
 
 import anyio
@@ -75,3 +76,9 @@ def leaves_of(error: BaseException) -> Iterator[BaseException]:
             yield from leaves_of(inner)
     else:
         yield error
+
+
+def task_is_being_cancelled() -> bool:
+    """Whether the running task has a cancellation requested that it has not yet taken."""
+    task = asyncio.current_task()
+    return task is not None and task.cancelling() > 0

@@ -15,7 +15,7 @@ def upgrade() -> None:
         sa.Column("place_kind", sa.Text, nullable=False),
         sa.Column("place_id", sa.Text, nullable=False),
         sa.Column("generation", sa.Text, nullable=False),
-        sa.Column("seq", sa.Numeric(scale=0), nullable=False),
+        sa.Column("seq", sa.Numeric(), nullable=False),
         sa.Column("first_read_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("speaker", sa.Text, nullable=False),
         sa.Column("kind", sa.Text, nullable=False),
@@ -23,4 +23,6 @@ def upgrade() -> None:
         sa.Column("own", sa.Boolean, nullable=False),
         sa.Column("spoken", sa.Boolean, nullable=False),
         sa.PrimaryKeyConstraint("client_id", "app", "place_kind", "place_id", "generation", "seq"),
+        # NUMERIC without a precision keeps any size, and only this check keeps it whole.
+        sa.CheckConstraint("scale(seq) = 0", name="seq_is_whole"),
     )

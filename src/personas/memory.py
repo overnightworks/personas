@@ -32,6 +32,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import InterfaceError, OperationalError, SQLAlchemyError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
 from personas.failures import (
@@ -40,6 +41,7 @@ from personas.failures import (
     STORE_UNREACHABLE_CODE,
     StoreDefect,
     StoreUnavailable,
+    task_is_being_cancelled,
 )
 
 if TYPE_CHECKING:
@@ -65,8 +67,8 @@ _LINES: Final = Table(
     Column("place_kind", Text),
     Column("place_id", Text),
     Column("generation", Text),
-    # The wire bounds a line's seq only from below.
-    Column("seq", Numeric(scale=0)),
+    # The wire bounds a line's seq only from below; the migration's check refuses a fraction.
+    Column("seq", Numeric()),
     Column("first_read_at", DateTime(timezone=True)),
     Column("speaker", Text),
     Column("kind", Text),
@@ -125,6 +127,8 @@ def _as_store_failure() -> Generator[None]:
         yield
     except OperationalError, InterfaceError:
         raise StoreUnavailable(STORE_UNREACHABLE_CODE) from None
+    except PoolTimeoutError:
+        raise StoreUnavailable(STORE_TIMEOUT_CODE) from None
     except SQLAlchemyError:
         raise StoreDefect(STORE_DEFECT_CODE) from None
 
@@ -207,6 +211,12 @@ class PostgresLineStore:
                         await connection.execute(statement)
         except TimeoutError:
             raise StoreUnavailable(STORE_TIMEOUT_CODE) from None
+        except StoreUnavailable, StoreDefect:
+            # The driver answers a cancellation with its own cancel request and raises a break of the connection
+            # during that wait instead of the cancellation; the time bound has taken back its own request by now.
+            if task_is_being_cancelled():
+                raise asyncio.CancelledError from None
+            raise
 
     async def _require_head(self, connection: AsyncConnection) -> None:
         if self._schema_checked:

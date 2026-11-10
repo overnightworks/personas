@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from agents.member import PlaceEntry, PlaceRef, PlaceWindow
+from sqlalchemy.exc import IntegrityError
 
 from personas.decision import WindowRead
 from personas.failures import STORE_TIMEOUT_CODE, STORE_UNREACHABLE_CODE, StoreDefect, StoreUnavailable
@@ -37,7 +38,12 @@ BOUND_SECONDS = 0.5
 MARGIN_SECONDS = 1.0
 CLOSED_PORT = 1
 DARK_WRITE_SECONDS = 1.0
+RESET_AFTER_CANCEL_SECONDS = 0.5
 BEYOND_64_BITS = 2**63
+FRACTIONAL_SEQ_ROW = (
+    "INSERT INTO lines VALUES ('agent', 'app', 'call', 'room', 'visit', 1.5, now(), 'Ada', 'message', 'text',"
+    " false, false)"
+)
 REFUSE_EVERY_NEW_ROW = "ALTER TABLE lines ADD CONSTRAINT refuses_every_row CHECK (false) NOT VALID"
 """Its error names the failing row, so only the adapter's own wording keeps the row out of a traceback."""
 
@@ -186,7 +192,10 @@ async def test_a_write_waiting_on_a_lock_ends_within_its_bound_releases_its_stat
     assert kept_lines(database, "seq") == [(1,), (3,)]
 
 
-async def test_a_write_cancelled_while_its_connection_answers_nothing_ends_as_the_cancellation(database):
+@pytest.mark.parametrize("reset_after_seconds", [None, RESET_AFTER_CANCEL_SECONDS], ids=["dark", "then_reset"])
+async def test_a_write_cancelled_while_its_connection_answers_nothing_ends_as_the_cancellation(
+    database, reset_after_seconds
+):
     forwarder = Forwarder(replace(database, write_seconds=DARK_WRITE_SECONDS))
     async with forwarder.serving() as through_the_forwarder:
         store = PostgresLineStore(through_the_forwarder)
@@ -197,6 +206,8 @@ async def test_a_write_cancelled_while_its_connection_answers_nothing_ends_as_th
             async with asyncio.timeout(LIMIT_SECONDS):
                 await forwarder.dropped.wait()
             write.cancel()
+            if reset_after_seconds is not None:
+                asyncio.get_running_loop().call_later(reset_after_seconds, forwarder.reset_dark)
             ended = await ended_by(write)
             await store.keep(a_read(line(3, "After the dark")))
         finally:
@@ -210,6 +221,11 @@ async def test_a_line_whose_seq_is_beyond_64_bits_is_kept_with_the_other_lines_o
     await store.keep(a_read(line(1, "Ordinary"), line(BEYOND_64_BITS, "Far along")))
 
     assert kept_lines(database, "seq, text") == [(1, "Ordinary"), (BEYOND_64_BITS, "Far along")]
+
+
+def test_a_fraction_for_seq_is_refused_by_the_database(database):
+    with pytest.raises(IntegrityError):
+        run_sql(database, FRACTIONAL_SEQ_ROW)
 
 
 async def test_a_store_without_a_write_bound_keeps_a_window(database):

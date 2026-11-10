@@ -147,6 +147,11 @@ class Forwarder:
         """Every connection open now stops answering, in both directions; new ones are forwarded."""
         self._dark |= self._open
 
+    def reset_dark(self) -> None:
+        """Every dark connection is reset, as a peer that is gone answers a later packet."""
+        for writer in self._dark:
+            writer.transport.abort()
+
     async def _forward(self, client_reader: asyncio.StreamReader, client_writer: asyncio.StreamWriter) -> None:
         server_reader, server_writer = await asyncio.open_connection(self._target.host, self._target.port)
         self._open |= {client_writer, server_writer}
