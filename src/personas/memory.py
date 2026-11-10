@@ -54,7 +54,8 @@ MIGRATIONS_DIRECTORY: Final = Path(__file__).parent / "migrations"
 MIGRATION_LOCK_KEY: Final = 5_201_907_364
 POSTGRES_DRIVER: Final = "postgresql+psycopg"
 MINIMUM_CONNECT_SECONDS: Final = 2
-"""The driver reads a connect timeout of 0 as no bound at all."""
+"""The least connect timeout the driver honours; it raises a smaller one to this and truncates a
+fraction, so the bound is rounded up."""
 NUL: Final = "\x00"
 REPLACEMENT: Final = "�"
 
