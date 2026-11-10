@@ -8,7 +8,7 @@ import pytest
 
 from personas import app_session
 from personas.failures import leaves_of
-from personas.loop import UnrequestedCancellationError
+from personas.task_record import UnrequestedCancellationError
 from tests.support.call import PLACE_ID
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import LIMIT_SECONDS, active

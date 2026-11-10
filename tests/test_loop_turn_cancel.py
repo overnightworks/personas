@@ -15,7 +15,7 @@ from mcp_types import ListToolsResult
 from personas import app_session
 from personas.decision import TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE
 from personas.failures import Unreachable, leaves_of
-from personas.loop import UnrequestedCancellationError
+from personas.task_record import UnrequestedCancellationError
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, says
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
