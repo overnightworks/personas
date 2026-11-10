@@ -40,13 +40,10 @@ from personas.failures import (
     STORE_UNREACHABLE_CODE,
     StoreDefect,
     StoreUnavailable,
-    task_is_being_cancelled,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Generator
-
-    from sqlalchemy.sql.expression import Executable
 
     from personas.config import MemoryTarget
     from personas.decision import WindowRead
@@ -199,18 +196,9 @@ class PostgresLineStore:
 
         ``write_seconds`` bounds taking a connection, connecting and the statement against a store that answers. A
         connection that goes dark in the middle of the statement is given up only after the driver's own cancel
-        wait, about ten seconds beyond the bound. An error the store raises while the task is being cancelled ends
-        as that cancellation.
+        wait, about ten seconds beyond the bound.
         """
         statement = insert(_LINES).values(_rows_of(read)).on_conflict_do_nothing()
-        try:
-            await self._write(statement)
-        except StoreUnavailable, StoreDefect:
-            if task_is_being_cancelled():
-                raise asyncio.CancelledError from None
-            raise
-
-    async def _write(self, statement: Executable) -> None:
         try:
             async with asyncio.timeout(self._write_bound):
                 with _as_store_failure():
