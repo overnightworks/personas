@@ -1,0 +1,8 @@
+claim_id = "acf7c0d9ffc34562a244864f80134cab"
+agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
+role = "builder"
+base = "b1b2a1292d64d0da850763756ca694a155fec35a"
+branch = "claude/issue-69-the-record-of-a-running-task-is-a-value"
+scope = ["docs/ARCHITECTURE.md", "src/personas/loop.py", "src/personas/task_record.py", "tests"]
+opened_commit = "72e96aaabe88b96428ea9c5053df0743171f266d"
+whole_reason = "One move of one rule out of loop.py; tests is a directory, touched only for an import line."
