@@ -82,6 +82,14 @@ async def test_a_written_line_naming_him_in_a_voice_place_enters_the_loop_and_th
     ]
 
 
+async def test_a_spoken_question_that_does_not_name_him_is_answered(runner):
+    await a_voice_call(runner, completion(ANSWER))
+    say_in_the_call(runner, "Anyone there?", spoken=True)
+    await runner.app.spoken_count(1)
+
+    assert sentences_spoken(runner) == [ANSWER]
+
+
 async def test_a_spoken_line_naming_him_is_answered_by_one_speak_per_sentence_in_order_each_after_the_last(runner):
     sleeps = HeldSleeps(runner)
     await a_voice_call(runner, completion(TWO_SENTENCES))
@@ -157,7 +165,7 @@ async def test_two_agents_in_one_place_each_skip_only_their_own_spoken_lines_and
 
     by_agent = {runner.gateway.user_of(number): number for number in (1, 2, 3)}
     assert runner.gateway.user_of(1) == mozart
-    assert {mozart, bach} == set(by_agent)
+    assert set(by_agent) == {mozart, bach}
     bach_heard = runner.gateway.heard_in(by_agent[bach])
     assert {"name": "Mozart", "kind": "message", "own": False, "spoken": True, "text": "Mozart answers."} in bach_heard
     assert not [heard for number in (1, 2, 3) for heard in runner.gateway.heard_in(number) if heard["own"]]
@@ -178,8 +186,19 @@ async def test_a_decision_over_the_cap_is_logged_as_capped_and_its_lines_are_ans
 
     assert [event for event, _ in runner.reports.events()].count("capped") == 1
     assert len(runner.gateway.requests) == 2
-    assert "Second." in runner.gateway.told_in(2)
-    assert "Third." in runner.gateway.told_in(2)
+    assert [line["text"] for line in runner.gateway.lines_told(2)] == [f"{ADDRESSED} Second.", f"{ADDRESSED} Third."]
+
+
+async def test_a_decision_over_the_cap_is_not_refunded_when_the_one_before_it_ended_short(runner):
+    runner.cap_turns(CAP)
+    await a_voice_call(runner, BUDGET_SPENT)
+    say_in_the_call(runner, f"{ADDRESSED} First.", spoken=True)
+    await runner.reports.until("turn_ended")
+    say_in_the_call(runner, f"{ADDRESSED} Second.", spoken=True)
+    await runner.reports.until("capped")
+
+    assert len(runner.gateway.requests) == 1
+    assert runner.reports.events() == [("started", None), ("turn_ended", "budget_spent"), ("capped", None)]
 
 
 async def test_a_turn_of_a_written_place_and_a_voice_decision_count_against_one_cap(runner, quiet):

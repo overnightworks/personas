@@ -17,8 +17,8 @@ from personas.task_record import UnrequestedCancellationError
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PLACE_ID, say_in_the_call
 from tests.support.gateway import Gateway
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import CALL, LISTEN, active, paused
-from tests.support.transport import transport_whose_close_loses_a_child, transport_whose_session_loses_a_child
+from tests.support.hopin import CALL, LIMIT_SECONDS, LISTEN, active, paused
+from tests.support.transport import ClosingHold, transport_whose_session_loses_a_child
 from tests.support.voice import TWO_SENTENCES, HeldSleeps, a_voice_call, ended_by, sentences_spoken
 
 pytestmark = pytest.mark.anyio
@@ -116,31 +116,39 @@ async def test_a_resume_starts_the_loop_having_heard_nothing_of_what_was_said_du
 
 
 @pytest.mark.parametrize(
-    ("break_speak", "events"),
+    ("break_speak", "mend_speak", "events"),
     [
         (
             lambda app: (
                 setattr(app, "refuse_with", HTTPStatus.SERVICE_UNAVAILABLE) or setattr(app, "refused_method", CALL)
             ),
-            [("started", None), ("backoff", "http_503")],
+            lambda app: setattr(app, "refuse_with", None),
+            [("started", None), ("backoff", "http_503"), ("resumed", None)],
         ),
         (
             lambda app: app.speak_outcomes.append(ToolOutcome("not a spoken record", is_error=False)),
-            [("started", None), ("suspended", "invalid_answer")],
+            lambda app: None,
+            [("started", None), ("suspended", "invalid_answer"), ("resumed", None)],
         ),
     ],
     ids=["a call that fails", "an answer that is no Spoken"],
 )
-async def test_a_speak_that_fails_as_a_call_or_answers_no_spoken_ends_the_loop_into_the_reaction_and_speaks_no_more(
-    runner, break_speak, events
+async def test_a_speak_that_fails_as_a_call_or_answers_no_spoken_ends_the_loop_into_the_reaction_and_a_new_loop_speaks(
+    runner, break_speak, mend_speak, events
 ):
-    await a_voice_call(runner, completion(TWO_SENTENCES))
+    await a_voice_call(runner, completion(TWO_SENTENCES), completion("Later."))
     break_speak(runner.app)
     say_in_the_call(runner, ADDRESSED, spoken=True)
-    await runner.reports.until(events[-1][0])
+    await runner.reports.until(events[1][0])
 
-    assert runner.reports.events() == events
     assert runner.app.spoken == []
+    mend_speak(runner.app)
+    await runner.reports.until("resumed")
+    say_in_the_call(runner, f"{ADDRESSED} Again.", spoken=True)
+    await runner.app.spoken_count(1)
+
+    assert sentences_spoken(runner) == ["Later."]
+    assert runner.reports.events() == events
     assert not runner.task.done()
 
 
@@ -162,38 +170,47 @@ async def test_a_voice_task_that_ends_cancelled_while_nobody_cancelled_it_ends_t
     assert isinstance(leaf.__cause__, asyncio.CancelledError)
 
 
-async def test_a_defect_in_speaks_session_ends_the_runner_loud(runner, monkeypatch):
+@pytest.fixture
+def speak_defect(monkeypatch):
+    """A defect that ``speak`` raises, whatever the sentence."""
     defect = ValueError("a defect")
 
     async def raise_it(self, *arguments):
         raise defect
 
     monkeypatch.setattr("personas.app_session._McpAppSession.speak", raise_it)
+    return defect
+
+
+async def test_a_defect_in_speaks_session_ends_the_runner_loud(runner, speak_defect):
     await a_voice_call(runner, completion(TWO_SENTENCES))
     say_in_the_call(runner, ADDRESSED, spoken=True)
 
     ended = await ended_by(runner.task)
 
-    assert [leaf for leaf in leaves_of(ended) if leaf is defect] == [defect]
+    assert list(leaves_of(ended)) == [speak_defect]
     assert runner.reports.events() == [("started", None)]
 
 
-async def test_a_defect_in_speaks_session_whose_close_loses_a_child_ends_the_runner_loud_with_both(runner, monkeypatch):
-    defect = ValueError("a defect")
-
-    async def raise_it(self, *arguments):
-        raise defect
-
-    monkeypatch.setattr("personas.app_session._McpAppSession.speak", raise_it)
-    lost = transport_whose_close_loses_a_child(OSError, nth=2, of_url=runner.app_url)
-    monkeypatch.setattr(app_session, "streamable_http_client", lost)
+async def test_a_defect_in_speaks_session_whose_place_then_leaves_ends_the_runner_loud_without_a_cancel(
+    runner, monkeypatch, speak_defect
+):
+    closing = ClosingHold()
+    monkeypatch.setattr(app_session, "streamable_http_client", closing.transport(of_url=runner.app_url))
     await a_voice_call(runner, completion(TWO_SENTENCES))
     say_in_the_call(runner, ADDRESSED, spoken=True)
+    try:
+        async with asyncio.timeout(LIMIT_SECONDS):
+            await closing.closing.wait()
+        runner.app.stand(SUBJECT)
+        async with asyncio.timeout(LIMIT_SECONDS):
+            await closing.cancelled.wait()
+    finally:
+        closing.release.set()
 
     ended = await ended_by(runner.task)
 
-    assert sorted(type(leaf).__name__ for leaf in leaves_of(ended)) == ["Unreachable", "ValueError"]
-    assert [leaf for leaf in leaves_of(ended) if leaf is defect] == [defect]
+    assert list(leaves_of(ended)) == [speak_defect]
     assert runner.reports.events() == [("started", None)]
 
 

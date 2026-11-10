@@ -67,7 +67,9 @@ class SpeakingVoice:
     report: Report
     renew_token: Callable[[], Awaitable[None]]
 
-    async def render(self, sentence: str) -> str:
+    # The library's port is an ``async def`` that pyright holds this to, and there is nothing to await: the app renders
+    # the sentence when it is played.
+    async def render(self, sentence: str) -> str:  # NOSONAR(S7503)
         return sentence
 
     async def play(self, audio: str) -> None:

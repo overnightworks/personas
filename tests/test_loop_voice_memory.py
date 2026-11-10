@@ -117,6 +117,27 @@ async def test_back_four_hours_after_a_visit_his_first_decision_is_told_its_line
     assert ADDRESSED not in runner.gateway.told_in(2).replace(welcome_back, "")
 
 
+async def test_a_restart_in_the_same_window_tells_the_loop_nothing_of_the_lines_its_own_visit_kept(runner, database):
+    store = WatchedStore(database)
+    runner.remember_in(store, database)
+    runner.give_voice()
+    runner.gateway = Gateway(completion(ANSWER), completion("Once more."))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED, spoken=True)
+    await runner.app.spoken_count(1)
+    await store.until_kept(2)
+    runner.task.cancel()
+    await asyncio.gather(runner.task, return_exceptions=True)
+    reads_before = runner.app.window_reads(PLACE_ID)
+    runner.start()
+    await runner.app.until_window_read(PLACE_ID, reads_before + 1)
+    say_in_the_call(runner, f"{ADDRESSED} Again.", spoken=True)
+    await runner.app.spoken_count(2)
+    await store.close()
+
+    assert context_of(runner.gateway, 2) == {"earlier_today": {"older_dropped": False, "visits": []}}
+
+
 async def test_a_store_that_cannot_be_read_when_the_loop_starts_lets_it_answer_without_the_day_and_is_logged_once(
     runner, database
 ):
