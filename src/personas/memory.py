@@ -32,7 +32,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import InterfaceError, OperationalError, SQLAlchemyError
-from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
 from personas.failures import (
@@ -127,8 +126,6 @@ def _as_store_failure() -> Generator[None]:
         yield
     except OperationalError, InterfaceError:
         raise StoreUnavailable(STORE_UNREACHABLE_CODE) from None
-    except PoolTimeoutError:
-        raise StoreUnavailable(STORE_TIMEOUT_CODE) from None
     except SQLAlchemyError:
         raise StoreDefect(STORE_DEFECT_CODE) from None
 
