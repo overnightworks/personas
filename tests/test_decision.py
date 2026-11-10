@@ -7,15 +7,16 @@ import json
 import secrets
 
 import pytest
-from agent_runtime_client.member import (
+from agents.member import (
     LEASE_SECONDS,
     LISTEN_BOUND_SECONDS,
+    AcceptInvitationRefusal,
     PlaceRef,
     PlaceWindow,
     Standing,
     StandingState,
 )
-from agent_runtime_client.tools import ToolDeclaration
+from agents.tools import ToolDeclaration
 
 from personas.app_session import READ_SECONDS
 from personas.decision import (
@@ -29,11 +30,11 @@ from personas.decision import (
     Perception,
     Reaction,
     Reading,
-    Refusal,
     Restarted,
     Suspend,
     Token,
     TurnCap,
+    UnrecognisedRefusal,
     accepts_for,
     active_call_places,
     addressed,
@@ -59,7 +60,12 @@ from personas.secret import Secret
 from tests.support.fakes import line, window_of
 from tests.support.hopin import GENERATION, active, invited, paused
 
-TRANSIENT_REFUSALS = [Refusal.SPONSOR_AWAY, Refusal.TWO_SEATS, Refusal.BUSY, Refusal.UNRECOGNISED]
+TRANSIENT_REFUSALS = [
+    AcceptInvitationRefusal.SPONSOR_AWAY,
+    AcceptInvitationRefusal.TWO_SEATS,
+    AcceptInvitationRefusal.BUSY,
+    UnrecognisedRefusal.UNRECOGNISED,
+]
 
 
 def test_an_invited_call_standing_is_accepted_with_its_place_invitation_and_epoch():
@@ -83,7 +89,7 @@ def test_a_standing_that_is_no_call_invitation_is_not_accepted(standing):
 
 def test_a_stale_invitation_is_never_accepted_again():
     first = invited("room-7", "inv-3")
-    memory, _ = after_refusal(Memory(), accepts_for((first,), Memory())[0], Refusal.STALE_INVITATION)
+    memory, _ = after_refusal(Memory(), accepts_for((first,), Memory())[0], AcceptInvitationRefusal.STALE_INVITATION)
 
     assert accepts_for((first,), memory) == ()
     assert accepts_for((invited("room-7", "inv-4"),), memory) == (
@@ -102,27 +108,29 @@ def test_any_other_refusal_is_accepted_again_at_the_next_read(refusal):
 
 def test_a_repeated_refusal_is_news_once_and_a_changed_one_is_news_again():
     attempt = Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 0)
-    memory, first = after_refusal(Memory(), attempt, Refusal.BUSY)
-    memory, repeated = after_refusal(memory, attempt, Refusal.BUSY)
-    _, changed = after_refusal(memory, attempt, Refusal.SPONSOR_AWAY)
+    memory, first = after_refusal(Memory(), attempt, AcceptInvitationRefusal.BUSY)
+    memory, repeated = after_refusal(memory, attempt, AcceptInvitationRefusal.BUSY)
+    _, changed = after_refusal(memory, attempt, AcceptInvitationRefusal.SPONSOR_AWAY)
 
     assert (first, repeated, changed) == (True, False, True)
 
 
 def test_what_is_remembered_of_an_invitation_that_left_the_standing_is_dropped():
     attempt = Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 0)
-    memory, _ = after_refusal(Memory(), attempt, Refusal.STALE_INVITATION)
-    memory, _ = after_refusal(memory, Accept(PlaceRef(kind="call", id="room-8"), "inv-4", 0), Refusal.BUSY)
+    memory, _ = after_refusal(Memory(), attempt, AcceptInvitationRefusal.STALE_INVITATION)
+    memory, _ = after_refusal(
+        memory, Accept(PlaceRef(kind="call", id="room-8"), "inv-4", 0), AcceptInvitationRefusal.BUSY
+    )
 
     forgotten = forget_gone(memory, (invited("room-8", "inv-4"),))
 
-    assert forgotten.refused == {"inv-4": Refusal.BUSY}
+    assert forgotten.refused == {"inv-4": AcceptInvitationRefusal.BUSY}
 
 
 def test_a_stale_invitation_stays_refused_when_a_read_leaves_it_out_and_a_later_one_holds_it_again():
     standing = invited("room-7", "inv-3")
     memory, _ = after_refusal(
-        Memory(), Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 0), Refusal.STALE_INVITATION
+        Memory(), Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 0), AcceptInvitationRefusal.STALE_INVITATION
     )
 
     memory = forget_gone(memory, ())

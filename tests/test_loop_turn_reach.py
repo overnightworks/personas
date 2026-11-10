@@ -8,8 +8,8 @@ from http import HTTPStatus
 import anyio
 import httpx2
 import pytest
-from agent_runtime_client.backend.fake_gateway import completion, tool_call, tool_round
-from agent_runtime_client.tools import ToolOutcome
+from agents.backend.fake_gateway import completion, tool_call, tool_round
+from agents.tools import ToolOutcome
 from mcp_types import ListToolsResult, Tool
 
 from personas import app_session

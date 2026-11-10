@@ -13,15 +13,15 @@ from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
-from agent_runtime_client.member import PlaceEntry, PlaceRef, PlaceWindow, Standing, StandingState
+from agents.member import AcceptInvitationRefusal, PlaceEntry, PlaceRef, PlaceWindow, Standing, StandingState
 
 from personas.failures import CallFailure, StatusFailure, TokenStatusFailure, UnusableAnswer
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
-    from agent_runtime_client.tools import ToolDeclaration
-    from agent_runtime_client.turn import AgentRole
+    from agents.tools import ToolDeclaration
+    from agents.turn import AgentRole
 
     from personas.secret import Secret
 
@@ -42,14 +42,13 @@ TURN_CANCELLED_CODE: Final = "cancelled"
 """The code of a turn the loop cancelled because its place left the standing."""
 
 
-class Refusal(StrEnum):
-    """The refusals of ``accept_invitation`` (hopin's contract) and one for any other tool error."""
+class UnrecognisedRefusal(StrEnum):
+    """A refusal outside the library's record: an app's own code, or an error text that is no such JSON."""
 
-    STALE_INVITATION = "stale_invitation"
-    SPONSOR_AWAY = "sponsor_away"
-    TWO_SEATS = "two_seats"
-    BUSY = "busy"
     UNRECOGNISED = "unrecognised"
+
+
+type Refusal = AcceptInvitationRefusal | UnrecognisedRefusal
 
 
 class Reaction(StrEnum):
@@ -108,7 +107,7 @@ def forget_gone(memory: Memory, standings: tuple[Standing, ...]) -> Memory:
 
 def after_refusal(memory: Memory, accept: Accept, refusal: Refusal) -> tuple[Memory, bool]:
     """The memory after a refused accept and whether this refusal is news worth reporting."""
-    if refusal is Refusal.STALE_INVITATION:
+    if refusal is AcceptInvitationRefusal.STALE_INVITATION:
         return Memory(memory.stale | {accept.invitation_id}, memory.refused), True
     is_news = memory.refused.get(accept.invitation_id) is not refusal
     return Memory(memory.stale, {**memory.refused, accept.invitation_id: refusal}), is_news

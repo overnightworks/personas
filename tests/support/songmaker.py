@@ -7,13 +7,13 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING
 
-from agent_runtime_client.mcp_server import PersonRequest, PersonTool
-from agent_runtime_client.tools import ToolDeclaration, ToolEffect, ToolOutcome
+from agents.mcp_server import PersonRequest, PersonTool
+from agents.tools import ToolDeclaration, ToolEffect, ToolOutcome
 
 from tests.support.hopin import FakeApp
 
 if TYPE_CHECKING:
-    from agent_runtime_client.turn import JsonObject
+    from agents.turn import JsonObject
 
 CREATE_SONG = "create_song"
 GENERATE_SONG = "generate_song"

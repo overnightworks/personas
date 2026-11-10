@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from agent_runtime_client.member import MemberStanding, PlaceEntry, PlaceWindow, Standing
+from agents.member import MemberStanding, PlaceEntry, PlaceWindow, Standing
 
 from personas.config import AgentCredentials, AppTarget
 from personas.decision import Accept, Refusal

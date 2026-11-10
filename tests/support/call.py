@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agent_runtime_client.member import PlaceRef
+from agents.member import PlaceRef
 
 from tests.support.hopin import AGENT_SUBJECT, active
 

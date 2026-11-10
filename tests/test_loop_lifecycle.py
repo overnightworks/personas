@@ -8,7 +8,7 @@ from http import HTTPStatus
 
 import anyio
 import pytest
-from agent_runtime_client.member import (
+from agents.member import (
     STANDING_URI,
     AcceptInvitationArguments,
     place_window_uri,

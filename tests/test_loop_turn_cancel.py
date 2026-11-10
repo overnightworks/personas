@@ -8,8 +8,8 @@ from http import HTTPStatus
 
 import anyio
 import pytest
-from agent_runtime_client.backend.fake_gateway import Reply
-from agent_runtime_client.member import STANDING_URI
+from agents.backend.fake_gateway import Reply
+from agents.member import STANDING_URI
 from mcp_types import ListToolsResult
 
 from personas import app_session

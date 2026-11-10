@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING
 
 import httpx2
 import pytest
-from agent_runtime_client.backend.gateway import GatewayBackend
-from agent_runtime_client.turn_events import FinalEvent
+from agents.backend.gateway import GatewayBackend
+from agents.turn_events import FinalEvent
 
 from personas.app_session import open_mcp_session
 from personas.config import CONFIG_ENVIRONMENT_VARIABLE, load_config
@@ -31,9 +31,9 @@ from tests.support.realm import FakeRealm
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterable
 
-    from agent_runtime_client.agents import TurnRequest
-    from agent_runtime_client.backend import AgentBackend, TurnEvent, TurnPerson
-    from agent_runtime_client.tools import HandTool
+    from agents.agent_file import TurnRequest
+    from agents.backend import AgentBackend, TurnEvent, TurnPerson
+    from agents.tools import HandTool
 
     from personas.config import AppTarget, Config
     from personas.readiness import ReadyMarker
@@ -58,7 +58,7 @@ def test_an_error_record_of_the_gateway_backend_reaches_no_log_line(library_logg
     configure_logging()
     caplog.set_level(logging.DEBUG)
 
-    logging.getLogger("agent_runtime_client.backend.gateway").error("tool say raised Unreachable")
+    logging.getLogger("agents.backend.gateway").error("tool say raised Unreachable")
 
     assert caplog.records == []
 

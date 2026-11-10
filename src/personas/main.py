@@ -11,7 +11,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import TYPE_CHECKING, Final
 
 import httpx2
-from agent_runtime_client.backend.gateway import GatewayBackend
+from agents.backend.gateway import GatewayBackend
 
 from personas.app_session import open_mcp_session
 from personas.clock import SystemClock
@@ -25,9 +25,9 @@ from personas.tokens import HttpTokenSource
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable, Iterable
 
-    from agent_runtime_client.backend import AgentBackend
-    from agent_runtime_client.config import AgentConfig
-    from agent_runtime_client.tools import HandTool
+    from agents.backend import AgentBackend
+    from agents.config import AgentConfig
+    from agents.tools import HandTool
 
     from personas.loop import BackendFactory
 
@@ -35,7 +35,7 @@ type Compose = Callable[[Config, ReadyMarker], AbstractAsyncContextManager[Bound
 
 CONFIGURATION_ERROR_EXIT_CODE: Final = 2
 READINESS_ERROR_EXIT_CODE: Final = 3
-QUIET_LIBRARIES: Final = ("httpx2", "httpcore2", "mcp", "client", "agent_runtime_client")
+QUIET_LIBRARIES: Final = ("httpx2", "httpcore2", "mcp", "client", "agents")
 """Their records carry request details and response content; only the runner's own state changes are logged."""
 SILENT_LEVEL: Final = logging.CRITICAL + 1
 

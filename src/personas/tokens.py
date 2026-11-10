@@ -9,7 +9,7 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Final, Protocol
 
 import httpx2
-from agent_runtime_client.turn import NonEmptyUnicodeText, Principal
+from agents.turn import NonEmptyUnicodeText, Principal
 from pydantic import BaseModel, ConfigDict
 
 from personas.failures import INVALID_ANSWER_CODE, TokenStatusFailure, Unreachable, UnusableAnswer
