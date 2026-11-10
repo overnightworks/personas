@@ -1,0 +1,8 @@
+claim_id = "d421fdbd2a384993a03217901895893a"
+agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
+role = "builder"
+base = "1d008eecd1e090a1e9c5792ca9d8f15bc42f95d7"
+branch = "claude/issue-51-personas-takes-agents-v0-29-0"
+scope = ["AGENTS.md", "README.md", "docs/ARCHITECTURE.md", "pyproject.toml", "src", "tests", "uv.lock"]
+opened_commit = "858211dd3f9639898e123c1417575916c58c327e"
+whole_reason = "The pin, the import rename it forces and the typed refusal it brings are one bump; split, either the lock or the imports fail."
