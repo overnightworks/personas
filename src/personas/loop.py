@@ -6,7 +6,7 @@ import asyncio
 from contextlib import aclosing
 from dataclasses import dataclass, replace
 from functools import partial
-from typing import TYPE_CHECKING, Final, NoReturn
+from typing import TYPE_CHECKING, Final, Literal, NoReturn
 
 from agent_runtime_client.agents import TurnRequest
 from agent_runtime_client.backend import TurnPerson, TurnStopKind, TurnStopped
@@ -641,7 +641,9 @@ class AgentLoop:
                 self._token = None
             case Suspend(code=code):
                 await self._suspend(code)
-            case Reaction.BACKOFF:
+            case remaining:
+                # pyright narrows `remaining` to the one reaction left, so a new reaction fails the type check here.
+                _: Literal[Reaction.BACKOFF] = remaining
                 await self._back_off(failure)
 
     async def _suspend(self, code: str) -> None:

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import signal
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from typing import TYPE_CHECKING
@@ -192,6 +194,18 @@ def test_a_marker_that_cannot_be_created_ends_the_runner_with_its_exit_code_thou
 
     assert stopped.value.code == READINESS_ERROR_EXIT_CODE
     assert "missing-directory" in capsys.readouterr().err
+
+
+def test_a_sigterm_that_cancels_the_runner_ends_the_entry_point_without_raising(world):
+    world.on_joined = lambda: None
+
+    @asynccontextmanager
+    async def compose_then_stop(config: Config, ready: ReadyMarker) -> AsyncGenerator[Boundaries]:
+        async with world.compose(config, ready) as boundaries:
+            os.kill(os.getpid(), signal.SIGTERM)
+            yield boundaries
+
+    main(compose_then_stop)
 
 
 def test_the_real_boundaries_hand_the_loops_the_marker_they_were_given(files):

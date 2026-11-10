@@ -128,6 +128,12 @@ exclude_lines = [
     "if TYPE_CHECKING:",
     "if __name__ == .__main__.",
 ]
+# A Protocol class declares a port; its method bodies are `...` and never run, and coverage.py excludes the whole
+# block that an excluded line introduces.
+exclude_also = [
+    'class .*\bProtocol\):',
+]
+fail_under = 100
 show_missing = true
 
 # --- Vulture ---

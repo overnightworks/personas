@@ -440,6 +440,22 @@ async def test_a_defect_in_a_tools_only_request_whose_close_outlasts_the_apps_ca
     assert runner.app.said == []
 
 
+@pytest.mark.parametrize("where", ["listing", "call"])
+async def test_a_timeout_a_tools_only_request_raises_itself_before_the_call_time_is_up_is_a_defect_ending_the_runner(
+    runner, songmaker, monkeypatch, where
+):
+    defect = TimeoutError("not the call time of the app")
+    raising_in_the_tools_only_request(runner, monkeypatch, where, defect)
+    runner.gateway = Gateway(calling(CREATE_SONG), saying(ANSWER), completion("done"))
+    await addressed_in_the_call(runner)
+
+    ended = await ended_by(runner.task)
+
+    assert defect in list(leaves_of(ended))
+    assert not any(isinstance(leaf, Unreachable) for leaf in leaves_of(ended))
+    assert failed_apps(runner) == []
+
+
 async def test_a_defect_in_a_tools_only_call_whose_close_outlasts_the_turns_duration_ends_the_runner_loud(
     runner, songmaker, monkeypatch
 ):
