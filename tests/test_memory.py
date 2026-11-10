@@ -165,8 +165,8 @@ async def test_a_write_waiting_on_a_lock_ends_within_its_bound_releases_its_stat
         with lines_table_locked(database):
             started = time.monotonic()
             during_the_lock = a_read(line(2, "During the lock"))
-            with pytest.raises(StoreUnavailable) as cut:
-                async with asyncio.timeout(LIMIT_SECONDS):
+            async with asyncio.timeout(LIMIT_SECONDS):
+                with pytest.raises(StoreUnavailable) as cut:
                     await store.keep(during_the_lock)
             elapsed = time.monotonic() - started
             still_waiting = waiting_statements(database)
