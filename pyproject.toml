@@ -9,7 +9,7 @@ dependencies = [
     "httpx2>=2.16.0",
     "mcp>=2.3.0",
     "mcp-types>=2.3.0",
-    "overnightworks-agent-runtime-client[backend] @ git+https://github.com/overnightworks/agent-runtime@v0.28.0",
+    "overnightworks-agents[backend] @ git+https://github.com/overnightworks/agents@v0.29.0",
     "pydantic>=2.12",
 ]
 
@@ -23,7 +23,7 @@ build-backend = "hatchling.build"
 [tool.uv]
 # The overnightworks library is built from its git tag; a named package
 # overrides a global --no-build, so every other package still installs as a wheel.
-no-binary-package = ["overnightworks-agent-runtime-client"]
+no-binary-package = ["overnightworks-agents"]
 # Its build backend runs with these exact tools, as hatchling is pinned above.
 build-constraint-dependencies = ["setuptools==84.2.1", "wheel==0.48.0"]
 
@@ -36,7 +36,7 @@ packages = ["src/personas"]
 [dependency-groups]
 dev = [
     "anyio>=4.16.0",
-    "overnightworks-agent-runtime-client[mcp-server] @ git+https://github.com/overnightworks/agent-runtime@v0.28.0",
+    "overnightworks-agents[mcp-server] @ git+https://github.com/overnightworks/agents@v0.29.0",
     "pyright>=1.1.414",
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",

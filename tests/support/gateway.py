@@ -7,12 +7,12 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from agent_runtime_client.backend.fake_gateway import FakeGateway, Reply, completion, tool_call, tool_round
+from agents.backend.fake_gateway import FakeGateway, Reply, completion, tool_call, tool_round
 
 from tests.support.hopin import LIMIT_SECONDS, SAY_TOOL
 
 if TYPE_CHECKING:
-    from agent_runtime_client.tools import JsonObject
+    from agents.tools import JsonObject
 
 TURN_OPENING_MESSAGES = 2
 """A turn's first round holds the persona and the room; every later round adds the model's calls and their results."""

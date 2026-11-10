@@ -7,13 +7,13 @@ from http import HTTPStatus
 
 import anyio
 import pytest
-from agent_runtime_client.backend.fake_gateway import Reply
-from agent_runtime_client.member import (
+from agents.backend.fake_gateway import Reply
+from agents.member import (
     STANDING_URI,
     place_window_uri,
 )
-from agent_runtime_client.tools import ToolOutcome
-from agent_runtime_client.turn import person_fingerprint
+from agents.tools import ToolOutcome
+from agents.turn import person_fingerprint
 from mcp_types import (
     INVALID_PARAMS,
     ListToolsResult,

@@ -8,10 +8,10 @@ from dataclasses import dataclass, replace
 from functools import partial
 from typing import TYPE_CHECKING, Final, Literal, NoReturn
 
-from agent_runtime_client.agents import TurnRequest
-from agent_runtime_client.backend import TurnPerson, TurnStopKind, TurnStopped
-from agent_runtime_client.tools import HandTool, ToolOutcome
-from agent_runtime_client.turn import FailureCode, Principal, Turn, TurnMessage, TurnRole
+from agents.agent_file import TurnRequest
+from agents.backend import TurnPerson, TurnStopKind, TurnStopped
+from agents.tools import HandTool, ToolOutcome
+from agents.turn import FailureCode, Principal, Turn, TurnMessage, TurnRole
 
 from personas.app_session import task_is_being_cancelled
 from personas.decision import (
@@ -53,11 +53,11 @@ from personas.tokens import TokenFacts, facts_of
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Coroutine, Iterable
 
-    from agent_runtime_client.agents import AgentDefinition
-    from agent_runtime_client.backend import AgentBackend
-    from agent_runtime_client.member import PlaceRef, Standing
-    from agent_runtime_client.tools import ToolDeclaration
-    from agent_runtime_client.turn import JsonObject
+    from agents.agent_file import AgentDefinition
+    from agents.backend import AgentBackend
+    from agents.member import PlaceRef, Standing
+    from agents.tools import ToolDeclaration
+    from agents.turn import JsonObject
 
     from personas.app_session import AppSession, SessionOpener
     from personas.clock import Clock

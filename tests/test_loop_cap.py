@@ -5,8 +5,8 @@ from __future__ import annotations
 from http import HTTPStatus
 
 import pytest
-from agent_runtime_client.backend.fake_gateway import Reply
-from agent_runtime_client.member import (
+from agents.backend.fake_gateway import Reply
+from agents.member import (
     place_window_uri,
 )
 

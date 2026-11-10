@@ -9,17 +9,18 @@ from dataclasses import dataclass
 from typing import Final, Protocol, cast, override
 
 import httpx2
-from agent_runtime_client.member import (
+from agents.member import (
     ACCEPT_INVITATION_TOOL,
     LISTEN_BOUND_SECONDS,
     STANDING_URI,
     AcceptInvitationArguments,
+    AcceptInvitationRefused,
     MemberStanding,
     PlaceRef,
     PlaceWindow,
     place_window_uri,
 )
-from agent_runtime_client.tools import JsonObject, ToolDeclaration, ToolEffect, ToolOutcome
+from agents.tools import JsonObject, ToolDeclaration, ToolEffect, ToolOutcome
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from mcp.client.subscriptions import Subscription, SubscriptionLost, listen
@@ -39,7 +40,7 @@ from mcp_types import (
 from pydantic import BaseModel, ValidationError
 
 from personas.config import AppTarget
-from personas.decision import Accept, Refusal, status_code
+from personas.decision import Accept, Refusal, UnrecognisedRefusal, status_code
 from personas.failures import (
     INVALID_ANSWER_CODE,
     LATE_ANSWER_ERRORS,
@@ -265,7 +266,10 @@ def _text_of(result: CallToolResult) -> str:
 
 
 def _refusal_of(text: str) -> Refusal:
-    return next((code for code in Refusal if code is not Refusal.UNRECOGNISED and code in text), Refusal.UNRECOGNISED)
+    try:
+        return AcceptInvitationRefused.model_validate_json(text).refused
+    except ValidationError:
+        return UnrecognisedRefusal.UNRECOGNISED
 
 
 def _failure_of(error: BaseException, auth: _BearerAuth) -> CallFailure:

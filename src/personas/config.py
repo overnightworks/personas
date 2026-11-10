@@ -18,8 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Self
 
-from agent_runtime_client.agents import AgentDefinition, AgentFileError, load_agent
-from agent_runtime_client.config import AgentConfig  # noqa: TC002 - pydantic resolves the field's type at run time
+from agents.agent_file import AgentDefinition, AgentFileError, load_agent
+from agents.config import AgentConfig  # noqa: TC002 - pydantic resolves the field's type at run time
 from pydantic import (
     AnyHttpUrl,
     BaseModel,

@@ -1,6 +1,6 @@
-"""An app that serves agent-runtime's own MCP front on a loopback socket, behind the gate a host has.
+"""An app that serves agents' own MCP front on a loopback socket, behind the gate a host has.
 
-The front, its resources and its change signal are agent_runtime_client's; the app's standings and
+The front, its resources and its change signal are the library's; the app's standings and
 the accept tool are scripted. A test may script the answer to a request method to misbehave once.
 """
 
@@ -17,9 +17,9 @@ from datetime import UTC, datetime
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 
-from agent_runtime_client.mcp_server import McpPersonFront, PersonRequest, PersonTool, ResourceChanges
-from agent_runtime_client.mcp_wire import MCP_ENDPOINT_PATH
-from agent_runtime_client.member import (
+from agents.mcp_server import McpPersonFront, PersonRequest, PersonTool, ResourceChanges
+from agents.mcp_wire import MCP_ENDPOINT_PATH
+from agents.member import (
     ACCEPT_INVITATION_TOOL,
     STANDING_URI,
     AcceptInvitationArguments,
@@ -33,8 +33,8 @@ from agent_runtime_client.member import (
     place_ref_from_window_uri,
     place_window_uri,
 )
-from agent_runtime_client.tools import ToolDeclaration, ToolEffect, ToolOutcome
-from agent_runtime_client.turn import JsonObject, Principal
+from agents.tools import ToolDeclaration, ToolEffect, ToolOutcome
+from agents.turn import JsonObject, Principal
 
 from tests.support.loopback import serving
 from tests.support.wire import ConnectionCut, Handler, Reply, Rpc

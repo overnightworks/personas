@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from agent_runtime_client.member import STANDING_URI
+from agents.member import STANDING_URI
 
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call

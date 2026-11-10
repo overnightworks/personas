@@ -7,11 +7,11 @@ from contextlib import asynccontextmanager
 
 import anyio
 import pytest
-from agent_runtime_client.backend import TurnStopKind, TurnStopped
-from agent_runtime_client.backend.gateway import GatewayBackend
-from agent_runtime_client.member import PlaceRef
-from agent_runtime_client.tools import ToolDeclaration, ToolEffect
-from agent_runtime_client.turn import RejectionCode
+from agents.backend import TurnStopKind, TurnStopped
+from agents.backend.gateway import GatewayBackend
+from agents.member import AcceptInvitationRefusal, PlaceRef
+from agents.tools import ToolDeclaration, ToolEffect
+from agents.turn import RejectionCode
 
 from personas.config import load_config
 from personas.decision import (
@@ -19,7 +19,6 @@ from personas.decision import (
     RENEW_BEFORE_EXPIRY_SECONDS,
     SUSPENDED_RETRY_SECONDS,
     Accept,
-    Refusal,
     backoff_delay,
 )
 from personas.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer, leaves_of
@@ -54,7 +53,7 @@ async def test_a_stale_invitation_is_not_retried_and_is_reported_once(scenario):
     standing = invited("room-7", "inv-3")
     run = scenario(
         [read_of(standing), read_of(standing), read_of(standing)],
-        accepts=[Refusal.STALE_INVITATION],
+        accepts=[AcceptInvitationRefusal.STALE_INVITATION],
     )
 
     await run.play()
@@ -63,7 +62,9 @@ async def test_a_stale_invitation_is_not_retried_and_is_reported_once(scenario):
     assert run.reports.events() == [("started", None), ("refused", "stale_invitation")]
 
 
-@pytest.mark.parametrize("refusal", [Refusal.SPONSOR_AWAY, Refusal.TWO_SEATS, Refusal.BUSY])
+@pytest.mark.parametrize(
+    "refusal", [AcceptInvitationRefusal.SPONSOR_AWAY, AcceptInvitationRefusal.TWO_SEATS, AcceptInvitationRefusal.BUSY]
+)
 async def test_a_transient_refusal_is_retried_at_the_next_answer_and_reported_once(scenario, refusal):
     standing = invited("room-7", "inv-3")
     run = scenario(
@@ -342,7 +343,7 @@ async def test_a_stream_reopened_after_a_graceful_end_carries_the_token_renewed_
 
 
 async def test_a_place_gone_between_the_read_and_the_accept_is_the_refusal_and_no_failure(scenario):
-    run = scenario([read_of(invited("room-7", "inv-3")), read_of()], accepts=[Refusal.STALE_INVITATION])
+    run = scenario([read_of(invited("room-7", "inv-3")), read_of()], accepts=[AcceptInvitationRefusal.STALE_INVITATION])
 
     await run.play()
 

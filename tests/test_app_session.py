@@ -1,4 +1,4 @@
-"""The SDK client against agent_runtime_client's own server on a loopback socket: the real wire."""
+"""The SDK client against the library's own server on a loopback socket: the real wire."""
 
 from __future__ import annotations
 
@@ -11,8 +11,15 @@ from http import HTTPStatus
 
 import anyio
 import pytest
-from agent_runtime_client.member import ACCEPT_INVITATION_TOOL, STANDING_URI, AcceptInvitationArguments, PlaceRef
-from agent_runtime_client.tools import ToolEffect, ToolOutcome
+from agents.member import (
+    ACCEPT_INVITATION_TOOL,
+    STANDING_URI,
+    AcceptInvitationArguments,
+    AcceptInvitationRefusal,
+    AcceptInvitationRefused,
+    PlaceRef,
+)
+from agents.tools import ToolEffect, ToolOutcome
 from mcp_types import (
     INVALID_PARAMS,
     BlobResourceContents,
@@ -27,7 +34,7 @@ from pydantic import ValidationError
 from personas import app_session
 from personas.app_session import open_mcp_session
 from personas.config import AppTarget
-from personas.decision import Accept, Refusal, status_code
+from personas.decision import Accept, UnrecognisedRefusal, status_code
 from personas.failures import (
     INVALID_ANSWER_CODE,
     LISTEN_NOT_HONORED_CODE,
@@ -61,7 +68,7 @@ from tests.support.transport import (
 pytestmark = pytest.mark.anyio
 
 SHORT_STREAM_SECONDS = 0.3
-POLLING_NAMES = ["agent_runtime_client.wait", "WaitAnswer", "WAIT_TOOL", "WaitToolError", "_cursor"]
+POLLING_NAMES = ["agents.wait", "WaitAnswer", "WAIT_TOOL", "WaitToolError", "_cursor"]
 SEARCHED = ["src", "tests", "README.md", "docs"]
 THIS_FILE = ":(exclude)tests/test_app_session.py"
 PLACE = PlaceRef(kind="call", id="room-7")
@@ -187,19 +194,23 @@ async def test_an_accept_sends_the_place_invitation_and_epoch_and_a_success_is_n
     assert app.accepted == [AcceptInvitationArguments(place=place, invitation="inv-3", epoch=2)]
 
 
-@pytest.mark.parametrize("refusal", [Refusal.STALE_INVITATION, Refusal.SPONSOR_AWAY, Refusal.TWO_SEATS, Refusal.BUSY])
-async def test_an_accept_refused_by_the_app_is_told_by_its_code(app, bearer, refusal):
-    app.accept_outcomes.append(ToolOutcome(refusal.value, is_error=True))
+@pytest.mark.parametrize("refusal", list(AcceptInvitationRefusal))
+async def test_an_accept_refused_with_a_code_of_the_record_is_told_by_that_code(app, bearer, refusal):
+    app.accept_outcomes.append(ToolOutcome(AcceptInvitationRefused(refused=refusal).model_dump_json(), is_error=True))
 
     async with opened(app, bearer) as session:
         assert await session.accept(Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 0)) is refusal
 
 
-async def test_an_accept_error_of_no_known_code_is_unrecognised(app, bearer):
-    app.accept_outcomes.append(ToolOutcome("something else", is_error=True))
+@pytest.mark.parametrize("text", ['{"refused": "own_account_only"}', "something else", "busy"])
+async def test_an_accept_error_outside_the_record_is_unrecognised(app, bearer, text):
+    app.accept_outcomes.append(ToolOutcome(text, is_error=True))
 
     async with opened(app, bearer) as session:
-        assert await session.accept(Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 0)) is Refusal.UNRECOGNISED
+        assert (
+            await session.accept(Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 0))
+            is UnrecognisedRefusal.UNRECOGNISED
+        )
 
 
 async def test_a_renewed_token_is_the_bearer_of_the_next_call(app, bearer):

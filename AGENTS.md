@@ -25,7 +25,7 @@
 ## Owners
 
 - The operator: the words of `docs/VISION.md`, and a yes for each release version before an agent dispatches `release.yml`.
-- overnightworks/agent-runtime: the client library and its wire contract; personas takes its releases.
+- overnightworks/agents: the client library and its wire contract; personas takes its releases.
 - overnightworks/quality: the shared gate (`quality / verdict`) and its rules.
 - overnightworks/hal: the realm and the model gateway.
 - overnightworks/platform: the runner's deployment.

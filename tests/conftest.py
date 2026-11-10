@@ -9,9 +9,9 @@ from typing import TYPE_CHECKING
 
 import httpx2
 import pytest
-from agent_runtime_client.backend.fake_gateway import completion
-from agent_runtime_client.backend.gateway import GatewayBackend
-from agent_runtime_client.turn import Principal
+from agents.backend.fake_gateway import completion
+from agents.backend.gateway import GatewayBackend
+from agents.turn import Principal
 
 from personas.app_session import READ_SECONDS, open_mcp_session
 from personas.config import load_config
@@ -42,9 +42,9 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterable, Iterator
     from pathlib import Path
 
-    from agent_runtime_client.backend import AgentBackend
-    from agent_runtime_client.member import MemberStanding
-    from agent_runtime_client.tools import HandTool
+    from agents.backend import AgentBackend
+    from agents.member import MemberStanding
+    from agents.tools import HandTool
 
     from personas.decision import Refusal, TurnCap
     from personas.failures import CallFailure
