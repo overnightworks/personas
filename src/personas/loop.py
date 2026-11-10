@@ -426,18 +426,15 @@ class AgentLoop:
         A session whose close cuts a request short can lose the defect from what leaves, so the turn's record
         joins it. A cancelled turn ends as the cancellation unless a defect was met or nobody cancelled it.
         """
-        cancelled: asyncio.CancelledError | None = None
+        await _ending_loud_when_cancelled(self._judged_turn_with_its_defect(setup, admitted), self._loud_end_of_turn)
+
+    async def _judged_turn_with_its_defect(self, setup: _TurnSetup, admitted: _Admitted) -> None:
+        """Judges the turn; what ends it, the recorded defect joins unless it is among the leaves."""
         failed: Exception | None = None
         try:
             await self._judge_turn(setup, admitted)
-        except asyncio.CancelledError as error:
-            cancelled = error
-            raise
         except Exception as error:
             failed = error
-        finally:
-            if cancelled is not None and (loud := self._loud_end_of_turn()) is not None:
-                raise loud from cancelled
         if (ending := self._with_recorded_defect(failed)) is not None:
             raise ending
 
@@ -506,7 +503,8 @@ class AgentLoop:
 
         A cancelled turn loses its errors to the cancellation; the record lets the runner end loud anyway.
         """
-        failures = (_failure_held_by(leaf) for leaf in leaves_of(error))
+        held = (_failure_held_by(leaf) for leaf in leaves_of(error))
+        failures = (failure for each in held if each is not None for failure in leaves_of(each))
         defect = next((failure for failure in failures if isinstance(failure, Exception) and is_defect(failure)), None)
         if defect is not None and self._recorded_defect() is None:
             assert self._turn is not None  # noqa: S101 - only the running turn runs its session body
@@ -599,7 +597,7 @@ class AgentLoop:
 
         The session lives only for this request. A failure of the call, a session that died of its own child and
         an expiry of the app's call time come back as the failure; any other error is raised, and a turn whose
-        place left stops.
+        place left stops. A defect recorded in the turn ends the request, raised from the failure.
         """
         try:
             return await _ending_loud_when_cancelled(self._within_call_time(app, ask), _unreachable_unless_cancelling)

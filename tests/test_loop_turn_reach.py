@@ -619,15 +619,39 @@ async def test_a_defect_in_a_tools_only_request_whose_turn_session_loses_a_child
     await ends_with_the_defect_beside(runner, defect, Unreachable)
 
 
+async def test_a_tools_only_call_that_fails_whose_close_adds_a_defect_ends_the_runner_with_each_leaf_once(
+    runner, songmaker, monkeypatch
+):
+    songmaker.script(CALL, refuses_with_a_server_error)
+    monkeypatch.setattr(
+        app_session, "streamable_http_client", transport_closing_with_late_answers(echo=RuntimeError, only_close=1)
+    )
+    runner.gateway = Gateway(calling(CREATE_SONG), saying(ANSWER), completion("done"))
+    await addressed_in_the_call(runner)
+
+    ended = await ended_by(runner.task)
+
+    assert sorted(type(leaf).__name__ for leaf in leaves_of(ended)) == ["RuntimeError", "StatusFailure"]
+    assert runner.reports.events() == [("started", None)]
+
+
 @REQUEST_AT
-@pytest.mark.parametrize("then", ["say answers", "say fails"])
+@pytest.mark.parametrize(
+    ("lost_child", "then"),
+    [
+        (OSError, "say answers"),
+        (OSError, "say fails"),
+        (anyio.BrokenResourceError, "say answers"),
+    ],
+    ids=["a lost child, say answers", "a lost child, say fails", "a late answer"],
+)
 async def test_a_defect_in_a_tools_only_request_whose_own_close_loses_a_child_ends_the_runner_loud_whatever_follows(
-    runner, songmaker, monkeypatch, where, then
+    runner, songmaker, monkeypatch, where, lost_child, then
 ):
     defect = ValueError("a defect")
     raising_in_the_tools_only_request(runner, monkeypatch, where, defect)
     lost = transport_whose_close_loses_a_child(
-        OSError, nth=1 if where == "listing" else 2, of_url=songmaker_url(runner)
+        lost_child, nth=1 if where == "listing" else 2, of_url=songmaker_url(runner)
     )
     monkeypatch.setattr(app_session, "streamable_http_client", lost)
     if then == "say fails":
@@ -638,22 +662,4 @@ async def test_a_defect_in_a_tools_only_request_whose_own_close_loses_a_child_en
     await ends_with_the_defect_beside(runner, defect, Unreachable)
 
     assert failed_apps(runner) == []
-    assert runner.app.said == []
-
-
-@REQUEST_AT
-async def test_a_defect_in_a_tools_only_request_whose_own_close_loses_a_late_answer_ends_the_runner_loud(
-    runner, songmaker, monkeypatch, where
-):
-    defect = ValueError("a defect")
-    raising_in_the_tools_only_request(runner, monkeypatch, where, defect)
-    lost = transport_whose_close_loses_a_child(
-        anyio.BrokenResourceError, nth=1 if where == "listing" else 2, of_url=songmaker_url(runner)
-    )
-    monkeypatch.setattr(app_session, "streamable_http_client", lost)
-    runner.gateway = Gateway(calling(CREATE_SONG), saying(ANSWER), completion("done"))
-    await addressed_in_the_call(runner)
-
-    await ends_with_the_defect_beside(runner, defect, Unreachable)
-
     assert runner.app.said == []

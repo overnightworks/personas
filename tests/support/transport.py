@@ -140,13 +140,11 @@ def transport_whose_session_loses_a_child(
     return losing
 
 
-def transport_whose_close_loses_a_child(
-    error: Callable[[], Exception], *, nth: int = 1, of_url: str | None = None, closing: asyncio.Event | None = None
-):
+def transport_whose_close_loses_a_child(error: Callable[[], Exception], *, nth: int = 1, of_url: str | None = None):
     """A stand-in for ``streamable_http_client`` whose ``nth`` close awaits inside an anyio group, as the SDK's
     close does, while a child of that group fails with ``error``.
 
-    ``closing`` is set when that close starts. With ``of_url`` only the closes of that URL are counted.
+    With ``of_url`` only the closes of that URL are counted.
     """
     real = app_session.streamable_http_client
     opens = 0
@@ -162,8 +160,6 @@ def transport_whose_close_loses_a_child(
                 yield streams
             finally:
                 if is_the_one:
-                    if closing is not None:
-                        closing.set()
 
                     async def child() -> None:
                         await asyncio.sleep(0)
