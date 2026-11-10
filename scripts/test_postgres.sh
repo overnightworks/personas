@@ -12,13 +12,13 @@ GRACE_SECONDS=30
 LOAD_WAIT_SECONDS=1800
 READY_WAIT_SECONDS=60
 
-if [ "$#" -eq 0 ]; then
+if [[ "$#" -eq 0 ]]; then
     echo "usage: $0 <command> [argument...]" >&2
     exit 2
 fi
 
 # Re-run this script under the cap, so that the trap below also runs when the cap or the caller's death ends it.
-if [ -z "${PERSONAS_TEST_POSTGRES_CAPPED:-}" ]; then
+if [[ -z "${PERSONAS_TEST_POSTGRES_CAPPED:-}" ]]; then
     PERSONAS_TEST_POSTGRES_CAPPED=1 exec setpriv --pdeathsig TERM timeout -k "${GRACE_SECONDS}" "${CAP_SECONDS}" "$0" "$@"
 fi
 
@@ -26,7 +26,7 @@ wait_for_low_load() {
     local limit waited=0 load
     limit=$(awk -v cores="$(nproc)" 'BEGIN { print 1.5 * cores }')
     while load=$(cut -d' ' -f1 /proc/loadavg) && awk -v load="${load}" -v limit="${limit}" 'BEGIN { exit !(load > limit) }'; do
-        if [ "${waited}" -ge "${LOAD_WAIT_SECONDS}" ]; then
+        if [[ "${waited}" -ge "${LOAD_WAIT_SECONDS}" ]]; then
             echo "load ${load} stayed above ${limit}" >&2
             exit 1
         fi

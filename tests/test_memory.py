@@ -164,9 +164,10 @@ async def test_a_write_waiting_on_a_lock_ends_within_its_bound_releases_its_stat
     try:
         with lines_table_locked(database):
             started = time.monotonic()
+            during_the_lock = a_read(line(2, "During the lock"))
             with pytest.raises(StoreUnavailable) as cut:
                 async with asyncio.timeout(LIMIT_SECONDS):
-                    await store.keep(a_read(line(2, "During the lock")))
+                    await store.keep(during_the_lock)
             elapsed = time.monotonic() - started
             still_waiting = waiting_statements(database)
 
@@ -183,8 +184,10 @@ async def test_a_write_waiting_on_a_lock_ends_within_its_bound_releases_its_stat
 async def test_a_store_that_cannot_be_reached_is_unavailable_by_its_code(database):
     store = PostgresLineStore(replace(database, port=CLOSED_PORT))
 
+    nowhere_to_go = a_read(line(1, "Nowhere to go"))
+
     with pytest.raises(StoreUnavailable) as unreachable:
-        await store.keep(a_read(line(1, "Nowhere to go")))
+        await store.keep(nowhere_to_go)
     await store.close()
 
     assert unreachable.value.code == STORE_UNREACHABLE_CODE
@@ -193,8 +196,10 @@ async def test_a_store_that_cannot_be_reached_is_unavailable_by_its_code(databas
 async def test_a_schema_behind_its_head_ends_the_write_naming_the_field_and_no_secret(unmigrated_database):
     store = PostgresLineStore(unmigrated_database)
 
+    no_table_yet = a_read(line(1, "No table yet"))
+
     with pytest.raises(SchemaNotAtHeadError) as behind:
-        await store.keep(a_read(line(1, "No table yet")))
+        await store.keep(no_table_yet)
     await store.close()
 
     assert "memory" in str(behind.value)
@@ -207,8 +212,10 @@ async def test_a_database_error_that_is_no_outage_raises_a_code_that_holds_no_li
     secret_line = "text-" + secrets.token_hex(8)
     secret_speaker = "speaker-" + secrets.token_hex(8)
 
+    secret_read = a_read(PlaceEntry(seq=2, kind="message", name=secret_speaker, text=secret_line, own=False))
+
     with pytest.raises(StoreDefect) as defect:
-        await store.keep(a_read(PlaceEntry(seq=2, kind="message", name=secret_speaker, text=secret_line, own=False)))
+        await store.keep(secret_read)
 
     shown = "".join(traceback.format_exception(defect.value))
     for held in (secret_line, secret_speaker, database.password.reveal()):

@@ -54,7 +54,8 @@ class UnusableAnswer(CallFailure):
         self.code = code
 
 
-class StoreUnavailable(Exception):  # noqa: N818 - it names the state of the store, as Unreachable does
+# Named for the state of the store, as Unreachable is; a suffix would repeat it.
+class StoreUnavailable(Exception):  # noqa: N818
     """The store could not keep a window now; ``code`` says why and the loop goes on without memory."""
 
     def __init__(self, code: str) -> None:
@@ -62,7 +63,8 @@ class StoreUnavailable(Exception):  # noqa: N818 - it names the state of the sto
         self.code = code
 
 
-class StoreDefect(Exception):  # noqa: N818 - a defect is named by its kind
+# Named for its kind; a suffix would repeat it.
+class StoreDefect(Exception):  # noqa: N818
     """A database error that is no outage; the message holds a code and no parameter, row or secret."""
 
 
