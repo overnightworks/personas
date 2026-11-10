@@ -9,12 +9,13 @@ import pytest
 from personas.config import (
     CONFIG_ENVIRONMENT_VARIABLE,
     DEFAULT_CALL_SECONDS,
+    DEFAULT_TODAY,
     DEFAULT_WRITE_SECONDS,
     ConfigError,
     ToolBinding,
     load_config,
 )
-from personas.decision import TurnCap
+from personas.decision import TodayBounds, TurnCap
 from personas.main import CONFIGURATION_ERROR_EXIT_CODE, main
 from tests.support.configfiles import MAX_TOOL_CALLS, MAX_TURNS, PERSONA_NAME, TURN_PERIOD_SECONDS
 from tests.support.realm import API_GROUP
@@ -438,6 +439,19 @@ def test_a_memory_table_may_set_the_write_bound_or_leave_a_write_unbounded(files
     assert memory.write_seconds == bound
 
 
+def test_a_memory_table_tells_a_turn_the_default_day_unless_it_sets_how_far_back_and_how_much(files):
+    files.text += files.memory_table()
+    default = load_config(files.write()).memory
+    files.text = files.valid_text() + files.memory_table(today_hours="inf", today_bytes="1024")
+
+    memory = load_config(files.write()).memory
+
+    assert default is not None
+    assert default.today == DEFAULT_TODAY
+    assert memory is not None
+    assert memory.today == TodayBounds(hours=math.inf, size_bytes=1024)
+
+
 def test_a_file_without_a_memory_table_opens_no_store(files):
     assert load_config(files.write()).memory is None
 
@@ -456,6 +470,11 @@ def test_a_file_without_a_memory_table_opens_no_store(files):
         ({"write_seconds": "0"}, "memory.write_seconds"),
         ({"write_seconds": '"2"'}, "memory.write_seconds"),
         ({"write_seconds": "nan"}, "memory.write_seconds"),
+        ({"today_hours": "0"}, "memory.today_hours"),
+        ({"today_hours": '"24"'}, "memory.today_hours"),
+        ({"today_hours": "nan"}, "memory.today_hours"),
+        ({"today_bytes": "0"}, "memory.today_bytes"),
+        ({"today_bytes": "1.5"}, "memory.today_bytes"),
         ({"password": '"in-the-file"'}, "memory.password"),
     ],
     ids=[
@@ -470,6 +489,11 @@ def test_a_file_without_a_memory_table_opens_no_store(files):
         "write bound zero",
         "write bound a string",
         "write bound no number",
+        "day of no hours",
+        "day hours a string",
+        "day hours no number",
+        "day of no bytes",
+        "day bytes a fraction",
         "password written into the file",
     ],
 )

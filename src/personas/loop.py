@@ -24,6 +24,7 @@ from personas.decision import (
     Suspend,
     Token,
     TurnCap,
+    Visit,
     WindowRead,
     accepts_for,
     active_call_places,
@@ -33,6 +34,7 @@ from personas.decision import (
     bound_declarations,
     call_within_bound,
     decisive_failure,
+    earlier_today,
     failure_code,
     forget_gone,
     is_defect,
@@ -42,6 +44,7 @@ from personas.decision import (
     reserve_turn,
     sets_where_reading_starts,
     sync_checkpoints,
+    today_since,
     turn_call_bound,
     turn_input,
     turn_invalid,
@@ -52,17 +55,18 @@ from personas.tokens import TokenFacts, facts_of
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Coroutine, Iterable
+    from datetime import datetime
 
     from agents.agent_file import AgentDefinition
     from agents.backend import AgentBackend
-    from agents.member import PlaceRef, PlaceWindow, Standing
+    from agents.member import PlaceEntry, PlaceRef, PlaceWindow, Standing
     from agents.tools import ToolDeclaration
     from agents.turn import JsonObject
 
     from personas.app_session import AppSession, SessionOpener
     from personas.clock import Clock
     from personas.config import AgentCredentials, AppTarget, Config, ToolBinding
-    from personas.decision import Checkpoint
+    from personas.decision import Checkpoint, EarlierToday, KeptLine, TodayBounds
     from personas.readiness import ReadyMarker
     from personas.tokens import TokenSource
 
@@ -78,6 +82,11 @@ class LineStore(Protocol):
 
     async def keep(self, read: WindowRead) -> None:
         """Keeps every line of the window once; raises ``StoreUnavailable`` when it cannot now."""
+        ...
+
+    async def kept_since(self, client_id: str, since: datetime, other_than: Visit) -> tuple[KeptLine, ...]:
+        """The agent's lines first read at or after ``since``, but those of one visit; ``StoreUnavailable`` when it
+        cannot now."""
         ...
 
 
@@ -213,10 +222,13 @@ class ActiveTurn:
 
 @dataclass(frozen=True)
 class _Admitted:
-    """A turn decided on, with the facts it was decided from."""
+    """A turn decided on, with the facts it was decided from: the token's and what the place's window gave."""
 
     facts: TokenFacts
-    input: str
+    place: PlaceRef
+    window: PlaceWindow
+    new: tuple[PlaceEntry, ...]
+    missed: bool
 
     def groups(self) -> Coroutine[None, None, frozenset[str]]:
         """The library's GroupSource wants an awaitable; the groups are already known."""
@@ -242,8 +254,10 @@ class AgentLoop:
         boundaries: Boundaries,
         counter: TurnCounter,
         tools_only: tuple[AppTarget, ...] = (),
+        today: TodayBounds | None = None,
     ) -> None:
         self._agent = agent
+        self._today = today
         self._counter = counter
         self._app = app
         self._tools_only = tuple((each, each.binding) for each in tools_only if each.binding is not None)
@@ -420,7 +434,7 @@ class AgentLoop:
             self._report(Event.CAPPED)
             return False
         self._counter.started = started
-        admitted = _Admitted(facts, turn_input(place, facts.name, window, perception.new, missed=perception.missed))
+        admitted = _Admitted(facts, place, window, perception.new, perception.missed)
         self._start_turn(turns, setup, place, admitted)
         return True
 
@@ -432,13 +446,35 @@ class AgentLoop:
         try:
             await store.keep(read)
         except StoreUnavailable as unavailable:
-            if not self._store_failing:
-                self._store_failing = True
-                self._report(Event.STORE_FAILED, unavailable.code)
+            self._store_failed(unavailable)
         else:
-            if self._store_failing:
-                self._store_failing = False
-                self._report(Event.STORE_RESUMED)
+            self._store_answered()
+
+    async def _earlier_today(self, admitted: _Admitted) -> EarlierToday | None:
+        """What the store kept of the agent's other visits within the day, or nothing without a memory or when the
+        store cannot be read now; that failure is reported once, as a write's is."""
+        store, bounds = self._boundaries.lines, self._today
+        if store is None or bounds is None:
+            return None
+        now = self._boundaries.clock.wall()
+        visit = Visit(self._app.mcp_url, admitted.place, admitted.window.generation)
+        try:
+            kept = await store.kept_since(self._agent.client_id, today_since(now, bounds), visit)
+        except StoreUnavailable as unavailable:
+            self._store_failed(unavailable)
+            return None
+        self._store_answered()
+        return earlier_today(kept, now, bounds)
+
+    def _store_failed(self, unavailable: StoreUnavailable) -> None:
+        if not self._store_failing:
+            self._store_failing = True
+            self._report(Event.STORE_FAILED, unavailable.code)
+
+    def _store_answered(self) -> None:
+        if self._store_failing:
+            self._store_failing = False
+            self._report(Event.STORE_RESUMED)
 
     def _start_turn(self, turns: asyncio.TaskGroup, setup: _TurnSetup, place: PlaceRef, admitted: _Admitted) -> None:
         task = turns.create_task(self._take_turn(setup, admitted))
@@ -527,10 +563,14 @@ class AgentLoop:
         return self._turn.defect
 
     async def _run_turn(self, setup: _TurnSetup, admitted: _Admitted) -> None:
+        earlier = await self._earlier_today(admitted)
+        told = turn_input(
+            admitted.place, admitted.facts.name, admitted.window, admitted.new, missed=admitted.missed, earlier=earlier
+        )
         token = await self._current_token()
         async with self._boundaries.open_session(self._app, token.value) as session:
             try:
-                await self._run_session_body(setup, admitted, session)
+                await self._run_session_body(setup, admitted, told, session)
             except Exception as error:
                 self._record_defect(error)
                 raise
@@ -547,7 +587,7 @@ class AgentLoop:
             assert self._turn is not None  # noqa: S101 - only the running turn runs its session body
             self._turn = replace(self._turn, defect=defect)
 
-    async def _run_session_body(self, setup: _TurnSetup, admitted: _Admitted, session: AppSession) -> None:
+    async def _run_session_body(self, setup: _TurnSetup, admitted: _Admitted, told: str, session: AppSession) -> None:
         _raise_if_cancelled()
         held = await self._hold_tools(setup, session)
         if held is None:
@@ -555,7 +595,7 @@ class AgentLoop:
             return
         request = TurnRequest(
             agent=setup.persona.name,
-            turn=Turn(system=setup.persona.prompt, messages=[TurnMessage(role=TurnRole.USER, text=admitted.input)]),
+            turn=Turn(system=setup.persona.prompt, messages=[TurnMessage(role=TurnRole.USER, text=told)]),
             roles=setup.persona.roles,
             tools=held.declarations,
             model=setup.persona.model,
@@ -717,9 +757,11 @@ async def run_all(config: Config, boundaries: Boundaries) -> NoReturn:
     assert runner is not None  # noqa: S101 - run_all runs inside a task
     async with asyncio.TaskGroup() as group:
         tools_only = tuple(app for app in config.apps if not app.listens)
+        today = None if config.memory is None else config.memory.today
         for agent in config.agents:
             counter = TurnCounter()
             for app in config.apps:
                 if app.listens:
-                    group.create_task(_run_loop(AgentLoop(agent, app, boundaries, counter, tools_only), runner))
+                    loop = AgentLoop(agent, app, boundaries, counter, tools_only, today)
+                    group.create_task(_run_loop(loop, runner))
     raise AssertionError("a loop ended")  # pragma: no cover

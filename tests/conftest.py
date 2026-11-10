@@ -134,6 +134,11 @@ class Harness:
         self.tools_only_apps: list[ToolsOnlyApp] = []
         self.lines: LineStore | None = None
 
+    def remember_in(self, store: LineStore, target: MemoryTarget) -> None:
+        """Gives the runner a memory: the store its loops keep and read lines through, and the table that names it."""
+        self.lines = store
+        self.config = replace(self.config, memory=target)
+
     def add_tools_only_app(self, app: ToolsOnlyApp, url: str) -> None:
         """Binds the tools of an app that listens to nothing and lets the agent's tokens for its scope into it."""
         self.files.text += (

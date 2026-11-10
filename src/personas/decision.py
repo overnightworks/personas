@@ -6,11 +6,12 @@ rule is called with the values it judges.
 
 from __future__ import annotations
 
+import itertools
 import json
 import math
 import re
 from dataclasses import asdict, dataclass, field
-from datetime import datetime  # noqa: TC003 - the dataclass field's type
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
@@ -276,6 +277,87 @@ class WindowRead:
 
 
 @dataclass(frozen=True)
+class Visit:
+    """One stay of an agent in a place: the app, the place and the window's generation, which a new join renews."""
+
+    app: str
+    place: PlaceRef
+    generation: str
+
+
+@dataclass(frozen=True)
+class KeptLine:
+    """A line the memory kept as a visit's window gave it, with the wall time it was first read."""
+
+    visit: Visit
+    seq: int
+    first_read_at: datetime
+    name: str
+    kind: str
+    text: str
+    own: bool
+
+
+@dataclass(frozen=True)
+class TodayBounds:
+    """What a turn is told of the day: the lines first read within ``hours``, at most ``size_bytes`` of them."""
+
+    hours: float
+    size_bytes: int
+
+
+@dataclass(frozen=True)
+class EarlierVisit:
+    """An earlier visit as a turn is told it: how many minutes ago its first line was read, and its lines."""
+
+    minutes_ago: int
+    lines: tuple[KeptLine, ...]
+
+
+@dataclass(frozen=True)
+class EarlierToday:
+    """The earlier visits of the day in the order they happened, and whether older lines were left out."""
+
+    visits: tuple[EarlierVisit, ...]
+    older_dropped: bool
+
+
+def today_since(now: datetime, bounds: TodayBounds) -> datetime:
+    """The earliest first read a turn at ``now`` is told of; a day longer than the calendar reaches any line."""
+    earliest = datetime.min.replace(tzinfo=now.tzinfo)
+    if bounds.hours * 3600 >= (now - earliest).total_seconds():
+        return earliest
+    return now - timedelta(hours=bounds.hours)
+
+
+def _size(line: KeptLine) -> int:
+    return len(line.name.encode()) + len(line.text.encode())
+
+
+def earlier_today(kept: Iterable[KeptLine], now: datetime, bounds: TodayBounds) -> EarlierToday:
+    """The lines of the agent's other visits a turn is told: grouped by visit, visits in the order of their first line
+    and lines in seq order; past ``size_bytes`` of speakers and text the oldest lines are left out."""
+    by_visit: dict[Visit, list[KeptLine]] = {}
+    for line in kept:
+        by_visit.setdefault(line.visit, []).append(line)
+    groups = sorted((sorted(lines, key=lambda line: line.seq) for lines in by_visit.values()), key=_first_read)
+    newest_first = (_size(line) for lines in reversed(groups) for line in reversed(lines))
+    fitting = sum(1 for total in itertools.accumulate(newest_first) if total <= bounds.size_bytes)
+    left_out = sum(len(lines) for lines in groups) - fitting
+    older_dropped = left_out > 0
+    visits: list[EarlierVisit] = []
+    for lines in groups:
+        told, left_out = lines[left_out:], max(0, left_out - len(lines))
+        if told:
+            visits.append(EarlierVisit(int((now - _first_read(lines)).total_seconds() // 60), tuple(told)))
+    return EarlierToday(tuple(visits), older_dropped)
+
+
+def _first_read(lines: Sequence[KeptLine]) -> datetime:
+    return min(line.first_read_at for line in lines)
+
+
+@dataclass(frozen=True)
 class Perception:
     """What reading a window from a checkpoint yields: the checkpoint after it, the lines taken and whether older ones
     were never seen."""
@@ -346,9 +428,29 @@ class _TurnRoom:
     lines: tuple[_TurnLine, ...]
 
 
-def turn_input(place: PlaceRef, name: str, window: PlaceWindow, new: Sequence[PlaceEntry], *, missed: bool) -> str:
+def _told_earlier(earlier: EarlierToday) -> dict[str, object]:
+    visits = [
+        {"minutes_ago": visit.minutes_ago, "lines": [_told_line(each) for each in visit.lines]}
+        for visit in earlier.visits
+    ]
+    return {"older_dropped": earlier.older_dropped, "visits": visits}
+
+
+def _told_line(line: KeptLine) -> dict[str, object]:
+    return {"name": line.name, "kind": line.kind, "text": line.text, "own": line.own}
+
+
+def turn_input(
+    place: PlaceRef,
+    name: str,
+    window: PlaceWindow,
+    new: Sequence[PlaceEntry],
+    *,
+    missed: bool,
+    earlier: EarlierToday | None = None,
+) -> str:
     """The facts of a turn: the room, the agent's name, every line of the window, which are new and which are his own,
-    and whether older lines were never seen.
+    and whether older lines were never seen; with a memory also what was said in his earlier visits of the day.
 
     It holds no instruction; those live in the persona.
     """
@@ -356,4 +458,7 @@ def turn_input(place: PlaceRef, name: str, window: PlaceWindow, new: Sequence[Pl
     lines = tuple(
         _TurnLine(line.seq, line.kind, line.name, line.text, line.own, line.seq in new_seqs) for line in window.entries
     )
-    return json.dumps(asdict(_TurnRoom(place.kind, place.id, name, missed, lines)), ensure_ascii=False)
+    facts = asdict(_TurnRoom(place.kind, place.id, name, missed, lines))
+    if earlier is not None:
+        facts["earlier_today"] = _told_earlier(earlier)
+    return json.dumps(facts, ensure_ascii=False)

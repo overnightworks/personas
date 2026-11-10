@@ -9,7 +9,8 @@ listen, and ``call_seconds`` bounds each request to it. No tool name is shared w
 An agent has a turn cap only when it sets ``max_turns`` in ``turn_period_seconds``, both or neither;
 with neither its turns are bounded by the budget and the off switches alone.
 The optional ``[memory]`` table names the Postgres database that keeps every line the agents read: its host, port,
-database, user, the file holding the password and ``write_seconds``, the bound on one write.
+database, user, the file holding the password, ``write_seconds``, the bound on one write or read, and how far back
+(``today_hours``) and how much (``today_bytes``) a turn is told of the lines of the agent's other visits.
 Every value is validated at start and an error names the field or path, never a secret.
 """
 
@@ -34,7 +35,7 @@ from pydantic import (
     model_validator,
 )
 
-from personas.decision import TURN_ROLE, TurnCap
+from personas.decision import TURN_ROLE, TodayBounds, TurnCap
 from personas.secret import Secret
 
 if TYPE_CHECKING:
@@ -43,6 +44,7 @@ if TYPE_CHECKING:
 CONFIG_ENVIRONMENT_VARIABLE: Final = "PERSONAS_CONFIG"
 DEFAULT_CALL_SECONDS: Final = 30.0
 DEFAULT_WRITE_SECONDS: Final = 2.0
+DEFAULT_TODAY: Final = TodayBounds(hours=24.0, size_bytes=32768)
 
 
 class ConfigError(Exception):
@@ -76,7 +78,8 @@ class AgentCredentials:
 
 @dataclass(frozen=True)
 class MemoryTarget:
-    """The database that keeps the lines, and how long one write to it may take."""
+    """The database that keeps the lines, how long one write or read of it may take and what a turn is told of the
+    day."""
 
     host: str
     port: int
@@ -84,6 +87,7 @@ class MemoryTarget:
     user: str
     password: Secret
     write_seconds: float = DEFAULT_WRITE_SECONDS
+    today: TodayBounds = DEFAULT_TODAY
 
 
 @dataclass(frozen=True)
@@ -159,6 +163,8 @@ class _MemoryEntry(_Entry):
     user: str = Field(min_length=1)
     password_file: Path
     write_seconds: PositiveFloat = Field(default=DEFAULT_WRITE_SECONDS, strict=True)
+    today_hours: PositiveFloat = Field(default=DEFAULT_TODAY.hours, strict=True)
+    today_bytes: PositiveInt = Field(default=DEFAULT_TODAY.size_bytes, strict=True)
 
 
 class _FileModel(_Entry):
@@ -263,7 +269,8 @@ def _memory_target(entry: _MemoryEntry | None) -> MemoryTarget | None:
     if entry is None:
         return None
     password = _read_secret("memory.password_file", entry.password_file)
-    return MemoryTarget(entry.host, entry.port, entry.dbname, entry.user, password, entry.write_seconds)
+    today = TodayBounds(entry.today_hours, entry.today_bytes)
+    return MemoryTarget(entry.host, entry.port, entry.dbname, entry.user, password, entry.write_seconds, today)
 
 
 def load_config(environment: Mapping[str, str]) -> Config:

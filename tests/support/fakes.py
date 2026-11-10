@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from agents.member import MemberStanding, PlaceEntry, PlaceWindow, Standing
 
-from personas.config import AgentCredentials, AppTarget
+from personas.config import AgentCredentials, AppTarget, MemoryTarget
 from personas.decision import Accept, Refusal
 from personas.failures import CallFailure
 from personas.secret import Secret
@@ -49,6 +49,11 @@ class FakeClock:
 
 def credentials(client_id: str = "agent-mozart") -> AgentCredentials:
     return AgentCredentials(client_id, Secret(secrets.token_hex(16)))
+
+
+def memory_target() -> MemoryTarget:
+    """A memory table naming a database no test reaches, for a loop whose store is scripted."""
+    return MemoryTarget("db.test", 5432, "personas", "mozart", Secret(secrets.token_hex(16)))
 
 
 def app_target() -> AppTarget:

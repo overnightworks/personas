@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import math
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
+from agents.member import PlaceRef
 from alembic import command
 from alembic.config import Config as AlembicConfig
 from alembic.migration import MigrationContext
@@ -25,15 +26,20 @@ from sqlalchemy import (
     MetaData,
     Numeric,
     PrimaryKeyConstraint,
+    Row,
     Table,
     Text,
+    and_,
     create_engine,
+    not_,
+    select,
     text,
 )
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import InterfaceError, OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
+from personas.decision import KeptLine, Visit
 from personas.failures import (
     STORE_DEFECT_CODE,
     STORE_TIMEOUT_CODE,
@@ -44,7 +50,8 @@ from personas.failures import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import AsyncGenerator, Generator
+    from datetime import datetime
 
     from personas.config import MemoryTarget
     from personas.decision import WindowRead
@@ -178,6 +185,13 @@ def _rows_of(read: WindowRead) -> list[dict[str, object]]:
     ]
 
 
+def _kept_line(row: Row[tuple[object, ...]]) -> KeptLine:
+    place = PlaceRef(kind=row.place_kind, id=row.place_id)
+    return KeptLine(
+        Visit(row.app, place, row.generation), int(row.seq), row.first_read_at, row.speaker, row.kind, row.text, row.own
+    )
+
+
 class PostgresLineStore:
     """Keeps the lines of the windows the loops read in the database the configuration names.
 
@@ -194,19 +208,40 @@ class PostgresLineStore:
         self._schema_checked = False
 
     async def keep(self, read: WindowRead) -> None:
-        """Keeps the window's lines, or raises ``StoreUnavailable`` or ``StoreDefect`` with a code.
+        """Keeps the window's lines, or raises ``StoreUnavailable`` or ``StoreDefect`` with a code."""
+        statement = insert(_LINES).values(_rows_of(read)).on_conflict_do_nothing()
+        async with self._bounded_transaction() as connection:
+            await connection.execute(statement)
+
+    async def kept_since(self, client_id: str, since: datetime, other_than: Visit) -> tuple[KeptLine, ...]:
+        """The agent's lines first read at or after ``since``, but those of one visit, under the bound of a write."""
+        visit = (
+            _LINES.c.app == other_than.app,
+            _LINES.c.place_kind == _without_nul(other_than.place.kind),
+            _LINES.c.place_id == _without_nul(other_than.place.id),
+            _LINES.c.generation == _without_nul(other_than.generation),
+        )
+        statement = select(_LINES).where(
+            _LINES.c.client_id == client_id, _LINES.c.first_read_at >= since, not_(and_(*visit))
+        )
+        async with self._bounded_transaction() as connection:
+            rows = (await connection.execute(statement)).all()
+        return tuple(_kept_line(row) for row in rows)
+
+    @asynccontextmanager
+    async def _bounded_transaction(self) -> AsyncGenerator[AsyncConnection]:
+        """A transaction on a schema at its head, whose failure leaves as ``StoreUnavailable`` or ``StoreDefect``.
 
         ``write_seconds`` bounds taking a connection, connecting and the statement against a store that answers. A
         connection that goes dark in the middle of the statement is given up only after the driver's own cancel
         wait, about ten seconds beyond the bound.
         """
-        statement = insert(_LINES).values(_rows_of(read)).on_conflict_do_nothing()
         try:
             async with asyncio.timeout(self._write_bound):
                 with _as_store_failure():
                     async with self._engine.begin() as connection:
                         await self._require_head(connection)
-                        await connection.execute(statement)
+                        yield connection
         except TimeoutError:
             raise StoreUnavailable(STORE_TIMEOUT_CODE) from None
         except StoreUnavailable, StoreDefect:
