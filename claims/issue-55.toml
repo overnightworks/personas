@@ -1,8 +1,0 @@
-claim_id = "16208bf07d5445338244a1c7cf379bd7"
-agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
-role = "builder"
-base = "438c8c55a0e9f3a6ac5f9249119d760841d7755e"
-branch = "claude/issue-55-branch-coverage-reaches-100"
-scope = ["docs/ARCHITECTURE.md", "pyproject.toml", "src/personas/loop.py", "src/personas/main.py", "tests"]
-opened_commit = "bd325bcbb370a944eac93b7ebd7d45240aa984f4"
-whole_reason = "The exclusion, the tests that close each gap and the floor that holds the number are one result; the floor alone would turn CI red and the tests alone would let it fall again. tests is the four new or extended modules."
