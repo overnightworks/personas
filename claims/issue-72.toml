@@ -1,0 +1,8 @@
+claim_id = "f913b0204e5f432ebf33ebf01d3080bb"
+agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
+role = "builder"
+base = "0344613674d1c069f4f07b373ffba4246f72e0ae"
+branch = "claude/issue-72-in-a-voice-place-one-loop-hears-speaks"
+scope = ["README.md", "docs/ARCHITECTURE.md", "pyproject.toml", "src/personas/app_session.py", "src/personas/config.py", "src/personas/decision.py", "src/personas/loop.py", "src/personas/task_record.py", "src/personas/voice.py", "tests", "uv.lock"]
+opened_commit = "09ac9383615a8eb1b0f1109e1bfe0f5af5240654"
+whole_reason = "One voice loop from a heard line to a spoken sentence, ending with its place; split, a loop that hears without speaking or speaks without ending has no honest end-to-end proof."
