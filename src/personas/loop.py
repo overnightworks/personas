@@ -9,9 +9,11 @@ from functools import partial
 from typing import TYPE_CHECKING, Final, Literal, NoReturn, Protocol
 
 from agents.agent_file import TurnRequest
-from agents.backend import TurnPerson, TurnStopKind, TurnStopped
+from agents.backend import TurnPerson, TurnStopped
 from agents.tools import HandTool, ToolOutcome
-from agents.turn import FailureCode, Principal, Turn, TurnMessage, TurnRole
+from agents.turn import Principal, Turn, TurnMessage, TurnRole
+from agents.voice.loop import run_voice_loop
+from agents.voice.wake import addressed_or_asked
 
 from personas.decision import (
     SUSPENDED_RETRY_SECONDS,
@@ -20,6 +22,7 @@ from personas.decision import (
     TURN_ROLE,
     Joined,
     Memory,
+    Perception,
     Reaction,
     Suspend,
     Token,
@@ -38,6 +41,7 @@ from personas.decision import (
     failure_code,
     forget_gone,
     is_defect,
+    is_voice_app,
     perceive,
     reaction_to,
     renewal_due,
@@ -48,16 +52,21 @@ from personas.decision import (
     turn_call_bound,
     turn_input,
     turn_invalid,
+    voice_context,
 )
 from personas.failures import CallFailure, StoreUnavailable, Unreachable, leaves_of, task_is_being_cancelled
 from personas.reporting import Event, Reporter, StateChange
 from personas.task_record import (
+    RelayFailed,
     TaskRecord,
     ending_loud_when_cancelled,
+    ending_with_recorded_defect,
+    failure_held_by,
     unreachable_unless_cancelling,
     unrequested_unless_cancelling,
 )
 from personas.tokens import TokenFacts, facts_of
+from personas.voice import ActiveVoice, CappedBackend, Hearing, SpeakingVoice, reporting_decisions
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Coroutine, Iterable
@@ -126,44 +135,6 @@ def _defect_of(task: asyncio.Task[object]) -> BaseException | None:
     if error is None or not any(is_defect(leaf) for leaf in leaves_of(error)):
         return None
     return error
-
-
-class _RelayFailed(TurnStopped):
-    """The stop a failed relayed call gives the backend, which ends the turn at once; it holds the failure."""
-
-    def __init__(self, failure: Exception) -> None:
-        super().__init__(TurnStopKind.FAILED, FailureCode.PROVIDER_ERROR)
-        self.failure = failure
-
-
-def _failure_held_by(leaf: BaseException) -> BaseException | None:
-    """The failure a session-body leaf stands for: a relay stop holds its failure, the gateway's own stop none."""
-    if isinstance(leaf, _RelayFailed):
-        return leaf.failure
-    return None if isinstance(leaf, TurnStopped) else leaf
-
-
-def _record_defect(record: TaskRecord, error: Exception) -> None:
-    """Keeps the first defect among the leaves of an error the session body left with.
-
-    A cancelled turn loses its errors to the cancellation; the record lets the runner end loud anyway.
-    """
-    held = (_failure_held_by(leaf) for leaf in leaves_of(error))
-    failures = (failure for each in held if each is not None for failure in leaves_of(each))
-    defect = next((failure for failure in failures if isinstance(failure, Exception) and is_defect(failure)), None)
-    if defect is not None and record.defect is None:
-        record.defect = defect
-
-
-def _with_recorded_defect(error: Exception | None, record: TaskRecord) -> BaseException | None:
-    """What leaves a turn: the error, with the recorded defect among its leaves unless it holds it already."""
-    defect = record.defect
-    leaves = list(leaves_of(error)) if error is not None else []
-    if defect is None or any(leaf is defect for leaf in leaves):
-        return error
-    if not leaves:
-        return defect
-    return BaseExceptionGroup("the turn failed", [defect, *leaves])
 
 
 @dataclass(frozen=True)
@@ -243,7 +214,9 @@ class AgentLoop:
     read too, and one addressed to him starts a turn; at most one turn runs per loop, over its own session,
     and a failure of the turn's calls to this app goes into the one reaction of the loop. The turn also holds the
     bound tools of the tools-only apps: each request to one runs in a session of its own under the token for its
-    own scope, and its failure never reaches the reaction.
+    own scope, and its failure never reaches the reaction. In an app that declares ``speak``, for an agent whose
+    persona has a voice section, each active call place instead runs one voice loop, which hears every line the place
+    gives and speaks through ``speak``.
     """
 
     def __init__(
@@ -271,6 +244,8 @@ class AgentLoop:
         self._checkpoints: dict[PlaceRef, Checkpoint] = {}
         self._turn: ActiveTurn | None = None
         self._turn_ended = asyncio.Event()
+        self._voices: dict[PlaceRef, ActiveVoice] = {}
+        self._voice_app = False
         persona, binding, backend = agent.persona, app.binding, boundaries.backend
         self._turn_setup = (
             None
@@ -296,12 +271,20 @@ class AgentLoop:
             asyncio.TaskGroup() as turns,
             self._boundaries.open_session(self._app, token.value) as session,
         ):
+            self._voices = {}
+            self._voice_app = await self._is_voice_app(session)
             while True:
                 await self._use_current_token(session)
                 async with session.changes() as changes, aclosing(self._wakes(changes)) as wakes:
                     await self._reconcile(session, turns)
                     async for _ in wakes:
                         await self._reconcile(session, turns)
+
+    async def _is_voice_app(self, session: AppSession) -> bool:
+        """Whether this app's places run the voice loop, decided once for the lifecycle session."""
+        has_voice_section = self._turn_setup is not None and self._turn_setup.persona.voice_window_bytes is not None
+        declared = await session.declared_tools() if has_voice_section else ()
+        return is_voice_app(has_voice_section, declared)
 
     async def _wakes(self, changes: AsyncIterator[object]) -> AsyncGenerator[None]:
         """A wake for each change the app signals and for each end of a turn; it ends when the stream does."""
@@ -348,7 +331,9 @@ class AgentLoop:
         return standing.standings
 
     def _cancel_turn_if_its_place_left(self, standings: tuple[Standing, ...]) -> None:
-        """A turn ends with its place; its slot stays taken until its task has ended."""
+        """A turn and a voice loop end with their place; a turn's slot stays taken until its task has ended."""
+        for place in [each for each in self._voices if turn_invalid(each, standings)]:
+            self._voices.pop(place).task.cancel()
         turn = self._turn
         if turn is not None and not turn.cancel_requested and turn_invalid(turn.place, standings):
             self._turn = replace(turn, cancel_requested=True)
@@ -411,30 +396,58 @@ class AgentLoop:
                 lost = True
                 continue
             read_at = self._boundaries.clock.wall()
-            turn_started = self._start_turn_if_addressed(turns, self._turn_setup, place, window, facts)
+            turn_started = self._take_lines(turns, self._turn_setup, place, window, facts)
             await self._keep(WindowRead(self._agent.client_id, self._app.mcp_url, place, window, read_at))
             if turn_started:
                 return lost
         return lost
 
-    def _start_turn_if_addressed(
+    def _take_lines(
         self, turns: asyncio.TaskGroup, setup: _TurnSetup, place: PlaceRef, window: PlaceWindow, facts: TokenFacts
     ) -> bool:
-        """Moves the place's checkpoint and starts the turn when a new line addresses the agent and the cap allows it.
-
-        No await stands in it, so a line starts at most one turn and a capped line is never answered later.
-        """
+        """Moves the place's checkpoint and takes the new lines: a voice loop hears all of them, and else one
+        addressed to the agent starts a turn, which this says. No await stands in it."""
         perception = perceive(window, self._checkpoints[place])
         self._checkpoints[place] = perception.checkpoint
+        if not self._voice_app:
+            return self._start_turn_if_addressed(turns, setup, place, window, facts, perception)
+        voice = self._voices.get(place)
+        if voice is None or voice.generation != window.generation:
+            if voice is not None:
+                voice.task.cancel()
+            voice = self._start_voice(turns, setup, Visit(self._app.mcp_url, place, window.generation), facts)
+        for line in perception.new:
+            voice.hearing.put(line)
+        return False
+
+    def _start_turn_if_addressed(
+        self,
+        turns: asyncio.TaskGroup,
+        setup: _TurnSetup,
+        place: PlaceRef,
+        window: PlaceWindow,
+        facts: TokenFacts,
+        perception: Perception,
+    ) -> bool:
+        """Starts the turn when a new line addresses the agent and the cap allows it.
+
+        A line starts at most one turn, and a capped line is never answered later.
+        """
         if not any(addressed(line, facts.name) for line in perception.new):
             return False
-        started = reserve_turn(self._counter.started, self._boundaries.clock.now(), setup.cap)
-        if started is None:
+        if not self._reserve(setup.cap):
             self._report(Event.CAPPED)
             return False
-        self._counter.started = started
         admitted = _Admitted(facts, place, window, perception.new, perception.missed)
         self._start_turn(turns, setup, place, admitted)
+        return True
+
+    def _reserve(self, cap: TurnCap | None) -> bool:
+        """Counts a turn or a voice decision against the agent's one counter; a refused one is not counted."""
+        started = reserve_turn(self._counter.started, self._boundaries.clock.now(), cap)
+        if started is None:
+            return False
+        self._counter.started = started
         return True
 
     async def _keep(self, read: WindowRead) -> None:
@@ -449,14 +462,13 @@ class AgentLoop:
         else:
             self._store_answered()
 
-    async def _earlier_today(self, admitted: _Admitted) -> EarlierToday | None:
+    async def _earlier_today(self, visit: Visit) -> EarlierToday | None:
         """What the store kept of the agent's other visits within the day, or nothing without a memory or when the
         store cannot be read now; that failure is reported once, as a write's is."""
         store, bounds = self._boundaries.lines, self._today
         if store is None or bounds is None:
             return None
         now = self._boundaries.clock.wall()
-        visit = Visit(self._app.mcp_url, admitted.place, admitted.window.generation)
         try:
             kept = await store.kept_since(self._agent.client_id, today_since(now, bounds), visit)
         except StoreUnavailable as unavailable:
@@ -480,6 +492,59 @@ class AgentLoop:
         self._turn = ActiveTurn(task, place)
         task.add_done_callback(self._turn_over)
 
+    def _start_voice(self, turns: asyncio.TaskGroup, setup: _TurnSetup, visit: Visit, facts: TokenFacts) -> ActiveVoice:
+        hearing = Hearing()
+        task = turns.create_task(self._take_voice(setup, visit, facts, hearing, TaskRecord()))
+        self._voices[visit.place] = voice = ActiveVoice(task, visit.generation, hearing)
+        return voice
+
+    async def _take_voice(
+        self, setup: _TurnSetup, visit: Visit, facts: TokenFacts, hearing: Hearing, record: TaskRecord
+    ) -> None:
+        """Runs a place's voice loop; whatever way it ends, a defect met in it ends the runner loud.
+
+        The loud end is asked here, in the task's own coroutine, and the record joins a defect the session's close
+        can lose from what leaves.
+        """
+        await ending_loud_when_cancelled(
+            ending_with_recorded_defect(self._run_voice(setup, visit, facts, hearing, record), record), record.loud_end
+        )
+
+    async def _run_voice(
+        self, setup: _TurnSetup, visit: Visit, facts: TokenFacts, hearing: Hearing, record: TaskRecord
+    ) -> None:
+        """Reads the day, then hears and speaks over a session of its own until it is cancelled.
+
+        Lines heard meanwhile wait in the hearing. A decision's tools are none, so nothing relays a call.
+        """
+        context = voice_context(await self._earlier_today(visit))
+        token = await self._current_token()
+        async with self._boundaries.open_session(self._app, token.value) as session:
+            try:
+                voice = SpeakingVoice(
+                    session,
+                    visit.place,
+                    self._boundaries.clock,
+                    self._report,
+                    partial(self._use_current_token, session),
+                )
+                await run_voice_loop(
+                    setup.persona,
+                    CappedBackend(setup.backend(()), partial(self._reserve, setup.cap)),
+                    TurnPerson(facts.principal, TURN_ROLE, self._current_groups),
+                    hearing,
+                    voice,
+                    wakes=addressed_or_asked(frozenset({facts.name})),
+                    context=context,
+                    report=reporting_decisions(self._report),
+                )
+            except Exception as error:
+                record.note(error)
+                raise
+
+    async def _current_groups(self) -> frozenset[str]:
+        return facts_of((await self._current_token()).value).groups
+
     def _turn_over(self, task: asyncio.Task[None]) -> None:
         turn, self._turn = self._turn, None
         if turn is not None and turn.cancel_requested and task.cancelled() and not turn.end_reported:
@@ -498,17 +563,9 @@ class AgentLoop:
         A session whose close cuts a request short can lose the defect from what leaves, so the turn's record
         joins it. A cancelled turn ends as the cancellation unless a defect was met or nobody cancelled it.
         """
-        await ending_loud_when_cancelled(self._judged_turn_with_its_defect(setup, admitted, record), record.loud_end)
-
-    async def _judged_turn_with_its_defect(self, setup: _TurnSetup, admitted: _Admitted, record: TaskRecord) -> None:
-        """Judges the turn; what ends it, the recorded defect joins unless it is among the leaves."""
-        failed: Exception | None = None
-        try:
-            await self._judge_turn(setup, admitted, record)
-        except Exception as error:
-            failed = error
-        if (ending := _with_recorded_defect(failed, record)) is not None:
-            raise ending
+        await ending_loud_when_cancelled(
+            ending_with_recorded_defect(self._judge_turn(setup, admitted, record), record), record.loud_end
+        )
 
     async def _judge_turn(self, setup: _TurnSetup, admitted: _Admitted, record: TaskRecord) -> None:
         """Runs one turn over its own session.
@@ -521,12 +578,12 @@ class AgentLoop:
         except Exception as error:
             _raise_if_cancelled()
             leaves = list(leaves_of(error))
-            relay_stop = next((leaf for leaf in leaves if isinstance(leaf, _RelayFailed)), None)
+            relay_stop = next((leaf for leaf in leaves if isinstance(leaf, RelayFailed)), None)
             stopped = relay_stop or next((leaf for leaf in leaves if isinstance(leaf, TurnStopped)), None)
             if stopped is None:
                 raise
             # The stop only carries the failure out of the backend; the failure goes to the group, never the stop.
-            held = _failure_held_by(stopped)
+            held = failure_held_by(stopped)
             if held is None and record.defect is None:
                 self._report_turn_end(stopped.code.value)
             # What left the session beside the stop (a late answer) still goes to the group, to be judged there.
@@ -538,7 +595,7 @@ class AgentLoop:
                 raise BaseExceptionGroup("the turn's session failed", rest) from None
 
     async def _run_turn(self, setup: _TurnSetup, admitted: _Admitted, record: TaskRecord) -> None:
-        earlier = await self._earlier_today(admitted)
+        earlier = await self._earlier_today(Visit(self._app.mcp_url, admitted.place, admitted.window.generation))
         told = turn_input(
             admitted.place, admitted.facts.name, admitted.window, admitted.new, missed=admitted.missed, earlier=earlier
         )
@@ -547,7 +604,7 @@ class AgentLoop:
             try:
                 await self._run_session_body(setup, admitted, told, session, record)
             except Exception as error:
-                _record_defect(record, error)
+                record.note(error)
                 raise
 
     async def _run_session_body(
@@ -611,7 +668,7 @@ class AgentLoop:
             await self._use_current_token(session)
             return await session.invoke(name, arguments)
         except Exception as error:
-            raise _RelayFailed(error) from None
+            raise RelayFailed(error) from None
 
     async def _relay_tools_only(
         self,
@@ -628,7 +685,7 @@ class AgentLoop:
         try:
             answer = await self._ask_tools_only(app, lambda session: session.invoke(name, arguments), record)
         except Exception as error:
-            raise _RelayFailed(error) from None
+            raise RelayFailed(error) from None
         if isinstance(answer, CallFailure):
             self._report_tools_only_failure(app, failed_apps, failure_code(answer))
             return ToolOutcome(_APP_FAILED_TEXT, is_error=True)
@@ -669,7 +726,7 @@ class AgentLoop:
                     try:
                         return await ask(session)
                     except Exception as error:
-                        _record_defect(record, error)
+                        record.note(error)
                         raise
         except TimeoutError:
             if not bound.expired():

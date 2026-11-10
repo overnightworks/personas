@@ -16,6 +16,7 @@ GATEWAY_ORIGIN = "http://gateway.test"
 MAX_TOOL_CALLS = 4
 MAX_TURNS = 50
 TURN_PERIOD_SECONDS = 3600.0
+VOICE_WINDOW_BYTES = 8192
 
 
 class Files:
@@ -41,12 +42,17 @@ class Files:
         self.config_path = directory / "personas.toml"
         self.text = self.valid_text()
 
-    def persona_text(self, max_duration_seconds: int = 30) -> str:
+    def persona_text(self, max_duration_seconds: int = 30, voice_window_bytes: int | None = None) -> str:
+        voice = "" if voice_window_bytes is None else f"voice: {{windowBytes: {voice_window_bytes}}}\n"
         return (
             f"---\nname: {PERSONA_NAME}\ndescription: persona-{secrets.token_hex(4)}\nappRoles: [admin, user]\n"
-            f"model: text/{secrets.token_hex(4)}\nmaxDurationSeconds: {max_duration_seconds}\n---\n"
+            f"model: text/{secrets.token_hex(4)}\nmaxDurationSeconds: {max_duration_seconds}\n{voice}---\n"
             f"{self.persona_prompt}\n"
         )
+
+    def give_voice(self, window_bytes: int = VOICE_WINDOW_BYTES) -> None:
+        """Gives the persona a voice section, which the next ``write`` and config load carry."""
+        self.persona_path.write_text(self.persona_text(voice_window_bytes=window_bytes), encoding="utf-8")
 
     def valid_text(self, mcp_url: str = "https://hopin.test/mcp", scope: str = "mcp-hopin", *, binds_tools=True) -> str:
         gateway = tools = persona = ""

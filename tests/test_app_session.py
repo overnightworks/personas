@@ -13,11 +13,15 @@ import anyio
 import pytest
 from agents.member import (
     ACCEPT_INVITATION_TOOL,
+    SPEAK_TOOL,
     STANDING_URI,
     AcceptInvitationArguments,
     AcceptInvitationRefusal,
     AcceptInvitationRefused,
     PlaceRef,
+    SpeakRefusal,
+    SpeakRefused,
+    Spoken,
 )
 from agents.tools import ToolEffect, ToolOutcome
 from mcp_types import (
@@ -53,6 +57,7 @@ from tests.support.hopin import (
     LISTEN,
     READ,
     SAY_TOOL,
+    SPOKEN_DURATION_MS,
     FakeApp,
     active,
     formatted,
@@ -211,6 +216,58 @@ async def test_an_accept_error_outside_the_record_is_unrecognised(app, bearer, t
             await session.accept(Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 0))
             is UnrecognisedRefusal.UNRECOGNISED
         )
+
+
+async def test_a_speak_sends_the_place_and_the_sentence_and_gives_how_long_the_app_says_it_plays(app, bearer):
+    sentence = secrets.token_hex(4)
+
+    async with opened(app, bearer) as session:
+        spoken = await session.speak(PLACE, sentence)
+
+    assert spoken == Spoken(duration_ms=SPOKEN_DURATION_MS)
+    assert app.spoken == [(SUBJECT, PLACE.id, sentence)]
+
+
+@pytest.mark.parametrize("refusal", list(SpeakRefusal))
+async def test_a_speak_refused_with_a_code_of_the_record_is_told_by_that_code(app, bearer, refusal):
+    app.speak_outcomes.append(ToolOutcome(SpeakRefused(refused=refusal).model_dump_json(), is_error=True))
+
+    async with opened(app, bearer) as session:
+        assert await session.speak(PLACE, "A sentence.") is refusal
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        ToolOutcome("not json", is_error=False),
+        ToolOutcome('{"duration_ms": 0}', is_error=False),
+        ToolOutcome(SpeakRefused(refused=SpeakRefusal.TOO_LONG).model_dump_json(), is_error=False),
+        ToolOutcome('{"refused": "other"}', is_error=True),
+        ToolOutcome(Spoken(duration_ms=1).model_dump_json(), is_error=True),
+    ],
+    ids=["no json", "no duration", "a refusal that succeeded", "an unknown refusal", "a duration that failed"],
+)
+async def test_a_speak_answer_that_is_neither_a_spoken_nor_a_refusal_of_the_record_is_an_unusable_answer(
+    app, bearer, outcome
+):
+    app.speak_outcomes.append(outcome)
+
+    async with opened(app, bearer) as session:
+        with pytest.raises(UnusableAnswer) as failure:
+            await session.speak(PLACE, "A sentence.")
+
+    assert failure.value.code == INVALID_ANSWER_CODE
+
+
+async def test_a_speak_the_app_refuses_is_a_failure(app, bearer):
+    app.refuse_with = HTTPStatus.SERVICE_UNAVAILABLE
+    app.refused_method = CALL
+
+    async with opened(app, bearer) as session:
+        with pytest.raises(StatusFailure) as failure:
+            await session.speak(PLACE, "A sentence.")
+
+    assert failure.value.status == HTTPStatus.SERVICE_UNAVAILABLE
 
 
 async def test_a_renewed_token_is_the_bearer_of_the_next_call(app, bearer):
@@ -637,7 +694,7 @@ async def test_the_declared_tools_are_the_ones_the_app_lists(app, bearer):
     async with opened(app, bearer) as session:
         declared = await session.declared_tools()
 
-    assert {each.name for each in declared} == {ACCEPT_INVITATION_TOOL, SAY_TOOL}
+    assert {each.name for each in declared} == {ACCEPT_INVITATION_TOOL, SAY_TOOL, SPEAK_TOOL}
 
 
 async def test_a_tool_marked_read_only_is_declared_read_only(app, bearer):

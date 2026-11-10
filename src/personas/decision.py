@@ -15,7 +15,15 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
-from agents.member import AcceptInvitationRefusal, PlaceEntry, PlaceRef, PlaceWindow, Standing, StandingState
+from agents.member import (
+    SPEAK_TOOL,
+    AcceptInvitationRefusal,
+    PlaceEntry,
+    PlaceRef,
+    PlaceWindow,
+    Standing,
+    StandingState,
+)
 
 from personas.failures import CallFailure, StatusFailure, TokenStatusFailure, UnusableAnswer
 
@@ -42,6 +50,11 @@ TOOL_NOT_DECLARED_CODE: Final = "tool_not_declared"
 """The code of a turn that ends because the app no longer declares a tool the configuration binds."""
 TURN_CANCELLED_CODE: Final = "cancelled"
 """The code of a turn the loop cancelled because its place left the standing."""
+SPOKEN_WAIT_BOUND_SECONDS: Final = 30.0
+"""The longest the voice waits after a sentence, whatever length the app says it plays."""
+CAPPED_DETAIL: Final = "turn_cap"
+"""The closed label of the stop a decision over the cap ends with, so the log tells it from the budget's refusal."""
+EARLIER_TODAY_KEY: Final = "earlier_today"
 
 
 class UnrecognisedRefusal(StrEnum):
@@ -155,6 +168,17 @@ def reaction_to(failure: CallFailure, *, already_renewed: bool) -> Reaction | Su
             return Suspend(status_code(status))
         case _:
             return Reaction.BACKOFF
+
+
+def is_voice_app(has_voice_section: bool, declared: Iterable[ToolDeclaration]) -> bool:
+    """Whether the places of an app run a voice loop: its agent's persona has a voice section and the app declares
+    ``speak``. Every other app keeps the per-line turn."""
+    return has_voice_section and any(each.name == SPEAK_TOOL for each in declared)
+
+
+def spoken_wait_seconds(duration_ms: int) -> float:
+    """How long the voice waits after a sentence the app says plays for ``duration_ms``."""
+    return min(duration_ms / 1000, SPOKEN_WAIT_BOUND_SECONDS)
 
 
 def is_defect(leaf: BaseException) -> bool:
@@ -428,7 +452,7 @@ class _TurnRoom:
     lines: tuple[_TurnLine, ...]
 
 
-def _told_earlier(earlier: EarlierToday) -> dict[str, object]:
+def told_earlier_today(earlier: EarlierToday) -> dict[str, object]:
     visits = [
         {"minutes_ago": visit.minutes_ago, "lines": [_told_line(each) for each in visit.lines]}
         for visit in earlier.visits
@@ -438,6 +462,14 @@ def _told_earlier(earlier: EarlierToday) -> dict[str, object]:
 
 def _told_line(line: KeptLine) -> dict[str, object]:
     return {"name": line.name, "kind": line.kind, "text": line.text, "own": line.own}
+
+
+def voice_context(earlier: EarlierToday | None) -> str:
+    """What a voice loop is told of the day, once, when it starts: the facts a turn is told under the same key; none
+    without a memory or when the store cannot be read."""
+    if earlier is None:
+        return ""
+    return json.dumps({EARLIER_TODAY_KEY: told_earlier_today(earlier)}, ensure_ascii=False)
 
 
 def turn_input(
@@ -460,5 +492,5 @@ def turn_input(
     )
     facts = asdict(_TurnRoom(place.kind, place.id, name, missed, lines))
     if earlier is not None:
-        facts["earlier_today"] = _told_earlier(earlier)
+        facts[EARLIER_TODAY_KEY] = told_earlier_today(earlier)
     return json.dumps(facts, ensure_ascii=False)

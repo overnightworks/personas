@@ -12,6 +12,7 @@ import pytest
 from agents.member import (
     LEASE_SECONDS,
     LISTEN_BOUND_SECONDS,
+    SPEAK_TOOL,
     AcceptInvitationRefusal,
     PlaceRef,
     PlaceWindow,
@@ -25,6 +26,7 @@ from personas.decision import (
     BACKOFF_CAP_SECONDS,
     NETWORK_FAILURE_CODE,
     RENEW_BEFORE_EXPIRY_SECONDS,
+    SPOKEN_WAIT_BOUND_SECONDS,
     Accept,
     Joined,
     KeptLine,
@@ -51,16 +53,19 @@ from personas.decision import (
     earlier_today,
     failure_code,
     forget_gone,
+    is_voice_app,
     perceive,
     reaction_to,
     renewal_due,
     reserve_turn,
     sets_where_reading_starts,
+    spoken_wait_seconds,
     sync_checkpoints,
     today_since,
     turn_call_bound,
     turn_input,
     turn_invalid,
+    voice_context,
 )
 from personas.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer
 from personas.secret import Secret
@@ -530,6 +535,42 @@ def test_a_turn_without_a_memory_is_told_no_earlier_visits():
     window = window_of(line(1, "now"))
 
     assert "earlier_today" not in json.loads(turn_input(PLACE, "Mozart", window, window.entries, missed=False))
+
+
+def test_a_voice_context_is_the_day_a_turn_is_told_under_the_same_key():
+    earlier = earlier_today([kept(MORNING, 1, "Good morning", hours_before=4)], LATER, ROOMY)
+    window = window_of(line(1, "now"))
+
+    told_to_a_turn = json.loads(turn_input(PLACE, "Mozart", window, window.entries, missed=False, earlier=earlier))
+
+    assert json.loads(voice_context(earlier)) == {"earlier_today": told_to_a_turn["earlier_today"]}
+
+
+def test_a_voice_loop_is_told_nothing_of_the_day_without_a_memory():
+    assert voice_context(None) == ""
+
+
+@pytest.mark.parametrize("has_voice_section", [True, False])
+@pytest.mark.parametrize("declared_names", [[SPEAK_TOOL, "say"], ["say"]], ids=["declares speak", "declares none"])
+def test_the_places_of_an_app_run_a_voice_loop_only_for_a_persona_with_a_voice_section_and_an_app_that_declares_speak(
+    has_voice_section, declared_names
+):
+    declared = [_declaration(name) for name in declared_names]
+
+    assert is_voice_app(has_voice_section, declared) is (has_voice_section and SPEAK_TOOL in declared_names)
+
+
+@pytest.mark.parametrize(
+    ("duration_ms", "waited"),
+    [(1500, 1.5), (1, 0.001), (int(SPOKEN_WAIT_BOUND_SECONDS * 1000), SPOKEN_WAIT_BOUND_SECONDS)],
+    ids=["a sentence", "the shortest", "exactly the bound"],
+)
+def test_the_voice_waits_as_long_as_a_sentence_plays_up_to_the_bound(duration_ms, waited):
+    assert spoken_wait_seconds(duration_ms) == waited
+
+
+def test_the_voice_waits_no_longer_than_the_bound_whatever_the_app_says():
+    assert spoken_wait_seconds(int(SPOKEN_WAIT_BOUND_SECONDS * 1000) + 1) == SPOKEN_WAIT_BOUND_SECONDS
 
 
 CAP = TurnCap(max_turns=3, period_seconds=100.0)

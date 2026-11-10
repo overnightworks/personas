@@ -5,7 +5,8 @@ The file holds the realm's token endpoint, the ready file's path, the apps (an M
 is the realm's group membership, never this file. An app that binds tools to its agents' turns
 names them with their call bound, and then the model gateway and each agent's persona file are required.
 An app with ``listens = false`` serves tools only: it starts no turn, its bound tools reach the turns of the apps that
-listen, and ``call_seconds`` bounds each request to it. No tool name is shared with a tools-only app.
+listen, and ``call_seconds`` bounds each request to it. No tool name is shared with a tools-only app, and no app names
+``speak``, the voice's own tool, which is never offered to a turn.
 An agent has a turn cap only when it sets ``max_turns`` in ``turn_period_seconds``, both or neither;
 with neither its turns are bounded by the budget and the off switches alone.
 The optional ``[memory]`` table names the Postgres database that keeps every line the agents read: its host, port,
@@ -23,6 +24,7 @@ from typing import TYPE_CHECKING, Final, Self
 
 from agents.agent_file import AgentDefinition, AgentFileError, load_agent
 from agents.config import AgentConfig  # noqa: TC002 - pydantic resolves the field's type at run time
+from agents.member import SPEAK_TOOL
 from pydantic import (
     AnyHttpUrl,
     BaseModel,
@@ -119,6 +121,13 @@ class _AppEntry(_Entry):
         if self.listens and self.call_seconds is not None:
             raise ValueError("call_seconds is for an app that does not listen")
         return self
+
+    @field_validator("tools")
+    @classmethod
+    def _speak_is_never_offered_to_the_model(cls, tools: tuple[str, ...]) -> tuple[str, ...]:
+        if SPEAK_TOOL in tools:
+            raise ValueError(f"{SPEAK_TOOL} is the voice's own tool and is never offered to a turn")
+        return tools
 
     @model_validator(mode="after")
     def _tools_come_with_their_call_bound(self) -> Self:

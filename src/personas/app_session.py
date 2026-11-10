@@ -12,12 +12,16 @@ import httpx2
 from agents.member import (
     ACCEPT_INVITATION_TOOL,
     LISTEN_BOUND_SECONDS,
+    SPEAK_TOOL,
     STANDING_URI,
     AcceptInvitationArguments,
     AcceptInvitationRefused,
     MemberStanding,
     PlaceRef,
     PlaceWindow,
+    SpeakRefusal,
+    SpeakRefused,
+    Spoken,
     place_window_uri,
 )
 from agents.tools import JsonObject, ToolDeclaration, ToolEffect, ToolOutcome
@@ -89,6 +93,11 @@ class AppSession(Protocol):
 
         Raises ``StatusFailure``, ``Unreachable`` or ``UnusableAnswer``.
         """
+        ...
+
+    async def speak(self, place: PlaceRef, sentence: str) -> Spoken | SpeakRefusal:
+        """How long the app says the sentence plays, or why it does not speak it; raises ``StatusFailure``,
+        ``Unreachable`` or ``UnusableAnswer``, the last for an answer that is neither."""
         ...
 
     async def declared_tools(self) -> tuple[ToolDeclaration, ...]:
@@ -206,6 +215,12 @@ class _McpAppSession:
         result = await self._called(ACCEPT_INVITATION_TOOL, arguments)
         return _refusal_of(_text_of(result)) if result.is_error else None
 
+    async def speak(self, place: PlaceRef, sentence: str) -> Spoken | SpeakRefusal:
+        # The arguments are the wire shape of ``SpeakArguments``, built unvalidated: a refusal of a sentence is
+        # the app's, and a validation error would carry the sentence.
+        result = await self._called(SPEAK_TOOL, {"place": place.model_dump(mode="json"), "text": sentence})
+        return _spoken_of(result)
+
     async def invoke(self, name: str, arguments: JsonObject) -> ToolOutcome:
         result = await self._called(name, arguments)
         return ToolOutcome(_text_of(result), result.is_error)
@@ -271,6 +286,14 @@ def _refusal_of(text: str) -> Refusal:
         return AcceptInvitationRefused.model_validate_json(text).refused
     except ValidationError:
         return UnrecognisedRefusal.UNRECOGNISED
+
+
+def _spoken_of(result: CallToolResult) -> Spoken | SpeakRefusal:
+    text = _text_of(result)
+    try:
+        return SpeakRefused.model_validate_json(text).refused if result.is_error else Spoken.model_validate_json(text)
+    except ValidationError:
+        raise UnusableAnswer(INVALID_ANSWER_CODE) from None
 
 
 def _failure_of(error: BaseException, auth: _BearerAuth) -> CallFailure:

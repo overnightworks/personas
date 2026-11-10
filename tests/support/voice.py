@@ -1,0 +1,58 @@
+"""What the tests of the voice loop share: a call of a speaking app, and a clock whose waits a test can hold."""
+
+from __future__ import annotations
+
+import asyncio
+
+from tests.support.call import restarted_in_the_call
+from tests.support.gateway import Gateway
+from tests.support.hopin import LIMIT_SECONDS
+
+TWO_SENTENCES = "First sentence. Second sentence."
+
+
+class HeldSleeps:
+    """The clock's sleeps wait until released; a test sees when each began and whether one was cancelled."""
+
+    def __init__(self, runner) -> None:
+        self.began: list[float] = []
+        self.release = asyncio.Event()
+        self.cancelled = asyncio.Event()
+        self._began = asyncio.Event()
+        runner.clock.sleep = self._sleep
+
+    async def _sleep(self, seconds: float) -> None:
+        self.began.append(seconds)
+        self._began.set()
+        try:
+            await self.release.wait()
+        except asyncio.CancelledError:
+            self.cancelled.set()
+            raise
+
+    async def until_began(self, count: int) -> None:
+        async with asyncio.timeout(LIMIT_SECONDS):
+            while len(self.began) < count:
+                self._began.clear()
+                await self._began.wait()
+
+    async def until_cancelled(self) -> None:
+        async with asyncio.timeout(LIMIT_SECONDS):
+            await self.cancelled.wait()
+
+
+async def ended_by(task):
+    async with asyncio.timeout(LIMIT_SECONDS):
+        (ended,) = await asyncio.gather(task, return_exceptions=True)
+    return ended
+
+
+async def a_voice_call(runner, *replies):
+    """The runner restarted in a call of a speaking app, for an agent whose persona has a voice section."""
+    runner.give_voice()
+    runner.gateway = Gateway(*replies)
+    await restarted_in_the_call(runner)
+
+
+def sentences_spoken(runner) -> list[str]:
+    return [text for _, _, text in runner.app.spoken]
