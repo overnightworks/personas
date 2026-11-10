@@ -1,8 +1,0 @@
-claim_id = "06b2e8e739e14647b904460e9c1d7b51"
-agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
-role = "builder"
-base = "b1b2a1292d64d0da850763756ca694a155fec35a"
-branch = "claude/issue-68-what-mozart-keeps-can-be-listed-and-eras"
-scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/main.py", "src/personas/memory.py", "tests"]
-opened_commit = "46a3f550646484688c318a9d7cfa5064427f1c42"
-whole_reason = "Listing and erasing are one command group over one table with shared refusals; tests is a directory."
