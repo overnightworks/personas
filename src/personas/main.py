@@ -16,7 +16,7 @@ from agents.backend.gateway import GatewayBackend
 from personas.app_session import open_mcp_session
 from personas.clock import SystemClock
 from personas.config import Config, ConfigError, load_config
-from personas.failures import leaves_of
+from personas.failures import StoreDefect, StoreUnavailable, leaves_of
 from personas.loop import Boundaries, run_all
 from personas.readiness import FileReadyMarker, ReadinessError, ReadyMarker
 from personas.reporting import log_state_change
@@ -36,6 +36,7 @@ type Compose = Callable[[Config, ReadyMarker], AbstractAsyncContextManager[Bound
 
 CONFIGURATION_ERROR_EXIT_CODE: Final = 2
 READINESS_ERROR_EXIT_CODE: Final = 3
+STORE_ERROR_EXIT_CODE: Final = 4
 QUIET_LIBRARIES: Final = ("httpx2", "httpcore2", "mcp", "client", "agents", "sqlalchemy", "psycopg", "alembic")
 """Their records carry request details and response content; only the runner's own state changes are logged."""
 SILENT_LEVEL: Final = logging.CRITICAL + 1
@@ -113,7 +114,11 @@ def _migrate(config: Config) -> None:
         raise SystemExit(CONFIGURATION_ERROR_EXIT_CODE)
     from personas.memory import migrate
 
-    migrate(config.memory)
+    try:
+        migrate(config.memory)
+    except (StoreUnavailable, StoreDefect) as error:
+        sys.stderr.write(f"personas: memory: {error}\n")
+        raise SystemExit(STORE_ERROR_EXIT_CODE) from None
 
 
 def _run_runner(config: Config, compose: Compose) -> None:

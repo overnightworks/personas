@@ -19,11 +19,11 @@ from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import (
     URL,
-    BigInteger,
     Boolean,
     Column,
     DateTime,
     MetaData,
+    Numeric,
     PrimaryKeyConstraint,
     Table,
     Text,
@@ -40,10 +40,13 @@ from personas.failures import (
     STORE_UNREACHABLE_CODE,
     StoreDefect,
     StoreUnavailable,
+    task_is_being_cancelled,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+
+    from sqlalchemy.sql.expression import Executable
 
     from personas.config import MemoryTarget
     from personas.decision import WindowRead
@@ -65,7 +68,8 @@ _LINES: Final = Table(
     Column("place_kind", Text),
     Column("place_id", Text),
     Column("generation", Text),
-    Column("seq", BigInteger),
+    # The wire bounds a line's seq only from below.
+    Column("seq", Numeric(scale=0)),
     Column("first_read_at", DateTime(timezone=True)),
     Column("speaker", Text),
     Column("kind", Text),
@@ -91,8 +95,14 @@ def _url(target: MemoryTarget) -> URL:
     )
 
 
+def _write_bound(target: MemoryTarget) -> float | None:
+    """The seconds one write may take; an infinite ``write_seconds`` is no bound."""
+    return None if math.isinf(target.write_seconds) else target.write_seconds
+
+
 def _connect_arguments(target: MemoryTarget) -> dict[str, int]:
-    return {"connect_timeout": max(MINIMUM_CONNECT_SECONDS, math.ceil(target.write_seconds))}
+    bound = _write_bound(target)
+    return {} if bound is None else {"connect_timeout": max(MINIMUM_CONNECT_SECONDS, math.ceil(bound))}
 
 
 def _alembic_config() -> AlembicConfig:
@@ -173,21 +183,36 @@ class PostgresLineStore:
     """Keeps the lines of the windows the loops read in the database the configuration names.
 
     It opens no connection until the first write. That write checks the schema is at its head, and a schema that
-    is not ends the runner. ``write_seconds`` bounds taking a connection, connecting and the statement together; a
-    write cut by it leaves its connection to the pool's invalidation, and the next write takes another.
+    is not ends the runner. A pooled connection is not checked before its use: a stale one fails its write, and the
+    pool takes another for the next.
     """
 
     def __init__(self, target: MemoryTarget) -> None:
-        self._write_seconds = target.write_seconds
+        self._write_bound = _write_bound(target)
         self._engine: AsyncEngine = create_async_engine(
-            _url(target), hide_parameters=True, pool_pre_ping=True, connect_args=_connect_arguments(target)
+            _url(target), hide_parameters=True, connect_args=_connect_arguments(target)
         )
         self._schema_checked = False
 
     async def keep(self, read: WindowRead) -> None:
+        """Keeps the window's lines, or raises ``StoreUnavailable`` or ``StoreDefect`` with a code.
+
+        ``write_seconds`` bounds taking a connection, connecting and the statement against a store that answers. A
+        connection that goes dark in the middle of the statement is given up only after the driver's own cancel
+        wait, about ten seconds beyond the bound. An error the store raises while the task is being cancelled ends
+        as that cancellation.
+        """
         statement = insert(_LINES).values(_rows_of(read)).on_conflict_do_nothing()
         try:
-            async with asyncio.timeout(self._write_seconds):
+            await self._write(statement)
+        except StoreUnavailable, StoreDefect:
+            if task_is_being_cancelled():
+                raise asyncio.CancelledError from None
+            raise
+
+    async def _write(self, statement: Executable) -> None:
+        try:
+            async with asyncio.timeout(self._write_bound):
                 with _as_store_failure():
                     async with self._engine.begin() as connection:
                         await self._require_head(connection)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from personas.config import (
@@ -415,23 +417,8 @@ def test_two_listening_apps_may_each_bind_the_same_tool(files):
     assert [app.binding for app in apps] == [ToolBinding(("say",), MAX_TOOL_CALLS)] * 2
 
 
-def _memory_table(files, **overrides: object) -> str:
-    """The valid memory table with its fields replaced, or dropped when set to None."""
-    fields = {
-        "host": '"db.test"',
-        "port": "5432",
-        "dbname": '"personas"',
-        "user": '"mozart"',
-        "password_file": f'"{files.password_path}"',
-    }
-    fields.update({name: value for name, value in overrides.items() if value is not None})
-    for name in [name for name, value in overrides.items() if value is None]:
-        del fields[name]
-    return "[memory]\n" + "".join(f"{name} = {value}\n" for name, value in fields.items())
-
-
 def test_a_memory_table_gives_the_runner_its_database_its_password_and_a_default_write_bound(files):
-    files.text += _memory_table(files)
+    files.text += files.memory_table()
 
     memory = load_config(files.write()).memory
 
@@ -441,13 +428,14 @@ def test_a_memory_table_gives_the_runner_its_database_its_password_and_a_default
     assert memory.write_seconds == DEFAULT_WRITE_SECONDS
 
 
-def test_a_memory_table_may_set_the_write_bound(files):
-    files.text += _memory_table(files, write_seconds="0.5")
+@pytest.mark.parametrize(("written", "bound"), [("0.5", 0.5), ("inf", math.inf)], ids=["seconds", "no bound"])
+def test_a_memory_table_may_set_the_write_bound_or_leave_a_write_unbounded(files, written, bound):
+    files.text += files.memory_table(write_seconds=written)
 
     memory = load_config(files.write()).memory
 
     assert memory is not None
-    assert memory.write_seconds == 0.5
+    assert memory.write_seconds == bound
 
 
 def test_a_file_without_a_memory_table_opens_no_store(files):
@@ -467,6 +455,7 @@ def test_a_file_without_a_memory_table_opens_no_store(files):
         ({"password_file": None}, "memory.password_file"),
         ({"write_seconds": "0"}, "memory.write_seconds"),
         ({"write_seconds": '"2"'}, "memory.write_seconds"),
+        ({"write_seconds": "nan"}, "memory.write_seconds"),
         ({"password": '"in-the-file"'}, "memory.password"),
     ],
     ids=[
@@ -480,11 +469,12 @@ def test_a_file_without_a_memory_table_opens_no_store(files):
         "password file missing",
         "write bound zero",
         "write bound a string",
+        "write bound no number",
         "password written into the file",
     ],
 )
 def test_a_missing_or_malformed_memory_field_stops_the_start_and_names_it(files, monkeypatch, capsys, overrides, named):
-    files.text += _memory_table(files, **overrides)
+    files.text += files.memory_table(**overrides)
 
     error = fails_at_start(files.write(), monkeypatch, capsys)
 
@@ -502,7 +492,7 @@ def test_a_missing_or_malformed_memory_field_stops_the_start_and_names_it(files,
     ids=["missing", "empty", "relative path"],
 )
 def test_a_password_file_that_is_unusable_stops_the_start_and_names_the_field(files, monkeypatch, capsys, arrange):
-    files.text += _memory_table(files)
+    files.text += files.memory_table()
     arrange(files)
 
     error = fails_at_start(files.write(), monkeypatch, capsys)

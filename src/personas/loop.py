@@ -13,7 +13,6 @@ from agents.backend import TurnPerson, TurnStopKind, TurnStopped
 from agents.tools import HandTool, ToolOutcome
 from agents.turn import FailureCode, Principal, Turn, TurnMessage, TurnRole
 
-from personas.app_session import task_is_being_cancelled
 from personas.decision import (
     SUSPENDED_RETRY_SECONDS,
     TOOL_NOT_DECLARED_CODE,
@@ -47,7 +46,7 @@ from personas.decision import (
     turn_input,
     turn_invalid,
 )
-from personas.failures import CallFailure, StoreUnavailable, Unreachable, leaves_of
+from personas.failures import CallFailure, StoreUnavailable, Unreachable, leaves_of, task_is_being_cancelled
 from personas.reporting import Event, Reporter, StateChange
 from personas.tokens import TokenFacts, facts_of
 

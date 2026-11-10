@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import secrets
 import time
 import traceback
@@ -19,7 +20,7 @@ from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_i
 from tests.support.fakes import WALL_START, line, window_of
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import LIMIT_SECONDS, active, formatted, paused
-from tests.support.postgres import kept_lines, lines_table_locked, run_sql, waiting_statements
+from tests.support.postgres import Forwarder, kept_lines, lines_table_locked, run_sql, waiting_statements
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -35,6 +36,10 @@ SECOND_SUBJECT = "ada-subject"
 BOUND_SECONDS = 0.5
 MARGIN_SECONDS = 1.0
 CLOSED_PORT = 1
+DARK_WRITE_SECONDS = 1.0
+BEYOND_64_BITS = 2**63
+REFUSE_EVERY_NEW_ROW = "ALTER TABLE lines ADD CONSTRAINT refuses_every_row CHECK (false) NOT VALID"
+"""Its error names the failing row, so only the adapter's own wording keeps the row out of a traceback."""
 
 
 class ObservedStore(PostgresLineStore):
@@ -181,6 +186,41 @@ async def test_a_write_waiting_on_a_lock_ends_within_its_bound_releases_its_stat
     assert kept_lines(database, "seq") == [(1,), (3,)]
 
 
+async def test_a_write_cancelled_while_its_connection_answers_nothing_ends_as_the_cancellation(database):
+    forwarder = Forwarder(replace(database, write_seconds=DARK_WRITE_SECONDS))
+    async with forwarder.serving() as through_the_forwarder:
+        store = PostgresLineStore(through_the_forwarder)
+        try:
+            await store.keep(a_read(line(1, "Before the dark")))
+            forwarder.go_dark()
+            write = asyncio.create_task(store.keep(a_read(line(2, "Into the dark"))))
+            async with asyncio.timeout(LIMIT_SECONDS):
+                await forwarder.dropped.wait()
+            write.cancel()
+            ended = await ended_by(write)
+            await store.keep(a_read(line(3, "After the dark")))
+        finally:
+            await store.close()
+
+    assert isinstance(ended, asyncio.CancelledError)
+    assert kept_lines(database, "seq") == [(1,), (3,)]
+
+
+async def test_a_line_whose_seq_is_beyond_64_bits_is_kept_with_the_other_lines_of_its_window(store, database):
+    await store.keep(a_read(line(1, "Ordinary"), line(BEYOND_64_BITS, "Far along")))
+
+    assert kept_lines(database, "seq, text") == [(1, "Ordinary"), (BEYOND_64_BITS, "Far along")]
+
+
+async def test_a_store_without_a_write_bound_keeps_a_window(database):
+    store = PostgresLineStore(replace(database, write_seconds=math.inf))
+
+    await store.keep(a_read(line(1, "Unbounded")))
+    await store.close()
+
+    assert kept_lines(database, "seq") == [(1,)]
+
+
 async def test_a_store_that_cannot_be_reached_is_unavailable_by_its_code(database):
     store = PostgresLineStore(replace(database, port=CLOSED_PORT))
 
@@ -208,7 +248,7 @@ async def test_a_schema_behind_its_head_ends_the_write_naming_the_field_and_no_s
 
 async def test_a_database_error_that_is_no_outage_raises_a_code_that_holds_no_line_name_or_password(store, database):
     await store.keep(a_read(line(1, "Kept before")))
-    run_sql(database, "DROP TABLE lines")
+    run_sql(database, REFUSE_EVERY_NEW_ROW)
     secret_line = "text-" + secrets.token_hex(8)
     secret_speaker = "speaker-" + secrets.token_hex(8)
 
@@ -256,7 +296,7 @@ async def test_a_runner_met_by_a_database_error_that_is_no_outage_ends_with_a_co
     store = ObservedStore(database)
     runner.lines = store
     await store.keep(a_read(line(1, "Kept before")))
-    run_sql(database, "DROP TABLE lines")
+    run_sql(database, REFUSE_EVERY_NEW_ROW)
     await restarted_in_the_call(runner)
     say_in_the_call(runner, "A line to be lost")
 

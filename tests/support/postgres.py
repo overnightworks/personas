@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import secrets
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -16,7 +18,7 @@ from personas.memory import migrate
 from personas.secret import Secret
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import AsyncIterator, Iterator
 
     from sqlalchemy import Engine
     from sqlalchemy.engine import URL
@@ -24,6 +26,8 @@ if TYPE_CHECKING:
 URL_ENVIRONMENT_VARIABLE = "PERSONAS_TEST_POSTGRES_URL"
 WRAPPER = "scripts/test_postgres.sh"
 DATABASE_NAME_BYTES = 8
+LOOPBACK = "127.0.0.1"
+FORWARD_CHUNK_BYTES = 65536
 
 
 def server_url() -> URL:
@@ -39,13 +43,13 @@ def engine_of(database: str) -> Engine:
     return create_engine(server_url().set(database=database), isolation_level="AUTOCOMMIT")
 
 
-def target_of(database: str, *, write_seconds: float = 2.0) -> MemoryTarget:
+def target_of(database: str) -> MemoryTarget:
     """What the runner's configuration holds for this database; the password is the test's own."""
     url = server_url()
     assert url.host is not None
     assert url.port is not None
     assert url.username is not None
-    return MemoryTarget(url.host, url.port, database, url.username, Secret(secrets.token_hex(8)), write_seconds)
+    return MemoryTarget(url.host, url.port, database, url.username, Secret(secrets.token_hex(8)))
 
 
 @contextmanager
@@ -115,6 +119,54 @@ def lines_table_locked(target: MemoryTarget) -> Iterator[None]:
         finally:
             connection.rollback()
     engine.dispose()
+
+
+class Forwarder:
+    """A TCP forwarder in front of the server whose open connections can go dark: their bytes are then dropped."""
+
+    def __init__(self, target: MemoryTarget) -> None:
+        self._target = target
+        self._dark: set[asyncio.StreamWriter] = set()
+        self._open: set[asyncio.StreamWriter] = set()
+        self.dropped = asyncio.Event()
+
+    @asynccontextmanager
+    async def serving(self) -> AsyncIterator[MemoryTarget]:
+        """The target as seen through the forwarder; every connection is closed at the end."""
+        server = await asyncio.start_server(self._forward, LOOPBACK, 0)
+        port = server.sockets[0].getsockname()[1]
+        try:
+            yield replace(self._target, host=LOOPBACK, port=port)
+        finally:
+            server.close()
+            for writer in self._open:
+                writer.transport.abort()
+            await server.wait_closed()
+
+    def go_dark(self) -> None:
+        """Every connection open now stops answering, in both directions; new ones are forwarded."""
+        self._dark |= self._open
+
+    async def _forward(self, client_reader: asyncio.StreamReader, client_writer: asyncio.StreamWriter) -> None:
+        server_reader, server_writer = await asyncio.open_connection(self._target.host, self._target.port)
+        self._open |= {client_writer, server_writer}
+        await asyncio.gather(
+            self._pipe(client_reader, server_writer),
+            self._pipe(server_reader, client_writer),
+            return_exceptions=True,
+        )
+
+    async def _pipe(self, source: asyncio.StreamReader, sink: asyncio.StreamWriter) -> None:
+        try:
+            while data := await source.read(FORWARD_CHUNK_BYTES):
+                if sink in self._dark:
+                    self.dropped.set()
+                    continue
+                sink.write(data)
+                await sink.drain()
+        finally:
+            sink.transport.abort()
+            self._open.discard(sink)
 
 
 def tables_of(target: MemoryTarget) -> list[str]:

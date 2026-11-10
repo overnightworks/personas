@@ -67,12 +67,21 @@ class Files:
             f'[[agents]]\nclient_id = "agent-mozart"\nsecret_file = "{self.secret_path}"\n{persona}'
         )
 
-    def memory_table(self, host: str, port: int, dbname: str, user: str, *, write_seconds: float | None = None) -> str:
-        bound = "" if write_seconds is None else f"write_seconds = {write_seconds}\n"
-        return (
-            f'[memory]\nhost = "{host}"\nport = {port}\ndbname = "{dbname}"\nuser = "{user}"\n'
-            f'password_file = "{self.password_path}"\n{bound}'
-        )
+    def memory_table(self, **overrides: str | None) -> str:
+        """A valid memory table; an override replaces a field's TOML value, or drops the field when None."""
+        fields = {
+            "host": '"db.test"',
+            "port": "5432",
+            "dbname": '"personas"',
+            "user": '"mozart"',
+            "password_file": f'"{self.password_path}"',
+        }
+        for name, value in overrides.items():
+            if value is None:
+                del fields[name]
+            else:
+                fields[name] = value
+        return "[memory]\n" + "".join(f"{name} = {value}\n" for name, value in fields.items())
 
     def write(self) -> dict[str, str]:
         self.config_path.write_text(self.text, encoding="utf-8")

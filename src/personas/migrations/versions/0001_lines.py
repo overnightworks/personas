@@ -15,7 +15,7 @@ def upgrade() -> None:
         sa.Column("place_kind", sa.Text, nullable=False),
         sa.Column("place_id", sa.Text, nullable=False),
         sa.Column("generation", sa.Text, nullable=False),
-        sa.Column("seq", sa.BigInteger, nullable=False),
+        sa.Column("seq", sa.Numeric(scale=0), nullable=False),
         sa.Column("first_read_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("speaker", sa.Text, nullable=False),
         sa.Column("kind", sa.Text, nullable=False),

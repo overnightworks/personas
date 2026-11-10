@@ -263,7 +263,7 @@ def test_the_real_boundaries_run_turns_through_the_gateway_exactly_when_the_conf
 @pytest.mark.parametrize("has_memory", [True, False], ids=["memory table", "no memory table"])
 def test_the_real_boundaries_hold_a_store_exactly_when_the_configuration_has_a_memory_table(files, has_memory):
     if has_memory:
-        files.text += files.memory_table("db.test", 5432, "personas", "mozart")
+        files.text += files.memory_table()
     config = load_config(files.write())
 
     async def composed_store() -> object:
