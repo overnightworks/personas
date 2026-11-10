@@ -350,12 +350,15 @@ async def open_mcp_session(
         # The SDK's task groups wrap what is raised inside them, so every leaf is looked at: a failure
         # of the call and what the caller's own code raised stay as they were, an error of the
         # connection becomes its failure and a defect stays a defect. The loop picks what decides.
-        from_body = {id(own) for own in leaves_of(raised_in_body)} if raised_in_body else set[int]()
+        from_body = list(leaves_of(raised_in_body)) if raised_in_body else []
         found = list(leaves_of(error))
+        # A close that failed or was cut can replace what the body raised; the body's leaves stay.
+        found = [*(own for own in from_body if all(own is not leaf for leaf in found)), *found]
+        from_body_ids = {id(own) for own in from_body}
         if cancelled_in_body and all(isinstance(leaf, LATE_ANSWER_ERRORS) for leaf in found):
             raise asyncio.CancelledError from None
         beside_no_echo = any(not isinstance(leaf, LATE_ANSWER_ERRORS) for leaf in found)
-        leaves = [_settled(leaf, from_body, auth, beside_no_echo=beside_no_echo) for leaf in found]
+        leaves = [_settled(leaf, from_body_ids, auth, beside_no_echo=beside_no_echo) for leaf in found]
         if len(leaves) == 1:
             raise leaves[0] from None
         raise ExceptionGroup("the session failed", cast("list[Exception]", leaves)) from None

@@ -6,6 +6,7 @@ import asyncio
 from http import HTTPStatus
 
 import anyio
+import httpx2
 import pytest
 from agent_runtime_client.backend.fake_gateway import completion, tool_call, tool_round
 from agent_runtime_client.tools import ToolOutcome
@@ -14,7 +15,8 @@ from mcp_types import ListToolsResult, Tool
 from personas import app_session
 from personas.config import load_config
 from personas.decision import TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE, TurnCap
-from personas.failures import leaves_of
+from personas.failures import Unreachable, leaves_of
+from personas.loop import AgentLoop
 from personas.tokens import HttpTokenSource
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway
@@ -23,8 +25,10 @@ from tests.support.hopin import CALL, DISCOVER, LIMIT_SECONDS, LIST_TOOLS, LISTE
 from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG, SCOPE, ToolsOnlyApp
 from tests.support.transport import (
     ClosingHold,
+    transport_by_url,
     transport_closing_with_late_answers,
     transport_closing_with_leaves,
+    transport_whose_close_loses_a_child,
     transport_whose_session_loses_a_child,
 )
 
@@ -566,3 +570,119 @@ async def test_a_tools_only_outcome_that_is_an_error_shows_the_model_its_text(ru
 
     assert refused.content in runner.gateway.tool_results(2)[0]
     assert runner.reports.events() == [("started", None)]
+
+
+async def ends_with_the_defect_beside(runner, defect, *others):
+    """The runner ended with ``defect`` once among its leaves, beside exactly the ``others``, reporting no turn."""
+    ended = await ended_by(runner.task)
+    leaves = list(leaves_of(ended))
+
+    assert [leaf for leaf in leaves if leaf is defect] == [defect]
+    assert sorted(type(leaf).__name__ for leaf in leaves if leaf is not defect) == sorted(
+        each.__name__ for each in others
+    )
+    assert runner.reports.events() == [("started", None)]
+
+
+CHILD_LOST = pytest.mark.parametrize(
+    "child", [lambda: OSError("connection reset"), lambda: httpx2.ReadError("cut")], ids=["os error", "read error"]
+)
+REQUEST_AT = pytest.mark.parametrize("where", ["listing", "call"])
+
+
+@REQUEST_AT
+@CHILD_LOST
+async def test_a_defect_in_a_tools_only_request_whose_turn_session_loses_a_child_while_it_closes_ends_the_runner_loud(
+    runner, songmaker, monkeypatch, where, child
+):
+    defect = ValueError("a defect")
+    raising_in_the_tools_only_request(runner, monkeypatch, where, defect)
+    failing = asyncio.Event()
+    closing = ClosingHold()
+    held = closing.transport(nth=1 if where == "listing" else 2, of_url=songmaker_url(runner))
+    lost = transport_whose_session_loses_a_child(failing, nth=2, of_url=runner.app_url, error=child)
+    monkeypatch.setattr(
+        app_session,
+        "streamable_http_client",
+        transport_by_url({songmaker_url(runner): held, runner.app_url: lost}),
+    )
+    runner.gateway = Gateway(calling(CREATE_SONG), saying(ANSWER), completion("done"))
+    await addressed_in_the_call(runner)
+    try:
+        async with asyncio.timeout(LIMIT_SECONDS):
+            await closing.closing.wait()
+        failing.set()
+        async with asyncio.timeout(LIMIT_SECONDS):
+            await closing.cancelled.wait()
+    finally:
+        closing.release.set()
+
+    await ends_with_the_defect_beside(runner, defect, Unreachable)
+
+
+async def test_a_second_defect_of_the_turns_session_body_leaves_beside_the_first_one_a_tools_only_call_recorded(
+    runner, songmaker, monkeypatch
+):
+    first, second = ValueError("first"), KeyError("second")
+    raising_in_the_tools_only_request(runner, monkeypatch, "call", first)
+    real_body = AgentLoop._run_session_body  # noqa: SLF001 - the turn's body is where the second defect arises
+
+    async def body_raising_the_second(self, *arguments):
+        try:
+            await real_body(self, *arguments)
+        except Exception:
+            raise second from None
+
+    monkeypatch.setattr(AgentLoop, "_run_session_body", body_raising_the_second)
+    runner.gateway = Gateway(calling(CREATE_SONG), saying(ANSWER), completion("done"))
+    await addressed_in_the_call(runner)
+
+    await ends_with_the_defect_beside(runner, first, KeyError)
+
+    assert [leaf for leaf in leaves_of(runner.task.exception()) if leaf is second] == [second]
+
+
+async def test_a_tools_only_call_that_fails_whose_close_adds_a_defect_ends_the_runner_with_each_leaf_once(
+    runner, songmaker, monkeypatch
+):
+    songmaker.script(CALL, refuses_with_a_server_error)
+    monkeypatch.setattr(
+        app_session, "streamable_http_client", transport_closing_with_late_answers(echo=RuntimeError, only_close=1)
+    )
+    runner.gateway = Gateway(calling(CREATE_SONG), saying(ANSWER), completion("done"))
+    await addressed_in_the_call(runner)
+
+    ended = await ended_by(runner.task)
+
+    assert sorted(type(leaf).__name__ for leaf in leaves_of(ended)) == ["RuntimeError", "StatusFailure"]
+    assert runner.reports.events() == [("started", None)]
+
+
+@REQUEST_AT
+@pytest.mark.parametrize(
+    ("lost_child", "then"),
+    [
+        (OSError, "say answers"),
+        (OSError, "say fails"),
+        (anyio.BrokenResourceError, "say answers"),
+    ],
+    ids=["a lost child, say answers", "a lost child, say fails", "a late answer"],
+)
+async def test_a_defect_in_a_tools_only_request_whose_own_close_loses_a_child_ends_the_runner_loud_whatever_follows(
+    runner, songmaker, monkeypatch, where, lost_child, then
+):
+    defect = ValueError("a defect")
+    raising_in_the_tools_only_request(runner, monkeypatch, where, defect)
+    lost = transport_whose_close_loses_a_child(
+        lost_child, nth=1 if where == "listing" else 2, of_url=songmaker_url(runner)
+    )
+    monkeypatch.setattr(app_session, "streamable_http_client", lost)
+    if then == "say fails":
+        runner.app.script(CALL, refuses_with_a_server_error)
+    runner.gateway = Gateway(calling(CREATE_SONG), saying(ANSWER), completion("done"))
+    await addressed_in_the_call(runner)
+
+    await ends_with_the_defect_beside(runner, defect, Unreachable)
+
+    assert failed_apps(runner) == []
+    assert runner.app.said == []

@@ -421,8 +421,32 @@ class AgentLoop:
         self._report(Event.TURN_ENDED, code)
 
     async def _take_turn(self, setup: _TurnSetup, admitted: _Admitted) -> None:
-        """Runs one turn; a cancelled one ends the runner loud with a defect it met, or when nobody cancelled it."""
-        await _ending_loud_when_cancelled(self._judge_turn(setup, admitted), self._loud_end_of_turn)
+        """Runs one turn; whatever way it ends, a defect a request of it met ends the runner loud.
+
+        A session whose close cuts a request short can lose the defect from what leaves, so the turn's record
+        joins it. A cancelled turn ends as the cancellation unless a defect was met or nobody cancelled it.
+        """
+        await _ending_loud_when_cancelled(self._judged_turn_with_its_defect(setup, admitted), self._loud_end_of_turn)
+
+    async def _judged_turn_with_its_defect(self, setup: _TurnSetup, admitted: _Admitted) -> None:
+        """Judges the turn; what ends it, the recorded defect joins unless it is among the leaves."""
+        failed: Exception | None = None
+        try:
+            await self._judge_turn(setup, admitted)
+        except Exception as error:
+            failed = error
+        if (ending := self._with_recorded_defect(failed)) is not None:
+            raise ending
+
+    def _with_recorded_defect(self, error: Exception | None) -> BaseException | None:
+        """What leaves a turn: the error, with the recorded defect among its leaves unless it holds it already."""
+        defect = self._recorded_defect()
+        leaves = list(leaves_of(error)) if error is not None else []
+        if defect is None or any(leaf is defect for leaf in leaves):
+            return error
+        if not leaves:
+            return defect
+        return BaseExceptionGroup("the turn failed", [defect, *leaves])
 
     def _loud_end_of_turn(self) -> Exception | None:
         """What ends the runner when the turn's session has left and the turn is cancelled.
@@ -437,8 +461,8 @@ class AgentLoop:
     async def _judge_turn(self, setup: _TurnSetup, admitted: _Admitted) -> None:
         """Runs one turn over its own session.
 
-        A turn the gateway ends short is reported; a failed relayed call and any other error go to the group.
-        Every error of a cancelled turn ends as the cancellation; a defect of its session body is recorded.
+        A turn the gateway ends short is reported unless a defect was met; a failed relayed call and any other
+        error go to the group. Every error of a cancelled turn ends as the cancellation.
         """
         try:
             await self._run_turn(setup, admitted)
@@ -451,8 +475,7 @@ class AgentLoop:
                 raise
             # The stop only carries the failure out of the backend; the failure goes to the group, never the stop.
             held = _failure_held_by(stopped)
-            if held is None:
-                self._end_with_recorded_defect()
+            if held is None and self._recorded_defect() is None:
                 self._report_turn_end(stopped.code.value)
             # What left the session beside the stop (a late answer) still goes to the group, to be judged there.
             rest: list[BaseException] = [held] if held is not None else []
@@ -461,17 +484,6 @@ class AgentLoop:
                 raise rest[0] from None
             if rest:
                 raise BaseExceptionGroup("the turn's session failed", rest) from None
-        else:
-            self._end_with_recorded_defect()
-
-    def _end_with_recorded_defect(self) -> None:
-        """A defect a request of the turn met ends the runner however the turn ends, before any end is reported.
-
-        A request's session cut short while it closes, by the app's call time or by the turn's duration, leaves
-        the defect only in this record.
-        """
-        if (defect := self._recorded_defect()) is not None:
-            raise defect from None
 
     def _recorded_defect(self) -> Exception | None:
         assert self._turn is not None  # noqa: S101 - the turn's record lives until its task has ended
@@ -491,9 +503,10 @@ class AgentLoop:
 
         A cancelled turn loses its errors to the cancellation; the record lets the runner end loud anyway.
         """
-        failures = (_failure_held_by(leaf) for leaf in leaves_of(error))
+        held = (_failure_held_by(leaf) for leaf in leaves_of(error))
+        failures = (failure for each in held if each is not None for failure in leaves_of(each))
         defect = next((failure for failure in failures if isinstance(failure, Exception) and is_defect(failure)), None)
-        if defect is not None:
+        if defect is not None and self._recorded_defect() is None:
             assert self._turn is not None  # noqa: S101 - only the running turn runs its session body
             self._turn = replace(self._turn, defect=defect)
 
@@ -584,7 +597,7 @@ class AgentLoop:
 
         The session lives only for this request. A failure of the call, a session that died of its own child and
         an expiry of the app's call time come back as the failure; any other error is raised, and a turn whose
-        place left stops.
+        place left stops. A defect recorded in the turn ends the request, raised from the failure.
         """
         try:
             return await _ending_loud_when_cancelled(self._within_call_time(app, ask), _unreachable_unless_cancelling)
@@ -593,6 +606,9 @@ class AgentLoop:
             failure = decisive_failure(tuple(leaves_of(error)), already_renewed=False)
             if failure is None:
                 raise
+            defect = self._recorded_defect()
+            if defect is not None:
+                raise defect from failure
             return failure
 
     async def _within_call_time[Answer](self, app: AppTarget, ask: Callable[[AppSession], Awaitable[Answer]]) -> Answer:
@@ -610,7 +626,6 @@ class AgentLoop:
         except TimeoutError:
             if not bound.expired():
                 raise
-            self._end_with_recorded_defect()
             raise Unreachable("the app did not answer in time") from None
 
     def _report_tools_only_failure(self, app: AppTarget, failed_apps: set[str], code: str) -> None:

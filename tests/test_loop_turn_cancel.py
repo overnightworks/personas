@@ -23,6 +23,7 @@ from tests.support.hopin import DISCOVER, LIMIT_SECONDS, LIST_TOOLS, READ, activ
 from tests.support.transport import (
     ClosingHold,
     transport_closing_with_late_answers,
+    transport_whose_close_loses_a_child,
     transport_whose_session_loses_a_child,
 )
 
@@ -344,3 +345,23 @@ async def test_a_turn_whose_session_anyio_cancelled_with_late_answers_alone_whil
     (leaf,) = leaves_of(ended)
     assert isinstance(leaf, UnrequestedCancellationError)
     assert isinstance(leaf.__cause__, asyncio.CancelledError)
+
+
+async def test_a_defect_in_a_turns_session_body_whose_close_loses_a_child_ends_the_runner_loud(runner, monkeypatch):
+    defect = ValueError("a defect")
+
+    async def raise_it(self, *arguments):
+        raise defect
+
+    monkeypatch.setattr("personas.app_session._McpAppSession.invoke", raise_it)
+    lost = transport_whose_close_loses_a_child(OSError, nth=2, of_url=runner.app_url)
+    monkeypatch.setattr(app_session, "streamable_http_client", lost)
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED)
+
+    ended = await ended_by(runner.task)
+
+    assert sorted(type(leaf).__name__ for leaf in leaves_of(ended)) == ["Unreachable", "ValueError"]
+    assert [leaf for leaf in leaves_of(ended) if leaf is defect] == [defect]
+    assert runner.reports.events() == [("started", None)]

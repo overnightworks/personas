@@ -52,7 +52,11 @@ from tests.support.hopin import (
     invited,
 )
 from tests.support.loopback import serving
-from tests.support.transport import transport_closing_with_late_answers, transport_closing_with_leaves
+from tests.support.transport import (
+    transport_closing_with_late_answers,
+    transport_closing_with_leaves,
+    transport_whose_close_loses_a_child,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -452,6 +456,25 @@ async def test_a_defect_beside_late_answers_after_a_cancellation_stays_with_them
 
     assert isinstance(ended, ExceptionGroup)
     assert [type(leaf) for leaf in leaves_of(ended)] == [ValueError, Unreachable]
+
+
+@pytest.mark.parametrize(
+    "raised",
+    [BodyError("the caller's own code failed"), StatusFailure(HTTPStatus.FORBIDDEN)],
+    ids=["a defect", "a refusal"],
+)
+async def test_what_the_body_raises_stays_among_the_leaves_when_the_close_then_loses_a_child(
+    app, bearer, monkeypatch, raised
+):
+    monkeypatch.setattr(app_session, "streamable_http_client", transport_whose_close_loses_a_child(OSError))
+
+    with pytest.raises(ExceptionGroup) as caught:
+        await raises_in_the_stream_body(app, bearer, raised)
+
+    assert [leaf for leaf in leaves_of(caught.value) if leaf is raised] == [raised]
+    assert sorted(type(leaf).__name__ for leaf in leaves_of(caught.value)) == sorted(
+        [type(raised).__name__, "Unreachable"]
+    )
 
 
 async def test_traffic_with_no_acknowledgement_until_past_the_deadline_is_unreachable(app, bearer):
