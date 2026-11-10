@@ -16,8 +16,8 @@ from agents.turn import Principal
 
 from personas.app_session import READ_SECONDS, open_mcp_session
 from personas.config import load_config
-from personas.loop import AgentLoop, Boundaries, TurnCounter, run_all
-from personas.main import QUIET_LIBRARIES, configure_logging
+from personas.loop import AgentLoop, Boundaries, TurnCounter
+from personas.main import QUIET_LIBRARIES, configure_logging, run_with_sweep
 from personas.readiness import FileReadyMarker
 from personas.reporting import log_state_change
 from personas.secret import Secret
@@ -209,7 +209,7 @@ class Harness:
             backend=self._backend,
             lines=self.lines,
         )
-        self.task = asyncio.create_task(run_all(self.config, boundaries))
+        self.task = asyncio.create_task(run_with_sweep(self.config, boundaries))
 
     def _backend(self, tools: Iterable[HandTool]) -> AgentBackend:
         assert self.config.gateway is not None

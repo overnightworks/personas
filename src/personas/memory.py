@@ -1,6 +1,6 @@
 """The memory: a Postgres table of the lines every agent read, verbatim, and the migration that owns its schema.
 
-The runner writes and reads through ``PostgresLineStore`` and the ``memory`` commands list and erase through it;
+The runner writes, reads and sweeps through ``PostgresLineStore`` and the ``memory`` commands list and erase through it;
 ``migrate`` is the only code that changes the schema. A line is keyed by the agent, the app, the place, the visit and
 its ``seq``, so reading a window again changes nothing and the time of the first read stands. No database
 error reaches a log or a traceback with a parameter or a row in it.
@@ -270,6 +270,10 @@ class PostgresLineStore:
     async def erase_all(self) -> int:
         """Deletes every line of every agent, in one statement, and returns how many; the schema stays."""
         return await self._erase(delete(_LINES))
+
+    async def erase_before(self, first_read_before: datetime) -> int:
+        """Deletes every line of every agent first read before the time, in one statement, and returns how many."""
+        return await self._erase(delete(_LINES).where(_LINES.c.first_read_at < first_read_before))
 
     async def _erase(self, statement: Delete) -> int:
         async with self._bounded_transaction() as connection:

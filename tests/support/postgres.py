@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import secrets
 from contextlib import asynccontextmanager, contextmanager
@@ -44,12 +45,17 @@ def engine_of(database: str) -> Engine:
 
 
 def target_of(database: str) -> MemoryTarget:
-    """What the runner's configuration holds for this database; the password is the test's own."""
+    """What the runner's configuration holds for this database; the password is the test's own.
+
+    It keeps every line, so that a runner on the fake clock never sweeps unless the test sets a keep period.
+    """
     url = server_url()
     assert url.host is not None
     assert url.port is not None
     assert url.username is not None
-    return MemoryTarget(url.host, url.port, database, url.username, Secret(secrets.token_hex(8)))
+    return MemoryTarget(
+        url.host, url.port, database, url.username, Secret(secrets.token_hex(8)), lines_keep_days=math.inf
+    )
 
 
 @contextmanager

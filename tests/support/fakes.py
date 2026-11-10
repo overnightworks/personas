@@ -47,6 +47,37 @@ class FakeClock:
         await asyncio.sleep(0)
 
 
+class SweepClock(FakeClock):
+    """A fake clock whose sleep of one length waits for ``open_gate``; every other sleep returns at once."""
+
+    def __init__(self, gated_seconds: float) -> None:
+        super().__init__()
+        self._gated_seconds = gated_seconds
+        self._waiting = 0
+        self._arrived = asyncio.Event()
+        self._opened = asyncio.Event()
+
+    async def sleep(self, seconds: float) -> None:
+        if seconds != self._gated_seconds:
+            await super().sleep(seconds)
+            return
+        self._waiting += 1
+        self._arrived.set()
+        await self._opened.wait()
+        self._opened.clear()
+        self.time += seconds
+
+    async def until_waiting(self, count: int, *, limit_seconds: float = 10.0) -> None:
+        """Returns once the gated sleep has been entered this many times."""
+        async with asyncio.timeout(limit_seconds):
+            while self._waiting < count:
+                self._arrived.clear()
+                await self._arrived.wait()
+
+    def open_gate(self) -> None:
+        self._opened.set()
+
+
 def credentials(client_id: str = "agent-mozart") -> AgentCredentials:
     return AgentCredentials(client_id, Secret(secrets.token_hex(16)))
 

@@ -23,6 +23,7 @@ from personas.failures import StoreDefect, StoreUnavailable, leaves_of
 from personas.loop import Boundaries, run_all
 from personas.readiness import FileReadyMarker, ReadinessError, ReadyMarker
 from personas.reporting import log_state_change
+from personas.sweep import SweptStore, sweep_lines
 from personas.tokens import HttpTokenSource
 
 if TYPE_CHECKING:
@@ -93,9 +94,17 @@ async def real_boundaries(config: Config, ready: ReadyMarker) -> AsyncGenerator[
         )
 
 
+async def run_with_sweep(config: Config, boundaries: Boundaries) -> NoReturn:
+    """The loops, and beside them the sweep when the configuration has a memory; a defect of either ends both."""
+    async with asyncio.TaskGroup() as group:
+        if config.memory is not None and isinstance(boundaries.lines, SweptStore):
+            group.create_task(sweep_lines(boundaries.lines, config.memory, boundaries.clock, boundaries.report))
+        await run_all(config, boundaries)
+
+
 async def _compose_and_run(config: Config, ready: ReadyMarker, compose: Compose) -> None:
     async with compose(config, ready) as boundaries:
-        await run_all(config, boundaries)
+        await run_with_sweep(config, boundaries)
 
 
 async def _run(config: Config, ready: ReadyMarker, compose: Compose) -> None:

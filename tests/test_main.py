@@ -209,6 +209,53 @@ def test_a_sigterm_that_cancels_the_runner_ends_the_entry_point_without_raising(
     main(compose_then_stop)
 
 
+SWEEP_MINUTES = 7.0
+
+
+class SweepEndedBySigterm:
+    """A store and a clock that send the runner a SIGTERM inside a sweep, or inside the wait after it, and then wait."""
+
+    def __init__(self, *, in_a_sweep: bool) -> None:
+        self._in_a_sweep = in_a_sweep
+        self.time = FakeClock()
+
+    async def erase_before(self, first_read_before) -> int:
+        if self._in_a_sweep:
+            await self._terminated()
+        return 0
+
+    def now(self) -> float:
+        return self.time.now()
+
+    def wall(self):
+        return self.time.wall()
+
+    async def sleep(self, seconds: float) -> None:
+        if seconds == SWEEP_MINUTES * 60:
+            await self._terminated()
+        await self.time.sleep(seconds)
+
+    @staticmethod
+    async def _terminated() -> None:
+        os.kill(os.getpid(), signal.SIGTERM)
+        await asyncio.Event().wait()
+
+
+@pytest.mark.parametrize("in_a_sweep", [False, True], ids=["in the wait", "in a sweep"])
+def test_a_sigterm_in_a_sweep_or_in_its_wait_ends_the_entry_point_without_raising(world, in_a_sweep):
+    world.on_joined = lambda: None
+    world.files.text += world.files.memory_table(sweep_minutes=str(SWEEP_MINUTES))
+    world.files.write()
+    sweeping = SweepEndedBySigterm(in_a_sweep=in_a_sweep)
+
+    @asynccontextmanager
+    async def compose_sweeping(config: Config, ready: ReadyMarker) -> AsyncGenerator[Boundaries]:
+        async with world.compose(config, ready) as boundaries:
+            yield replace(boundaries, lines=sweeping, clock=sweeping)
+
+    main(compose_sweeping)
+
+
 def test_the_real_boundaries_hand_the_loops_the_marker_they_were_given(files):
     files.write()
     config = load_config({CONFIG_ENVIRONMENT_VARIABLE: str(files.config_path)})

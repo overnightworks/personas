@@ -454,6 +454,22 @@ def test_a_memory_table_tells_a_turn_the_default_day_unless_it_sets_how_far_back
     assert memory.today == TodayBounds(hours=math.inf, size_bytes=1024)
 
 
+@pytest.mark.parametrize(
+    ("written", "expected"),
+    [({}, (30.0, 60.0)), ({"lines_keep_days": "inf", "sweep_minutes": "inf"}, (math.inf, math.inf))],
+    ids=["defaults", "no limit"],
+)
+def test_a_memory_table_keeps_lines_thirty_days_and_sweeps_hourly_unless_it_sets_either_or_leaves_it_infinite(
+    files, written, expected
+):
+    files.text += files.memory_table(**written)
+
+    memory = load_config(files.write()).memory
+
+    assert memory is not None
+    assert (memory.lines_keep_days, memory.sweep_minutes) == expected
+
+
 def test_a_file_without_a_memory_table_opens_no_store(files):
     assert load_config(files.write()).memory is None
 
@@ -476,6 +492,14 @@ def test_a_file_without_a_memory_table_opens_no_store(files):
         ({"today_hours": '"24"'}, "memory.today_hours"),
         ({"today_hours": "nan"}, "memory.today_hours"),
         ({"today_bytes": "0"}, "memory.today_bytes"),
+        ({"lines_keep_days": "0"}, "memory.lines_keep_days"),
+        ({"lines_keep_days": "-3"}, "memory.lines_keep_days"),
+        ({"lines_keep_days": '"30"'}, "memory.lines_keep_days"),
+        ({"lines_keep_days": "nan"}, "memory.lines_keep_days"),
+        ({"sweep_minutes": "0"}, "memory.sweep_minutes"),
+        ({"sweep_minutes": "-3"}, "memory.sweep_minutes"),
+        ({"sweep_minutes": '"60"'}, "memory.sweep_minutes"),
+        ({"sweep_minutes": "nan"}, "memory.sweep_minutes"),
         ({"today_bytes": "1.5"}, "memory.today_bytes"),
         ({"password": '"in-the-file"'}, "memory.password"),
     ],
@@ -495,6 +519,14 @@ def test_a_file_without_a_memory_table_opens_no_store(files):
         "day hours a string",
         "day hours no number",
         "day of no bytes",
+        "keep period of no days",
+        "keep period negative",
+        "keep period a string",
+        "keep period no number",
+        "sweep period of no minutes",
+        "sweep period negative",
+        "sweep period a string",
+        "sweep period no number",
         "day bytes a fraction",
         "password written into the file",
     ],

@@ -415,3 +415,19 @@ async def test_a_read_slower_than_its_bound_is_cut_as_a_timeout_and_the_turn_ans
 
     assert "earlier_today" not in runner.gateway.openings()[0].room
     assert runner.reports.events().count(("store_failed", STORE_TIMEOUT_CODE)) == 1
+
+
+async def test_every_line_first_read_before_the_time_is_erased_of_every_agent_whether_or_not_it_is_configured(
+    store, database
+):
+    cutoff = WALL_START + timedelta(days=1)
+    visit = a_visit("sweep")
+    await store.keep(a_read_in(visit, line(1, "Old, configured agent"), hours_after_start=0))
+    await store.keep(a_read_in(visit, line(1, "Old, agent no longer configured"), client_id="agent-gone"))
+    await store.keep(a_read_in(visit, line(2, "Exactly at the time"), hours_after_start=24))
+    await store.keep(a_read_in(visit, line(3, "Younger"), hours_after_start=30, client_id=SECOND_AGENT))
+
+    erased = await store.erase_before(cutoff)
+
+    assert erased == 2
+    assert kept_lines(database, "text") == [("Younger",), ("Exactly at the time",)]
