@@ -8,19 +8,22 @@ import secrets
 import time
 import traceback
 from dataclasses import replace
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 import pytest
 from agents.member import PlaceEntry, PlaceRef, PlaceWindow
 from sqlalchemy.exc import IntegrityError
 
-from personas.decision import WindowRead
+from personas.decision import TodayBounds, Visit, WindowRead, today_since
 from personas.failures import STORE_TIMEOUT_CODE, STORE_UNREACHABLE_CODE, StoreDefect, StoreUnavailable
 from personas.memory import PostgresLineStore, SchemaNotAtHeadError
-from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
+from personas.reporting import Event
+from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import WALL_START, line, window_of
+from tests.support.gateway import Gateway, says
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import LIMIT_SECONDS, active, formatted, paused
+from tests.support.hopin import LIMIT_SECONDS, active, formatted, invited, paused
 from tests.support.postgres import Forwarder, kept_lines, lines_table_locked, run_sql, waiting_statements
 
 if TYPE_CHECKING:
@@ -79,6 +82,15 @@ async def store(database: MemoryTarget) -> AsyncIterator[ObservedStore]:
 
 def a_read(*lines: PlaceEntry) -> WindowRead:
     return WindowRead(AGENT, APP, PlaceRef(kind="call", id=PLACE_ID), window_of(*lines), WALL_START)
+
+
+def a_visit(generation: str) -> Visit:
+    return Visit(APP, PlaceRef(kind="call", id=PLACE_ID), generation)
+
+
+def a_read_in(visit: Visit, *lines: PlaceEntry, client_id: str = AGENT, hours_after_start: float = 0.0) -> WindowRead:
+    read_at = WALL_START + timedelta(hours=hours_after_start)
+    return WindowRead(client_id, visit.app, visit.place, window_of(*lines, generation=visit.generation), read_at)
 
 
 async def ended_by(task):
@@ -322,3 +334,84 @@ async def test_a_runner_met_by_a_database_error_that_is_no_outage_ends_with_a_co
     assert "A line to be lost" not in shown
     assert database.password.reveal() not in shown
     await store.close()
+
+
+async def test_back_four_hours_after_a_visit_his_first_turn_is_told_its_lines_in_order_and_not_its_own_window_again(
+    runner, store, database
+):
+    welcome_back = f"{ADDRESSED} Back again?"
+
+    def addressed_once_joined(change):
+        if change.event is Event.JOINED:
+            runner.app.stand(SUBJECT, active(PLACE_ID))
+            say_in_the_call(runner, welcome_back)
+
+    runner.remember_in(store, database)
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER, "Yes."))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.app.said_count(1)
+    await store.until_finished(2)
+    runner.app.stand(SUBJECT)
+    runner.clock.time += 4 * 3600
+    runner.on_report = addressed_once_joined
+    runner.app.stand(SUBJECT, invited(PLACE_ID, "inv-3"))
+    await runner.app.said_count(2)
+
+    first_visit, back_again = runner.gateway.openings()
+    assert first_visit.room["earlier_today"] == {"older_dropped": False, "visits": []}
+    assert back_again.room["earlier_today"] == {
+        "older_dropped": False,
+        "visits": [
+            {
+                "minutes_ago": 240,
+                "lines": [
+                    {"name": "Ada", "kind": "message", "text": ADDRESSED, "own": False},
+                    {"name": "Mozart", "kind": "message", "text": ANSWER, "own": True},
+                ],
+            }
+        ],
+    }
+    assert [each["text"] for each in back_again.room["lines"]] == [welcome_back]
+
+
+async def test_lines_first_read_longer_ago_than_the_day_reaches_are_not_read(store):
+    now = WALL_START + timedelta(hours=30)
+    await store.keep(a_read_in(a_visit("long-ago"), line(1, "Too long ago"), hours_after_start=5.9))
+    await store.keep(a_read_in(a_visit("today"), line(1, "Within the day"), hours_after_start=6.1))
+
+    since = today_since(now, TodayBounds(hours=24.0, size_bytes=1024))
+    kept = await store.kept_since(AGENT, since, a_visit("now"))
+
+    assert [each.text for each in kept] == ["Within the day"]
+
+
+async def test_two_agents_with_lines_in_one_place_each_read_only_their_own_and_never_the_visit_they_are_in(store):
+    morning, now = a_visit("morning"), a_visit("now")
+    await store.keep(a_read_in(morning, line(1, "Mozart heard this")))
+    await store.keep(a_read_in(now, line(1, "Mozart hears this now")))
+    await store.keep(a_read_in(morning, line(1, "Ada heard this"), client_id=SECOND_AGENT))
+
+    mozart = await store.kept_since(AGENT, WALL_START, now)
+    ada = await store.kept_since(SECOND_AGENT, WALL_START, now)
+
+    assert [(each.visit, each.seq, each.text) for each in mozart] == [(morning, 1, "Mozart heard this")]
+    assert [(each.visit, each.seq, each.text) for each in ada] == [(morning, 1, "Ada heard this")]
+    assert type(mozart[0].seq) is int
+
+
+async def test_a_read_slower_than_its_bound_is_cut_as_a_timeout_and_the_turn_answers_without_the_day(runner, database):
+    bounded = replace(database, write_seconds=BOUND_SECONDS)
+    store = ObservedStore(bounded)
+    runner.remember_in(store, bounded)
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    await restarted_in_the_call(runner)
+    try:
+        with lines_table_locked(database):
+            say_in_the_call(runner, ADDRESSED)
+            await runner.app.said_count(1)
+    finally:
+        await store.close()
+
+    assert "earlier_today" not in runner.gateway.openings()[0].room
+    assert runner.reports.events().count(("store_failed", STORE_TIMEOUT_CODE)) == 1

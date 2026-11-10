@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import itertools
 import json
+import math
 import secrets
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from agents.member import (
@@ -25,6 +27,7 @@ from personas.decision import (
     RENEW_BEFORE_EXPIRY_SECONDS,
     Accept,
     Joined,
+    KeptLine,
     Memory,
     Paused,
     Perception,
@@ -32,9 +35,11 @@ from personas.decision import (
     Reading,
     Restarted,
     Suspend,
+    TodayBounds,
     Token,
     TurnCap,
     UnrecognisedRefusal,
+    Visit,
     accepts_for,
     active_call_places,
     addressed,
@@ -43,6 +48,7 @@ from personas.decision import (
     bound_declarations,
     call_within_bound,
     decisive_failure,
+    earlier_today,
     failure_code,
     forget_gone,
     perceive,
@@ -51,6 +57,7 @@ from personas.decision import (
     reserve_turn,
     sets_where_reading_starts,
     sync_checkpoints,
+    today_since,
     turn_call_bound,
     turn_input,
     turn_invalid,
@@ -433,6 +440,96 @@ def test_a_turn_is_told_whether_older_lines_were_not_seen(missed):
     window = window_of(line(4, "a"))
 
     assert json.loads(turn_input(PLACE, "Mozart", window, window.entries, missed=missed))["missed"] is missed
+
+
+LATER = datetime(2026, 11, 10, 18, 0, tzinfo=UTC)
+MORNING = Visit("https://app.test/mcp", PlaceRef(kind="call", id="room-7"), "morning")
+NOON = Visit("https://app.test/mcp", PlaceRef(kind="call", id="room-8"), "noon")
+ROOMY = TodayBounds(hours=24.0, size_bytes=10_000)
+
+
+def kept(visit, seq, text, *, hours_before, own=False, name="Ada"):
+    """A kept line of a visit, first read this many hours before ``LATER``."""
+    return KeptLine(visit, seq, LATER - timedelta(hours=hours_before), name, "message", text, own)
+
+
+def told(earlier):
+    return [[(each.seq, each.text) for each in visit.lines] for visit in earlier.visits]
+
+
+def test_two_earlier_visits_are_told_in_the_order_they_happened_each_as_its_own_group_in_seq_order():
+    lines = [
+        kept(NOON, 2, "noon two", hours_before=6),
+        kept(MORNING, 1, "morning one", hours_before=9),
+        kept(NOON, 1, "noon one", hours_before=6),
+        kept(MORNING, 2, "morning two", hours_before=9),
+    ]
+
+    earlier = earlier_today(lines, LATER, ROOMY)
+
+    assert told(earlier) == [[(1, "morning one"), (2, "morning two")], [(1, "noon one"), (2, "noon two")]]
+    assert [visit.minutes_ago for visit in earlier.visits] == [9 * 60, 6 * 60]
+    assert earlier.older_dropped is False
+
+
+def test_lines_beyond_the_size_bound_leave_the_oldest_out_keep_the_newest_and_say_so():
+    lines = [
+        kept(MORNING, 1, "oldest" * 20, hours_before=9, name="Bo"),
+        kept(NOON, 1, "middle", hours_before=6, name="Bo"),
+        kept(NOON, 2, "newest", hours_before=6, name="Bo"),
+    ]
+    two_lines = TodayBounds(hours=24.0, size_bytes=2 * len("Bo" + "middle"))
+
+    earlier = earlier_today(lines, LATER, two_lines)
+
+    assert told(earlier) == [[(1, "middle"), (2, "newest")]]
+    assert earlier.older_dropped is True
+
+
+def test_lines_exactly_at_the_size_bound_are_all_told():
+    lines = [kept(MORNING, 1, "one", hours_before=1, name="Bo"), kept(MORNING, 2, "two", hours_before=1, name="Bo")]
+
+    earlier = earlier_today(lines, LATER, TodayBounds(hours=24.0, size_bytes=2 * len("Bo" + "one")))
+
+    assert told(earlier) == [[(1, "one"), (2, "two")]]
+    assert earlier.older_dropped is False
+
+
+def test_the_day_reaches_back_the_configured_hours_and_an_unbounded_day_reaches_back_to_any_line():
+    assert today_since(LATER, TodayBounds(hours=24.0, size_bytes=1)) == LATER - timedelta(hours=24)
+    assert today_since(LATER, TodayBounds(hours=math.inf, size_bytes=1)) <= datetime(1, 1, 2, tzinfo=UTC)
+
+
+def test_a_turn_is_told_each_earlier_visit_how_long_ago_it_was_its_lines_their_speakers_and_his_own():
+    mine, theirs = secrets.token_hex(4), secrets.token_hex(4)
+    window = window_of(line(1, "now"))
+    earlier = earlier_today(
+        [kept(MORNING, 1, theirs, hours_before=4), kept(MORNING, 2, mine, hours_before=4, own=True, name="Mozart")],
+        LATER,
+        ROOMY,
+    )
+
+    facts = json.loads(turn_input(PLACE, "Mozart", window, window.entries, missed=False, earlier=earlier))
+
+    assert facts["earlier_today"] == {
+        "older_dropped": False,
+        "visits": [
+            {
+                "minutes_ago": 240,
+                "lines": [
+                    {"name": "Ada", "kind": "message", "text": theirs, "own": False},
+                    {"name": "Mozart", "kind": "message", "text": mine, "own": True},
+                ],
+            }
+        ],
+    }
+    assert [each["text"] for each in facts["lines"]] == ["now"]
+
+
+def test_a_turn_without_a_memory_is_told_no_earlier_visits():
+    window = window_of(line(1, "now"))
+
+    assert "earlier_today" not in json.loads(turn_input(PLACE, "Mozart", window, window.entries, missed=False))
 
 
 CAP = TurnCap(max_turns=3, period_seconds=100.0)
