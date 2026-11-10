@@ -440,14 +440,29 @@ async def test_a_defect_in_a_tools_only_request_whose_close_outlasts_the_apps_ca
     assert runner.app.said == []
 
 
-@pytest.mark.parametrize("where", ["listing", "call"])
-async def test_a_timeout_a_tools_only_request_raises_itself_before_the_call_time_is_up_is_a_defect_ending_the_runner(
-    runner, songmaker, monkeypatch, where
+@pytest.mark.parametrize("armed_at", ["listing", "call"])
+async def test_a_timeout_the_token_source_raises_itself_before_the_call_time_is_up_is_a_defect_ending_the_runner(
+    runner, songmaker, monkeypatch, armed_at
 ):
+    armed = asyncio.Event()
+    if armed_at == "listing":
+        armed.set()
+    real_fetch = HttpTokenSource.fetch
     defect = TimeoutError("not the call time of the app")
-    raising_in_the_tools_only_request(runner, monkeypatch, where, defect)
+
+    async def fetching(self, agent, scope):
+        if scope == SCOPE and armed.is_set():
+            raise defect
+        return await real_fetch(self, agent, scope)
+
+    monkeypatch.setattr(HttpTokenSource, "fetch", fetching)
     runner.gateway = Gateway(calling(CREATE_SONG), saying(ANSWER), completion("done"))
+    first_round = runner.gateway.hold_request(1)
     await addressed_in_the_call(runner)
+    if armed_at == "call":
+        await runner.gateway.until_requested(1)
+        armed.set()
+        first_round.set()
 
     ended = await ended_by(runner.task)
 

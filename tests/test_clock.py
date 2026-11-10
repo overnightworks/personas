@@ -1,4 +1,4 @@
-"""The real clock: time never runs backwards and a sleep returns."""
+"""The real clock: a sleep moves the time on."""
 
 from __future__ import annotations
 
@@ -9,13 +9,11 @@ from personas.clock import SystemClock
 pytestmark = pytest.mark.anyio
 
 
-def test_the_time_never_runs_backwards():
+async def test_a_sleep_moves_the_time_on():
     clock = SystemClock()
+    slept = 0.01
+    before = clock.now()
 
-    first = clock.now()
+    await clock.sleep(slept)
 
-    assert clock.now() >= first
-
-
-async def test_a_sleep_of_zero_seconds_returns():
-    await SystemClock().sleep(0)
+    assert clock.now() - before > slept / 2
