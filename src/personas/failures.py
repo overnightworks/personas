@@ -15,6 +15,12 @@ LISTEN_NOT_HONORED_CODE: Final = "listen_not_honored"
 """The code of a stream the app acknowledged without the subscription the runner asked for."""
 UNSUPPORTED_VERSION_CODE: Final = "unsupported_version"
 """The code of an app that shares no protocol revision with the runner."""
+STORE_UNREACHABLE_CODE: Final = "store_unreachable"
+"""The code of a store that could not be reached or ended the connection."""
+STORE_TIMEOUT_CODE: Final = "store_timeout"
+"""The code of a write that did not finish within its bound."""
+STORE_DEFECT_CODE: Final = "store_defect"
+"""The code of a database error that is no outage."""
 LATE_ANSWER_ERRORS: Final = (anyio.BrokenResourceError, anyio.ClosedResourceError)
 """What the transport's task raises when an answer lands after its session ended."""
 
@@ -46,6 +52,18 @@ class UnusableAnswer(CallFailure):
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
+
+
+class StoreUnavailable(Exception):  # noqa: N818 - it names the state of the store, as Unreachable does
+    """The store could not keep a window now; ``code`` says why and the loop goes on without memory."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+class StoreDefect(Exception):  # noqa: N818 - a defect is named by its kind
+    """A database error that is no outage; the message holds a code and no parameter, row or secret."""
 
 
 def leaves_of(error: BaseException) -> Iterator[BaseException]:

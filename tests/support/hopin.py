@@ -92,6 +92,7 @@ class Line:
     author: str
     name: str
     text: str
+    spoken: bool = False
 
 
 def active(place_id: str) -> Standing:
@@ -199,11 +200,11 @@ class FakeApp:
             self.content.update([each.place.id, *([each.invitation.id] if each.invitation else [])])
         self.changes.changed(Principal(iss=ISSUER, sub=subject), STANDING_URI)
 
-    def speak(self, place_id: str, author: str, name: str, text: str) -> int:
+    def speak(self, place_id: str, author: str, name: str, text: str, *, spoken: bool = False) -> int:
         """Adds a line to a place and signals its window to every member standing there, once it is visible."""
         place_lines = self.lines.setdefault(place_id, [])
         seq = place_lines[-1].seq + 1 if place_lines else 1
-        place_lines.append(Line(seq, author, name, text))
+        place_lines.append(Line(seq, author, name, text, spoken))
         del place_lines[:-WINDOW_LINES]
         self.content.add(text)
         window = place_window_uri(PlaceRef(kind="call", id=place_id))
@@ -272,7 +273,14 @@ class FakeApp:
         if place.id in self.vanished or not any(each.place == place for each in self.standings.get(principal.sub, [])):
             return None
         entries = tuple(
-            PlaceEntry(seq=line.seq, kind="message", name=line.name, text=line.text, own=line.author == principal.sub)
+            PlaceEntry(
+                seq=line.seq,
+                kind="message",
+                name=line.name,
+                text=line.text,
+                own=line.author == principal.sub,
+                spoken=line.spoken,
+            )
             for line in self.lines.get(place.id, [])
         )
         return PlaceWindow(

@@ -34,6 +34,9 @@ class Files:
         self.persona_prompt = secrets.token_hex(16)
         self.persona_path = directory / f"{PERSONA_NAME}.md"
         self.persona_path.write_text(self.persona_text(), encoding="utf-8")
+        self.password = secrets.token_hex(16)
+        self.password_path = directory / "memory.password"
+        self.password_path.write_text(f"{self.password}\n", encoding="utf-8")
         self.ready_path = directory / "ready"
         self.config_path = directory / "personas.toml"
         self.text = self.valid_text()
@@ -62,6 +65,13 @@ class Files:
             f'ready_file = "{self.ready_path}"\n{gateway}'
             f'[[apps]]\nmcp_url = "{mcp_url}"\nscope = "{scope}"\n{tools}'
             f'[[agents]]\nclient_id = "agent-mozart"\nsecret_file = "{self.secret_path}"\n{persona}'
+        )
+
+    def memory_table(self, host: str, port: int, dbname: str, user: str, *, write_seconds: float | None = None) -> str:
+        bound = "" if write_seconds is None else f"write_seconds = {write_seconds}\n"
+        return (
+            f'[memory]\nhost = "{host}"\nport = {port}\ndbname = "{dbname}"\nuser = "{user}"\n'
+            f'password_file = "{self.password_path}"\n{bound}'
         )
 
     def write(self) -> dict[str, str]:

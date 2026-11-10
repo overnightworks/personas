@@ -21,6 +21,8 @@ class Event(StrEnum):
     TURN_ENDED = "turn_ended"
     CAPPED = "capped"
     TOOLS_ONLY_APP_FAILED = "tools_only_app_failed"
+    STORE_FAILED = "store_failed"
+    STORE_RESUMED = "store_resumed"
 
 
 @dataclass(frozen=True)

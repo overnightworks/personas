@@ -10,6 +10,7 @@ import json
 import math
 import re
 from dataclasses import asdict, dataclass, field
+from datetime import datetime  # noqa: TC003 - the dataclass field's type
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
@@ -261,6 +262,17 @@ def reserve_turn(started: tuple[float, ...], now: float, cap: TurnCap | None) ->
     if len(inside) >= cap.max_turns:
         return None
     return (*inside, now)
+
+
+@dataclass(frozen=True)
+class WindowRead:
+    """A window as one agent read it from one app's place, and the wall time of that read."""
+
+    client_id: str
+    app: str
+    place: PlaceRef
+    window: PlaceWindow
+    read_at: datetime
 
 
 @dataclass(frozen=True)

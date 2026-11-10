@@ -6,6 +6,7 @@ import asyncio
 import secrets
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from agents.member import MemberStanding, PlaceEntry, PlaceWindow, Standing
@@ -24,6 +25,9 @@ if TYPE_CHECKING:
     from personas.reporting import StateChange
 
 
+WALL_START = datetime(2026, 11, 10, 8, 0, tzinfo=UTC)
+
+
 class FakeClock:
     """Time that moves only when told, and sleeps that return at once."""
 
@@ -33,6 +37,9 @@ class FakeClock:
 
     def now(self) -> float:
         return self.time
+
+    def wall(self) -> datetime:
+        return WALL_START + timedelta(seconds=self.time)
 
     async def sleep(self, seconds: float) -> None:
         self.slept.append(seconds)

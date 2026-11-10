@@ -46,8 +46,10 @@ if TYPE_CHECKING:
     from agents.member import MemberStanding
     from agents.tools import HandTool
 
+    from personas.config import MemoryTarget
     from personas.decision import Refusal, TurnCap
     from personas.failures import CallFailure
+    from personas.loop import LineStore
     from personas.reporting import StateChange
     from personas.tokens import GrantedToken
     from tests.support.songmaker import ToolsOnlyApp
@@ -130,6 +132,7 @@ class Harness:
         self.token_client = httpx2.AsyncClient(transport=self.realm.transport())
         self.task: asyncio.Task[object] | None = None
         self.tools_only_apps: list[ToolsOnlyApp] = []
+        self.lines: LineStore | None = None
 
     def add_tools_only_app(self, app: ToolsOnlyApp, url: str) -> None:
         """Binds the tools of an app that listens to nothing and lets the agent's tokens for its scope into it."""
@@ -175,6 +178,7 @@ class Harness:
             report=self._report,
             ready=FileReadyMarker(self.ready_file),
             backend=self._backend,
+            lines=self.lines,
         )
         self.task = asyncio.create_task(run_all(self.config, boundaries))
 
@@ -186,6 +190,7 @@ class Harness:
         return [
             *(agent.client_secret.reveal() for agent in self.config.agents),
             self.files.gateway_key,
+            self.files.password,
             self.files.persona_prompt,
             *self.realm.issued,
             *self.app.kept_out_of_logs(),
@@ -225,3 +230,32 @@ async def runner(caplog: pytest.LogCaptureFixture, library_loggers: None, files:
 @pytest.fixture
 def files(tmp_path: Path) -> Files:
     return Files(tmp_path)
+
+
+@pytest.fixture(scope="session")
+def postgres_template() -> Iterator[str]:
+    """The name of the migrated template database; the first test that asks creates it.
+
+    The support module imports the database library, which the tests of the loop never load.
+    """
+    from tests.support.postgres import migrated_template
+
+    with migrated_template() as name:
+        yield name
+
+
+@pytest.fixture
+def database(postgres_template: str) -> Iterator[MemoryTarget]:
+    """A migrated database of this test's own."""
+    from tests.support.postgres import created_database, target_of
+
+    with created_database(postgres_template) as name:
+        yield target_of(name)
+
+
+@pytest.fixture
+def unmigrated_database() -> Iterator[MemoryTarget]:
+    from tests.support.postgres import created_database, target_of
+
+    with created_database() as name:
+        yield target_of(name)

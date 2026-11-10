@@ -13,8 +13,8 @@ ADDRESSED = "Mozart, are you there?"
 ANSWER = "Here I am."
 
 
-def say_in_the_call(runner, text, *, author=PERSON, name="Ada"):
-    return runner.app.speak(PLACE_ID, author, name, text)
+def say_in_the_call(runner, text, *, author=PERSON, name="Ada", spoken=False):
+    return runner.app.speak(PLACE_ID, author, name, text, spoken=spoken)
 
 
 async def restarted_in_the_call(runner, place_id=PLACE_ID):

@@ -5,16 +5,19 @@ description = "The runner that signs agents in as themselves and keeps them wait
 license = "MIT"
 requires-python = ">=3.14"
 dependencies = [
+    "alembic>=1.16",
     "anyio>=4.16.0",
     "httpx2>=2.16.0",
     "mcp>=2.3.0",
     "mcp-types>=2.3.0",
     "overnightworks-agents[backend] @ git+https://github.com/overnightworks/agents@v0.29.0",
+    "psycopg[binary]>=3.2",
     "pydantic>=2.12",
+    "sqlalchemy[asyncio]>=2.1.6",
 ]
 
 [project.scripts]
-personas = "personas.main:main"
+personas = "personas.main:command_line"
 
 [build-system]
 requires = ["hatchling==1.33.0"]
@@ -110,6 +113,7 @@ addopts = [
     "--cov",
     "--cov-report=term-missing",
 ]
+markers = ["postgres: tests that need the throwaway Postgres named by PERSONAS_TEST_POSTGRES_URL"]
 
 # --- Coverage ---
 

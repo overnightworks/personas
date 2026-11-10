@@ -1,4 +1,4 @@
-"""The entry point: the console script ``personas``, which composes the real boundaries."""
+"""The entry point: the console script ``personas``, which composes the real boundaries or migrates the memory."""
 
 from __future__ import annotations
 
@@ -23,21 +23,23 @@ from personas.reporting import log_state_change
 from personas.tokens import HttpTokenSource
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Callable, Iterable
+    from collections.abc import AsyncGenerator, Callable, Iterable, Sequence
 
     from agents.backend import AgentBackend
     from agents.config import AgentConfig
     from agents.tools import HandTool
 
-    from personas.loop import BackendFactory
+    from personas.config import MemoryTarget
+    from personas.loop import BackendFactory, LineStore
 
 type Compose = Callable[[Config, ReadyMarker], AbstractAsyncContextManager[Boundaries]]
 
 CONFIGURATION_ERROR_EXIT_CODE: Final = 2
 READINESS_ERROR_EXIT_CODE: Final = 3
-QUIET_LIBRARIES: Final = ("httpx2", "httpcore2", "mcp", "client", "agents")
+QUIET_LIBRARIES: Final = ("httpx2", "httpcore2", "mcp", "client", "agents", "sqlalchemy", "psycopg", "alembic")
 """Their records carry request details and response content; only the runner's own state changes are logged."""
 SILENT_LEVEL: Final = logging.CRITICAL + 1
+MIGRATE_COMMAND: Final = "migrate"
 
 
 def _gateway_backends(gateway: AgentConfig | None) -> BackendFactory | None:
@@ -51,8 +53,26 @@ def _gateway_backends(gateway: AgentConfig | None) -> BackendFactory | None:
 
 
 @asynccontextmanager
+async def _line_store(target: MemoryTarget | None) -> AsyncGenerator[LineStore | None]:
+    """The store the configuration names, opened on its first write; without the table there is none.
+
+    The database library is loaded only here, so a runner without a memory never imports it.
+    """
+    if target is None:
+        yield None
+        return
+    from personas.memory import PostgresLineStore
+
+    store = PostgresLineStore(target)
+    try:
+        yield store
+    finally:
+        await store.close()
+
+
+@asynccontextmanager
 async def real_boundaries(config: Config, ready: ReadyMarker) -> AsyncGenerator[Boundaries]:
-    async with httpx2.AsyncClient() as token_client:
+    async with httpx2.AsyncClient() as token_client, _line_store(config.memory) as lines:
         yield Boundaries(
             tokens=HttpTokenSource(config.token_endpoint, token_client),
             open_session=open_mcp_session,
@@ -60,6 +80,7 @@ async def real_boundaries(config: Config, ready: ReadyMarker) -> AsyncGenerator[
             report=log_state_change,
             ready=ready,
             backend=_gateway_backends(config.gateway),
+            lines=lines,
         )
 
 
@@ -86,13 +107,16 @@ def configure_logging() -> None:
         logging.getLogger(name).setLevel(SILENT_LEVEL)
 
 
-def main(compose: Compose = real_boundaries) -> None:
-    try:
-        config = load_config(os.environ)
-    except ConfigError as error:
-        sys.stderr.write(f"personas: {error}\n")
-        raise SystemExit(CONFIGURATION_ERROR_EXIT_CODE) from None
-    configure_logging()
+def _migrate(config: Config) -> None:
+    if config.memory is None:
+        sys.stderr.write("personas: memory: the table is required to migrate\n")
+        raise SystemExit(CONFIGURATION_ERROR_EXIT_CODE)
+    from personas.memory import migrate
+
+    migrate(config.memory)
+
+
+def _run_runner(config: Config, compose: Compose) -> None:
     marker = FileReadyMarker(config.ready_file)
     try:
         # A marker from an earlier run never counts: it goes before any loop asks for a token.
@@ -101,3 +125,25 @@ def main(compose: Compose = real_boundaries) -> None:
     except* ReadinessError as group:
         sys.stderr.write(f"personas: {next(leaves_of(group))}\n")
         raise SystemExit(READINESS_ERROR_EXIT_CODE) from None
+
+
+def main(compose: Compose = real_boundaries, arguments: Sequence[str] = ()) -> None:
+    """Runs the runner, or with the argument ``migrate`` brings the memory's schema to its head."""
+    if list(arguments) not in ([], [MIGRATE_COMMAND]):
+        sys.stderr.write(f"personas: unknown command; the only one is {MIGRATE_COMMAND}\n")
+        raise SystemExit(CONFIGURATION_ERROR_EXIT_CODE)
+    try:
+        config = load_config(os.environ)
+    except ConfigError as error:
+        sys.stderr.write(f"personas: {error}\n")
+        raise SystemExit(CONFIGURATION_ERROR_EXIT_CODE) from None
+    configure_logging()
+    if arguments:
+        _migrate(config)
+    else:
+        _run_runner(config, compose)
+
+
+def command_line() -> None:
+    """The console script's entry point."""
+    main(arguments=sys.argv[1:])

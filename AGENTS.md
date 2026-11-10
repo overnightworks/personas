@@ -7,6 +7,7 @@
 - `uv run pyright`: strict types.
 - `uv run vulture`: dead code.
 - `uv run pytest tests/<module>.py --no-cov`: one test module; never the whole suite.
+- `scripts/test_postgres.sh uv run --no-sync pytest -m postgres -n auto --no-cov`: the tests that need Postgres, against a throwaway container; a marked test fails without `PERSONAS_TEST_POSTGRES_URL`.
 - `uvx --python 3.14 --from "overnightworks-quality @ git+https://github.com/overnightworks/quality@<sha>" quality check`: the shared gate's rules, at the sha `.github/workflows/ci.yml` pins on `uses: overnightworks/quality/...`; run after committing, because it reads tracked files only.
 
 ## Rules
