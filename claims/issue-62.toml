@@ -1,0 +1,8 @@
+claim_id = "e82d096ce1f24378a48f0956c47de5bf"
+agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
+role = "builder"
+base = "e0445a0c2ec71f4fe5f1e7402dddff291c6f5cc7"
+branch = "claude/issue-62-mozart-keeps-every-line-he-reads"
+scope = [".github/workflows/ci.yml", "AGENTS.md", "Dockerfile", "README.md", "docs/ARCHITECTURE.md", "pyproject.toml", "quality/config.toml", "scripts", "sonar-project.properties", "src/personas", "tests", "uv.lock"]
+opened_commit = "21f9a50d24aaa18d33ce695d9eb5026929e242b7"
+whole_reason = "The store, its migration, its configuration, the recording and the test database that proves them are one path from a window read to a kept line; split, a table has no writer or a writer has no table. The Dockerfile is in scope only if a wheel is missing for the image."
