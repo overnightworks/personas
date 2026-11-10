@@ -1,8 +1,9 @@
 """The memory: a Postgres table of the lines every agent read, verbatim, and the migration that owns its schema.
 
-The runner writes through ``PostgresLineStore``; ``migrate`` is the only code that changes the schema. A line is
-keyed by the agent, the app, the place, the visit and its ``seq``, so reading a window again changes nothing and the
-time of the first read stands. No database error reaches a log or a traceback with a parameter or a row in it.
+The runner writes and reads through ``PostgresLineStore`` and the ``memory`` commands list and erase through it;
+``migrate`` is the only code that changes the schema. A line is keyed by the agent, the app, the place, the visit and
+its ``seq``, so reading a window again changes nothing and the time of the first read stands. No database
+error reaches a log or a traceback with a parameter or a row in it.
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import math
 from contextlib import asynccontextmanager, contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
@@ -31,6 +33,8 @@ from sqlalchemy import (
     Text,
     and_,
     create_engine,
+    delete,
+    func,
     not_,
     select,
     text,
@@ -52,6 +56,8 @@ from personas.failures import (
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Generator
     from datetime import datetime
+
+    from sqlalchemy import Delete
 
     from personas.config import MemoryTarget
     from personas.decision import WindowRead
@@ -84,6 +90,17 @@ _LINES: Final = Table(
     Column("spoken", Boolean),
     PrimaryKeyConstraint("client_id", "app", "place_kind", "place_id", "generation", "seq"),
 )
+
+
+@dataclass(frozen=True)
+class KeptVisit:
+    """What one agent keeps of one visit: how many lines, and the first and the last time one of them was first read."""
+
+    client_id: str
+    visit: Visit
+    lines: int
+    first_read_at: datetime
+    last_read_at: datetime
 
 
 class SchemaNotAtHeadError(Exception):
@@ -227,6 +244,36 @@ class PostgresLineStore:
         async with self._bounded_transaction() as connection:
             rows = (await connection.execute(statement)).all()
         return tuple(_kept_line(row) for row in rows)
+
+    async def kept_visits(self, client_id: str | None) -> tuple[KeptVisit, ...]:
+        """Every agent's visits, or those of one agent, ordered by agent and first read; no line's content."""
+        visit = (_LINES.c.client_id, _LINES.c.app, _LINES.c.place_kind, _LINES.c.place_id, _LINES.c.generation)
+        first_read_at = func.min(_LINES.c.first_read_at)
+        statement = (
+            select(*visit, func.count(), first_read_at, func.max(_LINES.c.first_read_at))
+            .group_by(*visit)
+            .order_by(_LINES.c.client_id, first_read_at, *visit[1:])
+        )
+        if client_id is not None:
+            statement = statement.where(_LINES.c.client_id == client_id)
+        async with self._bounded_transaction() as connection:
+            rows = (await connection.execute(statement)).all()
+        return tuple(
+            KeptVisit(agent, Visit(app, PlaceRef(kind=kind, id=place_id), generation), count, first, last)
+            for agent, app, kind, place_id, generation, count, first, last in rows
+        )
+
+    async def erase_agent(self, client_id: str) -> int:
+        """Deletes every line the agent keeps, in one statement, and returns how many."""
+        return await self._erase(delete(_LINES).where(_LINES.c.client_id == client_id))
+
+    async def erase_all(self) -> int:
+        """Deletes every line of every agent, in one statement, and returns how many; the schema stays."""
+        return await self._erase(delete(_LINES))
+
+    async def _erase(self, statement: Delete) -> int:
+        async with self._bounded_transaction() as connection:
+            return (await connection.execute(statement)).rowcount
 
     @asynccontextmanager
     async def _bounded_transaction(self) -> AsyncGenerator[AsyncConnection]:

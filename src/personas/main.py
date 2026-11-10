@@ -1,14 +1,17 @@
-"""The entry point: the console script ``personas``, which composes the real boundaries or migrates the memory."""
+"""The entry point: the console script ``personas``, which composes the real boundaries, or migrates, lists or erases
+the memory."""
 
 from __future__ import annotations
 
+import argparse
 import asyncio
+import csv
 import logging
 import os
 import signal
 import sys
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from typing import TYPE_CHECKING, Final
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, contextmanager
+from typing import TYPE_CHECKING, Final, NoReturn
 
 import httpx2
 from agents.backend.gateway import GatewayBackend
@@ -23,7 +26,7 @@ from personas.reporting import log_state_change
 from personas.tokens import HttpTokenSource
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Callable, Iterable, Sequence
+    from collections.abc import AsyncGenerator, Callable, Generator, Iterable, Sequence
 
     from agents.backend import AgentBackend
     from agents.config import AgentConfig
@@ -31,6 +34,7 @@ if TYPE_CHECKING:
 
     from personas.config import MemoryTarget
     from personas.loop import BackendFactory, LineStore
+    from personas.memory import KeptVisit
 
 type Compose = Callable[[Config, ReadyMarker], AbstractAsyncContextManager[Boundaries]]
 
@@ -41,6 +45,10 @@ QUIET_LIBRARIES: Final = ("httpx2", "httpcore2", "mcp", "client", "agents", "sql
 """Their records carry request details and response content; only the runner's own state changes are logged."""
 SILENT_LEVEL: Final = logging.CRITICAL + 1
 MIGRATE_COMMAND: Final = "migrate"
+MEMORY_COMMAND: Final = "memory"
+LIST_COMMAND: Final = "list"
+ERASE_COMMAND: Final = "erase"
+VISIT_COLUMNS: Final = ("agent", "app", "place_kind", "place_id", "generation", "lines", "first_read", "last_read")
 
 
 def _gateway_backends(gateway: AgentConfig | None) -> BackendFactory | None:
@@ -108,17 +116,102 @@ def configure_logging() -> None:
         logging.getLogger(name).setLevel(SILENT_LEVEL)
 
 
-def _migrate(config: Config) -> None:
-    if config.memory is None:
-        sys.stderr.write("personas: memory: the table is required to migrate\n")
+class _MemoryArgumentParser(argparse.ArgumentParser):
+    """Refuses a wrong use with its usage and the exit code of every refused command, before anything is read."""
+
+    def error(self, message: str) -> NoReturn:
+        self.print_usage(sys.stderr)
+        sys.stderr.write(f"{self.prog}: {message}\n")
         raise SystemExit(CONFIGURATION_ERROR_EXIT_CODE)
-    from personas.memory import migrate
+
+
+class _StoreOnce(argparse.Action):
+    """Refuses an option given twice, which argparse would otherwise settle silently by its last value."""
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: str | Sequence[object] | None,
+        option_string: str | None = None,
+    ) -> None:
+        if getattr(namespace, self.dest) is not None:
+            parser.error(f"argument {option_string}: given more than once")
+        setattr(namespace, self.dest, values)
+
+
+def _memory_request(arguments: Sequence[str]) -> argparse.Namespace:
+    # Prefix matching is off, or a mistyped option such as ``--al`` would select every agent's lines.
+    parser = _MemoryArgumentParser(prog=f"personas {MEMORY_COMMAND}", allow_abbrev=False)
+    commands = parser.add_subparsers(dest="command", required=True)
+    listing = commands.add_parser(
+        LIST_COMMAND, help="one row per visit, without any line's content", allow_abbrev=False
+    )
+    listing.add_argument("--agent", action=_StoreOnce, metavar="CLIENT_ID", help="only this agent's visits")
+    erasing = commands.add_parser(ERASE_COMMAND, help="delete kept lines and print how many", allow_abbrev=False)
+    selector = erasing.add_mutually_exclusive_group(required=True)
+    selector.add_argument("--agent", action=_StoreOnce, metavar="CLIENT_ID", help="every line this agent keeps")
+    selector.add_argument("--all", action="store_true", dest="every_agent", help="every line of every agent")
+    return parser.parse_args(arguments)
+
+
+def _memory_target(config: Config, command: str) -> MemoryTarget:
+    if config.memory is None:
+        sys.stderr.write(f"personas: memory: the table is required to {command}\n")
+        raise SystemExit(CONFIGURATION_ERROR_EXIT_CODE)
+    return config.memory
+
+
+@contextmanager
+def _stopping_on_store_failure() -> Generator[None]:
+    """A failure of the store ends the command with its code or its revisions, and no traceback."""
+    from personas.memory import SchemaNotAtHeadError
 
     try:
-        migrate(config.memory)
+        yield
     except (StoreUnavailable, StoreDefect) as error:
         sys.stderr.write(f"personas: memory: {error}\n")
         raise SystemExit(STORE_ERROR_EXIT_CODE) from None
+    except SchemaNotAtHeadError as error:
+        sys.stderr.write(f"personas: {error}\n")
+        raise SystemExit(STORE_ERROR_EXIT_CODE) from None
+
+
+def _migrate(config: Config) -> None:
+    target = _memory_target(config, MIGRATE_COMMAND)
+    from personas.memory import migrate
+
+    with _stopping_on_store_failure():
+        migrate(target)
+
+
+def _print_visits(visits: Iterable[KeptVisit]) -> None:
+    """Tab-separated; a field holding a tab or a line break, as a place id from an app may, is quoted."""
+    rows = csv.writer(sys.stdout, dialect="excel-tab", lineterminator="\n")
+    rows.writerow(VISIT_COLUMNS)
+    for each in visits:
+        place, times = each.visit.place, (each.first_read_at.isoformat(), each.last_read_at.isoformat())
+        rows.writerow((each.client_id, each.visit.app, place.kind, place.id, each.visit.generation, each.lines, *times))
+
+
+async def _perform_memory(target: MemoryTarget, request: argparse.Namespace) -> None:
+    from personas.memory import PostgresLineStore
+
+    store = PostgresLineStore(target)
+    try:
+        if request.command == LIST_COMMAND:
+            _print_visits(await store.kept_visits(request.agent))
+            return
+        erased = await (store.erase_all() if request.every_agent else store.erase_agent(request.agent))
+        sys.stdout.write(f"{erased} lines erased\n")
+    finally:
+        await store.close()
+
+
+def _memory(config: Config, request: argparse.Namespace) -> None:
+    target = _memory_target(config, request.command)
+    with _stopping_on_store_failure():
+        asyncio.run(_perform_memory(target, request))
 
 
 def _run_runner(config: Config, compose: Compose) -> None:
@@ -133,9 +226,11 @@ def _run_runner(config: Config, compose: Compose) -> None:
 
 
 def main(compose: Compose = real_boundaries, arguments: Sequence[str] = ()) -> None:
-    """Runs the runner, or with the argument ``migrate`` brings the memory's schema to its head."""
-    if list(arguments) not in ([], [MIGRATE_COMMAND]):
-        sys.stderr.write(f"personas: unknown command; the only one is {MIGRATE_COMMAND}\n")
+    """Runs the runner; ``migrate`` brings the memory's schema to its head, ``memory`` lists or erases what it keeps."""
+    command = list(arguments)
+    memory_request = _memory_request(command[1:]) if command[:1] == [MEMORY_COMMAND] else None
+    if memory_request is None and command not in ([], [MIGRATE_COMMAND]):
+        sys.stderr.write(f"personas: unknown command; the commands are {MIGRATE_COMMAND} and {MEMORY_COMMAND}\n")
         raise SystemExit(CONFIGURATION_ERROR_EXIT_CODE)
     try:
         config = load_config(os.environ)
@@ -143,7 +238,9 @@ def main(compose: Compose = real_boundaries, arguments: Sequence[str] = ()) -> N
         sys.stderr.write(f"personas: {error}\n")
         raise SystemExit(CONFIGURATION_ERROR_EXIT_CODE) from None
     configure_logging()
-    if arguments:
+    if memory_request is not None:
+        _memory(config, memory_request)
+    elif command:
         _migrate(config)
     else:
         _run_runner(config, compose)
