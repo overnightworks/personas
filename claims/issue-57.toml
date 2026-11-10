@@ -1,8 +1,0 @@
-claim_id = "14ba0eff48c546c68574c14b32a3843a"
-agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
-role = "builder"
-base = "b91f8e127a31f03aa30473428595e45dad8e36a2"
-branch = "claude/issue-57-a-defect-recorded-in-a-turn-ends-the-run"
-scope = ["docs/ARCHITECTURE.md", "src/personas/app_session.py", "src/personas/loop.py", "tests"]
-opened_commit = "6ba72db3f317d93e54f09e7e8a6476aa8fde252b"
-whole_reason = "The session keeping its body's leaves and the turn's one exit owner are two layers of one rule, and either alone leaves a named ordering lost; tests is the suite's turn, lifecycle and session modules and their support."
