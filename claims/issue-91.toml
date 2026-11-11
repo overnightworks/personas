@@ -1,0 +1,8 @@
+claim_id = "dfefb458f19c4d0aae5564e2c4dba4ed"
+agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
+role = "builder"
+base = "ca2b32bb1d2f226508c7567a52a7d4b830358f7a"
+branch = "claude/issue-91-a-line-said-in-his-call-reaches-his-next"
+scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/config.py", "src/personas/decision.py", "src/personas/loop.py", "src/personas/mind.py", "src/personas/turning.py", "tests"]
+opened_commit = "cf4b4a6841befec7dd2b85b106ea02b128d08a54"
+whole_reason = "The owner, its bound, its feed and its reader have no caller without each other; tests is a directory."
