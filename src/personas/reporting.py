@@ -19,7 +19,6 @@ class Event(StrEnum):
     JOINED = "joined"
     REFUSED = "refused"
     TURN_ENDED = "turn_ended"
-    VIEW_UNANSWERED = "view_unanswered"
     SPEAK_REFUSED = "speak_refused"
     TOOLS_ONLY_APP_FAILED = "tools_only_app_failed"
     STORE_FAILED = "store_failed"

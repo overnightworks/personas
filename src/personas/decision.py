@@ -57,8 +57,6 @@ TURN_CANCELLED_CODE: Final = "cancelled"
 SPOKEN_WAIT_BOUND_SECONDS: Final = 30.0
 """The longest the voice waits after a sentence, whatever length the app says it plays."""
 EARLIER_TODAY_KEY: Final = "earlier_today"
-VIEW_TURNS_PER_REVISION: Final = 3
-"""The turns that may leave one revision of a view waiting: this bounds the model spend on a view he cannot move."""
 
 
 class UnrecognisedRefusal(StrEnum):
@@ -276,47 +274,18 @@ def active_view_places(standings: tuple[Standing, ...]) -> tuple[PlaceRef, ...]:
     )
 
 
-@dataclass(frozen=True)
-class ViewRecord:
-    """What the loop holds of one view place: the revision it last started a turn for, how many turns left that
-    revision waiting, and whether the last turn started for it has not been judged by a read yet."""
-
-    revision: int
-    left_waiting: int = 0
-    unjudged: bool = False
-
-
-@dataclass(frozen=True)
-class ViewStep:
-    """What a read of a view decides: the record after it, whether a turn is due and whether the revision has just
-    run out of turns."""
-
-    record: ViewRecord
-    turn_due: bool
-    unanswered: bool
-
-
-def sync_view_records(
-    records: Mapping[PlaceRef, ViewRecord], standings: tuple[Standing, ...]
-) -> dict[PlaceRef, ViewRecord]:
-    """The records after a standing read: a place that is no active view place any more loses its record."""
+def sync_turned_revisions(turned: Mapping[PlaceRef, int], standings: tuple[Standing, ...]) -> dict[PlaceRef, int]:
+    """The revisions after a standing read: a place that is no active view place any more is forgotten."""
     active = set(active_view_places(standings))
-    return {place: record for place, record in records.items() if place in active}
+    return {place: revision for place, revision in turned.items() if place in active}
 
 
-def judge_view(record: ViewRecord | None, view: PlaceView) -> ViewStep:
-    """Judges a view read after the last turn started for it ended, or at its first read.
+def view_turn_due(turned_revision: int | None, view: PlaceView) -> bool:
+    """A turn is due while the view waits for the agent at a revision no turn has been started for yet.
 
-    A new revision starts afresh. A revision that still waits after a turn started for it has had one more turn leave
-    it waiting; a revision that moved on or stopped waiting costs nothing. A turn is due while the view waits and
-    fewer than ``VIEW_TURNS_PER_REVISION`` turns have left this revision waiting.
+    The turn's own outcome does not count: an app that wants him to act again moves the revision.
     """
-    if record is None or record.revision != view.revision:
-        record = ViewRecord(view.revision)
-    left_waiting = record.left_waiting + (1 if record.unjudged and view.awaits_you else 0)
-    turn_due = view.awaits_you and left_waiting < VIEW_TURNS_PER_REVISION
-    ran_out = left_waiting == VIEW_TURNS_PER_REVISION and left_waiting != record.left_waiting
-    return ViewStep(ViewRecord(view.revision, left_waiting, unjudged=turn_due), turn_due, ran_out)
+    return view.awaits_you and turned_revision != view.revision
 
 
 def turn_invalid(place: PlaceRef, standings: tuple[Standing, ...]) -> bool:
