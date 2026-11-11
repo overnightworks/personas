@@ -26,7 +26,6 @@ from personas.decision import (
     Reaction,
     Suspend,
     Token,
-    TurnCap,
     Visit,
     WindowRead,
     accepts_for,
@@ -44,7 +43,6 @@ from personas.decision import (
     perceive,
     reaction_to,
     renewal_due,
-    reserve_turn,
     sets_where_reading_starts,
     sync_checkpoints,
     turn_call_bound,
@@ -65,7 +63,7 @@ from personas.task_record import (
     unrequested_unless_cancelling,
 )
 from personas.tokens import TokenFacts, facts_of
-from personas.voice import ActiveVoice, CappedBackend, Hearing, SpeakingVoice, reporting_decisions
+from personas.voice import ActiveVoice, Hearing, SpeakingVoice, reporting_decisions
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Coroutine, Iterable
@@ -129,7 +127,6 @@ class _TurnSetup:
     persona: AgentDefinition
     binding: ToolBinding
     backend: BackendFactory
-    cap: TurnCap | None
 
 
 @dataclass
@@ -156,13 +153,6 @@ class _HeldTools:
     @property
     def declarations(self) -> tuple[ToolDeclaration, ...]:
         return tuple(each.declaration for each in self.tools)
-
-
-@dataclass
-class TurnCounter:
-    """The start times of one agent's recent turns, shared by all its loops and kept for the process."""
-
-    started: tuple[float, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -209,12 +199,10 @@ class AgentLoop:
         agent: AgentCredentials,
         app: AppTarget,
         boundaries: Boundaries,
-        counter: TurnCounter,
         tools_only: tuple[AppTarget, ...] = (),
         today: TodayBounds | None = None,
     ) -> None:
         self._agent = agent
-        self._counter = counter
         self._app = app
         self._tools_only = tuple((each, each.binding) for each in tools_only if each.binding is not None)
         self._boundaries = boundaries
@@ -232,9 +220,7 @@ class AgentLoop:
         self._voice_app = False
         persona, binding, backend = agent.persona, app.binding, boundaries.backend
         self._turn_setup = (
-            None
-            if persona is None or binding is None or backend is None
-            else _TurnSetup(persona, binding, backend, agent.turn_cap)
+            None if persona is None or binding is None or backend is None else _TurnSetup(persona, binding, backend)
         )
 
     async def run(self) -> NoReturn:
@@ -413,25 +399,11 @@ class AgentLoop:
         facts: TokenFacts,
         perception: Perception,
     ) -> bool:
-        """Starts the turn when a new line addresses the agent and the cap allows it.
-
-        A line starts at most one turn, and a capped line is never answered later.
-        """
+        """Starts the turn when a new line addresses the agent. A line starts at most one turn."""
         if not any(addressed(line, facts.name) for line in perception.new):
-            return False
-        if not self._reserve(setup.cap):
-            self._report(Event.CAPPED)
             return False
         admitted = _Admitted(facts, place, window, perception.new, perception.missed)
         self._start_turn(turns, setup, place, admitted)
-        return True
-
-    def _reserve(self, cap: TurnCap | None) -> bool:
-        """Counts a turn or a voice decision against the agent's one counter; a refused one is not counted."""
-        started = reserve_turn(self._counter.started, self._boundaries.clock.now(), cap)
-        if started is None:
-            return False
-        self._counter.started = started
         return True
 
     def _start_turn(self, turns: asyncio.TaskGroup, setup: _TurnSetup, place: PlaceRef, admitted: _Admitted) -> None:
@@ -477,7 +449,7 @@ class AgentLoop:
                 )
                 await run_voice_loop(
                     setup.persona,
-                    CappedBackend(setup.backend(()), partial(self._reserve, setup.cap)),
+                    setup.backend(()),
                     TurnPerson(facts.principal, TURN_ROLE, self._current_groups),
                     hearing,
                     voice,
@@ -734,9 +706,8 @@ async def run_all(config: Config, boundaries: Boundaries) -> NoReturn:
         tools_only = tuple(app for app in config.apps if not app.listens)
         today = None if config.memory is None else config.memory.today
         for agent in config.agents:
-            counter = TurnCounter()
             for app in config.apps:
                 if app.listens:
-                    loop = AgentLoop(agent, app, boundaries, counter, tools_only, today)
+                    loop = AgentLoop(agent, app, boundaries, tools_only, today)
                     group.create_task(_run_loop(loop, runner))
     raise AssertionError("a loop ended")  # pragma: no cover

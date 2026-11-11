@@ -14,7 +14,7 @@ from mcp_types import ListToolsResult, Tool
 
 from personas import app_session
 from personas.config import load_config
-from personas.decision import TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE, TurnCap
+from personas.decision import TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE
 from personas.failures import Unreachable, leaves_of
 from personas.loop import AgentLoop
 from personas.tokens import HttpTokenSource
@@ -577,17 +577,6 @@ async def test_a_leaf_that_is_no_call_failure_ends_the_runner_though_a_tools_onl
     ended = await ended_by(runner.task)
 
     assert defect in list(leaves_of(ended))
-
-
-async def test_a_turn_with_tools_only_calls_takes_one_reservation_of_the_turn_cap(runner, songmaker):
-    runner.cap_turns(TurnCap(1, 3600.0))
-    await a_song_is_made_and_announced(runner, songmaker)
-
-    say_in_the_call(runner, f"{ADDRESSED} Again.")
-    await runner.reports.until("capped")
-
-    assert [name for name, _ in songmaker.called] == [CREATE_SONG, GENERATE_SONG]
-    assert runner.reports.events() == [("started", None), ("capped", None)]
 
 
 async def test_a_tools_only_outcome_that_is_an_error_shows_the_model_its_text(runner, songmaker):

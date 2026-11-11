@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass
+from http import HTTPStatus
 from typing import TYPE_CHECKING
 
 from agents.backend.fake_gateway import FakeGateway, Reply, completion, tool_call, tool_round
@@ -16,6 +17,11 @@ if TYPE_CHECKING:
 
 TURN_OPENING_MESSAGES = 2
 """A turn's first round holds the persona and the room; every later round adds the model's calls and their results."""
+BUDGET_SPENT = Reply(
+    status=HTTPStatus.UNPROCESSABLE_ENTITY,
+    body=json.dumps({"error": {"type": "budget_exceeded", "code": "422"}}).encode(),
+)
+"""The gateway's refusal once the agent's budget is spent."""
 
 
 def says(place_id: str, *texts: str) -> list[Reply]:

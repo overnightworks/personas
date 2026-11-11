@@ -39,7 +39,6 @@ from personas.decision import (
     Suspend,
     TodayBounds,
     Token,
-    TurnCap,
     UnrecognisedRefusal,
     Visit,
     accepts_for,
@@ -57,7 +56,6 @@ from personas.decision import (
     perceive,
     reaction_to,
     renewal_due,
-    reserve_turn,
     sets_where_reading_starts,
     spoken_wait_seconds,
     swept_before,
@@ -591,38 +589,6 @@ def test_the_voice_waits_as_long_as_a_sentence_plays_up_to_the_bound(duration_ms
 
 def test_the_voice_waits_no_longer_than_the_bound_whatever_the_app_says():
     assert spoken_wait_seconds(int(SPOKEN_WAIT_BOUND_SECONDS * 1000) + 1) == SPOKEN_WAIT_BOUND_SECONDS
-
-
-CAP = TurnCap(max_turns=3, period_seconds=100.0)
-NOW = 5000.0
-
-
-def test_a_turn_with_no_turns_started_is_reserved_at_now():
-    assert reserve_turn((), NOW, CAP) == (NOW,)
-
-
-def test_without_a_cap_every_turn_may_start_and_no_start_time_is_kept():
-    started = (NOW - 50, NOW - 10)
-
-    assert reserve_turn(started, NOW, None) == started
-
-
-def test_turns_below_the_cap_keep_their_times_and_add_now():
-    started = (NOW - 50, NOW - 10)
-
-    assert reserve_turn(started, NOW, CAP) == (*started, NOW)
-
-
-def test_a_turn_at_the_cap_inside_the_period_is_held_back():
-    assert reserve_turn((NOW - 90, NOW - 50, NOW - 10), NOW, CAP) is None
-
-
-def test_a_start_exactly_one_period_old_no_longer_counts():
-    assert reserve_turn((NOW - CAP.period_seconds, NOW - 50, NOW - 10), NOW, CAP) == (NOW - 50, NOW - 10, NOW)
-
-
-def test_a_start_just_inside_the_period_still_counts():
-    assert reserve_turn((NOW - CAP.period_seconds + 1, NOW - 50, NOW - 10), NOW, CAP) is None
 
 
 def test_a_turns_call_bound_is_the_sum_of_the_bounds_of_the_apps_whose_tools_it_holds():

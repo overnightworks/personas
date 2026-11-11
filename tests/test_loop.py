@@ -22,7 +22,7 @@ from personas.decision import (
     backoff_delay,
 )
 from personas.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer, leaves_of
-from personas.loop import AgentLoop, Boundaries, TurnCounter
+from personas.loop import AgentLoop, Boundaries
 from tests.support.fakes import (
     FakeClock,
     FakeReadyMarker,
@@ -402,7 +402,7 @@ class ScriptedSessions:
         self._windows = [window_of(line(1, "Mozart?"))]
         tokens = FakeTokens(self.clock, [jwt_grant() for _ in range(5)])
         boundaries = Boundaries(tokens, self.open, self.clock, self.reports, FakeReadyMarker(), backend=backend)
-        self.loop = AgentLoop(self.config.agents[0], self.config.apps[0], boundaries, TurnCounter())
+        self.loop = AgentLoop(self.config.agents[0], self.config.apps[0], boundaries)
 
     def use_token(self, token) -> None:
         pass
@@ -658,7 +658,7 @@ class TokenFetchSwallowingTheCancellation:
         self.fetches = 0
         config = load_config(files.write())
         boundaries = Boundaries(self, self._no_session, FakeClock(), Reports(), FakeReadyMarker())
-        self.loop = AgentLoop(config.agents[0], config.apps[0], boundaries, TurnCounter())
+        self.loop = AgentLoop(config.agents[0], config.apps[0], boundaries)
 
     async def fetch(self, agent, scope):
         self.fetches += 1

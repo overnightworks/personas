@@ -16,7 +16,7 @@ from agents.turn import Principal
 
 from personas.app_session import READ_SECONDS, open_mcp_session
 from personas.config import load_config
-from personas.loop import AgentLoop, Boundaries, TurnCounter
+from personas.loop import AgentLoop, Boundaries
 from personas.main import QUIET_LIBRARIES, SweepingBoundaries, configure_logging, run_with_sweep
 from personas.readiness import FileReadyMarker
 from personas.reporting import log_state_change
@@ -49,7 +49,7 @@ if TYPE_CHECKING:
 
     from personas.app_session import SessionOpener
     from personas.config import MemoryTarget
-    from personas.decision import Refusal, TurnCap
+    from personas.decision import Refusal
     from personas.failures import CallFailure
     from personas.remembering import LineStore
     from personas.reporting import StateChange
@@ -75,7 +75,7 @@ class Scenario:
         self.reports = reports
         self.ready = FakeReadyMarker()
         boundaries = Boundaries(tokens, session.open, clock, reports, self.ready)
-        self.loop = AgentLoop(credentials(), app_target(), boundaries, TurnCounter())
+        self.loop = AgentLoop(credentials(), app_target(), boundaries)
 
     async def play(self) -> None:
         """Runs the loop until the script is spent, which is when a boundary blocks, then stops it."""
@@ -180,16 +180,12 @@ class Harness:
             apps=tuple(replace(each, call_seconds=seconds) if not each.listens else each for each in self.config.apps),
         )
 
-    def cap_turns(self, cap: TurnCap | None) -> None:
-        """Gives every agent this cap, or none; the amounts of a scenario are its own."""
-        self.config = replace(self.config, agents=tuple(replace(each, turn_cap=cap) for each in self.config.agents))
-
     def add_app(self) -> None:
         """A second app of the same agents; it answers at the same address as the first."""
         self.config = replace(self.config, apps=(*self.config.apps, *self.config.apps))
 
     def add_agent(self, client_id: str, subject: str, name: str | None = None) -> None:
-        """A second agent with the first one's persona and cap, its own client and its own subject in the app.
+        """A second agent with the first one's persona, its own client and its own subject in the app.
 
         Its token names it ``name``, or the first agent's name.
         """
