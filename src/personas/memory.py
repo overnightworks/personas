@@ -31,11 +31,9 @@ from sqlalchemy import (
     Row,
     Table,
     Text,
-    and_,
     create_engine,
     delete,
     func,
-    not_,
     select,
     text,
 )
@@ -230,17 +228,9 @@ class PostgresLineStore:
         async with self._bounded_transaction() as connection:
             await connection.execute(statement)
 
-    async def kept_since(self, client_id: str, since: datetime, other_than: Visit) -> tuple[KeptLine, ...]:
-        """The agent's lines first read at or after ``since``, but those of one visit, under the bound of a write."""
-        visit = (
-            _LINES.c.app == other_than.app,
-            _LINES.c.place_kind == _without_nul(other_than.place.kind),
-            _LINES.c.place_id == _without_nul(other_than.place.id),
-            _LINES.c.generation == _without_nul(other_than.generation),
-        )
-        statement = select(_LINES).where(
-            _LINES.c.client_id == client_id, _LINES.c.first_read_at >= since, not_(and_(*visit))
-        )
+    async def kept_since(self, client_id: str, since: datetime) -> tuple[KeptLine, ...]:
+        """The agent's lines first read at or after ``since``, under the bound of a write."""
+        statement = select(_LINES).where(_LINES.c.client_id == client_id, _LINES.c.first_read_at >= since)
         async with self._bounded_transaction() as connection:
             rows = (await connection.execute(statement)).all()
         return tuple(_kept_line(row) for row in rows)

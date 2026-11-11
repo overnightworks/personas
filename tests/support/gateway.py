@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from agents.tools import JsonObject
 
 TURN_OPENING_MESSAGES = 2
-"""A turn's first round holds the persona and the room; every later round adds the model's calls and their results."""
+"""A turn's first round holds the persona and the message told; every later round adds the model's calls and results."""
 BUDGET_SPENT = Reply(
     status=HTTPStatus.UNPROCESSABLE_ENTITY,
     body=json.dumps({"error": {"type": "budget_exceeded", "code": "422"}}).encode(),
@@ -35,7 +35,7 @@ def says(place_id: str, *texts: str) -> list[Reply]:
 
 @dataclass(frozen=True)
 class TurnOpening:
-    """What a turn's first request told the gateway: the persona, the room's facts and whom it is for."""
+    """What a turn's first request told the gateway: the persona, the message it was told and whom it is for."""
 
     system: str
     room: JsonObject
@@ -43,12 +43,12 @@ class TurnOpening:
 
     @property
     def missed(self) -> bool:
-        """Whether the turn was told that lines older than its window were not seen."""
-        return bool(self.room["missed"])
+        """Whether the turn was told that lines older than the ones it saw were missed."""
+        return bool(self.room["woke"]["missed"])
 
     @property
     def new_seqs(self) -> list[int]:
-        return [line["seq"] for line in self.room["lines"] if line["new"]]
+        return [line["seq"] for line in self.room["history"]["entries"] if line["new"]]
 
 
 class Gateway(FakeGateway):

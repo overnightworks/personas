@@ -41,7 +41,7 @@ def waits(runner, revision: int, place: PlaceRef = TABLE) -> dict[str, str]:
 
 
 def told_states(runner) -> list[object]:
-    return [opening.room["state"] for opening in runner.gateway.openings()]
+    return [opening.room["woke"]["state"] for opening in runner.gateway.openings()]
 
 
 async def seated_at_a_table_whose_view_waits(runner, revision: int = 1) -> dict[str, str]:
@@ -145,13 +145,15 @@ async def test_a_view_that_moves_to_a_revision_waiting_for_him_gets_one_turn_tol
 
     opening = runner.gateway.openings()[0]
     assert opening.room == {
-        "app": runner.config.apps[0].mcp_url,
-        "kind": TABLE.kind,
-        "id": TABLE.id,
         "you": AGENT_NAME,
-        "awaits_you": True,
-        "state": state,
         "history": {"older_dropped": False, "entries": []},
+        "woke": {
+            "why": "view",
+            "app": runner.config.apps[0].mcp_url,
+            "place": {"kind": TABLE.kind, "id": TABLE.id},
+            "awaits_you": True,
+            "state": state,
+        },
     }
     assert opening.system == runner.files.persona_prompt
     assert sorted(runner.gateway.offered_tools()) == sorted([SAY_TOOL, CREATE_SONG, GENERATE_SONG])
@@ -295,7 +297,7 @@ async def test_a_line_that_addresses_him_while_a_view_turn_runs_gets_its_turn_on
     view_turn.set()
     await runner.app.said_count(1)
 
-    assert [opening.room.get("state") is not None for opening in runner.gateway.openings()] == [True, False]
+    assert [opening.room["woke"].get("state") is not None for opening in runner.gateway.openings()] == [True, False]
     assert runner.app.said == [(SUBJECT, PLACE_ID, ANSWER)]
     assert len(runner.gateway.openings()) == 2
 

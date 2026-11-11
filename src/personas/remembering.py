@@ -12,8 +12,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from datetime import datetime
 
-    from personas.clock import Clock
-    from personas.decision import EarlierToday, KeptLine, TodayBounds, Visit, WindowRead
+    from personas.decision import EarlierToday, History, KeptLine, TodayBounds, Visit, WindowRead
     from personas.reporting import Event
 
 
@@ -24,9 +23,8 @@ class LineStore(Protocol):
         """Keeps every line of the window once; raises ``StoreUnavailable`` when it cannot now."""
         ...
 
-    async def kept_since(self, client_id: str, since: datetime, other_than: Visit) -> tuple[KeptLine, ...]:
-        """The agent's lines first read at or after ``since``, but those of one visit; ``StoreUnavailable`` when it
-        cannot now."""
+    async def kept_since(self, client_id: str, since: datetime) -> tuple[KeptLine, ...]:
+        """The agent's lines first read at or after ``since``; ``StoreUnavailable`` when it cannot now."""
         ...
 
 
@@ -43,13 +41,11 @@ class Remembering:
         store: LineStore | None,
         today: TodayBounds | None,
         client_id: str,
-        clock: Clock,
         report_state: Callable[[Event, str | None], None],
     ) -> None:
         self._store = store
         self._today = today
         self._client_id = client_id
-        self._clock = clock
         self._outage = StoreOutage(report_state)
 
     async def keep(self, read: WindowRead) -> None:
@@ -64,17 +60,16 @@ class Remembering:
         else:
             self._outage.answered()
 
-    async def read_day(self, visit: Visit) -> EarlierToday | None:
-        """What the store kept of the agent's other visits within the day, or nothing without a store or a day, or when
-        the store cannot be read now; that failure is reported once, as a write's is."""
+    async def read_day(self, now: datetime, leaving_out: History | Visit) -> EarlierToday | None:
+        """What the store kept of the agent's day up to ``now`` besides what ``leaving_out`` holds, or nothing without a
+        store or a day, or when the store cannot be read now; that failure is reported once, as a write's is."""
         store, bounds = self._store, self._today
         if store is None or bounds is None:
             return None
-        now = self._clock.wall()
         try:
-            kept = await store.kept_since(self._client_id, today_since(now, bounds), visit)
+            kept = await store.kept_since(self._client_id, today_since(now, bounds))
         except StoreUnavailable as unavailable:
             self._outage.failed(unavailable.code)
             return None
         self._outage.answered()
-        return earlier_today(kept, now, bounds)
+        return earlier_today(kept, now, bounds, leaving_out)

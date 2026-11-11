@@ -17,12 +17,14 @@ from personas.decision import (
     TURN_CANCELLED_CODE,
     TURN_ROLE,
     Joined,
+    Lines,
     Memory,
     Perception,
     Reaction,
     Suspend,
     Token,
     Visit,
+    Waiting,
     WindowRead,
     accepts_for,
     active_call_places,
@@ -57,7 +59,7 @@ from personas.task_record import (
     unrequested_unless_cancelling,
 )
 from personas.tokens import TokenFacts, facts_of
-from personas.turning import Admitted, Lines, Turning, TurnSetup, Waiting
+from personas.turning import Admitted, Turning, TurnSetup
 from personas.voice import ActiveVoice, Hearing, SpeakingVoice, reporting_decisions
 
 if TYPE_CHECKING:
@@ -137,7 +139,7 @@ class AgentLoop:
         self._app = app
         self._boundaries = boundaries
         self._mind = mind
-        self._remembering = Remembering(boundaries.lines, today, agent.client_id, boundaries.clock, self._report)
+        self._remembering = Remembering(boundaries.lines, today, agent.client_id, self._report)
         self._turning = Turning(
             agent,
             app,
@@ -335,7 +337,8 @@ class AgentLoop:
             if view is None or not view_turn_due(self._turned_revisions.get(place), view):
                 continue
             self._turned_revisions[place] = view.revision
-            self._start_turn(turns, setup, place, Admitted(facts, place, Waiting(view, self._mind.history)))
+            admitted = Admitted(facts, place, Waiting(view), self._mind.history, self._boundaries.clock.wall())
+            self._start_turn(turns, setup, place, admitted)
             return
 
     def _take_lines(
@@ -354,7 +357,7 @@ class AgentLoop:
         visit = Visit(self._app.mcp_url, place, window.generation)
         self._mind.take(taken_lines(visit, perception.new, read_at))
         if not self._voice_app:
-            return self._start_turn_if_addressed(turns, setup, place, window, facts, perception)
+            return self._start_turn_if_addressed(turns, setup, place, window, facts, perception, read_at)
         voice = self._voices.get(place)
         if voice is None or voice.generation != window.generation:
             if voice is not None:
@@ -372,11 +375,13 @@ class AgentLoop:
         window: PlaceWindow,
         facts: TokenFacts,
         perception: Perception,
+        read_at: datetime,
     ) -> bool:
         """Starts the turn when a new line addresses the agent. A line starts at most one turn."""
         if not any(addressed(line, facts.name) for line in perception.new):
             return False
-        admitted = Admitted(facts, place, Lines(window, perception.new, perception.missed))
+        lines = Lines(window.generation, frozenset(line.seq for line in perception.new), perception.missed)
+        admitted = Admitted(facts, place, lines, self._mind.history, read_at)
         self._start_turn(turns, setup, place, admitted)
         return True
 
@@ -410,7 +415,7 @@ class AgentLoop:
 
         Lines heard meanwhile wait in the hearing. A decision's tools are none, so nothing relays a call.
         """
-        context = voice_context(await self._remembering.read_day(visit))
+        context = voice_context(await self._remembering.read_day(self._boundaries.clock.wall(), visit))
         token = await self._current_token()
         async with self._boundaries.open_session(self._app, token.value) as session:
             try:
