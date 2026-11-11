@@ -14,6 +14,7 @@ from agents.member import (
     LISTEN_BOUND_SECONDS,
     SPEAK_TOOL,
     AcceptInvitationRefusal,
+    PlaceEntry,
     PlaceRef,
     PlaceView,
     PlaceWindow,
@@ -29,6 +30,7 @@ from personas.decision import (
     RENEW_BEFORE_EXPIRY_SECONDS,
     SPOKEN_WAIT_BOUND_SECONDS,
     Accept,
+    History,
     Joined,
     KeptLine,
     Memory,
@@ -54,6 +56,7 @@ from personas.decision import (
     earlier_today,
     failure_code,
     forget_gone,
+    history_after,
     is_voice_app,
     perceive,
     reaction_to,
@@ -63,7 +66,9 @@ from personas.decision import (
     swept_before,
     sync_checkpoints,
     sync_turned_revisions,
+    taken_lines,
     today_since,
+    told_history,
     turn_call_bound,
     turn_input,
     turn_invalid,
@@ -708,10 +713,109 @@ def test_a_view_is_due_a_turn_while_it_waits_at_a_revision_no_turn_was_started_f
     assert view_turn_due(turned_revision, view) is due
 
 
-def test_a_view_turn_is_told_the_place_his_name_that_it_waits_for_him_and_the_state_as_sent_and_no_instruction():
+APP = "https://app.test/mcp"
+EMPTY_HISTORY = History((), older_dropped=False)
+
+
+def said(seq: int, text: str, *, name: str = "Bo", visit: Visit = MORNING) -> KeptLine:
+    return KeptLine(visit, seq, LATER, name, "message", text, own=False)
+
+
+def test_a_view_turn_is_told_its_app_the_place_his_name_that_it_waits_for_him_the_state_as_sent_and_his_history():
     view = PlaceView(revision=3, awaits_you=True, state={"hand": ["x", {"seen": True}], "umläut": "ä"})
+    history = History((said(1, "Spiel den Buben", name="Ada", visit=NOON),), older_dropped=True)
 
-    told = json.loads(view_turn_input(TABLE, "Mozart", view))
+    told = json.loads(view_turn_input(APP, TABLE, "Mozart", view, history))
 
-    assert told == {"kind": "table", "id": "table-1", "you": "Mozart", "awaits_you": True, "state": view.state}
-    assert "ä" in view_turn_input(TABLE, "Mozart", view)
+    assert told == {
+        "app": APP,
+        "kind": "table",
+        "id": "table-1",
+        "you": "Mozart",
+        "awaits_you": True,
+        "state": view.state,
+        "history": {
+            "older_dropped": True,
+            "entries": [
+                {
+                    "app": NOON.app,
+                    "place": {"kind": "call", "id": "room-8"},
+                    "name": "Ada",
+                    "kind": "message",
+                    "text": "Spiel den Buben",
+                    "own": False,
+                }
+            ],
+        },
+    }
+    assert "ä" in view_turn_input(APP, TABLE, "Mozart", view, history)
+
+
+def test_a_view_turn_told_an_empty_history_is_told_no_entries_and_none_dropped():
+    told = json.loads(view_turn_input(APP, TABLE, "Mozart", a_view(1), EMPTY_HISTORY))
+
+    assert told["history"] == {"older_dropped": False, "entries": []}
+
+
+def test_taken_lines_are_the_visits_lines_as_kept_with_the_time_of_the_read():
+    entries = (
+        PlaceEntry(seq=4, kind="message", name="Ada", text="four", own=False),
+        PlaceEntry(seq=5, kind="message", name="Mozart", text="five", own=True),
+    )
+
+    assert taken_lines(MORNING, entries, LATER) == (
+        KeptLine(MORNING, 4, LATER, "Ada", "message", "four", own=False),
+        KeptLine(MORNING, 5, LATER, "Mozart", "message", "five", own=True),
+    )
+
+
+def test_told_history_lists_the_entries_in_the_order_the_history_holds_them():
+    history = History((said(2, "later", visit=NOON), said(1, "earlier")), older_dropped=False)
+
+    assert [entry["text"] for entry in told_history(history)["entries"]] == ["later", "earlier"]
+
+
+def test_a_history_and_its_lines_show_no_name_and_no_text_in_their_repr():
+    marker = secrets.token_hex(8)
+    line = said(1, marker, name=marker)
+
+    assert marker not in repr(History((line,), older_dropped=False))
+    assert marker not in repr(line)
+
+
+def test_new_lines_join_the_history_after_the_lines_it_holds():
+    history = history_after(History((said(1, "one"),), older_dropped=False), (said(2, "two"), said(3, "three")), 10_000)
+
+    assert [line.text for line in history.entries] == ["one", "two", "three"]
+    assert history.older_dropped is False
+
+
+@pytest.mark.parametrize(
+    ("bound_over_the_two_lines", "kept_texts", "older_dropped"),
+    [
+        pytest.param(1, ["one", "two"], False, id="the bound lies above the lines"),
+        pytest.param(0, ["one", "two"], False, id="the bound is the lines' size"),
+        pytest.param(-1, ["two"], True, id="the bound lies one byte below the lines"),
+    ],
+)
+def test_the_history_keeps_the_newest_lines_that_fit_the_bound_and_says_when_it_dropped_older_ones(
+    bound_over_the_two_lines, kept_texts, older_dropped
+):
+    two_lines = 2 * len("Bo" + "one")
+
+    history = history_after(EMPTY_HISTORY, (said(1, "one"), said(2, "two")), two_lines + bound_over_the_two_lines)
+
+    assert [line.text for line in history.entries] == kept_texts
+    assert history.older_dropped is older_dropped
+
+
+def test_a_line_longer_than_the_bound_empties_the_history_and_leaves_it_marked():
+    history = history_after(History((said(1, "one"),), older_dropped=False), (said(2, "x" * 50),), 10)
+
+    assert history == History((), older_dropped=True)
+
+
+def test_the_history_stays_marked_once_it_dropped_older_lines_though_the_next_lines_fit():
+    marked = History((), older_dropped=True)
+
+    assert history_after(marked, (said(1, "one"),), 10_000).older_dropped is True

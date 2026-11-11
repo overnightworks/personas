@@ -13,7 +13,7 @@ from agents.member import AcceptInvitationRefusal, PlaceRef
 from agents.tools import ToolDeclaration, ToolEffect
 from agents.turn import RejectionCode
 
-from personas.config import load_config
+from personas.config import DEFAULT_HISTORY_BYTES, load_config
 from personas.decision import (
     BACKOFF_CAP_SECONDS,
     RENEW_BEFORE_EXPIRY_SECONDS,
@@ -23,6 +23,7 @@ from personas.decision import (
 )
 from personas.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer, leaves_of
 from personas.loop import AgentLoop, Boundaries
+from personas.mind import Mind
 from tests.support.fakes import (
     FakeClock,
     FakeReadyMarker,
@@ -402,7 +403,7 @@ class ScriptedSessions:
         self._windows = [window_of(line(1, "Mozart?"))]
         tokens = FakeTokens(self.clock, [jwt_grant() for _ in range(5)])
         boundaries = Boundaries(tokens, self.open, self.clock, self.reports, FakeReadyMarker(), backend=backend)
-        self.loop = AgentLoop(self.config.agents[0], self.config.apps[0], boundaries)
+        self.loop = AgentLoop(self.config.agents[0], self.config.apps[0], boundaries, Mind(DEFAULT_HISTORY_BYTES))
 
     def use_token(self, token) -> None:
         pass
@@ -658,7 +659,7 @@ class TokenFetchSwallowingTheCancellation:
         self.fetches = 0
         config = load_config(files.write())
         boundaries = Boundaries(self, self._no_session, FakeClock(), Reports(), FakeReadyMarker())
-        self.loop = AgentLoop(config.agents[0], config.apps[0], boundaries)
+        self.loop = AgentLoop(config.agents[0], config.apps[0], boundaries, Mind(DEFAULT_HISTORY_BYTES))
 
     async def fetch(self, agent, scope):
         self.fetches += 1

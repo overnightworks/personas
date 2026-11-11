@@ -10,6 +10,7 @@ import pytest
 from personas.config import (
     CONFIG_ENVIRONMENT_VARIABLE,
     DEFAULT_CALL_SECONDS,
+    DEFAULT_HISTORY_BYTES,
     DEFAULT_LINES_KEEP_DAYS,
     DEFAULT_SWEEP_MINUTES,
     DEFAULT_TODAY,
@@ -411,6 +412,27 @@ def test_a_memory_table_keeps_and_sweeps_by_default_unless_it_sets_either_or_lea
     assert memory is not None
     assert memory.lines_keep_days == days
     assert memory.sweep_minutes == minutes
+
+
+@pytest.mark.parametrize(
+    ("written", "bytes_kept"),
+    [(None, DEFAULT_HISTORY_BYTES), ("1024", 1024)],
+    ids=["absent", "set"],
+)
+def test_the_history_is_bounded_by_the_default_unless_the_file_sets_history_bytes(files, written, bytes_kept):
+    if written is not None:
+        files.text = f"history_bytes = {written}\n{files.text}"
+
+    assert load_config(files.write()).history_bytes == bytes_kept
+
+
+@pytest.mark.parametrize("written", ["0", "-1", "1.5", '"1024"', "true"])
+def test_a_history_bound_that_is_no_positive_integer_stops_the_start_and_names_the_field(
+    files, monkeypatch, capsys, written
+):
+    files.text = f"history_bytes = {written}\n{files.text}"
+
+    assert "history_bytes" in fails_at_start(files.write(), monkeypatch, capsys)
 
 
 def test_a_file_without_a_memory_table_opens_no_store(files):
