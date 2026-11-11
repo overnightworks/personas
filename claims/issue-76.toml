@@ -1,8 +1,0 @@
-claim_id = "40b5884b8bec41a7b062ec400093ada5"
-agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
-role = "builder"
-base = "d12396f42d98f247496e8ab2a3f144438ee47363"
-branch = "claude/issue-76-lines-older-than-the-keep-period-are-swe"
-scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/config.py", "src/personas/decision.py", "src/personas/main.py", "src/personas/memory.py", "src/personas/remembering.py", "src/personas/reporting.py", "src/personas/sweep.py", "tests"]
-opened_commit = "e9d4f3101b35bf88e1d4f5397b4fe71aa6344d42"
-whole_reason = "Two settings, one pure rule, one statement and one task are one path from a keep period to a deleted line; split, a statement or a task has no caller."
