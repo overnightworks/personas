@@ -320,9 +320,9 @@ class KeptLine:
     visit: Visit
     seq: int
     first_read_at: datetime
-    name: str
+    name: str = field(repr=False)
     kind: str
-    text: str
+    text: str = field(repr=False)
     own: bool
 
 
@@ -372,6 +372,11 @@ def _size(line: KeptLine) -> int:
     return len(line.name.encode()) + len(line.text.encode())
 
 
+def _newest_that_fit(newest_first: Iterable[KeptLine], size_bytes: int) -> int:
+    """How many of the lines, taken newest first, fit ``size_bytes`` of speakers and text."""
+    return sum(1 for total in itertools.accumulate(map(_size, newest_first)) if total <= size_bytes)
+
+
 def earlier_today(kept: Iterable[KeptLine], now: datetime, bounds: TodayBounds) -> EarlierToday:
     """The lines of the agent's other visits a turn is told: grouped by visit, visits in the order of their first line
     and lines in seq order; past ``size_bytes`` of speakers and text the oldest lines are left out."""
@@ -379,8 +384,8 @@ def earlier_today(kept: Iterable[KeptLine], now: datetime, bounds: TodayBounds) 
     for line in kept:
         by_visit.setdefault(line.visit, []).append(line)
     groups = sorted((sorted(lines, key=lambda line: line.seq) for lines in by_visit.values()), key=_first_read)
-    newest_first = (_size(line) for lines in reversed(groups) for line in reversed(lines))
-    fitting = sum(1 for total in itertools.accumulate(newest_first) if total <= bounds.size_bytes)
+    newest_first = (line for lines in reversed(groups) for line in reversed(lines))
+    fitting = _newest_that_fit(newest_first, bounds.size_bytes)
     left_out = sum(len(lines) for lines in groups) - fitting
     older_dropped = left_out > 0
     visits: list[EarlierVisit] = []
@@ -393,6 +398,27 @@ def earlier_today(kept: Iterable[KeptLine], now: datetime, bounds: TodayBounds) 
 
 def _first_read(lines: Sequence[KeptLine]) -> datetime:
     return min(line.first_read_at for line in lines)
+
+
+@dataclass(frozen=True)
+class History:
+    """Every line one agent took in at any of his places since the runner started, in the order he took it, and
+    whether older ones were left out to keep it within its bound."""
+
+    entries: tuple[KeptLine, ...] = field(repr=False)
+    older_dropped: bool
+
+
+def taken_lines(visit: Visit, new: Iterable[PlaceEntry], read_at: datetime) -> tuple[KeptLine, ...]:
+    """The lines a read of the visit's window took, as the history keeps them."""
+    return tuple(KeptLine(visit, line.seq, read_at, line.name, line.kind, line.text, line.own) for line in new)
+
+
+def history_after(history: History, new: Iterable[KeptLine], size_bytes: int) -> History:
+    """The history with ``new`` appended; past ``size_bytes`` of speakers and text the oldest lines are left out."""
+    entries = (*history.entries, *new)
+    left_out = len(entries) - _newest_that_fit(reversed(entries), size_bytes)
+    return History(entries[left_out:], history.older_dropped or left_out > 0)
 
 
 @dataclass(frozen=True)
@@ -478,13 +504,29 @@ def _told_line(line: KeptLine) -> dict[str, object]:
     return {"name": line.name, "kind": line.kind, "text": line.text, "own": line.own}
 
 
-def view_turn_input(place: PlaceRef, name: str, view: PlaceView) -> str:
-    """The facts of a view turn: the place, the agent's name, that the place waits for him and the view's state as the
-    app sent it.
+def told_history(history: History) -> dict[str, object]:
+    entries = [
+        {"app": line.visit.app, "place": {"kind": line.visit.place.kind, "id": line.visit.place.id}} | _told_line(line)
+        for line in history.entries
+    ]
+    return {"older_dropped": history.older_dropped, "entries": entries}
+
+
+def view_turn_input(app: str, place: PlaceRef, name: str, view: PlaceView, history: History) -> str:
+    """The facts of a view turn: the app and place, the agent's name, that the place waits for him, the view's state as
+    the app sent it and his history.
 
     It holds no instruction; those live in the persona.
     """
-    facts = {"kind": place.kind, "id": place.id, "you": name, "awaits_you": view.awaits_you, "state": view.state}
+    facts = {
+        "app": app,
+        "kind": place.kind,
+        "id": place.id,
+        "you": name,
+        "awaits_you": view.awaits_you,
+        "state": view.state,
+        "history": told_history(history),
+    }
     return json.dumps(facts, ensure_ascii=False)
 
 
