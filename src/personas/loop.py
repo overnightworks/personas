@@ -22,10 +22,12 @@ from personas.decision import (
     Reaction,
     Suspend,
     Token,
+    ViewRecord,
     Visit,
     WindowRead,
     accepts_for,
     active_call_places,
+    active_view_places,
     addressed,
     after_refusal,
     backoff_delay,
@@ -34,11 +36,13 @@ from personas.decision import (
     forget_gone,
     is_defect,
     is_voice_app,
+    judge_view,
     perceive,
     reaction_to,
     renewal_due,
     sets_where_reading_starts,
     sync_checkpoints,
+    sync_view_records,
     turn_invalid,
     voice_context,
 )
@@ -52,7 +56,7 @@ from personas.task_record import (
     unrequested_unless_cancelling,
 )
 from personas.tokens import TokenFacts, facts_of
-from personas.turning import Admitted, Turning, TurnSetup
+from personas.turning import Admitted, Lines, Turning, TurnSetup, Waiting
 from personas.voice import ActiveVoice, Hearing, SpeakingVoice, reporting_decisions
 
 if TYPE_CHECKING:
@@ -149,6 +153,7 @@ class AgentLoop:
         self._suspension: str | None = None
         self._backing_off = False
         self._checkpoints: dict[PlaceRef, Checkpoint] = {}
+        self._views: dict[PlaceRef, ViewRecord] = {}
         self._turn: ActiveTurn | None = None
         self._turn_ended = asyncio.Event()
         self._voices: dict[PlaceRef, ActiveVoice] = {}
@@ -220,7 +225,8 @@ class AgentLoop:
         standings = await self._take_standing(session)
         if await self._answer_addressed_lines(session, turns, standings):
             # A window the app lost dropped its place's checkpoint: the standing says where the place stands now.
-            await self._take_standing(session)
+            standings = await self._take_standing(session)
+        await self._answer_waiting_view(session, turns, standings)
         self._served()
 
     async def _take_standing(self, session: AppSession) -> tuple[Standing, ...]:
@@ -231,6 +237,7 @@ class AgentLoop:
         self._boundaries.ready.announce()
         self._memory = forget_gone(self._memory, standing.standings)
         self._checkpoints = sync_checkpoints(self._checkpoints, standing.standings)
+        self._views = sync_view_records(self._views, standing.standings)
         self._cancel_turn_if_its_place_left(standing.standings)
         await self._accept_invitations(session, standing.standings)
         return standing.standings
@@ -267,7 +274,7 @@ class AgentLoop:
             self._report(Event.RESUMED)
 
     async def _accept_invitations(self, session: AppSession, standings: tuple[Standing, ...]) -> None:
-        for accept in accepts_for(standings, self._memory):
+        for accept in accepts_for(standings, self._memory, takes_turns=self._turn_setup is not None):
             await self._use_current_token(session)
             refusal = await session.accept(accept)
             if refusal is None:
@@ -307,6 +314,30 @@ class AgentLoop:
                 return lost
         return lost
 
+    async def _answer_waiting_view(
+        self, session: AppSession, turns: asyncio.TaskGroup, standings: tuple[Standing, ...]
+    ) -> None:
+        """Reads the views of the active view places in the standing's order; the first that is due starts the turn.
+
+        It reads none while a turn runs or was just started. The read after a turn's end judges that turn.
+        """
+        setup = self._turn_setup
+        if setup is None or self._turn is not None:
+            return
+        facts = facts_of((await self._current_token()).value)
+        for place in active_view_places(standings):
+            await self._use_current_token(session)
+            view = await session.read_view(place)
+            if view is None:
+                continue
+            step = judge_view(self._views.get(place), view)
+            self._views[place] = step.record
+            if step.unanswered:
+                self._report(Event.VIEW_UNANSWERED)
+            if step.turn_due:
+                self._start_turn(turns, setup, place, Admitted(facts, place, Waiting(view)))
+                return
+
     def _take_lines(
         self, turns: asyncio.TaskGroup, setup: TurnSetup, place: PlaceRef, window: PlaceWindow, facts: TokenFacts
     ) -> bool:
@@ -337,7 +368,7 @@ class AgentLoop:
         """Starts the turn when a new line addresses the agent. A line starts at most one turn."""
         if not any(addressed(line, facts.name) for line in perception.new):
             return False
-        admitted = Admitted(facts, place, window, perception.new, perception.missed)
+        admitted = Admitted(facts, place, Lines(window, perception.new, perception.missed))
         self._start_turn(turns, setup, place, admitted)
         return True
 

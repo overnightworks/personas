@@ -59,6 +59,7 @@ class Gateway(FakeGateway):
         self._holds: dict[int, asyncio.Event] = {}
         self._arrivals = 0
         self._arrived = asyncio.Event()
+        self._answered = asyncio.Event()
         self.cancelling_at_arrival: list[int] = []
         """The cancel requests pending on the task that made each request, in arrival order: a turn's own task."""
 
@@ -75,7 +76,9 @@ class Gateway(FakeGateway):
         self._arrived.set()
         if held is not None:
             await held.wait()
-        return await super().handle_async_request(request)
+        response = await super().handle_async_request(request)
+        self._answered.set()
+        return response
 
     async def until_requested(self, count: int) -> None:
         """Returns once this many requests arrived; fails after the limit."""
@@ -83,6 +86,13 @@ class Gateway(FakeGateway):
             while self._arrivals < count:
                 self._arrived.clear()
                 await self._arrived.wait()
+
+    async def until_turns(self, count: int) -> None:
+        """Returns once this many turns have been answered their first round; fails after the limit."""
+        async with asyncio.timeout(LIMIT_SECONDS):
+            while len(self.openings()) < count:
+                self._answered.clear()
+                await self._answered.wait()
 
     def openings(self) -> list[TurnOpening]:
         bodies = [json.loads(request.content) for request in self.requests]

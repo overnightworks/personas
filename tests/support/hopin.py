@@ -28,12 +28,15 @@ from agents.member import (
     MemberStanding,
     PlaceEntry,
     PlaceRef,
+    PlaceView,
     PlaceWindow,
     SpeakArguments,
     Spoken,
     Standing,
     StandingState,
+    place_ref_from_view_uri,
     place_ref_from_window_uri,
+    place_view_uri,
     place_window_uri,
 )
 from agents.tools import ToolDeclaration, ToolEffect, ToolOutcome
@@ -92,9 +95,16 @@ _ACCEPT_DECLARATION = ToolDeclaration(
 )
 
 
-def invited(place_id: str, invitation_id: str, epoch: int = 0, kind: str = "call") -> Standing:
+def invited(
+    place_id: str, invitation_id: str, epoch: int = 0, kind: str = "call", *, serves_view: bool = False
+) -> Standing:
     invitation = Invitation(id=invitation_id, epoch=epoch, expires_at=datetime(2099, 1, 1, tzinfo=UTC))
-    return Standing(place=PlaceRef(kind=kind, id=place_id), state=StandingState.INVITED, invitation=invitation)
+    return Standing(
+        place=PlaceRef(kind=kind, id=place_id),
+        state=StandingState.INVITED,
+        invitation=invitation,
+        serves_view=serves_view,
+    )
 
 
 @dataclass(frozen=True)
@@ -108,13 +118,13 @@ class Line:
     spoken: bool = False
 
 
-def active(place_id: str) -> Standing:
-    return Standing(place=PlaceRef(kind="call", id=place_id), state=StandingState.ACTIVE)
+def active(place_id: str, kind: str = "call", *, serves_view: bool = False) -> Standing:
+    return Standing(place=PlaceRef(kind=kind, id=place_id), state=StandingState.ACTIVE, serves_view=serves_view)
 
 
-def paused(place_id: str) -> Standing:
+def paused(place_id: str, kind: str = "call", *, serves_view: bool = False) -> Standing:
     """The sponsor is away: the member keeps the place and its window, and nobody reads it meanwhile."""
-    return Standing(place=PlaceRef(kind="call", id=place_id), state=StandingState.PAUSED)
+    return Standing(place=PlaceRef(kind=kind, id=place_id), state=StandingState.PAUSED, serves_view=serves_view)
 
 
 ACCEPTED_NAME = "Mozart"
@@ -192,6 +202,7 @@ class FakeApp:
     scripted: defaultdict[str, list[Handler]] = field(default_factory=lambda: defaultdict(list[Handler]))
     held_read: asyncio.Event | None = None
     read_held: asyncio.Event = field(default_factory=asyncio.Event)
+    views: dict[str, PlaceView] = field(default_factory=dict[str, PlaceView])
     presented: set[str] = field(default_factory=set[str])
     content: set[str] = field(default_factory=lambda: {ACCEPTED_NAME})
 
@@ -234,6 +245,15 @@ class FakeApp:
                 self.changes.changed(Principal(iss=ISSUER, sub=subject), window)
         return seq
 
+    def show_view(self, place_id: str, revision: int, state: dict[str, Any], *, awaits_you: bool = True) -> None:
+        """Sets a place's view for every member standing there and signals it, as an app does once it is visible."""
+        self.views[place_id] = PlaceView(revision=revision, awaits_you=awaits_you, state=dict(state))
+        self.content.update(value for value in state.values() if isinstance(value, str))
+        for subject, standings in self.standings.items():
+            for each in standings:
+                if each.place.id == place_id and each.serves_view:
+                    self.changes.changed(Principal(iss=ISSUER, sub=subject), place_view_uri(each.place))
+
     def join(self, place_id: str) -> None:
         """A join gives the place a new, existing window: a fresh generation, numbered from seq 1, with no old line."""
         self.generations[place_id] = f"generation-{secrets.token_hex(4)}"
@@ -263,11 +283,18 @@ class FakeApp:
     async def current(self, principal: Principal) -> list[str]:
         if not self.lists_standing:
             return []
-        return [STANDING_URI, *(place_window_uri(each.place) for each in self.standings.get(principal.sub, []))]
+        held = self.standings.get(principal.sub, [])
+        return [
+            STANDING_URI,
+            *(place_view_uri(each.place) if each.serves_view else place_window_uri(each.place) for each in held),
+        ]
 
-    async def read(self, principal: Principal, uri: str) -> MemberStanding | PlaceWindow | None:
+    async def read(self, principal: Principal, uri: str) -> MemberStanding | PlaceWindow | PlaceView | None:
         self.reads[uri] = self.reads.get(uri, 0) + 1
         self.read_added.set()
+        viewed = place_ref_from_view_uri(uri)
+        if viewed is not None:
+            return self._view(principal, viewed)
         place = place_ref_from_window_uri(uri)
         if place is not None:
             return await self._window(principal, place)
@@ -289,6 +316,10 @@ class FakeApp:
             self.window_read_held.set()
             await held.wait()
         return window
+
+    def _view(self, principal: Principal, place: PlaceRef) -> PlaceView | None:
+        serving = any(each.place == place and each.serves_view for each in self.standings.get(principal.sub, []))
+        return self.views.get(place.id) if serving and place.id not in self.vanished else None
 
     def _snapshot(self, principal: Principal, place: PlaceRef) -> PlaceWindow | None:
         if place.id in self.vanished or not any(each.place == place for each in self.standings.get(principal.sub, [])):
@@ -346,6 +377,12 @@ class FakeApp:
 
     async def until_standing_read(self, count: int = 1) -> None:
         await self.until_read(STANDING_URI, count)
+
+    async def until_view_read(self, place: PlaceRef, count: int = 1) -> None:
+        await self.until_read(place_view_uri(place), count)
+
+    def view_reads(self, place: PlaceRef) -> int:
+        return self.reads.get(place_view_uri(place), 0)
 
     def window_reads(self, place_id: str) -> int:
         return self.reads.get(place_window_uri(PlaceRef(kind="call", id=place_id)), 0)

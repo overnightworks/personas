@@ -15,6 +15,7 @@ from agents.member import (
     SPEAK_TOOL,
     AcceptInvitationRefusal,
     PlaceRef,
+    PlaceView,
     PlaceWindow,
     Standing,
     StandingState,
@@ -27,6 +28,7 @@ from personas.decision import (
     NETWORK_FAILURE_CODE,
     RENEW_BEFORE_EXPIRY_SECONDS,
     SPOKEN_WAIT_BOUND_SECONDS,
+    VIEW_TURNS_PER_REVISION,
     Accept,
     Joined,
     KeptLine,
@@ -40,9 +42,11 @@ from personas.decision import (
     TodayBounds,
     Token,
     UnrecognisedRefusal,
+    ViewRecord,
     Visit,
     accepts_for,
     active_call_places,
+    active_view_places,
     addressed,
     after_refusal,
     backoff_delay,
@@ -53,6 +57,7 @@ from personas.decision import (
     failure_code,
     forget_gone,
     is_voice_app,
+    judge_view,
     perceive,
     reaction_to,
     renewal_due,
@@ -60,10 +65,12 @@ from personas.decision import (
     spoken_wait_seconds,
     swept_before,
     sync_checkpoints,
+    sync_view_records,
     today_since,
     turn_call_bound,
     turn_input,
     turn_invalid,
+    view_turn_input,
     voice_context,
 )
 from personas.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer
@@ -612,3 +619,115 @@ def test_an_app_takes_calls_until_its_own_bound_is_reached(made, within):
 )
 def test_a_failure_is_logged_with_its_status_its_answer_code_or_the_word_for_the_network(failure, code):
     assert failure_code(failure) == code
+
+
+RAN_OUT = VIEW_TURNS_PER_REVISION
+LAST_TURN = VIEW_TURNS_PER_REVISION - 1
+TABLE = PlaceRef(kind="table", id="table-1")
+OTHER_TABLE = PlaceRef(kind="table", id="table-2")
+
+
+def serving(place: PlaceRef = TABLE, *, state: StandingState = StandingState.ACTIVE) -> Standing:
+    if state is StandingState.INVITED:
+        return invited(place.id, "inv-3", kind=place.kind, serves_view=True)
+    return Standing(place=place, state=state, serves_view=True)
+
+
+def a_view(revision: int, *, awaits_you: bool = True) -> PlaceView:
+    return PlaceView(revision=revision, awaits_you=awaits_you, state={"hand": secrets.token_hex(4)})
+
+
+@pytest.mark.parametrize(
+    ("takes_turns", "accepted"),
+    [(True, True), (False, False)],
+    ids=["the loop can take turns", "the loop cannot take turns"],
+)
+def test_an_invited_place_that_serves_a_view_is_accepted_only_where_the_loop_can_take_turns(takes_turns, accepted):
+    standing = serving(state=StandingState.INVITED)
+
+    expected = (Accept(TABLE, "inv-3", 0),) if accepted else ()
+    assert accepts_for((standing,), Memory(), takes_turns=takes_turns) == expected
+
+
+def test_an_invited_view_place_whose_invitation_was_refused_as_stale_is_not_accepted_again():
+    standing = serving(state=StandingState.INVITED)
+    memory, _ = after_refusal(
+        Memory(), accepts_for((standing,), Memory(), takes_turns=True)[0], AcceptInvitationRefusal.STALE_INVITATION
+    )
+
+    assert accepts_for((standing,), memory, takes_turns=True) == ()
+
+
+def test_a_call_place_that_serves_a_view_is_a_view_place_and_no_window_is_kept_or_read_for_it():
+    standing = Standing(place=PLACE, state=StandingState.ACTIVE, serves_view=True)
+
+    assert active_call_places((standing,)) == ()
+    assert sync_checkpoints({}, (standing,)) == {}
+    assert active_view_places((standing,)) == (PLACE,)
+    assert accepts_for((invited("room-7", "inv-3", serves_view=True),), Memory()) == ()
+
+
+def test_only_the_active_places_that_serve_a_view_are_view_places_in_the_order_of_the_standing():
+    standings = (
+        serving(OTHER_TABLE),
+        serving(TABLE, state=StandingState.PAUSED),
+        active("room-7"),
+        active("table-3", "table"),
+        serving(PlaceRef(kind="table", id="table-4")),
+        serving(state=StandingState.INVITED),
+    )
+
+    assert active_view_places(standings) == (OTHER_TABLE, PlaceRef(kind="table", id="table-4"))
+
+
+def test_the_standing_decides_which_view_records_exist():
+    records = {TABLE: ViewRecord(4, 2, unjudged=True), OTHER_TABLE: ViewRecord(1)}
+
+    assert sync_view_records(records, (serving(TABLE), serving(OTHER_TABLE, state=StandingState.PAUSED))) == {
+        TABLE: ViewRecord(4, 2, unjudged=True)
+    }
+    assert sync_view_records(records, ()) == {}
+
+
+@pytest.mark.parametrize(
+    ("record", "view", "expected", "due", "unanswered"),
+    [
+        (None, a_view(1), ViewRecord(1, 0, unjudged=True), True, False),
+        (None, a_view(1, awaits_you=False), ViewRecord(1), False, False),
+        (ViewRecord(1, 0, unjudged=True), a_view(1), ViewRecord(1, 1, unjudged=True), True, False),
+        (ViewRecord(1, 1, unjudged=True), a_view(1), ViewRecord(1, 2, unjudged=True), True, False),
+        (ViewRecord(1, LAST_TURN, unjudged=True), a_view(1), ViewRecord(1, RAN_OUT), False, True),
+        (ViewRecord(1, RAN_OUT), a_view(1), ViewRecord(1, RAN_OUT), False, False),
+        (ViewRecord(1, LAST_TURN, unjudged=True), a_view(1, awaits_you=False), ViewRecord(1, LAST_TURN), False, False),
+        (ViewRecord(1, LAST_TURN, unjudged=True), a_view(2), ViewRecord(2, 0, unjudged=True), True, False),
+        (ViewRecord(1, RAN_OUT), a_view(2), ViewRecord(2, 0, unjudged=True), True, False),
+        (ViewRecord(1, LAST_TURN), a_view(1), ViewRecord(1, LAST_TURN, unjudged=True), True, False),
+    ],
+    ids=[
+        "a revision that waits gets its first turn",
+        "a revision that does not wait gets none",
+        "a turn that left it waiting counts one",
+        "a second turn that left it waiting counts two",
+        "the third turn that left it waiting runs it out",
+        "a revision that ran out gets no turn and no second report",
+        "a revision that stopped waiting after a turn counts nothing",
+        "a new revision starts afresh after a turn",
+        "a new revision starts afresh after a revision that ran out",
+        "a read with no turn since counts nothing",
+    ],
+)
+def test_a_read_of_a_view_counts_the_turns_that_left_it_waiting_and_decides_whether_a_turn_is_due(
+    record, view, expected, due, unanswered
+):
+    step = judge_view(record, view)
+
+    assert (step.record, step.turn_due, step.unanswered) == (expected, due, unanswered)
+
+
+def test_a_view_turn_is_told_the_place_his_name_that_it_waits_for_him_and_the_state_as_sent_and_no_instruction():
+    view = PlaceView(revision=3, awaits_you=True, state={"hand": ["x", {"seen": True}], "umläut": "ä"})
+
+    told = json.loads(view_turn_input(TABLE, "Mozart", view))
+
+    assert told == {"kind": "table", "id": "table-1", "you": "Mozart", "awaits_you": True, "state": view.state}
+    assert "ä" in view_turn_input(TABLE, "Mozart", view)
