@@ -33,12 +33,15 @@ RUN uv sync --locked --no-dev --no-install-project --no-build
 FROM python-base
 COPY --from=dependencies /opt/venv /opt/venv
 RUN useradd --no-create-home --uid 1001 personas
-COPY src ./src
+COPY src/personas ./src/personas
 # Only the project is installed here, as a wheel built from the copied source;
 # --no-build keeps the install itself from running any other build script.
 RUN uv build --wheel --out-dir /tmp/wheel \
  && uv pip install --python /opt/venv/bin/python --no-deps --no-build /tmp/wheel/*.whl \
  && rm -r /tmp/wheel
+# After the wheel, so a change of a text alone reuses the wheel's layer. The
+# deployment's configuration names these files at /app/characters.
+COPY src/characters ./characters
 # A pod's runAsNonRoot can verify only a numeric user; 1001 is personas' uid.
 USER 1001
 
