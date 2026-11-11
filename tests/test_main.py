@@ -18,8 +18,14 @@ from agents.turn_events import FinalEvent
 from personas.app_session import open_mcp_session
 from personas.config import CONFIG_ENVIRONMENT_VARIABLE, load_config
 from personas.failures import leaves_of
-from personas.loop import Boundaries
-from personas.main import QUIET_LIBRARIES, READINESS_ERROR_EXIT_CODE, configure_logging, main, real_boundaries
+from personas.main import (
+    QUIET_LIBRARIES,
+    READINESS_ERROR_EXIT_CODE,
+    SweepingBoundaries,
+    configure_logging,
+    main,
+    real_boundaries,
+)
 from personas.memory import PostgresLineStore
 from personas.readiness import FileReadyMarker
 from personas.reporting import Event, log_state_change
@@ -103,7 +109,7 @@ class World:
             self.on_joined()
 
     @asynccontextmanager
-    async def compose(self, config: Config, ready: ReadyMarker) -> AsyncGenerator[Boundaries]:
+    async def compose(self, config: Config, ready: ReadyMarker) -> AsyncGenerator[SweepingBoundaries]:
         realm = FakeRealm(self.app, config.agents[0], AGENT_SUBJECT, config.apps[0].scope)
         self.issued = realm.issued
 
@@ -121,7 +127,7 @@ class World:
             self.app.serving() as app_url,
             httpx2.AsyncClient(transport=realm.transport(), event_hooks={"request": [note_request]}) as token_client,
         ):
-            yield Boundaries(
+            yield SweepingBoundaries(
                 tokens=HttpTokenSource(config.token_endpoint, token_client),
                 open_session=open_at_the_app,
                 clock=FakeClock(),
@@ -201,7 +207,7 @@ def test_a_sigterm_that_cancels_the_runner_ends_the_entry_point_without_raising(
     world.on_joined = lambda: None
 
     @asynccontextmanager
-    async def compose_then_stop(config: Config, ready: ReadyMarker) -> AsyncGenerator[Boundaries]:
+    async def compose_then_stop(config: Config, ready: ReadyMarker) -> AsyncGenerator[SweepingBoundaries]:
         async with world.compose(config, ready) as boundaries:
             os.kill(os.getpid(), signal.SIGTERM)
             yield boundaries
@@ -249,9 +255,9 @@ def test_a_sigterm_in_a_sweep_or_in_its_wait_ends_the_entry_point_without_raisin
     sweeping = SweepEndedBySigterm(in_a_sweep=in_a_sweep)
 
     @asynccontextmanager
-    async def compose_sweeping(config: Config, ready: ReadyMarker) -> AsyncGenerator[Boundaries]:
+    async def compose_sweeping(config: Config, ready: ReadyMarker) -> AsyncGenerator[SweepingBoundaries]:
         async with world.compose(config, ready) as boundaries:
-            yield replace(boundaries, lines=sweeping, clock=sweeping)
+            yield replace(boundaries, lines=sweeping, swept=sweeping, clock=sweeping)
 
     main(compose_sweeping)
 

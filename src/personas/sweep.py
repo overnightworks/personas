@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol
 
 from personas.decision import swept_before
 from personas.failures import StoreUnavailable
@@ -19,7 +19,6 @@ if TYPE_CHECKING:
 SECONDS_PER_MINUTE = 60
 
 
-@runtime_checkable
 class SweptStore(Protocol):
     """What the sweep asks of the store."""
 

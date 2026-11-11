@@ -60,6 +60,9 @@ class ScriptedStore:
             raise self.read_failure
         return ()
 
+    async def erase_before(self, first_read_before: datetime) -> int:
+        return 0
+
     def seqs_kept(self) -> list[int]:
         return [line.seq for read in self.kept for line in read.window.entries]
 

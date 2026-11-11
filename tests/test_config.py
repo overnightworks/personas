@@ -9,6 +9,8 @@ import pytest
 from personas.config import (
     CONFIG_ENVIRONMENT_VARIABLE,
     DEFAULT_CALL_SECONDS,
+    DEFAULT_LINES_KEEP_DAYS,
+    DEFAULT_SWEEP_MINUTES,
     DEFAULT_TODAY,
     DEFAULT_WRITE_SECONDS,
     ConfigError,
@@ -456,7 +458,10 @@ def test_a_memory_table_tells_a_turn_the_default_day_unless_it_sets_how_far_back
 
 @pytest.mark.parametrize(
     ("written", "days", "minutes"),
-    [({}, 30.0, 60.0), ({"lines_keep_days": "inf", "sweep_minutes": "inf"}, math.inf, math.inf)],
+    [
+        ({}, DEFAULT_LINES_KEEP_DAYS, DEFAULT_SWEEP_MINUTES),
+        ({"lines_keep_days": "inf", "sweep_minutes": "inf"}, math.inf, math.inf),
+    ],
     ids=["defaults", "no limit"],
 )
 def test_a_memory_table_keeps_lines_thirty_days_and_sweeps_hourly_unless_it_sets_either_or_leaves_it_infinite(
