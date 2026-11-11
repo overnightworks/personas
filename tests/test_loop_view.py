@@ -11,6 +11,7 @@ from agents.backend.fake_gateway import Reply, completion, tool_call, tool_round
 from agents.member import STANDING_URI, PlaceRef
 
 from personas.config import load_config
+from personas.decision import TURN_CANCELLED_CODE
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, say_in_the_call
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
@@ -225,6 +226,21 @@ async def test_two_view_places_that_wait_at_once_get_their_turns_one_at_a_time_i
     await runner.gateway.until_turns(2)
 
     assert told_states(runner) == [first, second]
+
+
+async def test_a_place_that_leaves_the_standing_during_its_turn_cancels_it_and_is_forgotten(runner):
+    runner.gateway = Gateway(completion("done"))
+    runner.gateway.hold_request(1)
+    state = await seated_at_a_table_whose_view_waits(runner)
+    await runner.gateway.until_requested(1)
+
+    runner.app.stand(SUBJECT)
+    await runner.reports.until("turn_ended")
+    runner.app.stand(SUBJECT, at_table())
+    await runner.gateway.until_turns(1)
+
+    assert [code for event, code in runner.reports.events() if event == "turn_ended"] == [TURN_CANCELLED_CODE]
+    assert told_states(runner) == [state]
 
 
 async def test_a_place_that_leaves_and_comes_back_at_its_waiting_revision_gets_one_turn(runner):
