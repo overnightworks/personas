@@ -46,7 +46,7 @@ if TYPE_CHECKING:
 
     from personas.app_session import AppSession, SessionOpener
     from personas.config import AgentCredentials, AppTarget, ToolBinding
-    from personas.decision import Token
+    from personas.decision import History, Token
     from personas.remembering import Remembering
     from personas.task_record import TaskRecord
     from personas.tokens import TokenFacts, TokenSource
@@ -103,9 +103,10 @@ class Lines:
 
 @dataclass(frozen=True)
 class Waiting:
-    """Why a view turn runs: the place's view waits for the agent."""
+    """Why a view turn runs: the place's view waits for the agent, and what he had taken in when it was admitted."""
 
     view: PlaceView = field(repr=False)
+    history: History = field(repr=False)
 
 
 @dataclass(frozen=True)
@@ -203,8 +204,8 @@ class Turning:
     async def _told(self, admitted: Admitted) -> str:
         """The user message of the turn: a written turn reads the day first, a view turn keeps no day."""
         match admitted.occasion:
-            case Waiting(view=view):
-                return view_turn_input(admitted.place, admitted.facts.name, view)
+            case Waiting(view=view, history=history):
+                return view_turn_input(self._app.mcp_url, admitted.place, admitted.facts.name, view, history)
             case lines:
                 visit = Visit(self._app.mcp_url, admitted.place, lines.window.generation)
                 earlier = await self._remembering.read_day(visit)

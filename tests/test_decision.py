@@ -777,9 +777,10 @@ def test_told_history_lists_the_entries_in_the_order_the_history_holds_them():
 
 def test_a_history_and_its_lines_show_no_name_and_no_text_in_their_repr():
     marker = secrets.token_hex(8)
-    history = History((said(1, marker, name=marker),), older_dropped=False)
+    line = said(1, marker, name=marker)
 
-    assert marker not in repr(history)
+    assert marker not in repr(History((line,), older_dropped=False))
+    assert marker not in repr(line)
 
 
 def test_new_lines_join_the_history_after_the_lines_it_holds():

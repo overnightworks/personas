@@ -145,11 +145,13 @@ async def test_a_view_that_moves_to_a_revision_waiting_for_him_gets_one_turn_tol
 
     opening = runner.gateway.openings()[0]
     assert opening.room == {
+        "app": runner.config.apps[0].mcp_url,
         "kind": TABLE.kind,
         "id": TABLE.id,
         "you": AGENT_NAME,
         "awaits_you": True,
         "state": state,
+        "history": {"older_dropped": False, "entries": []},
     }
     assert opening.system == runner.files.persona_prompt
     assert sorted(runner.gateway.offered_tools()) == sorted([SAY_TOOL, CREATE_SONG, GENERATE_SONG])
