@@ -55,3 +55,24 @@ def log_state_change(change: StateChange) -> None:
         change.code or "-",
         removed,
     )
+
+
+class StoreOutage:
+    """Whether a store is failing: an outage is reported once, and its end once.
+
+    ``report`` adds the client id and app of whoever uses the outage, or none.
+    """
+
+    def __init__(self, report: Callable[[Event, str | None], None]) -> None:
+        self._report = report
+        self._failing = False
+
+    def failed(self, code: str) -> None:
+        if not self._failing:
+            self._failing = True
+            self._report(Event.STORE_FAILED, code)
+
+    def answered(self) -> None:
+        if self._failing:
+            self._failing = False
+            self._report(Event.STORE_RESUMED, None)

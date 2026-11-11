@@ -319,10 +319,11 @@ def test_the_real_boundaries_hold_a_store_exactly_when_the_configuration_has_a_m
         files.text += files.memory_table()
     config = load_config(files.write())
 
-    async def composed_store() -> object:
+    async def composed_store() -> tuple[object, object]:
         async with real_boundaries(config, FileReadyMarker(config.ready_file)) as boundaries:
-            return boundaries.lines
+            return boundaries.lines, boundaries.swept
 
-    store = asyncio.run(composed_store())
+    store, swept = asyncio.run(composed_store())
 
     assert isinstance(store, PostgresLineStore) is has_memory
+    assert (swept is store) if has_memory else (swept is None)

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import math
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -61,7 +63,7 @@ class ScriptedStore:
         return ()
 
     async def erase_before(self, first_read_before: datetime) -> int:
-        return 0
+        raise AssertionError("a test about the loop swept")
 
     def seqs_kept(self) -> list[int]:
         return [line.seq for read in self.kept for line in read.window.entries]
@@ -110,7 +112,7 @@ async def test_a_write_that_ends_in_a_timeout_is_reported_by_its_code_and_does_n
 async def test_a_store_that_cannot_be_read_when_a_turn_starts_costs_no_answer_and_is_reported_once(runner):
     store = ScriptedStore()
     store.read_failure = StoreUnavailable(STORE_UNREACHABLE_CODE)
-    runner.remember_in(store, memory_target())
+    runner.remember_in(store, replace(memory_target(), lines_keep_days=math.inf))
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)

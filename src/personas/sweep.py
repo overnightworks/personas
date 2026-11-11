@@ -5,9 +5,9 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, Protocol
 
-from personas.decision import swept_before
+from personas.decision import SECONDS_PER_MINUTE, swept_before
 from personas.failures import StoreUnavailable
-from personas.reporting import Event, StateChange
+from personas.reporting import Event, StateChange, StoreOutage
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -15,8 +15,6 @@ if TYPE_CHECKING:
     from personas.clock import Clock
     from personas.config import MemoryTarget
     from personas.reporting import Reporter
-
-SECONDS_PER_MINUTE = 60
 
 
 class SweptStore(Protocol):
@@ -31,18 +29,14 @@ class SweptStore(Protocol):
 async def sweep_lines(store: SweptStore, memory: MemoryTarget, clock: Clock, report: Reporter) -> None:
     """Sweeps once and then after every ``sweep_minutes``; it ends when nothing is ever swept or after the first
     sweep when the minutes are infinite. A store that cannot be reached is reported once per outage."""
-    failing = False
+    outage = StoreOutage(lambda event, code: report(StateChange(event, None, None, code)))
     while (cutoff := swept_before(clock.wall(), memory.lines_keep_days)) is not None:
         try:
             removed = await store.erase_before(cutoff)
         except StoreUnavailable as unavailable:
-            if not failing:
-                report(StateChange(Event.STORE_FAILED, None, None, unavailable.code))
-            failing = True
+            outage.failed(unavailable.code)
         else:
-            if failing:
-                report(StateChange(Event.STORE_RESUMED, None, None))
-            failing = False
+            outage.answered()
             if removed:
                 report(StateChange(Event.SWEPT, None, None, lines=removed))
         if math.isinf(memory.sweep_minutes):

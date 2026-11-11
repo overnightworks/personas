@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from personas.secret import Secret
 
 CALL_PLACE_KIND: Final = "call"
+SECONDS_PER_MINUTE: Final = 60
 SECONDS_PER_HOUR: Final = 3600
 SECONDS_PER_DAY: Final = 24 * SECONDS_PER_HOUR
 RENEW_BEFORE_EXPIRY_SECONDS: Final = 60.0

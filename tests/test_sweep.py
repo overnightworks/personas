@@ -64,7 +64,7 @@ async def test_a_task_with_nothing_to_remove_or_no_next_sweep_ends_after_the_sta
 
 async def test_a_runner_without_a_memory_table_sweeps_nothing(runner):
     store = ScriptedSweeps()
-    runner.lines = store
+    runner.swept = store
     await restarted_in_the_call(runner)
     await runner.app.until_standing_read(1)
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING, NoReturn
 
 import pytest
 
@@ -22,6 +23,10 @@ from personas.main import CONFIGURATION_ERROR_EXIT_CODE, main
 from tests.support.configfiles import MAX_TOOL_CALLS, MAX_TURNS, PERSONA_NAME, TURN_PERIOD_SECONDS
 from tests.support.realm import API_GROUP
 
+if TYPE_CHECKING:
+    from personas.config import Config
+    from personas.readiness import ReadyMarker
+
 APP_TABLE = (
     '[[apps]]\nmcp_url = "https://hopin.test/mcp"\nscope = "mcp-hopin"\n'
     f'tools = ["say"]\nmax_tool_calls = {MAX_TOOL_CALLS}\n'
@@ -40,12 +45,16 @@ def _with_ready_file(text: str, value: str | None) -> str:
     return "".join(others if value is None else [f'ready_file = "{value}"\n', *others])
 
 
+def never_composed(config: Config, marker: ReadyMarker) -> NoReturn:
+    raise AssertionError("a refused configuration started the runner")
+
+
 def fails_at_start(environment: dict[str, str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
     monkeypatch.delenv(CONFIG_ENVIRONMENT_VARIABLE, raising=False)
     for name, value in environment.items():
         monkeypatch.setenv(name, value)
     with pytest.raises(SystemExit) as stopped:
-        main()
+        main(never_composed)
     assert stopped.value.code == CONFIGURATION_ERROR_EXIT_CODE
     return capsys.readouterr().err
 
@@ -464,7 +473,7 @@ def test_a_memory_table_tells_a_turn_the_default_day_unless_it_sets_how_far_back
     ],
     ids=["defaults", "no limit"],
 )
-def test_a_memory_table_keeps_lines_thirty_days_and_sweeps_hourly_unless_it_sets_either_or_leaves_it_infinite(
+def test_a_memory_table_keeps_and_sweeps_by_default_unless_it_sets_either_or_leaves_it_infinite(
     files, written, days, minutes
 ):
     files.text += files.memory_table(**written)
