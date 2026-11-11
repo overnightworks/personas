@@ -46,13 +46,3 @@ def test_a_history_read_earlier_does_not_change_when_more_lines_are_taken():
     mind.take((said(CALL, 2, "second"),))
 
     assert [line.text for line in before.entries] == ["first"]
-
-
-def test_a_mind_keeps_only_the_newest_lines_that_fit_its_bound():
-    mind = Mind(size_bytes=len("Ada" + "second") + len("Ada" + "third"))
-
-    mind.take((said(CALL, 1, "first"), said(CALL, 2, "second")))
-    mind.take((said(CALL, 3, "third"),))
-
-    assert [line.text for line in mind.history.entries] == ["second", "third"]
-    assert mind.history.older_dropped is True

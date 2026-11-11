@@ -383,8 +383,9 @@ async def test_no_line_state_or_name_of_the_history_reaches_a_log_line(runner, o
     await restarted_in_the_call(runner)
     await said_and_taken(runner.app, PLACE_ID, REMARK, name=name)
     other.stand(SUBJECT, at_table())
-    waits(other, 1)
+    state = waits(other, 1)
     await runner.gateway.until_turns(1)
 
+    assert not [value for value in state.values() if value in caplog.text]
     assert name not in caplog.text
     assert REMARK not in caplog.text
