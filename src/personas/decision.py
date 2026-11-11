@@ -108,7 +108,7 @@ def _is_call(standing: Standing) -> bool:
     return standing.place.kind == CALL_PLACE_KIND and not standing.serves_view
 
 
-def accepts_for(standings: tuple[Standing, ...], memory: Memory, *, takes_turns: bool = False) -> tuple[Accept, ...]:
+def accepts_for(standings: tuple[Standing, ...], memory: Memory, *, takes_turns: bool) -> tuple[Accept, ...]:
     """One accept for each invited call standing whose invitation was not refused as stale, and, where the loop can
     take turns, for each invited place that serves a view: a seated agent that cannot act leaves the place waiting."""
     return tuple(

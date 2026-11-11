@@ -89,7 +89,7 @@ TRANSIENT_REFUSALS = [
 def test_an_invited_call_standing_is_accepted_with_its_place_invitation_and_epoch():
     held = (invited("room-7", "inv-3", epoch=4),)
 
-    assert accepts_for(held, Memory()) == (Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 4),)
+    assert accepts_for(held, Memory(), takes_turns=False) == (Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 4),)
 
 
 @pytest.mark.parametrize(
@@ -102,15 +102,17 @@ def test_an_invited_call_standing_is_accepted_with_its_place_invitation_and_epoc
     ids=["active", "paused", "another kind of place"],
 )
 def test_a_standing_that_is_no_call_invitation_is_not_accepted(standing):
-    assert accepts_for((standing,), Memory()) == ()
+    assert accepts_for((standing,), Memory(), takes_turns=False) == ()
 
 
 def test_a_stale_invitation_is_never_accepted_again():
     first = invited("room-7", "inv-3")
-    memory, _ = after_refusal(Memory(), accepts_for((first,), Memory())[0], AcceptInvitationRefusal.STALE_INVITATION)
+    memory, _ = after_refusal(
+        Memory(), accepts_for((first,), Memory(), takes_turns=False)[0], AcceptInvitationRefusal.STALE_INVITATION
+    )
 
-    assert accepts_for((first,), memory) == ()
-    assert accepts_for((invited("room-7", "inv-4"),), memory) == (
+    assert accepts_for((first,), memory, takes_turns=False) == ()
+    assert accepts_for((invited("room-7", "inv-4"),), memory, takes_turns=False) == (
         Accept(PlaceRef(kind="call", id="room-7"), "inv-4", 0),
     )
 
@@ -118,10 +120,10 @@ def test_a_stale_invitation_is_never_accepted_again():
 @pytest.mark.parametrize("refusal", TRANSIENT_REFUSALS)
 def test_any_other_refusal_is_accepted_again_at_the_next_read(refusal):
     standing = invited("room-7", "inv-3")
-    attempt = accepts_for((standing,), Memory())[0]
+    attempt = accepts_for((standing,), Memory(), takes_turns=False)[0]
     memory, _ = after_refusal(Memory(), attempt, refusal)
 
-    assert accepts_for((standing,), memory) == (attempt,)
+    assert accepts_for((standing,), memory, takes_turns=False) == (attempt,)
 
 
 def test_a_repeated_refusal_is_news_once_and_a_changed_one_is_news_again():
@@ -153,7 +155,7 @@ def test_a_stale_invitation_stays_refused_when_a_read_leaves_it_out_and_a_later_
 
     memory = forget_gone(memory, ())
 
-    assert accepts_for((standing,), memory) == ()
+    assert accepts_for((standing,), memory, takes_turns=False) == ()
 
 
 @pytest.mark.parametrize(
@@ -664,7 +666,7 @@ def test_a_call_place_that_serves_a_view_is_a_view_place_and_no_window_is_kept_o
     assert active_call_places((standing,)) == ()
     assert sync_checkpoints({}, (standing,)) == {}
     assert active_view_places((standing,)) == (PLACE,)
-    assert accepts_for((invited("room-7", "inv-3", serves_view=True),), Memory()) == ()
+    assert accepts_for((invited("room-7", "inv-3", serves_view=True),), Memory(), takes_turns=False) == ()
 
 
 def test_only_the_active_places_that_serve_a_view_are_view_places_in_the_order_of_the_standing():

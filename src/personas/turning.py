@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import aclosing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Final
 
@@ -96,8 +96,8 @@ class _HeldTools:
 class Lines:
     """Why a written turn runs: what the place's window gave."""
 
-    window: PlaceWindow
-    new: tuple[PlaceEntry, ...]
+    window: PlaceWindow = field(repr=False)
+    new: tuple[PlaceEntry, ...] = field(repr=False)
     missed: bool
 
 
@@ -105,7 +105,7 @@ class Lines:
 class Waiting:
     """Why a view turn runs: the place's view waits for the agent."""
 
-    view: PlaceView
+    view: PlaceView = field(repr=False)
 
 
 @dataclass(frozen=True)
