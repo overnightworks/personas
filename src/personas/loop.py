@@ -22,7 +22,6 @@ from personas.decision import (
     Reaction,
     Suspend,
     Token,
-    ViewRecord,
     Visit,
     WindowRead,
     accepts_for,
@@ -36,14 +35,14 @@ from personas.decision import (
     forget_gone,
     is_defect,
     is_voice_app,
-    judge_view,
     perceive,
     reaction_to,
     renewal_due,
     sets_where_reading_starts,
     sync_checkpoints,
-    sync_view_records,
+    sync_turned_revisions,
     turn_invalid,
+    view_turn_due,
     voice_context,
 )
 from personas.failures import CallFailure, leaves_of, raise_if_cancelled
@@ -153,7 +152,7 @@ class AgentLoop:
         self._suspension: str | None = None
         self._backing_off = False
         self._checkpoints: dict[PlaceRef, Checkpoint] = {}
-        self._views: dict[PlaceRef, ViewRecord] = {}
+        self._turned_revisions: dict[PlaceRef, int] = {}
         self._turn: ActiveTurn | None = None
         self._turn_ended = asyncio.Event()
         self._voices: dict[PlaceRef, ActiveVoice] = {}
@@ -237,7 +236,7 @@ class AgentLoop:
         self._boundaries.ready.announce()
         self._memory = forget_gone(self._memory, standing.standings)
         self._checkpoints = sync_checkpoints(self._checkpoints, standing.standings)
-        self._views = sync_view_records(self._views, standing.standings)
+        self._turned_revisions = sync_turned_revisions(self._turned_revisions, standing.standings)
         self._cancel_turn_if_its_place_left(standing.standings)
         await self._accept_invitations(session, standing.standings)
         return standing.standings
@@ -319,7 +318,7 @@ class AgentLoop:
     ) -> None:
         """Reads the views of the active view places in the standing's order; the first that is due starts the turn.
 
-        It reads none while a turn runs or was just started. The read after a turn's end judges that turn.
+        It reads none while a turn runs or was just started. A revision starts one turn, whatever that turn did.
         """
         setup = self._turn_setup
         if setup is None or self._turn is not None:
@@ -328,15 +327,11 @@ class AgentLoop:
         for place in active_view_places(standings):
             await self._use_current_token(session)
             view = await session.read_view(place)
-            if view is None:
+            if view is None or not view_turn_due(self._turned_revisions.get(place), view):
                 continue
-            step = judge_view(self._views.get(place), view)
-            self._views[place] = step.record
-            if step.unanswered:
-                self._report(Event.VIEW_UNANSWERED)
-            if step.turn_due:
-                self._start_turn(turns, setup, place, Admitted(facts, place, Waiting(view)))
-                return
+            self._turned_revisions[place] = view.revision
+            self._start_turn(turns, setup, place, Admitted(facts, place, Waiting(view)))
+            return
 
     def _take_lines(
         self, turns: asyncio.TaskGroup, setup: TurnSetup, place: PlaceRef, window: PlaceWindow, facts: TokenFacts

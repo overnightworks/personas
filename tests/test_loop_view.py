@@ -11,7 +11,7 @@ from agents.backend.fake_gateway import Reply, completion, tool_call, tool_round
 from agents.member import STANDING_URI, PlaceRef
 
 from personas.config import load_config
-from personas.decision import TURN_CANCELLED_CODE, VIEW_TURNS_PER_REVISION
+from personas.decision import TURN_CANCELLED_CODE
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, say_in_the_call
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
@@ -23,7 +23,6 @@ pytestmark = pytest.mark.anyio
 
 TABLE = PlaceRef(kind="table", id="table-1")
 OTHER_TABLE = PlaceRef(kind="table", id="table-2")
-UNANSWERED = "view_unanswered"
 
 
 def at_table(place: PlaceRef = TABLE):
@@ -45,21 +44,11 @@ def told_states(runner) -> list[object]:
     return [opening.room["state"] for opening in runner.gateway.openings()]
 
 
-def unanswered(runner) -> int:
-    return sum(change.event.value == UNANSWERED for change in runner.reports.changes)
-
-
 async def seated_at_a_table_whose_view_waits(runner, revision: int = 1) -> dict[str, str]:
     runner.app.stand(SUBJECT, at_table())
     state = waits(runner, revision)
     runner.start()
     return state
-
-
-async def three_turns_leave_the_first_revision_waiting(runner) -> dict[str, str]:
-    first = await seated_at_a_table_whose_view_waits(runner)
-    await runner.reports.until(UNANSWERED)
-    return first
 
 
 async def wakes_at_the_same_revision(runner, state, count: int = 2) -> None:
@@ -167,44 +156,37 @@ async def test_a_view_that_moves_to_a_revision_waiting_for_him_gets_one_turn_tol
     assert len(runner.gateway.requests) == 1
 
 
-@pytest.mark.parametrize("calls", [True, False], ids=["the turn calls a tool", "the turn makes no call"])
-async def test_a_turn_after_which_the_view_does_not_wait_any_more_gets_no_second_turn_and_no_report(runner, calls):
-    runner.gateway = Gateway(*says(TABLE.id, ANSWER)) if calls else Gateway(completion("done"))
-    ending = runner.gateway.hold_request(2 if calls else 1)
-    await seated_at_a_table_whose_view_waits(runner)
-    await runner.gateway.until_requested(1)
-    if calls:
-        await runner.app.said_count(1)
-    runner.app.show_view(TABLE.id, 2, a_state(), awaits_you=False)
-    ending.set()
+@pytest.mark.parametrize(
+    ("replies", "relay_fails"),
+    [
+        pytest.param(says(TABLE.id, ANSWER), False, id="the turn calls a tool that moves nothing"),
+        pytest.param([completion("done")], False, id="the turn makes no call"),
+        pytest.param([Reply(status=HTTPStatus.TOO_MANY_REQUESTS)], False, id="the gateway is busy"),
+        pytest.param([BUDGET_SPENT], False, id="the budget is spent"),
+        pytest.param(
+            [tool_round(tool_call("call-0", SAY_TOOL, {"place": TABLE.id, "text": ANSWER}))],
+            True,
+            id="the relayed call fails",
+        ),
+    ],
+)
+async def test_a_turn_that_ends_and_leaves_its_revision_waiting_gets_no_second_turn_however_the_loop_wakes(
+    runner, replies, relay_fails
+):
+    async def cuts(reply):
+        await reply.open_stream()
+        reply.cut()
+
+    runner.gateway = Gateway(*replies)
+    if relay_fails:
+        runner.app.script(CALL, cuts)
+    first = await seated_at_a_table_whose_view_waits(runner)
     await runner.app.until_view_read(TABLE, 2)
-    state = waits(runner, 3)
-    await runner.gateway.until_turns(2)
-
-    assert told_states(runner)[1] == state
-    assert len(runner.gateway.openings()) == 2
-    assert unanswered(runner) == 0
-
-
-@pytest.mark.parametrize("calls", [True, False], ids=["the turn calls a tool", "the turn makes no call"])
-async def test_three_turns_that_leave_a_revision_waiting_end_in_one_report_and_no_fourth_turn(runner, calls):
-    runner.gateway = Gateway(*says(TABLE.id, "one", "two", "three")) if calls else Gateway(completion("done"))
-    first = await three_turns_leave_the_first_revision_waiting(runner)
     await wakes_at_the_same_revision(runner, first)
     second = waits(runner, 2)
-    await runner.gateway.until_turns(VIEW_TURNS_PER_REVISION + 1)
+    await runner.gateway.until_turns(2)
 
-    assert told_states(runner) == [first, first, first, second]
-    assert unanswered(runner) == 1
-
-
-async def test_after_three_turns_a_new_revision_that_waits_gets_one_turn(runner):
-    first = await three_turns_leave_the_first_revision_waiting(runner)
-    second = waits(runner, 2)
-    await runner.gateway.until_turns(VIEW_TURNS_PER_REVISION + 1)
-    await runner.app.until_view_read(TABLE, runner.app.view_reads(TABLE) + 1)
-
-    assert told_states(runner) == [first, first, first, second]
+    assert told_states(runner) == [first, second]
 
 
 async def test_a_turn_that_moves_the_app_to_a_revision_that_waits_again_starts_that_revision_afresh(runner):
@@ -214,43 +196,9 @@ async def test_a_turn_that_moves_the_app_to_a_revision_that_waits_again_starts_t
     await runner.gateway.until_requested(1)
     second = waits(runner, 2)
     ending.set()
-    await runner.reports.until(UNANSWERED)
+    await runner.gateway.until_turns(2)
 
-    assert told_states(runner) == [first, second, second, second]
-    assert unanswered(runner) == 1
-
-
-@pytest.mark.parametrize(
-    "reply",
-    [Reply(status=HTTPStatus.TOO_MANY_REQUESTS), BUDGET_SPENT],
-    ids=["the gateway is busy", "the budget is spent"],
-)
-async def test_turns_the_gateway_ends_short_count_like_any_others_and_never_stop_the_table_for_good(runner, reply):
-    runner.gateway = Gateway(reply)
-    first = await three_turns_leave_the_first_revision_waiting(runner)
-    await wakes_at_the_same_revision(runner, first)
-    second = waits(runner, 2)
-    await runner.reports.until("turn_ended", count=VIEW_TURNS_PER_REVISION + 1)
-
-    assert told_states(runner) == [first, first, first, second]
-    assert unanswered(runner) == 1
-
-
-async def test_turns_whose_relayed_call_fails_count_like_any_others_over_the_reactions_they_lead_to(runner):
-    async def cuts(reply):
-        await reply.open_stream()
-        reply.cut()
-
-    sayings = tool_round(tool_call("call-0", SAY_TOOL, {"place": TABLE.id, "text": ANSWER}))
-    runner.gateway = Gateway(sayings, sayings, sayings)
-    runner.app.script(CALL, cuts, cuts, cuts)
-    first = await three_turns_leave_the_first_revision_waiting(runner)
-    await wakes_at_the_same_revision(runner, first)
-    second = waits(runner, 2)
-    await runner.gateway.until_turns(VIEW_TURNS_PER_REVISION + 1)
-
-    assert told_states(runner) == [first, first, first, second]
-    assert unanswered(runner) == 1
+    assert told_states(runner) == [first, second]
 
 
 async def test_two_view_places_that_wait_at_once_get_their_turns_one_at_a_time_in_the_order_of_the_standing(runner):
@@ -273,18 +221,33 @@ async def test_two_view_places_that_wait_at_once_get_their_turns_one_at_a_time_i
 
 async def test_a_place_that_leaves_the_standing_during_its_turn_cancels_it_and_is_forgotten(runner):
     runner.gateway = Gateway(completion("done"))
-    runner.gateway.hold_request(VIEW_TURNS_PER_REVISION)
+    runner.gateway.hold_request(1)
     state = await seated_at_a_table_whose_view_waits(runner)
-    await runner.gateway.until_requested(VIEW_TURNS_PER_REVISION)
+    await runner.gateway.until_requested(1)
 
     runner.app.stand(SUBJECT)
     await runner.reports.until("turn_ended")
     runner.app.stand(SUBJECT, at_table())
-    await runner.gateway.until_turns(VIEW_TURNS_PER_REVISION)
+    await runner.gateway.until_turns(1)
 
     assert [code for event, code in runner.reports.events() if event == "turn_ended"] == [TURN_CANCELLED_CODE]
-    assert told_states(runner) == [state] * VIEW_TURNS_PER_REVISION
-    assert unanswered(runner) == 0
+    assert told_states(runner) == [state]
+
+
+async def test_a_place_that_leaves_and_comes_back_at_its_waiting_revision_gets_one_turn(runner):
+    first = await seated_at_a_table_whose_view_waits(runner)
+    await runner.app.until_view_read(TABLE, 2)
+    standing_reads = runner.app.reads[STANDING_URI]
+    runner.app.stand(SUBJECT)
+    await runner.app.until_standing_read(standing_reads + 1)
+    runner.app.stand(SUBJECT, at_table())
+    await runner.gateway.until_turns(2)
+    reads = runner.app.view_reads(TABLE)
+    await runner.app.until_view_read(TABLE, reads + 1)
+    second = waits(runner, 2)
+    await runner.gateway.until_turns(3)
+
+    assert told_states(runner) == [first, first, second]
 
 
 async def test_a_view_he_cannot_read_starts_no_turn_and_fails_nothing_until_the_standing_shows_it_again(runner):
@@ -299,24 +262,22 @@ async def test_a_view_he_cannot_read_starts_no_turn_and_fails_nothing_until_the_
     assert runner.reports.events() == [("started", None)]
 
 
-async def test_a_reaction_keeps_what_was_counted_and_the_view_is_read_again_after_the_new_sessions_first_standing(
-    runner,
-):
+async def test_a_reaction_after_a_turn_that_left_its_revision_waiting_starts_no_second_turn_at_that_revision(runner):
     async def cuts(reply):
         await reply.open_stream()
         reply.cut()
 
-    first = await three_turns_leave_the_first_revision_waiting(runner)
+    first = await seated_at_a_table_whose_view_waits(runner)
+    await runner.app.until_view_read(TABLE, 2)
     reads = runner.app.view_reads(TABLE)
     runner.app.script(READ, cuts)
     runner.app.show_view(TABLE.id, 1, first)
     await runner.reports.until("resumed")
     await runner.app.until_view_read(TABLE, reads + 1)
     second = waits(runner, 2)
-    await runner.gateway.until_turns(VIEW_TURNS_PER_REVISION + 1)
+    await runner.gateway.until_turns(2)
 
-    assert told_states(runner) == [first, first, first, second]
-    assert unanswered(runner) == 1
+    assert told_states(runner) == [first, second]
 
 
 async def test_a_line_that_addresses_him_while_a_view_turn_runs_gets_its_turn_once_that_one_has_ended(runner):
@@ -337,15 +298,11 @@ async def test_a_line_that_addresses_him_while_a_view_turn_runs_gets_its_turn_on
     assert len(runner.gateway.openings()) == 2
 
 
-async def test_the_state_of_a_view_reaches_no_report_and_no_log_line_and_an_unanswered_revision_is_reported_bare(
-    runner, caplog
-):
-    first = await three_turns_leave_the_first_revision_waiting(runner)
+async def test_the_state_of_a_view_reaches_no_report_and_no_log_line(runner, caplog):
+    first = await seated_at_a_table_whose_view_waits(runner)
+    await runner.app.until_view_read(TABLE, 2)
     logged = caplog.text
 
-    (change,) = [each for each in runner.reports.changes if each.event.value == UNANSWERED]
-    assert (change.client_id, change.app, change.code) == (runner.agent.client_id, runner.config.apps[0].mcp_url, None)
-    assert f"{UNANSWERED} client_id={runner.agent.client_id} app={runner.config.apps[0].mcp_url} code=-" in logged
     assert not [value for value in first.values() if value in logged]
     assert TABLE.id not in logged
     assert all(record.levelno < logging.ERROR for record in caplog.records)

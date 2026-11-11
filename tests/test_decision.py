@@ -28,7 +28,6 @@ from personas.decision import (
     NETWORK_FAILURE_CODE,
     RENEW_BEFORE_EXPIRY_SECONDS,
     SPOKEN_WAIT_BOUND_SECONDS,
-    VIEW_TURNS_PER_REVISION,
     Accept,
     Joined,
     KeptLine,
@@ -42,7 +41,6 @@ from personas.decision import (
     TodayBounds,
     Token,
     UnrecognisedRefusal,
-    ViewRecord,
     Visit,
     accepts_for,
     active_call_places,
@@ -57,7 +55,6 @@ from personas.decision import (
     failure_code,
     forget_gone,
     is_voice_app,
-    judge_view,
     perceive,
     reaction_to,
     renewal_due,
@@ -65,11 +62,12 @@ from personas.decision import (
     spoken_wait_seconds,
     swept_before,
     sync_checkpoints,
-    sync_view_records,
+    sync_turned_revisions,
     today_since,
     turn_call_bound,
     turn_input,
     turn_invalid,
+    view_turn_due,
     view_turn_input,
     voice_context,
 )
@@ -623,8 +621,6 @@ def test_a_failure_is_logged_with_its_status_its_answer_code_or_the_word_for_the
     assert failure_code(failure) == code
 
 
-RAN_OUT = VIEW_TURNS_PER_REVISION
-LAST_TURN = VIEW_TURNS_PER_REVISION - 1
 TABLE = PlaceRef(kind="table", id="table-1")
 OTHER_TABLE = PlaceRef(kind="table", id="table-2")
 
@@ -682,48 +678,34 @@ def test_only_the_active_places_that_serve_a_view_are_view_places_in_the_order_o
     assert active_view_places(standings) == (OTHER_TABLE, PlaceRef(kind="table", id="table-4"))
 
 
-def test_the_standing_decides_which_view_records_exist():
-    records = {TABLE: ViewRecord(4, 2, unjudged=True), OTHER_TABLE: ViewRecord(1)}
+def test_the_standing_decides_which_turned_revisions_are_kept():
+    turned = {TABLE: 4, OTHER_TABLE: 1}
 
-    assert sync_view_records(records, (serving(TABLE), serving(OTHER_TABLE, state=StandingState.PAUSED))) == {
-        TABLE: ViewRecord(4, 2, unjudged=True)
+    assert sync_turned_revisions(turned, (serving(TABLE), serving(OTHER_TABLE, state=StandingState.PAUSED))) == {
+        TABLE: 4
     }
-    assert sync_view_records(records, ()) == {}
+    assert sync_turned_revisions(turned, ()) == {}
 
 
 @pytest.mark.parametrize(
-    ("record", "view", "expected", "due", "unanswered"),
+    ("turned_revision", "view", "due"),
     [
-        (None, a_view(1), ViewRecord(1, 0, unjudged=True), True, False),
-        (None, a_view(1, awaits_you=False), ViewRecord(1), False, False),
-        (ViewRecord(1, 0, unjudged=True), a_view(1), ViewRecord(1, 1, unjudged=True), True, False),
-        (ViewRecord(1, 1, unjudged=True), a_view(1), ViewRecord(1, 2, unjudged=True), True, False),
-        (ViewRecord(1, LAST_TURN, unjudged=True), a_view(1), ViewRecord(1, RAN_OUT), False, True),
-        (ViewRecord(1, RAN_OUT), a_view(1), ViewRecord(1, RAN_OUT), False, False),
-        (ViewRecord(1, LAST_TURN, unjudged=True), a_view(1, awaits_you=False), ViewRecord(1, LAST_TURN), False, False),
-        (ViewRecord(1, LAST_TURN, unjudged=True), a_view(2), ViewRecord(2, 0, unjudged=True), True, False),
-        (ViewRecord(1, RAN_OUT), a_view(2), ViewRecord(2, 0, unjudged=True), True, False),
-        (ViewRecord(1, LAST_TURN), a_view(1), ViewRecord(1, LAST_TURN, unjudged=True), True, False),
+        (None, a_view(1), True),
+        (None, a_view(1, awaits_you=False), False),
+        (1, a_view(1), False),
+        (1, a_view(2), True),
+        (1, a_view(2, awaits_you=False), False),
     ],
     ids=[
         "a revision that waits gets its first turn",
         "a revision that does not wait gets none",
-        "a turn that left it waiting counts one",
-        "a second turn that left it waiting counts two",
-        "the third turn that left it waiting runs it out",
-        "a revision that ran out gets no turn and no second report",
-        "a revision that stopped waiting after a turn counts nothing",
-        "a new revision starts afresh after a turn",
-        "a new revision starts afresh after a revision that ran out",
-        "a read with no turn since counts nothing",
+        "a revision a turn was started for gets no second turn",
+        "a new revision that waits gets its turn",
+        "a new revision that does not wait gets none",
     ],
 )
-def test_a_read_of_a_view_counts_the_turns_that_left_it_waiting_and_decides_whether_a_turn_is_due(
-    record, view, expected, due, unanswered
-):
-    step = judge_view(record, view)
-
-    assert (step.record, step.turn_due, step.unanswered) == (expected, due, unanswered)
+def test_a_view_is_due_a_turn_while_it_waits_at_a_revision_no_turn_was_started_for(turned_revision, view, due):
+    assert view_turn_due(turned_revision, view) is due
 
 
 def test_a_view_turn_is_told_the_place_his_name_that_it_waits_for_him_and_the_state_as_sent_and_no_instruction():
