@@ -28,7 +28,7 @@ from personas.failures import (
 )
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
-from tests.support.gateway import Gateway, says
+from tests.support.gateway import BUDGET_SPENT, Gateway, says
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import (
     CALL,
@@ -187,6 +187,23 @@ async def test_one_turn_runs_at_a_time_and_a_line_said_meanwhile_is_answered_aft
     assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [2, 3]]
 
 
+async def test_every_line_addressed_to_him_gets_its_own_turn_one_after_the_other(runner):
+    runner.gateway = Gateway(
+        Reply(status=HTTPStatus.TOO_MANY_REQUESTS), BUDGET_SPENT, Reply(status=HTTPStatus.TOO_MANY_REQUESTS)
+    )
+    await restarted_in_the_call(runner)
+    for round_number in range(1, 4):
+        say_in_the_call(runner, f"{ADDRESSED} Round {round_number}.")
+        await runner.reports.until("turn_ended", count=round_number)
+
+    assert len(runner.gateway.openings()) == 3
+    assert [code for event, code in runner.reports.events() if event == "turn_ended"] == [
+        "busy",
+        "budget_spent",
+        "busy",
+    ]
+
+
 async def a_turn_ended_short(runner, code):
     """Runs the runner on one addressed line until its turn reported this code."""
     await restarted_in_the_call(runner)
@@ -206,8 +223,9 @@ async def a_turn_ended_short(runner, code):
         (Reply(status=HTTPStatus.TOO_MANY_REQUESTS, headers={"Retry-After": "3"}), "busy"),
         (Reply(status=HTTPStatus.FORBIDDEN), "provider_unavailable"),
         (Reply(status=HTTPStatus.SERVICE_UNAVAILABLE), "provider_unavailable"),
+        (BUDGET_SPENT, "budget_spent"),
     ],
-    ids=["rate limited", "refused", "failing"],
+    ids=["rate limited", "refused", "failing", "budget spent"],
 )
 async def test_a_gateway_refusal_is_silent_logs_one_code_and_leaves_the_lifecycle_untouched(runner, reply, code):
     runner.gateway = Gateway(reply)

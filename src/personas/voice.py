@@ -1,25 +1,20 @@
-"""The voice loop's ports: the lines it hears, the sentences it speaks, the backend that carries the cap and the log."""
+"""The voice loop's ports: the lines it hears, the sentences it speaks and the log."""
 
 from __future__ import annotations
 
 import asyncio
-from contextlib import aclosing
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from agents.backend import TurnStopKind, TurnStopped
 from agents.member import SpeakRefusal
-from agents.turn import RejectionCode
 from agents.voice import DecisionFailed, VoiceRefused
 
-from personas.decision import CAPPED_DETAIL, spoken_wait_seconds
+from personas.decision import spoken_wait_seconds
 from personas.reporting import Event
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Awaitable, Callable
+    from collections.abc import Awaitable, Callable
 
-    from agents.agent_file import TurnRequest
-    from agents.backend import AgentBackend, TurnEvent, TurnPerson
     from agents.member import PlaceEntry, PlaceRef
     from agents.voice import VoiceEvent
 
@@ -82,33 +77,12 @@ class SpeakingVoice:
         await self.clock.sleep(spoken_wait_seconds(outcome.duration_ms))
 
 
-@dataclass(frozen=True)
-class CappedBackend:
-    """A backend whose every run first reserves a turn against the agent's cap.
-
-    A run the cap holds back ends refused with the cap's label, so that the loop's lines stay undecided.
-    """
-
-    backend: AgentBackend
-    reserve: Callable[[], bool]
-
-    async def run(self, request: TurnRequest, person: TurnPerson) -> AsyncGenerator[TurnEvent]:
-        if not self.reserve():
-            raise TurnStopped(TurnStopKind.REFUSED, RejectionCode.BUSY, detail=CAPPED_DETAIL)
-        async with aclosing(self.backend.run(request, person)) as events:
-            async for event in events:
-                yield event
-
-
 def reporting_decisions(report: Report) -> Callable[[VoiceEvent], None]:
-    """A failed decision is logged by its code, or as capped; nothing the loop hears or says is logged."""
+    """A failed decision is logged by its code; nothing the loop hears or says is logged."""
 
     def on_event(event: VoiceEvent) -> None:
         if not isinstance(event, DecisionFailed):
             return
-        if event.detail == CAPPED_DETAIL:
-            report(Event.CAPPED, None)
-        else:
-            report(Event.TURN_ENDED, event.code.value)
+        report(Event.TURN_ENDED, event.code.value)
 
     return on_event

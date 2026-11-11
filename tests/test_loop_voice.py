@@ -2,18 +2,15 @@
 
 from __future__ import annotations
 
-import json
-from http import HTTPStatus
-
 import pytest
-from agents.backend.fake_gateway import Reply, completion
+from agents.backend.fake_gateway import completion
 from agents.member import SpeakRefusal, SpeakRefused, Spoken
 from agents.tools import ToolOutcome
 from agents.turn import Principal, person_fingerprint
 
-from personas.decision import SPOKEN_WAIT_BOUND_SECONDS, TurnCap
+from personas.decision import SPOKEN_WAIT_BOUND_SECONDS
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
-from tests.support.gateway import Gateway, says
+from tests.support.gateway import BUDGET_SPENT, Gateway, says
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import ISSUER, SPOKEN_DURATION_MS, Line, QuietApp, active
 from tests.support.realm import LIFETIME_SECONDS
@@ -21,13 +18,8 @@ from tests.support.voice import TWO_SENTENCES, HeldSleeps, a_voice_call, sentenc
 
 pytestmark = pytest.mark.anyio
 
-CAP = TurnCap(max_turns=1, period_seconds=120.0)
 QUIET_PLACE_ID = "room-8"
 SECOND_AGENT, SECOND_SUBJECT, SECOND_NAME = "agent-bach", "agent-subject-2", "Bach"
-BUDGET_SPENT = Reply(
-    status=HTTPStatus.UNPROCESSABLE_ENTITY,
-    body=json.dumps({"error": {"type": "budget_exceeded", "code": "422"}}).encode(),
-)
 
 
 @pytest.fixture
@@ -171,48 +163,18 @@ async def test_two_agents_in_one_place_each_skip_only_their_own_spoken_lines_and
     assert not [heard for number in (1, 2, 3) for heard in runner.gateway.heard_in(number) if heard["own"]]
 
 
-async def test_a_decision_over_the_cap_is_logged_as_capped_and_its_lines_are_answered_by_the_next_decision_that_wakes(
-    runner,
-):
-    runner.cap_turns(CAP)
-    await a_voice_call(runner, completion("One answer."))
+async def test_every_line_that_wakes_the_voice_gets_its_own_decision_and_none_is_refused(runner):
+    await a_voice_call(runner, completion("One answer."), completion("Second answer."), completion("Third answer."))
     say_in_the_call(runner, f"{ADDRESSED} First.", spoken=True)
     await runner.app.spoken_count(1)
     say_in_the_call(runner, f"{ADDRESSED} Second.", spoken=True)
-    await runner.reports.until("capped")
-    runner.clock.time += CAP.period_seconds
-    say_in_the_call(runner, f"{ADDRESSED} Third.", spoken=True)
     await runner.app.spoken_count(2)
+    say_in_the_call(runner, f"{ADDRESSED} Third.", spoken=True)
+    await runner.app.spoken_count(3)
 
-    assert [event for event, _ in runner.reports.events()].count("capped") == 1
-    assert len(runner.gateway.requests) == 2
-    assert [line["text"] for line in runner.gateway.lines_told(2)] == [f"{ADDRESSED} Second.", f"{ADDRESSED} Third."]
-
-
-async def test_a_decision_over_the_cap_is_not_refunded_when_the_one_before_it_ended_short(runner):
-    runner.cap_turns(CAP)
-    await a_voice_call(runner, BUDGET_SPENT)
-    say_in_the_call(runner, f"{ADDRESSED} First.", spoken=True)
-    await runner.reports.until("turn_ended")
-    say_in_the_call(runner, f"{ADDRESSED} Second.", spoken=True)
-    await runner.reports.until("capped")
-
-    assert len(runner.gateway.requests) == 1
-    assert runner.reports.events() == [("started", None), ("turn_ended", "budget_spent"), ("capped", None)]
-
-
-async def test_a_turn_of_a_written_place_and_a_voice_decision_count_against_one_cap(runner, quiet):
-    runner.cap_turns(CAP)
-    await a_voice_call(runner, *says(QUIET_PLACE_ID, "Written."), completion("Aloud."))
-    await quiet.until_window_read(QUIET_PLACE_ID)
-    quiet.speak(QUIET_PLACE_ID, PERSON, "Ada", ADDRESSED)
-    await quiet.said_count(1)
-    await runner.gateway.until_requested(2)
-    say_in_the_call(runner, ADDRESSED, spoken=True)
-    await runner.reports.until("capped")
-
-    assert runner.app.spoken == []
-    assert len(runner.gateway.requests) == 2
+    assert sentences_spoken(runner) == ["One answer.", "Second answer.", "Third answer."]
+    assert len(runner.gateway.requests) == 3
+    assert runner.reports.events() == [("started", None)]
 
 
 async def test_a_sentence_that_plays_longer_than_the_bound_is_waited_for_only_the_bound(runner):
@@ -238,15 +200,10 @@ async def test_a_loop_that_outlives_its_token_speaks_its_next_sentence_with_a_re
     assert second == runner.realm.issued[-1]
 
 
-async def test_a_voice_loop_logs_an_answered_line_not_at_all_and_a_capped_decision_by_its_event_alone(runner, caplog):
-    runner.cap_turns(CAP)
+async def test_a_voice_loop_logs_its_start_and_no_answered_line(runner, caplog):
     await a_voice_call(runner, completion(ANSWER))
     say_in_the_call(runner, ADDRESSED, spoken=True)
     await runner.app.spoken_count(1)
-    say_in_the_call(runner, f"{ADDRESSED} Again.", spoken=True)
-    await runner.reports.until("capped")
 
     logged = [record.getMessage() for record in caplog.get_records("call") if record.name == "personas"]
-    assert [message.split()[0] for message in logged] == ["started", "capped"]
-    assert logged[1].startswith(f"capped client_id={runner.agent.client_id} app=")
-    assert logged[1].endswith("code=-")
+    assert [message.split()[0] for message in logged] == ["started"]

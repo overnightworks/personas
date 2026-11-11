@@ -7,8 +7,6 @@ names them with their call bound, and then the model gateway and each agent's pe
 An app with ``listens = false`` serves tools only: it starts no turn, its bound tools reach the turns of the apps that
 listen, and ``call_seconds`` bounds each request to it. No tool name is shared with a tools-only app, and no app names
 ``speak``, the voice's own tool, which is never offered to a turn.
-An agent has a turn cap only when it sets ``max_turns`` in ``turn_period_seconds``, both or neither;
-with neither its turns are bounded by the budget and the off switches alone.
 The optional ``[memory]`` table names the Postgres database that keeps every line the agents read: its host, port,
 database, user, the file holding the password, ``write_seconds``, the bound on one write or read, and how far back
 (``today_hours``) and how much (``today_bytes``) a turn is told of the lines of the agent's other visits, and how long
@@ -39,7 +37,7 @@ from pydantic import (
     model_validator,
 )
 
-from personas.decision import TURN_ROLE, TodayBounds, TurnCap
+from personas.decision import TURN_ROLE, TodayBounds
 from personas.secret import Secret
 
 if TYPE_CHECKING:
@@ -79,7 +77,6 @@ class AgentCredentials:
     client_id: str
     client_secret: Secret
     persona: AgentDefinition | None = None
-    turn_cap: TurnCap | None = None
 
 
 @dataclass(frozen=True)
@@ -154,21 +151,6 @@ class _AgentEntry(_Entry):
     client_id: str = Field(min_length=1)
     secret_file: Path
     persona_file: Path | None = None
-    max_turns: PositiveInt | None = Field(default=None, strict=True)
-    turn_period_seconds: PositiveFloat | None = Field(default=None, strict=True)
-
-    @model_validator(mode="after")
-    def _turn_cap_amounts_come_together(self) -> Self:
-        for present, missing in (("max_turns", "turn_period_seconds"), ("turn_period_seconds", "max_turns")):
-            if getattr(self, present) is not None and getattr(self, missing) is None:
-                raise ValueError(f"{missing}: required when {present} is set")
-        return self
-
-    @property
-    def turn_cap(self) -> TurnCap | None:
-        if self.max_turns is None or self.turn_period_seconds is None:
-            return None
-        return TurnCap(self.max_turns, self.turn_period_seconds)
 
 
 class _MemoryEntry(_Entry):
@@ -321,7 +303,6 @@ def load_config(environment: Mapping[str, str]) -> Config:
                 agent.client_id,
                 _read_secret(f"agents.{index}.secret_file", agent.secret_file),
                 _read_persona(index, agent.persona_file),
-                agent.turn_cap,
             )
             for index, agent in enumerate(parsed.agents)
         ),

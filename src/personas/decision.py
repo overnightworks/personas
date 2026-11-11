@@ -55,8 +55,6 @@ TURN_CANCELLED_CODE: Final = "cancelled"
 """The code of a turn the loop cancelled because its place left the standing."""
 SPOKEN_WAIT_BOUND_SECONDS: Final = 30.0
 """The longest the voice waits after a sentence, whatever length the app says it plays."""
-CAPPED_DETAIL: Final = "turn_cap"
-"""The closed label of the stop a decision over the cap ends with, so the log tells it from the budget's refusal."""
 EARLIER_TODAY_KEY: Final = "earlier_today"
 
 
@@ -268,28 +266,6 @@ def active_call_places(standings: tuple[Standing, ...]) -> tuple[PlaceRef, ...]:
 def turn_invalid(place: PlaceRef, standings: tuple[Standing, ...]) -> bool:
     """A turn ends with its place: it is invalid once the place is gone, invited again or paused."""
     return not any(standing.place == place and standing.state is StandingState.ACTIVE for standing in standings)
-
-
-@dataclass(frozen=True)
-class TurnCap:
-    """At most ``max_turns`` turns start in any ``period_seconds``."""
-
-    max_turns: int
-    period_seconds: float
-
-
-def reserve_turn(started: tuple[float, ...], now: float, cap: TurnCap | None) -> tuple[float, ...] | None:
-    """The start times after a turn starting at ``now``, or None when the cap holds it back.
-
-    ``started`` holds the start times of earlier turns; those at or before ``now - period_seconds`` no longer count.
-    Without a cap nothing holds a turn back and no start time is kept.
-    """
-    if cap is None:
-        return started
-    inside = tuple(each for each in started if each > now - cap.period_seconds)
-    if len(inside) >= cap.max_turns:
-        return None
-    return (*inside, now)
 
 
 @dataclass(frozen=True)
