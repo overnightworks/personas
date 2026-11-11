@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from personas.decision import earlier_today, today_since
 from personas.failures import StoreUnavailable
-from personas.reporting import Event
+from personas.reporting import StoreOutage
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
     from personas.clock import Clock
     from personas.decision import EarlierToday, KeptLine, TodayBounds, Visit, WindowRead
+    from personas.reporting import Event
 
 
 class LineStore(Protocol):
@@ -49,8 +50,7 @@ class Remembering:
         self._today = today
         self._client_id = client_id
         self._clock = clock
-        self._report_state = report_state
-        self._store_failing = False
+        self._outage = StoreOutage(report_state)
 
     async def keep(self, read: WindowRead) -> None:
         """Hands a window to the store, if there is one; its failure is reported once and never reaches the app."""
@@ -60,9 +60,9 @@ class Remembering:
         try:
             await store.keep(read)
         except StoreUnavailable as unavailable:
-            self._store_failed(unavailable)
+            self._outage.failed(unavailable.code)
         else:
-            self._store_answered()
+            self._outage.answered()
 
     async def read_day(self, visit: Visit) -> EarlierToday | None:
         """What the store kept of the agent's other visits within the day, or nothing without a store or a day, or when
@@ -74,17 +74,7 @@ class Remembering:
         try:
             kept = await store.kept_since(self._client_id, today_since(now, bounds), visit)
         except StoreUnavailable as unavailable:
-            self._store_failed(unavailable)
+            self._outage.failed(unavailable.code)
             return None
-        self._store_answered()
+        self._outage.answered()
         return earlier_today(kept, now, bounds)
-
-    def _store_failed(self, unavailable: StoreUnavailable) -> None:
-        if not self._store_failing:
-            self._store_failing = True
-            self._report_state(Event.STORE_FAILED, unavailable.code)
-
-    def _store_answered(self) -> None:
-        if self._store_failing:
-            self._store_failing = False
-            self._report_state(Event.STORE_RESUMED, None)

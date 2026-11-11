@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING, NoReturn
 
 import pytest
 
 from personas.config import (
     CONFIG_ENVIRONMENT_VARIABLE,
     DEFAULT_CALL_SECONDS,
+    DEFAULT_LINES_KEEP_DAYS,
+    DEFAULT_SWEEP_MINUTES,
     DEFAULT_TODAY,
     DEFAULT_WRITE_SECONDS,
     ConfigError,
@@ -19,6 +22,10 @@ from personas.decision import TodayBounds, TurnCap
 from personas.main import CONFIGURATION_ERROR_EXIT_CODE, main
 from tests.support.configfiles import MAX_TOOL_CALLS, MAX_TURNS, PERSONA_NAME, TURN_PERIOD_SECONDS
 from tests.support.realm import API_GROUP
+
+if TYPE_CHECKING:
+    from personas.config import Config
+    from personas.readiness import ReadyMarker
 
 APP_TABLE = (
     '[[apps]]\nmcp_url = "https://hopin.test/mcp"\nscope = "mcp-hopin"\n'
@@ -38,12 +45,16 @@ def _with_ready_file(text: str, value: str | None) -> str:
     return "".join(others if value is None else [f'ready_file = "{value}"\n', *others])
 
 
+def never_composed(config: Config, marker: ReadyMarker) -> NoReturn:
+    raise AssertionError("a refused configuration started the runner")
+
+
 def fails_at_start(environment: dict[str, str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
     monkeypatch.delenv(CONFIG_ENVIRONMENT_VARIABLE, raising=False)
     for name, value in environment.items():
         monkeypatch.setenv(name, value)
     with pytest.raises(SystemExit) as stopped:
-        main()
+        main(never_composed)
     assert stopped.value.code == CONFIGURATION_ERROR_EXIT_CODE
     return capsys.readouterr().err
 
@@ -454,6 +465,26 @@ def test_a_memory_table_tells_a_turn_the_default_day_unless_it_sets_how_far_back
     assert memory.today == TodayBounds(hours=math.inf, size_bytes=1024)
 
 
+@pytest.mark.parametrize(
+    ("written", "days", "minutes"),
+    [
+        ({}, DEFAULT_LINES_KEEP_DAYS, DEFAULT_SWEEP_MINUTES),
+        ({"lines_keep_days": "inf", "sweep_minutes": "inf"}, math.inf, math.inf),
+    ],
+    ids=["defaults", "no limit"],
+)
+def test_a_memory_table_keeps_and_sweeps_by_default_unless_it_sets_either_or_leaves_it_infinite(
+    files, written, days, minutes
+):
+    files.text += files.memory_table(**written)
+
+    memory = load_config(files.write()).memory
+
+    assert memory is not None
+    assert memory.lines_keep_days == days
+    assert memory.sweep_minutes == minutes
+
+
 def test_a_file_without_a_memory_table_opens_no_store(files):
     assert load_config(files.write()).memory is None
 
@@ -476,6 +507,14 @@ def test_a_file_without_a_memory_table_opens_no_store(files):
         ({"today_hours": '"24"'}, "memory.today_hours"),
         ({"today_hours": "nan"}, "memory.today_hours"),
         ({"today_bytes": "0"}, "memory.today_bytes"),
+        ({"lines_keep_days": "0"}, "memory.lines_keep_days"),
+        ({"lines_keep_days": "-3"}, "memory.lines_keep_days"),
+        ({"lines_keep_days": '"30"'}, "memory.lines_keep_days"),
+        ({"lines_keep_days": "nan"}, "memory.lines_keep_days"),
+        ({"sweep_minutes": "0"}, "memory.sweep_minutes"),
+        ({"sweep_minutes": "-3"}, "memory.sweep_minutes"),
+        ({"sweep_minutes": '"60"'}, "memory.sweep_minutes"),
+        ({"sweep_minutes": "nan"}, "memory.sweep_minutes"),
         ({"today_bytes": "1.5"}, "memory.today_bytes"),
         ({"password": '"in-the-file"'}, "memory.password"),
     ],
@@ -495,6 +534,14 @@ def test_a_file_without_a_memory_table_opens_no_store(files):
         "day hours a string",
         "day hours no number",
         "day of no bytes",
+        "keep period of no days",
+        "keep period negative",
+        "keep period a string",
+        "keep period no number",
+        "sweep period of no minutes",
+        "sweep period negative",
+        "sweep period a string",
+        "sweep period no number",
         "day bytes a fraction",
         "password written into the file",
     ],

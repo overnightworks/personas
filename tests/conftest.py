@@ -16,8 +16,8 @@ from agents.turn import Principal
 
 from personas.app_session import READ_SECONDS, open_mcp_session
 from personas.config import load_config
-from personas.loop import AgentLoop, Boundaries, TurnCounter, run_all
-from personas.main import QUIET_LIBRARIES, configure_logging
+from personas.loop import AgentLoop, Boundaries, TurnCounter
+from personas.main import QUIET_LIBRARIES, SweepingBoundaries, configure_logging, run_with_sweep
 from personas.readiness import FileReadyMarker
 from personas.reporting import log_state_change
 from personas.secret import Secret
@@ -51,8 +51,9 @@ if TYPE_CHECKING:
     from personas.config import MemoryTarget
     from personas.decision import Refusal, TurnCap
     from personas.failures import CallFailure
-    from personas.loop import LineStore
+    from personas.remembering import LineStore
     from personas.reporting import StateChange
+    from personas.sweep import SweptStore
     from personas.tokens import GrantedToken
     from tests.support.songmaker import ToolsOnlyApp
 
@@ -136,10 +137,12 @@ class Harness:
         self.tools_only_apps: list[ToolsOnlyApp] = []
         self.other_apps: list[FakeApp] = []
         self.lines: LineStore | None = None
+        self.swept: SweptStore | None = None
 
     def remember_in(self, store: LineStore, target: MemoryTarget) -> None:
         """Gives the runner a memory: the store its loops keep and read lines through, and the table that names it."""
         self.lines = store
+        self.swept = store
         self.config = replace(self.config, memory=target)
 
     def add_tools_only_app(self, app: ToolsOnlyApp, url: str) -> None:
@@ -200,7 +203,7 @@ class Harness:
         self.on_report(change)
 
     def start(self, *, stream_seconds: float = READ_SECONDS, open_session: SessionOpener | None = None) -> None:
-        boundaries = Boundaries(
+        boundaries = SweepingBoundaries(
             tokens=HttpTokenSource(TOKEN_ENDPOINT, self.token_client),
             open_session=open_session or partial(open_mcp_session, stream_seconds=stream_seconds),
             clock=self.clock,
@@ -208,8 +211,9 @@ class Harness:
             ready=FileReadyMarker(self.ready_file),
             backend=self._backend,
             lines=self.lines,
+            swept=self.swept,
         )
-        self.task = asyncio.create_task(run_all(self.config, boundaries))
+        self.task = asyncio.create_task(run_with_sweep(self.config, boundaries))
 
     def _backend(self, tools: Iterable[HandTool]) -> AgentBackend:
         assert self.config.gateway is not None

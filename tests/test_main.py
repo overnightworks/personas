@@ -18,8 +18,14 @@ from agents.turn_events import FinalEvent
 from personas.app_session import open_mcp_session
 from personas.config import CONFIG_ENVIRONMENT_VARIABLE, load_config
 from personas.failures import leaves_of
-from personas.loop import Boundaries
-from personas.main import QUIET_LIBRARIES, READINESS_ERROR_EXIT_CODE, configure_logging, main, real_boundaries
+from personas.main import (
+    QUIET_LIBRARIES,
+    READINESS_ERROR_EXIT_CODE,
+    SweepingBoundaries,
+    configure_logging,
+    main,
+    real_boundaries,
+)
 from personas.memory import PostgresLineStore
 from personas.readiness import FileReadyMarker
 from personas.reporting import Event, log_state_change
@@ -103,7 +109,7 @@ class World:
             self.on_joined()
 
     @asynccontextmanager
-    async def compose(self, config: Config, ready: ReadyMarker) -> AsyncGenerator[Boundaries]:
+    async def compose(self, config: Config, ready: ReadyMarker) -> AsyncGenerator[SweepingBoundaries]:
         realm = FakeRealm(self.app, config.agents[0], AGENT_SUBJECT, config.apps[0].scope)
         self.issued = realm.issued
 
@@ -121,7 +127,7 @@ class World:
             self.app.serving() as app_url,
             httpx2.AsyncClient(transport=realm.transport(), event_hooks={"request": [note_request]}) as token_client,
         ):
-            yield Boundaries(
+            yield SweepingBoundaries(
                 tokens=HttpTokenSource(config.token_endpoint, token_client),
                 open_session=open_at_the_app,
                 clock=FakeClock(),
@@ -201,12 +207,59 @@ def test_a_sigterm_that_cancels_the_runner_ends_the_entry_point_without_raising(
     world.on_joined = lambda: None
 
     @asynccontextmanager
-    async def compose_then_stop(config: Config, ready: ReadyMarker) -> AsyncGenerator[Boundaries]:
+    async def compose_then_stop(config: Config, ready: ReadyMarker) -> AsyncGenerator[SweepingBoundaries]:
         async with world.compose(config, ready) as boundaries:
             os.kill(os.getpid(), signal.SIGTERM)
             yield boundaries
 
     main(compose_then_stop)
+
+
+SWEEP_MINUTES = 7.0
+
+
+class SweepEndedBySigterm:
+    """A store and a clock that send the runner a SIGTERM inside a sweep, or inside the wait after it, and then wait."""
+
+    def __init__(self, *, in_a_sweep: bool) -> None:
+        self._in_a_sweep = in_a_sweep
+        self.time = FakeClock()
+
+    async def erase_before(self, first_read_before) -> int:
+        if self._in_a_sweep:
+            await self._terminated()
+        return 0
+
+    def now(self) -> float:
+        return self.time.now()
+
+    def wall(self):
+        return self.time.wall()
+
+    async def sleep(self, seconds: float) -> None:
+        if seconds == SWEEP_MINUTES * 60:
+            await self._terminated()
+        await self.time.sleep(seconds)
+
+    @staticmethod
+    async def _terminated() -> None:
+        os.kill(os.getpid(), signal.SIGTERM)
+        await asyncio.Event().wait()
+
+
+@pytest.mark.parametrize("in_a_sweep", [False, True], ids=["in the wait", "in a sweep"])
+def test_a_sigterm_in_a_sweep_or_in_its_wait_ends_the_entry_point_without_raising(world, in_a_sweep):
+    world.on_joined = lambda: None
+    world.files.text += world.files.memory_table(sweep_minutes=str(SWEEP_MINUTES))
+    world.files.write()
+    sweeping = SweepEndedBySigterm(in_a_sweep=in_a_sweep)
+
+    @asynccontextmanager
+    async def compose_sweeping(config: Config, ready: ReadyMarker) -> AsyncGenerator[SweepingBoundaries]:
+        async with world.compose(config, ready) as boundaries:
+            yield replace(boundaries, lines=sweeping, swept=sweeping, clock=sweeping)
+
+    main(compose_sweeping)
 
 
 def test_the_real_boundaries_hand_the_loops_the_marker_they_were_given(files):
@@ -266,10 +319,11 @@ def test_the_real_boundaries_hold_a_store_exactly_when_the_configuration_has_a_m
         files.text += files.memory_table()
     config = load_config(files.write())
 
-    async def composed_store() -> object:
+    async def composed_store() -> tuple[object, object]:
         async with real_boundaries(config, FileReadyMarker(config.ready_file)) as boundaries:
-            return boundaries.lines
+            return boundaries.lines, boundaries.swept
 
-    store = asyncio.run(composed_store())
+    store, swept = asyncio.run(composed_store())
 
     assert isinstance(store, PostgresLineStore) is has_memory
+    assert (swept is store) if has_memory else (swept is None)

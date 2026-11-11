@@ -11,7 +11,9 @@ An agent has a turn cap only when it sets ``max_turns`` in ``turn_period_seconds
 with neither its turns are bounded by the budget and the off switches alone.
 The optional ``[memory]`` table names the Postgres database that keeps every line the agents read: its host, port,
 database, user, the file holding the password, ``write_seconds``, the bound on one write or read, and how far back
-(``today_hours``) and how much (``today_bytes``) a turn is told of the lines of the agent's other visits.
+(``today_hours``) and how much (``today_bytes``) a turn is told of the lines of the agent's other visits, and how long
+a line is kept (``lines_keep_days``) and how often older ones are swept (``sweep_minutes``); ``inf`` keeps every line
+or sweeps once, at the start.
 Every value is validated at start and an error names the field or path, never a secret.
 """
 
@@ -47,6 +49,8 @@ CONFIG_ENVIRONMENT_VARIABLE: Final = "PERSONAS_CONFIG"
 DEFAULT_CALL_SECONDS: Final = 30.0
 DEFAULT_WRITE_SECONDS: Final = 2.0
 DEFAULT_TODAY: Final = TodayBounds(hours=24.0, size_bytes=32768)
+DEFAULT_LINES_KEEP_DAYS: Final = 30.0
+DEFAULT_SWEEP_MINUTES: Final = 60.0
 
 
 class ConfigError(Exception):
@@ -80,8 +84,8 @@ class AgentCredentials:
 
 @dataclass(frozen=True)
 class MemoryTarget:
-    """The database that keeps the lines, how long one write or read of it may take and what a turn is told of the
-    day."""
+    """The database that keeps the lines, how long one write or read of it may take, what a turn is told of the day
+    and how long a line is kept, with how often older ones are swept."""
 
     host: str
     port: int
@@ -90,6 +94,8 @@ class MemoryTarget:
     password: Secret
     write_seconds: float = DEFAULT_WRITE_SECONDS
     today: TodayBounds = DEFAULT_TODAY
+    lines_keep_days: float = DEFAULT_LINES_KEEP_DAYS
+    sweep_minutes: float = DEFAULT_SWEEP_MINUTES
 
 
 @dataclass(frozen=True)
@@ -174,6 +180,8 @@ class _MemoryEntry(_Entry):
     write_seconds: PositiveFloat = Field(default=DEFAULT_WRITE_SECONDS, strict=True)
     today_hours: PositiveFloat = Field(default=DEFAULT_TODAY.hours, strict=True)
     today_bytes: PositiveInt = Field(default=DEFAULT_TODAY.size_bytes, strict=True)
+    lines_keep_days: PositiveFloat = Field(default=DEFAULT_LINES_KEEP_DAYS, strict=True)
+    sweep_minutes: PositiveFloat = Field(default=DEFAULT_SWEEP_MINUTES, strict=True)
 
 
 class _FileModel(_Entry):
@@ -279,7 +287,17 @@ def _memory_target(entry: _MemoryEntry | None) -> MemoryTarget | None:
         return None
     password = _read_secret("memory.password_file", entry.password_file)
     today = TodayBounds(entry.today_hours, entry.today_bytes)
-    return MemoryTarget(entry.host, entry.port, entry.dbname, entry.user, password, entry.write_seconds, today)
+    return MemoryTarget(
+        entry.host,
+        entry.port,
+        entry.dbname,
+        entry.user,
+        password,
+        entry.write_seconds,
+        today,
+        entry.lines_keep_days,
+        entry.sweep_minutes,
+    )
 
 
 def load_config(environment: Mapping[str, str]) -> Config:

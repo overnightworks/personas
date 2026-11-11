@@ -36,6 +36,9 @@ if TYPE_CHECKING:
     from personas.secret import Secret
 
 CALL_PLACE_KIND: Final = "call"
+SECONDS_PER_MINUTE: Final = 60
+SECONDS_PER_HOUR: Final = 3600
+SECONDS_PER_DAY: Final = 24 * SECONDS_PER_HOUR
 RENEW_BEFORE_EXPIRY_SECONDS: Final = 60.0
 """A token is renewed once this little of its lifetime remains, so no call carries an expired one."""
 NETWORK_FAILURE_CODE: Final = "network"
@@ -346,12 +349,22 @@ class EarlierToday:
     older_dropped: bool
 
 
+def _before(now: datetime, seconds: float) -> datetime | None:
+    """The time ``seconds`` before ``now``, or nothing when that lies before the calendar's first moment."""
+    earliest = datetime.min.replace(tzinfo=now.tzinfo)
+    if seconds >= (now - earliest).total_seconds():
+        return None
+    return now - timedelta(seconds=seconds)
+
+
 def today_since(now: datetime, bounds: TodayBounds) -> datetime:
     """The earliest first read a turn at ``now`` is told of; a day longer than the calendar reaches any line."""
-    earliest = datetime.min.replace(tzinfo=now.tzinfo)
-    if bounds.hours * 3600 >= (now - earliest).total_seconds():
-        return earliest
-    return now - timedelta(hours=bounds.hours)
+    return _before(now, bounds.hours * SECONDS_PER_HOUR) or datetime.min.replace(tzinfo=now.tzinfo)
+
+
+def swept_before(now: datetime, lines_keep_days: float) -> datetime | None:
+    """The time before which a line first read is swept at ``now``, or nothing when the period reaches any line."""
+    return _before(now, lines_keep_days * SECONDS_PER_DAY)
 
 
 def _size(line: KeptLine) -> int:

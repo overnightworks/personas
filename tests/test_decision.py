@@ -60,6 +60,7 @@ from personas.decision import (
     reserve_turn,
     sets_where_reading_starts,
     spoken_wait_seconds,
+    swept_before,
     sync_checkpoints,
     today_since,
     turn_call_bound,
@@ -503,6 +504,25 @@ def test_lines_exactly_at_the_size_bound_are_all_told():
 def test_the_day_reaches_back_the_configured_hours_and_an_unbounded_day_reaches_back_to_any_line():
     assert today_since(LATER, TodayBounds(hours=24.0, size_bytes=1)) == LATER - timedelta(hours=24)
     assert today_since(LATER, TodayBounds(hours=math.inf, size_bytes=1)) <= datetime(1, 1, 2, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    ("keep_days", "oldest_kept"),
+    [
+        (30.0, datetime(2026, 10, 11, 18, 0, tzinfo=UTC)),
+        (0.5, datetime(2026, 11, 10, 6, 0, tzinfo=UTC)),
+        (math.inf, None),
+    ],
+    ids=["a month", "half a day", "every line"],
+)
+def test_the_oldest_first_read_that_stays_is_the_keep_period_before_now_and_an_infinite_period_sweeps_nothing(
+    keep_days, oldest_kept
+):
+    assert swept_before(LATER, keep_days) == oldest_kept
+
+
+def test_a_keep_period_that_reaches_before_the_calendar_sweeps_nothing():
+    assert swept_before(LATER, 1e12) is None
 
 
 def test_a_turn_is_told_each_earlier_visit_how_long_ago_it_was_its_lines_their_speakers_and_his_own():

@@ -11,6 +11,7 @@ import os
 import signal
 import sys
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, contextmanager
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, NoReturn
 
 import httpx2
@@ -23,6 +24,7 @@ from personas.failures import StoreDefect, StoreUnavailable, leaves_of
 from personas.loop import Boundaries, run_all
 from personas.readiness import FileReadyMarker, ReadinessError, ReadyMarker
 from personas.reporting import log_state_change
+from personas.sweep import sweep_lines
 from personas.tokens import HttpTokenSource
 
 if TYPE_CHECKING:
@@ -33,10 +35,11 @@ if TYPE_CHECKING:
     from agents.tools import HandTool
 
     from personas.config import MemoryTarget
-    from personas.loop import BackendFactory, LineStore
-    from personas.memory import KeptVisit
+    from personas.loop import BackendFactory
+    from personas.memory import KeptVisit, PostgresLineStore
+    from personas.sweep import SweptStore
 
-type Compose = Callable[[Config, ReadyMarker], AbstractAsyncContextManager[Boundaries]]
+type Compose = Callable[[Config, ReadyMarker], AbstractAsyncContextManager[SweepingBoundaries]]
 
 CONFIGURATION_ERROR_EXIT_CODE: Final = 2
 READINESS_ERROR_EXIT_CODE: Final = 3
@@ -61,8 +64,15 @@ def _gateway_backends(gateway: AgentConfig | None) -> BackendFactory | None:
     return backend
 
 
+@dataclass(frozen=True)
+class SweepingBoundaries(Boundaries):
+    """The loops' boundaries and the store the sweep erases from, none without a memory."""
+
+    swept: SweptStore | None = None
+
+
 @asynccontextmanager
-async def _line_store(target: MemoryTarget | None) -> AsyncGenerator[LineStore | None]:
+async def _line_store(target: MemoryTarget | None) -> AsyncGenerator[PostgresLineStore | None]:
     """The store the configuration names, opened on its first write; without the table there is none.
 
     The database library is loaded only here, so a runner without a memory never imports it.
@@ -80,9 +90,9 @@ async def _line_store(target: MemoryTarget | None) -> AsyncGenerator[LineStore |
 
 
 @asynccontextmanager
-async def real_boundaries(config: Config, ready: ReadyMarker) -> AsyncGenerator[Boundaries]:
+async def real_boundaries(config: Config, ready: ReadyMarker) -> AsyncGenerator[SweepingBoundaries]:
     async with httpx2.AsyncClient() as token_client, _line_store(config.memory) as lines:
-        yield Boundaries(
+        yield SweepingBoundaries(
             tokens=HttpTokenSource(config.token_endpoint, token_client),
             open_session=open_mcp_session,
             clock=SystemClock(),
@@ -90,12 +100,22 @@ async def real_boundaries(config: Config, ready: ReadyMarker) -> AsyncGenerator[
             ready=ready,
             backend=_gateway_backends(config.gateway),
             lines=lines,
+            swept=lines,
         )
+
+
+async def run_with_sweep(config: Config, boundaries: SweepingBoundaries) -> NoReturn:
+    """The loops, and beside them the sweep when the configuration has a memory; a defect of either ends both."""
+    async with asyncio.TaskGroup() as group:
+        group.create_task(run_all(config, boundaries))
+        if config.memory is not None and boundaries.swept is not None:
+            group.create_task(sweep_lines(boundaries.swept, config.memory, boundaries.clock, boundaries.report))
+    raise AssertionError("a loop ended")  # pragma: no cover
 
 
 async def _compose_and_run(config: Config, ready: ReadyMarker, compose: Compose) -> None:
     async with compose(config, ready) as boundaries:
-        await run_all(config, boundaries)
+        await run_with_sweep(config, boundaries)
 
 
 async def _run(config: Config, ready: ReadyMarker, compose: Compose) -> None:
