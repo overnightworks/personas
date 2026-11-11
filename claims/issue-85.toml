@@ -1,0 +1,8 @@
+claim_id = "f4aee1032fe44ab1a41de1ba0e56ee11"
+agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
+role = "builder"
+base = "f4afc8b641e9a219dc51bcf302792c59c8b67ce9"
+branch = "claude/issue-85-running-a-turn-lives-in-its-own-module"
+scope = ["docs/ARCHITECTURE.md", "src/personas/failures.py", "src/personas/loop.py", "src/personas/main.py", "src/personas/turning.py", "tests"]
+opened_commit = "7fa6a701ab673180511975d843b16e4da9ba24f2"
+whole_reason = "A move of one unit takes its shared helper and its type alias with it; split, the tree would hold the turn's code twice."
