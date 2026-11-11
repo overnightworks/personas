@@ -35,9 +35,9 @@ if TYPE_CHECKING:
     from agents.tools import HandTool
 
     from personas.config import MemoryTarget
-    from personas.loop import BackendFactory
     from personas.memory import KeptVisit, PostgresLineStore
     from personas.sweep import SweptStore
+    from personas.turning import BackendFactory
 
 type Compose = Callable[[Config, ReadyMarker], AbstractAsyncContextManager[SweepingBoundaries]]
 

@@ -82,3 +82,12 @@ def task_is_being_cancelled() -> bool:
     """Whether the running task has a cancellation requested that it has not yet taken."""
     task = asyncio.current_task()
     return task is not None and task.cancelling() > 0
+
+
+def raise_if_cancelled() -> None:
+    """Stops a task whose cancellation was swallowed on the way, as by a fetch or an SDK task group.
+
+    The task still counts the request; without this the loop would go on instead of ending.
+    """
+    if task_is_being_cancelled():
+        raise asyncio.CancelledError
