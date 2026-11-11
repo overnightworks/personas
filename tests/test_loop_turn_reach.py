@@ -16,8 +16,8 @@ from personas import app_session
 from personas.config import load_config
 from personas.decision import TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE
 from personas.failures import Unreachable, leaves_of
-from personas.loop import AgentLoop
 from personas.tokens import HttpTokenSource
+from personas.turning import Turning
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
@@ -645,7 +645,7 @@ async def test_a_second_defect_of_the_turns_session_body_leaves_beside_the_first
 ):
     first, second = ValueError("first"), KeyError("second")
     raising_in_the_tools_only_request(runner, monkeypatch, "call", first)
-    real_body = AgentLoop._run_session_body  # noqa: SLF001 - the turn's body is where the second defect arises
+    real_body = Turning._run_session_body  # noqa: SLF001 - the turn's body is where the second defect arises
 
     async def body_raising_the_second(self, *arguments):
         try:
@@ -653,7 +653,7 @@ async def test_a_second_defect_of_the_turns_session_body_leaves_beside_the_first
         except Exception:
             raise second from None
 
-    monkeypatch.setattr(AgentLoop, "_run_session_body", body_raising_the_second)
+    monkeypatch.setattr(Turning, "_run_session_body", body_raising_the_second)
     runner.gateway = Gateway(calling(CREATE_SONG), saying(ANSWER), completion("done"))
     await addressed_in_the_call(runner)
 
