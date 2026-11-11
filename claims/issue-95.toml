@@ -1,8 +1,0 @@
-claim_id = "a8d00b77371441e68ba0e1bc572d0235"
-agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
-role = "builder"
-base = "1eb0183ec8b1dc336c8056b8da7f70cfac46f55d"
-branch = "claude/issue-95-mozart-s-and-leonardo-s-agent-files-ship"
-scope = [".github/workflows/ci.yml", "Dockerfile", "README.md", "docs/ARCHITECTURE.md", "src/characters"]
-opened_commit = "f8d0002c32f6239146cafd0c9fe684249c4b6111"
-whole_reason = "src/characters is a new directory that holds the two agent files and nothing else; the texts, their place in the image and the proof that the image loads them are one change."
