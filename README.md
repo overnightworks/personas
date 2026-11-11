@@ -21,10 +21,9 @@ The turn is told one JSON message: the place's kind and id, his name, that the p
 It has no instruction; what to do at a table is the persona's to say.
 The turn holds the bound tools of its app and of the tools-only apps, and it ends with its place, as a written turn does.
 It reads and keeps nothing of the day.
-After a turn, the next read of the view settles the revision, however the turn ended.
-If the view moved on or stopped waiting, nothing is counted.
-If the same revision still waits, that turn counts as one that left it waiting, and another turn starts until three have, a refused move or no move at all included.
-Then `view_unanswered` is logged once, with the client id and the app and no place or state.
+A waiting revision gets one turn, and no second one at that revision, however the turn ended: with a tool call that moves nothing, with no call, with a refused call or with a failed relay.
+The runner does not ask again by itself; an app that wants him to act again moves the revision.
+A tool's error result reaches the model inside the same turn.
 The agent then waits for the app's next revision.
 An app therefore moves the revision with every answer of the agent, a declined word included.
 The state reaches no log line.
