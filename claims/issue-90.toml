@@ -1,7 +1,0 @@
-claim_id = "c5c2b26a4d604fea84bf59d96a340459"
-agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
-role = "builder"
-base = "0646d91878e6de0355d24ab0cf9887fd6a3c95cd"
-branch = "claude/issue-90-move-to-quality-v0-11-0-the-gate-pins-an"
-scope = [".github/workflows/ci.yml", ".github/workflows/code-scanning.yml", ".github/workflows/release.yml"]
-opened_commit = "ea691f270a51f03ff0bd797a15a5b5ffdc01cb7e"
