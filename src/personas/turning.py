@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import aclosing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Final
 
@@ -23,6 +23,7 @@ from personas.decision import (
     failure_code,
     turn_call_bound,
     turn_input,
+    view_turn_input,
 )
 from personas.failures import CallFailure, Unreachable, leaves_of, raise_if_cancelled
 from personas.reporting import Event
@@ -39,7 +40,7 @@ if TYPE_CHECKING:
 
     from agents.agent_file import AgentDefinition
     from agents.backend import AgentBackend
-    from agents.member import PlaceEntry, PlaceRef, PlaceWindow
+    from agents.member import PlaceEntry, PlaceRef, PlaceView, PlaceWindow
     from agents.tools import ToolDeclaration
     from agents.turn import JsonObject, Principal
 
@@ -92,14 +93,29 @@ class _HeldTools:
 
 
 @dataclass(frozen=True)
+class Lines:
+    """Why a written turn runs: what the place's window gave."""
+
+    window: PlaceWindow = field(repr=False)
+    new: tuple[PlaceEntry, ...] = field(repr=False)
+    missed: bool
+
+
+@dataclass(frozen=True)
+class Waiting:
+    """Why a view turn runs: the place's view waits for the agent."""
+
+    view: PlaceView = field(repr=False)
+
+
+@dataclass(frozen=True)
 class Admitted:
-    """A turn decided on, with the facts it was decided from: the token's and what the place's window gave."""
+    """A turn decided on, with the facts it was decided from: the token's and what the place gave, which also says how
+    the turn is told."""
 
     facts: TokenFacts
     place: PlaceRef
-    window: PlaceWindow
-    new: tuple[PlaceEntry, ...]
-    missed: bool
+    occasion: Lines | Waiting
 
     def groups(self) -> Coroutine[None, None, frozenset[str]]:
         """The library's GroupSource wants an awaitable; the groups are already known."""
@@ -175,10 +191,7 @@ class Turning:
                 raise BaseExceptionGroup("the turn's session failed", rest) from None
 
     async def _run_turn(self, setup: TurnSetup, admitted: Admitted, record: TaskRecord) -> None:
-        earlier = await self._remembering.read_day(Visit(self._app.mcp_url, admitted.place, admitted.window.generation))
-        told = turn_input(
-            admitted.place, admitted.facts.name, admitted.window, admitted.new, missed=admitted.missed, earlier=earlier
-        )
+        told = await self._told(admitted)
         token = await self._current_token()
         async with self._open_session(self._app, token.value) as session:
             try:
@@ -186,6 +199,23 @@ class Turning:
             except Exception as error:
                 record.note(error)
                 raise
+
+    async def _told(self, admitted: Admitted) -> str:
+        """The user message of the turn: a written turn reads the day first, a view turn keeps no day."""
+        match admitted.occasion:
+            case Waiting(view=view):
+                return view_turn_input(admitted.place, admitted.facts.name, view)
+            case lines:
+                visit = Visit(self._app.mcp_url, admitted.place, lines.window.generation)
+                earlier = await self._remembering.read_day(visit)
+                return turn_input(
+                    admitted.place,
+                    admitted.facts.name,
+                    lines.window,
+                    lines.new,
+                    missed=lines.missed,
+                    earlier=earlier,
+                )
 
     async def _run_session_body(
         self, setup: TurnSetup, admitted: Admitted, told: str, session: AppSession, record: TaskRecord

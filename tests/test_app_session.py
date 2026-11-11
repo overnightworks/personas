@@ -690,6 +690,56 @@ async def test_a_window_that_is_no_window_is_an_unusable_answer(app, bearer, con
     assert failure.value.code == INVALID_ANSWER_CODE
 
 
+TABLE = PlaceRef(kind="table", id="table-1")
+
+
+async def test_a_view_holds_the_revision_the_wait_and_the_state_as_the_app_sent_them(app, bearer):
+    state = {"hand": secrets.token_hex(4), "stack": [1, {"seen": True}]}
+    app.stand(SUBJECT, active(TABLE.id, TABLE.kind, serves_view=True))
+    app.show_view(TABLE.id, 7, state)
+
+    async with opened(app, bearer) as session:
+        view = await session.read_view(TABLE)
+
+    assert view is not None
+    assert (view.revision, view.awaits_you, view.state) == (7, True, state)
+
+
+@pytest.mark.parametrize("arrangement", ["the app lost the place", "not in the place", "answered inside a 200"])
+async def test_a_view_the_app_shows_the_member_no_more_is_none(app, bearer, arrangement):
+    async def knows_no_such_resource(reply):
+        await reply.error(INVALID_PARAMS, status=HTTPStatus.OK)
+
+    app.stand(SUBJECT, active(TABLE.id, TABLE.kind, serves_view=True))
+    app.show_view(TABLE.id, 1, {})
+    if arrangement == "the app lost the place":
+        app.vanished.add(TABLE.id)
+    elif arrangement == "not in the place":
+        app.stand(SUBJECT)
+    else:
+        app.script(READ, knows_no_such_resource)
+
+    async with opened(app, bearer) as session:
+        view = await session.read_view(TABLE)
+
+    assert view is None
+
+
+async def test_a_view_that_is_no_view_is_an_unusable_answer(app, bearer):
+    async def answers_wrongly(reply):
+        contents = TextResourceContents(uri="member://standing", text="{}", mime_type="application/json")
+        await reply.result(ReadResourceResult(contents=[contents], ttl_ms=0, cache_scope="private"))
+
+    app.stand(SUBJECT, active(TABLE.id, TABLE.kind, serves_view=True))
+    app.script(READ, answers_wrongly)
+
+    async with opened(app, bearer) as session:
+        with pytest.raises(UnusableAnswer) as failure:
+            await session.read_view(TABLE)
+
+    assert failure.value.code == INVALID_ANSWER_CODE
+
+
 async def test_the_declared_tools_are_the_ones_the_app_lists(app, bearer):
     async with opened(app, bearer) as session:
         declared = await session.declared_tools()

@@ -20,6 +20,7 @@ from agents.member import (
     AcceptInvitationRefusal,
     PlaceEntry,
     PlaceRef,
+    PlaceView,
     PlaceWindow,
     Standing,
     StandingState,
@@ -56,6 +57,8 @@ TURN_CANCELLED_CODE: Final = "cancelled"
 SPOKEN_WAIT_BOUND_SECONDS: Final = 30.0
 """The longest the voice waits after a sentence, whatever length the app says it plays."""
 EARLIER_TODAY_KEY: Final = "earlier_today"
+VIEW_TURNS_PER_REVISION: Final = 3
+"""The turns that may leave one revision of a view waiting: this bounds the model spend on a view he cannot move."""
 
 
 class UnrecognisedRefusal(StrEnum):
@@ -100,14 +103,20 @@ class Memory:
     refused: Mapping[str, Refusal] = field(default_factory=dict[str, Refusal])
 
 
-def accepts_for(standings: tuple[Standing, ...], memory: Memory) -> tuple[Accept, ...]:
-    """One accept for each invited call standing whose invitation was not refused as stale."""
+def _is_call(standing: Standing) -> bool:
+    """A call place is read through its window; a place that serves a view is read through that, whatever its kind."""
+    return standing.place.kind == CALL_PLACE_KIND and not standing.serves_view
+
+
+def accepts_for(standings: tuple[Standing, ...], memory: Memory, *, takes_turns: bool) -> tuple[Accept, ...]:
+    """One accept for each invited call standing whose invitation was not refused as stale, and, where the loop can
+    take turns, for each invited place that serves a view: a seated agent that cannot act leaves the place waiting."""
     return tuple(
         Accept(standing.place, standing.invitation.id, standing.invitation.epoch)
         for standing in standings
         if standing.state is StandingState.INVITED
         and standing.invitation is not None
-        and standing.place.kind == CALL_PLACE_KIND
+        and (_is_call(standing) or (standing.serves_view and takes_turns))
         and standing.invitation.id not in memory.stale
     )
 
@@ -241,7 +250,7 @@ def sync_checkpoints(
     restarted, and a place that is gone or invited again has none."""
     synced: dict[PlaceRef, Checkpoint] = {}
     for standing in standings:
-        if standing.place.kind != CALL_PLACE_KIND:
+        if not _is_call(standing):
             continue
         if standing.state is StandingState.PAUSED:
             synced[standing.place] = Paused()
@@ -257,10 +266,57 @@ def sets_where_reading_starts(checkpoint: Checkpoint) -> bool:
 
 def active_call_places(standings: tuple[Standing, ...]) -> tuple[PlaceRef, ...]:
     return tuple(
-        standing.place
-        for standing in standings
-        if standing.state is StandingState.ACTIVE and standing.place.kind == CALL_PLACE_KIND
+        standing.place for standing in standings if standing.state is StandingState.ACTIVE and _is_call(standing)
     )
+
+
+def active_view_places(standings: tuple[Standing, ...]) -> tuple[PlaceRef, ...]:
+    return tuple(
+        standing.place for standing in standings if standing.state is StandingState.ACTIVE and standing.serves_view
+    )
+
+
+@dataclass(frozen=True)
+class ViewRecord:
+    """What the loop holds of one view place: the revision it last started a turn for, how many turns left that
+    revision waiting, and whether the last turn started for it has not been judged by a read yet."""
+
+    revision: int
+    left_waiting: int = 0
+    unjudged: bool = False
+
+
+@dataclass(frozen=True)
+class ViewStep:
+    """What a read of a view decides: the record after it, whether a turn is due and whether the revision has just
+    run out of turns."""
+
+    record: ViewRecord
+    turn_due: bool
+    unanswered: bool
+
+
+def sync_view_records(
+    records: Mapping[PlaceRef, ViewRecord], standings: tuple[Standing, ...]
+) -> dict[PlaceRef, ViewRecord]:
+    """The records after a standing read: a place that is no active view place any more loses its record."""
+    active = set(active_view_places(standings))
+    return {place: record for place, record in records.items() if place in active}
+
+
+def judge_view(record: ViewRecord | None, view: PlaceView) -> ViewStep:
+    """Judges a view read after the last turn started for it ended, or at its first read.
+
+    A new revision starts afresh. A revision that still waits after a turn started for it has had one more turn leave
+    it waiting; a revision that moved on or stopped waiting costs nothing. A turn is due while the view waits and
+    fewer than ``VIEW_TURNS_PER_REVISION`` turns have left this revision waiting.
+    """
+    if record is None or record.revision != view.revision:
+        record = ViewRecord(view.revision)
+    left_waiting = record.left_waiting + (1 if record.unjudged and view.awaits_you else 0)
+    turn_due = view.awaits_you and left_waiting < VIEW_TURNS_PER_REVISION
+    ran_out = left_waiting == VIEW_TURNS_PER_REVISION and left_waiting != record.left_waiting
+    return ViewStep(ViewRecord(view.revision, left_waiting, unjudged=turn_due), turn_due, ran_out)
 
 
 def turn_invalid(place: PlaceRef, standings: tuple[Standing, ...]) -> bool:
@@ -451,6 +507,16 @@ def told_earlier_today(earlier: EarlierToday) -> dict[str, object]:
 
 def _told_line(line: KeptLine) -> dict[str, object]:
     return {"name": line.name, "kind": line.kind, "text": line.text, "own": line.own}
+
+
+def view_turn_input(place: PlaceRef, name: str, view: PlaceView) -> str:
+    """The facts of a view turn: the place, the agent's name, that the place waits for him and the view's state as the
+    app sent it.
+
+    It holds no instruction; those live in the persona.
+    """
+    facts = {"kind": place.kind, "id": place.id, "you": name, "awaits_you": view.awaits_you, "state": view.state}
+    return json.dumps(facts, ensure_ascii=False)
 
 
 def voice_context(earlier: EarlierToday | None) -> str:
