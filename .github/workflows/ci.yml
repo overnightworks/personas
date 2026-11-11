@@ -124,7 +124,9 @@ jobs:
           grep PERSONAS_CONFIG stderr.txt
 
       # The runner is PID 1 here, which ignores a signal it has no handler for. Its token endpoint refuses
-      # connections, so its loop backs off and the stop reaches it mid-loop.
+      # connections, so its loop backs off and the stop reaches it mid-loop. One agent per file the repository
+      # ships names that file in the image, and the runner loads each before it backs off: a file it refuses
+      # ends the container before the first backoff, which the Running check fails.
       - name: Check that a container stop ends the runner with exit code 0 before the timeout
         run: |
           configuration="$(mktemp --directory)"
@@ -137,10 +139,17 @@ jobs:
           [[apps]]
           mcp_url = "http://127.0.0.1:9/mcp"
           scope = "mcp-app"
-          [[agents]]
-          client_id = "agent-runner"
-          secret_file = "/configuration/runner.secret"
           EOF
+          mapfile -t agent_files < <(git ls-files 'src/characters/*.md')
+          if [ "${#agent_files[@]}" -eq 0 ]; then
+            echo "no agent file under src/characters" >&2
+            exit 1
+          fi
+          for agent_file in "${agent_files[@]}"; do
+            stem="$(basename "$agent_file" .md)"
+            printf '[[agents]]\nclient_id = "agent-%s"\nsecret_file = "/configuration/runner.secret"\npersona_file = "/app/characters/%s.md"\n' \
+              "$stem" "$stem" >> "$configuration/personas.toml"
+          done
           docker run --detach --name stopped-runner \
             --volume "$configuration:/configuration:ro" \
             --env PERSONAS_CONFIG=/configuration/personas.toml personas-image
