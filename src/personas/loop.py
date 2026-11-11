@@ -116,12 +116,12 @@ class AgentLoop:
     A refusal by the realm or the app suspends the loop: it makes no further call until its next
     retry, and resumes once a read answers again. A network failure, a lost stream or a 5xx backs off,
     logged once until a read answers. In an app that binds tools, the lines of the agent's call places are
-    read too, and one addressed to him starts a turn; at most one turn runs per loop, over its own session,
-    and a failure of the turn's calls to this app goes into the one reaction of the loop. The turn also holds the
-    bound tools of the tools-only apps: each request to one runs in a session of its own under the token for its
-    own scope, and its failure never reaches the reaction. In an app that declares ``speak``, for an agent whose
-    persona has a voice section, each active call place instead runs one voice loop, which hears every line the place
-    gives and speaks through ``speak``.
+    read too, every new line goes into the agent's history, and one addressed to him starts a turn; at most one turn
+    runs per loop, over its own session, and a failure of the turn's calls to this app goes into the one reaction of
+    the loop. The turn also holds the bound tools of the tools-only apps: each request to one runs in a session of
+    its own under the token for its own scope, and its failure never reaches the reaction. In an app that declares
+    ``speak``, for an agent whose persona has a voice section, each active call place instead runs one voice loop,
+    which hears every line the place gives and speaks through ``speak``.
     """
 
     def __init__(
