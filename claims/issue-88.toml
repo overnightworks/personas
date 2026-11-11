@@ -1,8 +1,0 @@
-claim_id = "e0b5dc006a924c219b227ca0ef4a36c6"
-agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
-role = "builder"
-base = "1011326ab202e052d2740aaefc8e2169a4a2aa40"
-branch = "claude/issue-88-one-turn-per-revision"
-scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/decision.py", "src/personas/loop.py", "src/personas/reporting.py", "tests"]
-opened_commit = "67a70a40fef496171a265ad3f227f95ca007feea"
-whole_reason = "The rule, its event and their tests leave together; tests is a directory."
