@@ -6,6 +6,7 @@ import itertools
 import json
 import math
 import secrets
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -30,9 +31,11 @@ from personas.decision import (
     RENEW_BEFORE_EXPIRY_SECONDS,
     SPOKEN_WAIT_BOUND_SECONDS,
     Accept,
+    EarlierToday,
     History,
     Joined,
     KeptLine,
+    Lines,
     Memory,
     Paused,
     Perception,
@@ -44,6 +47,7 @@ from personas.decision import (
     Token,
     UnrecognisedRefusal,
     Visit,
+    Waiting,
     accepts_for,
     active_call_places,
     active_view_places,
@@ -68,12 +72,10 @@ from personas.decision import (
     sync_turned_revisions,
     taken_lines,
     today_since,
-    told_history,
     turn_call_bound,
-    turn_input,
     turn_invalid,
+    turn_told,
     view_turn_due,
-    view_turn_input,
     voice_context,
 )
 from personas.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer
@@ -437,31 +439,11 @@ def test_a_bound_tool_the_app_declares_no_more_leaves_no_declarations():
     assert bound_declarations([_declaration("a")], ["a", "gone"]) is None
 
 
-def test_a_turn_is_told_facts_only_the_room_the_lines_which_are_new_and_which_are_his_own():
-    own, theirs, new = secrets.token_hex(4), secrets.token_hex(4), secrets.token_hex(4)
-    window = window_of(line(4, theirs, name="Ada"), line(5, own, own=True, name="Mozart"), line(6, new, name="Ada"))
-
-    facts = json.loads(turn_input(PLACE, "Mozart", window, window.entries[2:], missed=False))
-
-    assert (facts["kind"], facts["id"], facts["you"]) == (PLACE.kind, PLACE.id, "Mozart")
-    assert [(each["seq"], each["text"], each["own"], each["new"]) for each in facts["lines"]] == [
-        (4, theirs, False, False),
-        (5, own, True, False),
-        (6, new, False, True),
-    ]
-
-
-@pytest.mark.parametrize("missed", [False, True])
-def test_a_turn_is_told_whether_older_lines_were_not_seen(missed):
-    window = window_of(line(4, "a"))
-
-    assert json.loads(turn_input(PLACE, "Mozart", window, window.entries, missed=missed))["missed"] is missed
-
-
 LATER = datetime(2026, 11, 10, 18, 0, tzinfo=UTC)
 MORNING = Visit("https://app.test/mcp", PlaceRef(kind="call", id="room-7"), "morning")
 NOON = Visit("https://app.test/mcp", PlaceRef(kind="call", id="room-8"), "noon")
 ROOMY = TodayBounds(hours=24.0, size_bytes=10_000)
+EMPTY_HISTORY = History((), older_dropped=False)
 
 
 def kept(visit, seq, text, *, hours_before, own=False, name="Ada"):
@@ -481,7 +463,7 @@ def test_two_earlier_visits_are_told_in_the_order_they_happened_each_as_its_own_
         kept(MORNING, 2, "morning two", hours_before=9),
     ]
 
-    earlier = earlier_today(lines, LATER, ROOMY)
+    earlier = earlier_today(lines, LATER, ROOMY, EMPTY_HISTORY)
 
     assert told(earlier) == [[(1, "morning one"), (2, "morning two")], [(1, "noon one"), (2, "noon two")]]
     assert [visit.minutes_ago for visit in earlier.visits] == [9 * 60, 6 * 60]
@@ -496,7 +478,7 @@ def test_lines_beyond_the_size_bound_leave_the_oldest_out_keep_the_newest_and_sa
     ]
     two_lines = TodayBounds(hours=24.0, size_bytes=2 * len("Bo" + "middle"))
 
-    earlier = earlier_today(lines, LATER, two_lines)
+    earlier = earlier_today(lines, LATER, two_lines, EMPTY_HISTORY)
 
     assert told(earlier) == [[(1, "middle"), (2, "newest")]]
     assert earlier.older_dropped is True
@@ -505,7 +487,7 @@ def test_lines_beyond_the_size_bound_leave_the_oldest_out_keep_the_newest_and_sa
 def test_lines_exactly_at_the_size_bound_are_all_told():
     lines = [kept(MORNING, 1, "one", hours_before=1, name="Bo"), kept(MORNING, 2, "two", hours_before=1, name="Bo")]
 
-    earlier = earlier_today(lines, LATER, TodayBounds(hours=24.0, size_bytes=2 * len("Bo" + "one")))
+    earlier = earlier_today(lines, LATER, TodayBounds(hours=24.0, size_bytes=2 * len("Bo" + "one")), EMPTY_HISTORY)
 
     assert told(earlier) == [[(1, "one"), (2, "two")]]
     assert earlier.older_dropped is False
@@ -535,16 +517,23 @@ def test_a_keep_period_that_reaches_before_the_calendar_sweeps_nothing():
     assert swept_before(LATER, 1e12) is None
 
 
-def test_a_turn_is_told_each_earlier_visit_how_long_ago_it_was_its_lines_their_speakers_and_his_own():
-    mine, theirs = secrets.token_hex(4), secrets.token_hex(4)
-    window = window_of(line(1, "now"))
-    earlier = earlier_today(
-        [kept(MORNING, 1, theirs, hours_before=4), kept(MORNING, 2, mine, hours_before=4, own=True, name="Mozart")],
-        LATER,
-        ROOMY,
+def told_a_written_turn(earlier: EarlierToday | None, history: History = EMPTY_HISTORY, *, missed: bool = False) -> str:
+    """The message of a written turn at ``LATER`` in the place of the morning visit, for lines that are none yet."""
+    return turn_told(
+        "Mozart", APP, MORNING.place, Lines(MORNING.generation, frozenset(), missed), history, earlier, LATER
     )
 
-    facts = json.loads(turn_input(PLACE, "Mozart", window, window.entries, missed=False, earlier=earlier))
+
+def test_a_turn_is_told_each_earlier_visit_how_long_ago_it_was_its_lines_their_speakers_and_his_own():
+    mine, theirs = secrets.token_hex(4), secrets.token_hex(4)
+    earlier = earlier_today(
+        [kept(NOON, 1, theirs, hours_before=4), kept(NOON, 2, mine, hours_before=4, own=True, name="Mozart")],
+        LATER,
+        ROOMY,
+        EMPTY_HISTORY,
+    )
+
+    facts = json.loads(told_a_written_turn(earlier))
 
     assert facts["earlier_today"] == {
         "older_dropped": False,
@@ -558,20 +547,24 @@ def test_a_turn_is_told_each_earlier_visit_how_long_ago_it_was_its_lines_their_s
             }
         ],
     }
-    assert [each["text"] for each in facts["lines"]] == ["now"]
 
 
-def test_a_turn_without_a_memory_is_told_no_earlier_visits():
-    window = window_of(line(1, "now"))
-
-    assert "earlier_today" not in json.loads(turn_input(PLACE, "Mozart", window, window.entries, missed=False))
+@pytest.mark.parametrize(
+    ("earlier", "keys"),
+    [
+        (None, ["you", "history", "woke"]),
+        (EarlierToday((), older_dropped=False), ["you", "earlier_today", "history", "woke"]),
+    ],
+    ids=["without a memory he is told no day", "with a memory the day comes between his name and his history"],
+)
+def test_a_turn_is_told_his_name_then_the_day_then_his_history_and_last_what_woke_him(earlier, keys):
+    assert list(json.loads(told_a_written_turn(earlier))) == keys
 
 
 def test_a_voice_context_is_the_day_a_turn_is_told_under_the_same_key():
-    earlier = earlier_today([kept(MORNING, 1, "Good morning", hours_before=4)], LATER, ROOMY)
-    window = window_of(line(1, "now"))
+    earlier = earlier_today([kept(NOON, 1, "Good morning", hours_before=4)], LATER, ROOMY, EMPTY_HISTORY)
 
-    told_to_a_turn = json.loads(turn_input(PLACE, "Mozart", window, window.entries, missed=False, earlier=earlier))
+    told_to_a_turn = json.loads(told_a_written_turn(earlier))
 
     assert json.loads(voice_context(earlier)) == {"earlier_today": told_to_a_turn["earlier_today"]}
 
@@ -714,47 +707,91 @@ def test_a_view_is_due_a_turn_while_it_waits_at_a_revision_no_turn_was_started_f
 
 
 APP = "https://app.test/mcp"
-EMPTY_HISTORY = History((), older_dropped=False)
 
 
 def said(seq: int, text: str, *, name: str = "Bo", visit: Visit = MORNING) -> KeptLine:
     return KeptLine(visit, seq, LATER, name, "message", text, own=False)
 
 
-def test_a_view_turn_is_told_its_app_the_place_his_name_that_it_waits_for_him_the_state_as_sent_and_his_history():
+def test_a_view_turn_is_told_that_the_place_waits_for_him_and_the_state_as_the_app_sent_it_and_no_line_is_new():
     view = PlaceView(revision=3, awaits_you=True, state={"hand": ["x", {"seen": True}], "umläut": "ä"})
     history = History((said(1, "Spiel den Buben", name="Ada", visit=NOON),), older_dropped=True)
 
-    told = json.loads(view_turn_input(APP, TABLE, "Mozart", view, history))
+    told = turn_told("Mozart", APP, TABLE, Waiting(view), history, None, LATER)
 
-    assert told == {
-        "app": APP,
-        "kind": "table",
-        "id": "table-1",
+    assert json.loads(told) == {
         "you": "Mozart",
-        "awaits_you": True,
-        "state": view.state,
         "history": {
             "older_dropped": True,
             "entries": [
                 {
+                    "entry": "line",
                     "app": NOON.app,
                     "place": {"kind": "call", "id": "room-8"},
+                    "seconds_ago": 0,
+                    "seq": 1,
                     "name": "Ada",
                     "kind": "message",
                     "text": "Spiel den Buben",
                     "own": False,
+                    "new": False,
                 }
             ],
         },
+        "woke": {
+            "why": "view",
+            "app": APP,
+            "place": {"kind": "table", "id": "table-1"},
+            "awaits_you": True,
+            "state": view.state,
+        },
     }
-    assert "ä" in view_turn_input(APP, TABLE, "Mozart", view, history)
+    assert "ä" in told
 
 
-def test_a_view_turn_told_an_empty_history_is_told_no_entries_and_none_dropped():
-    told = json.loads(view_turn_input(APP, TABLE, "Mozart", a_view(1), EMPTY_HISTORY))
+@pytest.mark.parametrize("missed", [False, True])
+def test_a_written_turn_is_told_in_which_place_it_woke_and_whether_older_lines_were_not_seen(missed):
+    woke = json.loads(told_a_written_turn(None, missed=missed))["woke"]
 
-    assert told["history"] == {"older_dropped": False, "entries": []}
+    assert woke == {"why": "lines", "app": APP, "place": {"kind": "call", "id": "room-7"}, "missed": missed}
+
+
+def test_a_turn_told_an_empty_history_is_told_no_entries_and_none_dropped():
+    assert json.loads(told_a_written_turn(None))["history"] == {"older_dropped": False, "entries": []}
+
+
+def test_a_history_line_is_told_with_its_age_and_is_new_only_when_the_turn_is_for_that_line_of_that_visit():
+    evening = replace(MORNING, generation="evening")
+    history = History(
+        (
+            KeptLine(NOON, 1, LATER - timedelta(seconds=300), "Bo", "message", "elsewhere", own=False),
+            KeptLine(evening, 1, LATER - timedelta(seconds=200), "Bo", "message", "an earlier run", own=False),
+            KeptLine(MORNING, 1, LATER - timedelta(seconds=90), "Ada", "message", "woke him", own=False),
+            KeptLine(MORNING, 2, LATER - timedelta(seconds=1), "Mozart", "message", "his own", own=True),
+        ),
+        older_dropped=False,
+    )
+    occasion = Lines(MORNING.generation, frozenset({1}), missed=False)
+
+    told = json.loads(turn_told("Mozart", APP, MORNING.place, occasion, history, None, LATER))
+
+    assert [
+        (each["place"]["id"], each["seq"], each["seconds_ago"], each["text"], each["own"], each["new"])
+        for each in told["history"]["entries"]
+    ] == [
+        ("room-8", 1, 300, "elsewhere", False, False),
+        ("room-7", 1, 200, "an earlier run", False, False),
+        ("room-7", 1, 90, "woke him", False, True),
+        ("room-7", 2, 1, "his own", True, False),
+    ]
+
+
+def test_the_history_is_told_in_the_order_it_holds_its_entries():
+    history = History((said(2, "later", visit=NOON), said(1, "earlier")), older_dropped=False)
+
+    told = json.loads(told_a_written_turn(None, history))
+
+    assert [entry["text"] for entry in told["history"]["entries"]] == ["later", "earlier"]
 
 
 def test_taken_lines_are_the_visits_lines_as_kept_with_the_time_of_the_read():
@@ -767,12 +804,6 @@ def test_taken_lines_are_the_visits_lines_as_kept_with_the_time_of_the_read():
         KeptLine(MORNING, 4, LATER, "Ada", "message", "four", own=False),
         KeptLine(MORNING, 5, LATER, "Mozart", "message", "five", own=True),
     )
-
-
-def test_told_history_lists_the_entries_in_the_order_the_history_holds_them():
-    history = History((said(2, "later", visit=NOON), said(1, "earlier")), older_dropped=False)
-
-    assert [entry["text"] for entry in told_history(history)["entries"]] == ["later", "earlier"]
 
 
 def test_a_history_and_its_lines_show_no_name_and_no_text_in_their_repr():
@@ -819,3 +850,40 @@ def test_the_history_stays_marked_once_it_dropped_older_lines_though_the_next_li
     marked = History((), older_dropped=True)
 
     assert history_after(marked, (said(1, "one"),), 10_000).older_dropped is True
+
+
+def test_the_day_leaves_out_the_lines_the_history_holds_by_visit_and_seq_and_those_first_read_after_the_turn():
+    kept_lines = [
+        kept(MORNING, 1, "held", hours_before=5),
+        kept(MORNING, 2, "not held", hours_before=5),
+        kept(NOON, 1, "same seq of another visit", hours_before=4),
+        kept(NOON, 2, "read as the turn was admitted", hours_before=0),
+        kept(NOON, 3, "read after the turn was admitted", hours_before=-1),
+    ]
+
+    earlier = earlier_today(kept_lines, LATER, ROOMY, History((said(1, "held"),), older_dropped=False))
+
+    assert told(earlier) == [
+        [(2, "not held")],
+        [(1, "same seq of another visit"), (2, "read as the turn was admitted")],
+    ]
+
+
+@pytest.mark.parametrize(
+    "leaving_out",
+    [History((said(1, "held"), said(2, "held")), older_dropped=False), MORNING],
+    ids=["the lines a turn's history holds", "the visit a voice loop is in"],
+)
+def test_what_is_left_out_of_the_day_counts_nothing_toward_its_size_bound(leaving_out):
+    two_lines = TodayBounds(hours=24.0, size_bytes=2 * len("Bo" + "one"))
+    kept_lines = [
+        kept(MORNING, 1, "held" * 20, hours_before=5, name="Bo"),
+        kept(MORNING, 2, "held" * 20, hours_before=5, name="Bo"),
+        kept(NOON, 1, "one", hours_before=4, name="Bo"),
+        kept(NOON, 2, "two", hours_before=4, name="Bo"),
+    ]
+
+    earlier = earlier_today(kept_lines, LATER, two_lines, leaving_out)
+
+    assert told(earlier) == [[(1, "one"), (2, "two")]]
+    assert earlier.older_dropped is False

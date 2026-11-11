@@ -63,7 +63,7 @@ async def test_a_pause_and_a_resume_seen_while_a_turn_runs_elsewhere_leave_the_l
     held_turn.set()
     await runner.app.said_count(2)
 
-    assert [(opening.room["id"], opening.new_seqs) for opening in runner.gateway.openings()] == [
+    assert [(opening.room["woke"]["place"]["id"], opening.new_seqs) for opening in runner.gateway.openings()] == [
         (PLACE_ID, [1]),
         (other, [2]),
     ]

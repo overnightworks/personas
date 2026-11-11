@@ -18,7 +18,7 @@ from tests.support.hopin import LIMIT_SECONDS
 if TYPE_CHECKING:
     from datetime import datetime
 
-    from personas.decision import KeptLine, Visit, WindowRead
+    from personas.decision import KeptLine, WindowRead
 
 pytestmark = pytest.mark.anyio
 
@@ -57,7 +57,7 @@ class ScriptedStore:
             raise self.failure
         self.kept.append(read)
 
-    async def kept_since(self, client_id: str, since: datetime, other_than: Visit) -> tuple[KeptLine, ...]:
+    async def kept_since(self, client_id: str, since: datetime) -> tuple[KeptLine, ...]:
         if self.read_failure is not None:
             raise self.read_failure
         return ()

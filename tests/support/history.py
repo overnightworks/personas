@@ -1,0 +1,99 @@
+"""What the tests of the history share: the places, the lines and the message a turn is told, as the gateway saw it."""
+
+from __future__ import annotations
+
+import secrets
+
+from agents.member import STANDING_URI, PlaceRef
+
+from tests.support.call import PERSON
+from tests.support.hopin import AGENT_SUBJECT as SUBJECT
+from tests.support.hopin import FakeApp, active
+
+TABLE = PlaceRef(kind="table", id="table-1")
+OTHER_CALL_ID = "room-9"
+SPEAKER = "Ada"
+REMARK = "Play the jack."
+
+
+def url_of(runner, number: int) -> str:
+    return runner.config.apps[number].mcp_url
+
+
+def at_table():
+    return active(TABLE.id, TABLE.kind, serves_view=True)
+
+
+def waits(app: FakeApp, revision: int) -> dict[str, str]:
+    state = {"hand": secrets.token_hex(8)}
+    app.show_view(TABLE.id, revision, state)
+    return state
+
+
+def entry(
+    app_url: str,
+    place_id: str,
+    text: str,
+    *,
+    seq: int = 1,
+    seconds_ago: int = 0,
+    name: str = SPEAKER,
+    own: bool = False,
+    new: bool = False,
+) -> dict[str, object]:
+    return {
+        "entry": "line",
+        "app": app_url,
+        "place": {"kind": "call", "id": place_id},
+        "seconds_ago": seconds_ago,
+        "seq": seq,
+        "name": name,
+        "kind": "message",
+        "text": text,
+        "own": own,
+        "new": new,
+    }
+
+
+def woke_at_lines(app_url: str, place_id: str, *, missed: bool = False) -> dict[str, object]:
+    return {"why": "lines", "app": app_url, "place": {"kind": "call", "id": place_id}, "missed": missed}
+
+
+def turns_woken_by(runner, why: str):
+    """The turns whose first message says they woke for this reason; a voice decision's request is no turn."""
+    return [opening for opening in runner.gateway.openings() if opening.room.get("woke", {}).get("why") == why]
+
+
+def view_turns(runner):
+    return turns_woken_by(runner, "view")
+
+
+def written_turns(runner):
+    return turns_woken_by(runner, "lines")
+
+
+def histories(runner) -> list[object]:
+    return [opening.room["history"] for opening in view_turns(runner)]
+
+
+def history_of(entries: list[dict[str, object]], *, older_dropped: bool = False) -> dict[str, object]:
+    return {"older_dropped": older_dropped, "entries": entries}
+
+
+async def settled(app: FakeApp) -> None:
+    """Every line said so far in a place of the agent was read and taken by the loop of this app.
+
+    A standing the app signals again makes the loop read once more, and its next standing read starts only after the
+    reconcile before it ended; so does the one after that.
+    """
+    for _ in range(2):
+        reads = app.reads[STANDING_URI]
+        app.stand(SUBJECT, *app.standings[SUBJECT])
+        await app.until_standing_read(reads + 1)
+
+
+async def said_and_taken(app: FakeApp, place_id: str, text: str, *, author: str = PERSON, name: str = SPEAKER) -> None:
+    reads = app.window_reads(place_id)
+    app.speak(place_id, author, name, text)
+    await app.until_window_read(place_id, reads + 1)
+    await settled(app)

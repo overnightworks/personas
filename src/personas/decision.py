@@ -10,7 +10,7 @@ import itertools
 import json
 import math
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
@@ -29,7 +29,7 @@ from agents.member import (
 from personas.failures import CallFailure, StatusFailure, TokenStatusFailure, UnusableAnswer
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping, Sequence
+    from collections.abc import Collection, Iterable, Mapping, Sequence
 
     from agents.tools import ToolDeclaration
     from agents.turn import AgentRole
@@ -377,11 +377,23 @@ def _newest_that_fit(newest_first: Iterable[KeptLine], size_bytes: int) -> int:
     return sum(1 for total in itertools.accumulate(map(_size, newest_first)) if total <= size_bytes)
 
 
-def earlier_today(kept: Iterable[KeptLine], now: datetime, bounds: TodayBounds) -> EarlierToday:
-    """The lines of the agent's other visits a turn is told: grouped by visit, visits in the order of their first line
-    and lines in seq order; past ``size_bytes`` of speakers and text the oldest lines are left out."""
+def _remaining(kept: Iterable[KeptLine], leaving_out: History | Visit, now: datetime) -> Iterable[KeptLine]:
+    """The kept lines a turn is still to be told: those the history holds are left out by visit and seq, and those first
+    read after ``now``, which no history of that turn holds yet; a voice loop leaves out the lines of its own visit."""
+    if isinstance(leaving_out, Visit):
+        return (line for line in kept if line.visit != leaving_out)
+    held = {(line.visit, line.seq) for line in leaving_out.entries}
+    return (line for line in kept if (line.visit, line.seq) not in held and line.first_read_at <= now)
+
+
+def earlier_today(
+    kept: Iterable[KeptLine], now: datetime, bounds: TodayBounds, leaving_out: History | Visit
+) -> EarlierToday:
+    """The lines of the day a turn is told besides its history: grouped by visit, visits in the order of their first
+    line and lines in seq order; past ``size_bytes`` of speakers and text the oldest lines are left out, and what is
+    left out beforehand (see ``_remaining``) counts nothing toward that bound."""
     by_visit: dict[Visit, list[KeptLine]] = {}
-    for line in kept:
+    for line in _remaining(kept, leaving_out, now):
         by_visit.setdefault(line.visit, []).append(line)
     groups = sorted((sorted(lines, key=lambda line: line.seq) for lines in by_visit.values()), key=_first_read)
     newest_first = (line for lines in reversed(groups) for line in reversed(lines))
@@ -474,22 +486,28 @@ def call_within_bound(made: int, bound: int) -> bool:
 
 
 @dataclass(frozen=True)
-class _TurnLine:
-    seq: int
-    kind: str
-    name: str
-    text: str
-    own: bool
-    new: bool
+class Lines:
+    """Why a written turn runs: the lines of one visit's window that a read took, which the history holds, and whether
+    older ones were never seen."""
+
+    generation: str
+    seqs: frozenset[int]
+    missed: bool
 
 
 @dataclass(frozen=True)
-class _TurnRoom:
-    kind: str
-    id: str
-    you: str
-    missed: bool
-    lines: tuple[_TurnLine, ...]
+class Waiting:
+    """Why a view turn runs: the place's view waits for the agent."""
+
+    view: PlaceView = field(repr=False)
+
+
+type Occasion = Lines | Waiting
+
+
+class WakeReason(StrEnum):
+    LINES = "lines"
+    VIEW = "view"
 
 
 def told_earlier_today(earlier: EarlierToday) -> dict[str, object]:
@@ -504,30 +522,66 @@ def _told_line(line: KeptLine) -> dict[str, object]:
     return {"name": line.name, "kind": line.kind, "text": line.text, "own": line.own}
 
 
-def told_history(history: History) -> dict[str, object]:
+def _told_place(place: PlaceRef) -> dict[str, str]:
+    return {"kind": place.kind, "id": place.id}
+
+
+def _told_entries(history: History, new: Collection[tuple[Visit, int]], at: datetime) -> dict[str, object]:
     entries = [
-        {"app": line.visit.app, "place": {"kind": line.visit.place.kind, "id": line.visit.place.id}} | _told_line(line)
+        {
+            "entry": "line",
+            "app": line.visit.app,
+            "place": _told_place(line.visit.place),
+            "seconds_ago": int((at - line.first_read_at).total_seconds()),
+            "seq": line.seq,
+        }
+        | _told_line(line)
+        | {"new": (line.visit, line.seq) in new}
         for line in history.entries
     ]
     return {"older_dropped": history.older_dropped, "entries": entries}
 
 
-def view_turn_input(app: str, place: PlaceRef, name: str, view: PlaceView, history: History) -> str:
-    """The facts of a view turn: the app and place, the agent's name, that the place waits for him, the view's state as
-    the app sent it and his history.
+def _told_wake(app: str, place: PlaceRef, occasion: Occasion) -> dict[str, object]:
+    if isinstance(occasion, Lines):
+        return {"why": WakeReason.LINES, "app": app, "place": _told_place(place), "missed": occasion.missed}
+    return {
+        "why": WakeReason.VIEW,
+        "app": app,
+        "place": _told_place(place),
+        "awaits_you": occasion.view.awaits_you,
+        "state": occasion.view.state,
+    }
+
+
+def _lines_taken_for(app: str, place: PlaceRef, occasion: Occasion) -> frozenset[tuple[Visit, int]]:
+    if isinstance(occasion, Waiting):
+        return frozenset()
+    visit = Visit(app, place, occasion.generation)
+    return frozenset((visit, seq) for seq in occasion.seqs)
+
+
+def turn_told(
+    you: str,
+    app: str,
+    place: PlaceRef,
+    occasion: Occasion,
+    history: History,
+    earlier: EarlierToday | None,
+    at: datetime,
+) -> str:
+    """The one user message of every turn, the facts in the order things happened: his name, with a memory what he kept
+    of the day that his history does not hold, his history as it stood when the turn was admitted at ``at`` with the
+    lines the turn is for marked new, and what woke him.
 
     It holds no instruction; those live in the persona.
     """
-    facts = {
-        "app": app,
-        "kind": place.kind,
-        "id": place.id,
-        "you": name,
-        "awaits_you": view.awaits_you,
-        "state": view.state,
-        "history": told_history(history),
-    }
-    return json.dumps(facts, ensure_ascii=False)
+    told: dict[str, object] = {"you": you}
+    if earlier is not None:
+        told[EARLIER_TODAY_KEY] = told_earlier_today(earlier)
+    told["history"] = _told_entries(history, _lines_taken_for(app, place, occasion), at)
+    told["woke"] = _told_wake(app, place, occasion)
+    return json.dumps(told, ensure_ascii=False)
 
 
 def voice_context(earlier: EarlierToday | None) -> str:
@@ -536,27 +590,3 @@ def voice_context(earlier: EarlierToday | None) -> str:
     if earlier is None:
         return ""
     return json.dumps({EARLIER_TODAY_KEY: told_earlier_today(earlier)}, ensure_ascii=False)
-
-
-def turn_input(
-    place: PlaceRef,
-    name: str,
-    window: PlaceWindow,
-    new: Sequence[PlaceEntry],
-    *,
-    missed: bool,
-    earlier: EarlierToday | None = None,
-) -> str:
-    """The facts of a turn: the room, the agent's name, every line of the window, which are new and which are his own,
-    and whether older lines were never seen; with a memory also what was said in his earlier visits of the day.
-
-    It holds no instruction; those live in the persona.
-    """
-    new_seqs = {line.seq for line in new}
-    lines = tuple(
-        _TurnLine(line.seq, line.kind, line.name, line.text, line.own, line.seq in new_seqs) for line in window.entries
-    )
-    facts = asdict(_TurnRoom(place.kind, place.id, name, missed, lines))
-    if earlier is not None:
-        facts[EARLIER_TODAY_KEY] = told_earlier_today(earlier)
-    return json.dumps(facts, ensure_ascii=False)

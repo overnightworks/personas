@@ -16,14 +16,12 @@ from agents.turn import Turn, TurnMessage, TurnRole
 from personas.decision import (
     TOOL_NOT_DECLARED_CODE,
     TURN_ROLE,
-    Visit,
     bound_declarations,
     call_within_bound,
     decisive_failure,
     failure_code,
     turn_call_bound,
-    turn_input,
-    view_turn_input,
+    turn_told,
 )
 from personas.failures import CallFailure, Unreachable, leaves_of, raise_if_cancelled
 from personas.reporting import Event
@@ -37,16 +35,17 @@ from personas.task_record import (
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Iterable
+    from datetime import datetime
 
     from agents.agent_file import AgentDefinition
     from agents.backend import AgentBackend
-    from agents.member import PlaceEntry, PlaceRef, PlaceView, PlaceWindow
+    from agents.member import PlaceRef
     from agents.tools import ToolDeclaration
     from agents.turn import JsonObject, Principal
 
     from personas.app_session import AppSession, SessionOpener
     from personas.config import AgentCredentials, AppTarget, ToolBinding
-    from personas.decision import History, Token
+    from personas.decision import History, Occasion, Token
     from personas.remembering import Remembering
     from personas.task_record import TaskRecord
     from personas.tokens import TokenFacts, TokenSource
@@ -93,30 +92,15 @@ class _HeldTools:
 
 
 @dataclass(frozen=True)
-class Lines:
-    """Why a written turn runs: what the place's window gave."""
-
-    window: PlaceWindow = field(repr=False)
-    new: tuple[PlaceEntry, ...] = field(repr=False)
-    missed: bool
-
-
-@dataclass(frozen=True)
-class Waiting:
-    """Why a view turn runs: the place's view waits for the agent, and what he had taken in when it was admitted."""
-
-    view: PlaceView = field(repr=False)
-    history: History = field(repr=False)
-
-
-@dataclass(frozen=True)
 class Admitted:
-    """A turn decided on, with the facts it was decided from: the token's and what the place gave, which also says how
-    the turn is told."""
+    """A turn decided on, with the facts it was decided from: the token's, what woke it, what its agent had taken in
+    and the wall time of the read that admitted it."""
 
     facts: TokenFacts
     place: PlaceRef
-    occasion: Lines | Waiting
+    occasion: Occasion
+    history: History = field(repr=False)
+    at: datetime
 
     def groups(self) -> Coroutine[None, None, frozenset[str]]:
         """The library's GroupSource wants an awaitable; the groups are already known."""
@@ -202,21 +186,17 @@ class Turning:
                 raise
 
     async def _told(self, admitted: Admitted) -> str:
-        """The user message of the turn: a written turn reads the day first, a view turn keeps no day."""
-        match admitted.occasion:
-            case Waiting(view=view, history=history):
-                return view_turn_input(self._app.mcp_url, admitted.place, admitted.facts.name, view, history)
-            case lines:
-                visit = Visit(self._app.mcp_url, admitted.place, lines.window.generation)
-                earlier = await self._remembering.read_day(visit)
-                return turn_input(
-                    admitted.place,
-                    admitted.facts.name,
-                    lines.window,
-                    lines.new,
-                    missed=lines.missed,
-                    earlier=earlier,
-                )
+        """The user message of the turn: the day is read at its admission and tells what the history does not hold."""
+        earlier = await self._remembering.read_day(admitted.at, admitted.history)
+        return turn_told(
+            admitted.facts.name,
+            self._app.mcp_url,
+            admitted.place,
+            admitted.occasion,
+            admitted.history,
+            earlier,
+            admitted.at,
+        )
 
     async def _run_session_body(
         self, setup: TurnSetup, admitted: Admitted, told: str, session: AppSession, record: TaskRecord

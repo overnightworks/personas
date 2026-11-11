@@ -289,3 +289,12 @@ def unmigrated_database() -> Iterator[MemoryTarget]:
 
     with created_database() as name:
         yield target_of(name)
+
+
+@pytest.fixture
+async def other(runner):
+    """A second app the agent listens to."""
+    app = FakeApp()
+    async with app.serving() as url:
+        runner.add_listening_app(app, url, "mcp-other")
+        yield app
