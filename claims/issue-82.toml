@@ -1,8 +1,0 @@
-claim_id = "9d4562f09ecd4aad9fe106321b0afee8"
-agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
-role = "builder"
-base = "a2e947c0293acb7c7b4118df37e3a6b4524dc083"
-branch = "claude/issue-82-a-place-that-serves-a-view"
-scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/app_session.py", "src/personas/decision.py", "src/personas/loop.py", "src/personas/reporting.py", "src/personas/turning.py", "tests"]
-opened_commit = "6c8fa578df2384b78756f7e6da024220eabee3a9"
-whole_reason = "The view's read, the rule for a due turn and the step that starts it have no caller without each other."
