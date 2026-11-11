@@ -188,14 +188,20 @@ async def test_one_turn_runs_at_a_time_and_a_line_said_meanwhile_is_answered_aft
 
 
 async def test_every_line_addressed_to_him_gets_its_own_turn_one_after_the_other(runner):
-    runner.gateway = Gateway(*[Reply(status=HTTPStatus.TOO_MANY_REQUESTS)] * 3)
+    runner.gateway = Gateway(
+        Reply(status=HTTPStatus.TOO_MANY_REQUESTS), BUDGET_SPENT, Reply(status=HTTPStatus.TOO_MANY_REQUESTS)
+    )
     await restarted_in_the_call(runner)
     for round_number in range(1, 4):
         say_in_the_call(runner, f"{ADDRESSED} Round {round_number}.")
         await runner.reports.until("turn_ended", count=round_number)
 
     assert len(runner.gateway.openings()) == 3
-    assert [code for event, code in runner.reports.events() if event == "turn_ended"] == ["busy"] * 3
+    assert [code for event, code in runner.reports.events() if event == "turn_ended"] == [
+        "busy",
+        "budget_spent",
+        "busy",
+    ]
 
 
 async def a_turn_ended_short(runner, code):
