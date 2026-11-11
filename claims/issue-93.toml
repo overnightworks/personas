@@ -1,0 +1,8 @@
+claim_id = "7d6c1bf3f8bc434c9a75ea85ae1776a0"
+agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
+role = "builder"
+base = "0646d91878e6de0355d24ab0cf9887fd6a3c95cd"
+branch = "claude/issue-93-every-turn-is-told-his-history-and-the-d"
+scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/config.py", "src/personas/decision.py", "src/personas/loop.py", "src/personas/memory.py", "src/personas/remembering.py", "src/personas/turning.py", "tests"]
+opened_commit = "02b1e87fe25558a302b16d9c05b809a3892ce94b"
+whole_reason = "A history told without the exclusion by key tells lines twice, and the exclusion without the store's wider read loses the call's lines from before a restart; tests is a directory."
