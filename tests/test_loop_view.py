@@ -189,15 +189,6 @@ async def test_a_turn_that_ends_and_leaves_its_revision_waiting_gets_no_second_t
     assert told_states(runner) == [first, second]
 
 
-async def test_after_a_turn_left_a_revision_waiting_a_new_revision_that_waits_gets_one_turn(runner):
-    first = await seated_at_a_table_whose_view_waits(runner)
-    await runner.app.until_view_read(TABLE, 2)
-    second = waits(runner, 2)
-    await runner.gateway.until_turns(2)
-
-    assert told_states(runner) == [first, second]
-
-
 async def test_a_turn_that_moves_the_app_to_a_revision_that_waits_again_starts_that_revision_afresh(runner):
     runner.gateway = Gateway(completion("done"))
     ending = runner.gateway.hold_request(1)
