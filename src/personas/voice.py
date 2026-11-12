@@ -102,7 +102,8 @@ class Speaking:
         except Exception as error:
             raise RelayFailed(error) from None
         if outcome is None:
-            self._stop_past_deadline()
+            if not self._silenced:
+                self._stop_past_deadline()
             return
         if isinstance(outcome, SpeakRefusal):
             self._report(Event.SPEAK_REFUSED, outcome.value)
@@ -127,7 +128,7 @@ class Speaking:
         self._idle.clear()
         try:
             await self._renew_token()
-            if self._past_deadline():
+            if self._silenced or self._past_deadline():
                 return None
             answer = await self._session.speak(self._place, sentence)
             ended = answer

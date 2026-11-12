@@ -96,3 +96,17 @@ async def test_a_sentence_whose_token_renewal_ends_past_the_deadline_is_not_sent
     assert stopped.value.code is FailureCode.LIMIT_EXCEEDED
     assert scenario.sent == []
     assert scenario.entered == []
+
+
+async def test_a_sentence_whose_token_renewal_ends_after_the_events_failed_is_not_sent_and_is_not_entered():
+    scenario = SpeakingScenario("One.")
+    playing = asyncio.create_task(scenario.speaking.play())
+    await asyncio.sleep(0)
+    settling = asyncio.create_task(scenario.speaking.settle())
+    await asyncio.sleep(0)
+
+    scenario.renewal_gate.set()
+    await asyncio.gather(playing, settling)
+
+    assert scenario.sent == []
+    assert scenario.entered == []
