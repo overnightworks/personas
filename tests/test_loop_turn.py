@@ -252,7 +252,7 @@ async def test_a_key_the_gateway_cannot_use_ends_the_turn_before_any_gateway_cal
 async def test_a_missing_api_group_is_refused_with_no_gateway_call(runner):
     runner.realm.groups = []
 
-    await a_turn_ended_short(runner, "not_enabled")
+    await a_turn_ended_short(runner, RejectionCode.NOT_ENABLED.value)
 
     assert runner.gateway.requests == []
 
@@ -469,4 +469,4 @@ async def test_a_refused_and_an_answered_turn_log_a_code_and_no_secret_or_conten
     await runner.app.said_count(1)
 
     logged = formatted(caplog.get_records("call"))
-    assert "turn_ended" in logged
+    assert Event.TURN_ENDED.value in logged

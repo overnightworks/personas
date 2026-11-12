@@ -336,4 +336,4 @@ async def test_a_spoken_turn_logs_its_start_and_no_sentence(runner, caplog):
     await runner.app.spoken_count(1)
 
     logged = [record.getMessage() for record in caplog.get_records("call") if record.name == "personas"]
-    assert [message.split()[0] for message in logged] == ["started"]
+    assert [message.split()[0] for message in logged] == [Event.STARTED.value]
