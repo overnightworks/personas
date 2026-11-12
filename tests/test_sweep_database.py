@@ -177,7 +177,7 @@ async def test_no_line_text_speaker_or_password_reaches_a_log_line_of_a_sweep(ru
     await clock.until_waiting(1)
 
     logged = formatted(caplog.get_records("call"))
-    assert "swept" in logged
+    assert Event.SWEPT.value in logged
     for held in (text, speaker, database.password.reveal()):
         assert held not in logged
 
