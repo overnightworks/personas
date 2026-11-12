@@ -1292,17 +1292,17 @@ def taking(history: History, *entries, size_bytes: int = ROOMY.size_bytes) -> Hi
 
 
 @pytest.mark.parametrize(
-    ("entries", "heard", "left_out"),
+    ("entries", "heard"),
     [
-        pytest.param((said(1, "a"), said(2, "b")), 2, 0, id="lines of others count as heard"),
-        pytest.param((a_view_seen(1),), 1, 0, id="a view revision counts as heard"),
-        pytest.param((an_own_line(1), an_act()), 0, 0, id="his own line and his act are not heard"),
+        pytest.param((said(1, "a"), said(2, "b")), 2, id="lines of others count as heard"),
+        pytest.param((a_view_seen(1),), 1, id="a view revision counts as heard"),
+        pytest.param((an_own_line(1), an_act()), 0, id="his own line and his act are not heard"),
     ],
 )
-def test_the_history_counts_the_entries_not_his_own_it_took_in(entries, heard, left_out):
+def test_the_history_counts_the_entries_not_his_own_it_took_in(entries, heard):
     history = taking(EMPTY_HISTORY, *entries)
 
-    assert (history.heard, history.left_out, history.taken) == (heard, left_out, len(entries))
+    assert (history.heard, history.taken) == (heard, len(entries))
 
 
 def test_a_revision_the_history_already_holds_is_not_heard_again():
@@ -1321,16 +1321,18 @@ def test_the_history_counts_what_the_bound_removed_and_every_entry_ever_taken(to
     assert len(history.entries) == 1
 
 
-def test_nothing_arrived_when_nothing_was_taken():
-    admitted = taking(EMPTY_HISTORY, said(1, "one"))
+@pytest.mark.parametrize(
+    ("held", "taken"),
+    [
+        pytest.param((said(1, "one"),), (), id="nothing was taken"),
+        pytest.param((said(1, "one"),), (an_own_line(2), an_act()), id="only his own line and his act were taken"),
+        pytest.param((a_view_seen(3),), (a_view_seen(3),), id="a revision the history already held was taken again"),
+    ],
+)
+def test_nothing_arrived_when_nothing_not_his_own_and_new_was_taken_since_the_admission(held, taken):
+    admitted = taking(EMPTY_HISTORY, *held)
 
-    assert arrived_since(admitted, admitted) is None
-
-
-def test_nothing_not_his_own_arrived_when_only_his_own_line_and_his_act_did():
-    admitted = taking(EMPTY_HISTORY, said(1, "one"))
-
-    assert arrived_since(taking(admitted, an_own_line(2), an_act()), admitted) is None
+    assert arrived_since(taking(admitted, *taken), admitted) is None
 
 
 def test_the_entries_taken_since_the_admission_arrived_in_the_order_taken_his_own_among_them():
@@ -1340,13 +1342,6 @@ def test_the_entries_taken_since_the_admission_arrived_in_the_order_taken_his_ow
     arrived = arrived_since(taking(admitted, act, own, theirs, view), admitted)
 
     assert arrived == Arrived((act, own, theirs, view), older_dropped=False)
-
-
-def test_a_revision_the_history_already_held_at_the_admission_arrives_as_nothing():
-    held = a_view_seen(3)
-    admitted = taking(EMPTY_HISTORY, held)
-
-    assert arrived_since(taking(admitted, a_view_seen(3)), admitted) is None
 
 
 def test_a_revision_that_left_by_the_bound_and_is_read_again_arrives(told_one_bytes):
@@ -1370,34 +1365,40 @@ def test_arrivals_the_bound_removed_before_the_hold_are_left_out_and_older_dropp
     assert arrived == Arrived(during[1:], older_dropped=True)
 
 
-def test_the_newest_arrival_alone_past_the_bound_is_all_that_arrived_and_older_dropped_is_false():
-    admitted = taking(EMPTY_HISTORY, said(1, "a"), said(2, "b"))
-    huge = a_view_seen(1, size=200)
+@pytest.mark.parametrize(
+    ("held", "between", "during", "older_dropped"),
+    [
+        pytest.param(
+            (said(1, "a"), said(2, "b")),
+            (),
+            (a_view_seen(1, size=200),),
+            False,
+            id="the newest arrival alone past the bound is all that arrived",
+        ),
+        pytest.param(
+            (said(1, "a"), said(2, "b")),
+            (said(3, "c"),),
+            (a_view_seen(1, size=200),),
+            True,
+            id="an arrival the bound removed leaves the newest one alone",
+        ),
+        pytest.param(
+            (said(1, "a"),),
+            (said(2, "c"),),
+            (an_act(arguments={"text": "x" * 200}),),
+            True,
+            id="an arrival not his own left with only his own act left",
+        ),
+    ],
+)
+def test_what_arrived_when_the_bound_leaves_only_the_newest_entry_taken_during_the_turn(
+    held, between, during, older_dropped
+):
+    admitted = taking(EMPTY_HISTORY, *held)
 
-    after = taking(admitted, huge, size_bytes=50)
-    arrived = arrived_since(after, admitted)
+    after = taking(taking(admitted, *between), *during, size_bytes=50)
 
-    assert arrived == Arrived((huge,), older_dropped=False)
-
-
-def test_an_arrival_the_bound_removed_with_the_newest_one_alone_left_says_older_dropped():
-    admitted = taking(EMPTY_HISTORY, said(1, "a"), said(2, "b"))
-    huge = a_view_seen(1, size=200)
-
-    after = taking(taking(admitted, said(3, "c")), huge, size_bytes=50)
-    arrived = arrived_since(after, admitted)
-
-    assert arrived == Arrived((huge,), older_dropped=True)
-
-
-def test_an_arrival_not_his_own_that_left_with_only_his_own_act_left_still_arrives_and_says_older_dropped():
-    admitted = taking(EMPTY_HISTORY, said(1, "a"))
-    act = an_act(arguments={"text": "x" * 200})
-
-    after = taking(taking(admitted, said(2, "c")), act, size_bytes=50)
-    arrived = arrived_since(after, admitted)
-
-    assert arrived == Arrived((act,), older_dropped=True)
+    assert arrived_since(after, admitted) == Arrived(during, older_dropped=older_dropped)
 
 
 def told_held(arrived: Arrived) -> dict:

@@ -8,6 +8,7 @@ import secrets
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
 
+from personas.config import load_config
 from personas.decision import TURN_CANCELLED_CODE
 from tests.support.call import (
     ADDRESSED,
@@ -59,10 +60,6 @@ def say(text: str, place_id: str = PLACE_ID):
     return tool_call(secrets.token_hex(4), SAY_TOOL, {"place": place_id, "text": text})
 
 
-def round_of(*calls):
-    return tool_round(*calls)
-
-
 def song(name: str):
     return tool_call(secrets.token_hex(4), name, {"title": "t"})
 
@@ -88,7 +85,7 @@ async def at_the_table_with_news_to_come(runner, other, *replies, holds=(1,)):
 
 async def test_a_turn_that_meets_nothing_new_has_every_call_relayed_in_as_many_rounds(runner, other):
     texts = words(3)
-    runner.gateway = Gateway(*(round_of(say(text, TABLE.id)) for text in texts), completion("done"))
+    runner.gateway = Gateway(*(tool_round(say(text, TABLE.id)) for text in texts), completion("done"))
     other.stand(SUBJECT, at_table())
     await restarted_in_the_call(runner)
     waits(other, 1)
@@ -103,7 +100,7 @@ async def test_a_turn_that_meets_nothing_new_has_every_call_relayed_in_as_many_r
 
 async def test_his_own_line_read_back_and_his_own_act_hold_no_call(runner):
     first, then = words(2)
-    runner.gateway = Gateway(round_of(say(first)), round_of(say(then)), completion("done"))
+    runner.gateway = Gateway(tool_round(say(first)), tool_round(say(then)), completion("done"))
     second = runner.gateway.hold_request(2)
     await addressed_in_the_call(runner)
     await runner.app.said_count(1)
@@ -120,7 +117,9 @@ async def test_a_call_after_a_line_of_someone_else_is_held_with_every_arrival_to
     runner,
 ):
     first, held_text, last = words(3)
-    runner.gateway = Gateway(round_of(say(first)), round_of(say(held_text)), round_of(say(last)), completion("done"))
+    runner.gateway = Gateway(
+        tool_round(say(first)), tool_round(say(held_text)), tool_round(say(last)), completion("done")
+    )
     second = runner.gateway.hold_request(2)
     await addressed_in_the_call(runner)
     await runner.app.said_count(1)
@@ -143,7 +142,7 @@ async def test_a_call_after_a_line_of_someone_else_is_held_with_every_arrival_to
 async def test_news_before_each_of_three_calls_holds_only_the_first(runner, other):
     texts = words(3)
     _, (first, second, third) = await at_the_table_with_news_to_come(
-        runner, other, *(round_of(say(text, TABLE.id)) for text in texts), completion("done"), holds=(1, 2, 3)
+        runner, other, *(tool_round(say(text, TABLE.id)) for text in texts), completion("done"), holds=(1, 2, 3)
     )
     for number, released in enumerate((first, second, third), 1):
         await runner.gateway.until_requested(number)
@@ -159,7 +158,7 @@ async def test_news_before_each_of_three_calls_holds_only_the_first(runner, othe
 async def test_two_calls_of_one_reply_after_news_hold_the_first_and_send_the_second(runner, other):
     held_text, sent_text = words(2)
     _, (running,) = await at_the_table_with_news_to_come(
-        runner, other, round_of(say(held_text, TABLE.id), say(sent_text, TABLE.id)), completion("done")
+        runner, other, tool_round(say(held_text, TABLE.id), say(sent_text, TABLE.id)), completion("done")
     )
     await said_and_taken(runner.app, PLACE_ID, REMARK)
     running.set()
@@ -174,7 +173,10 @@ async def test_two_calls_of_one_reply_after_news_hold_the_first_and_send_the_sec
 
 async def test_a_held_call_to_a_tools_only_app_opens_no_session_and_takes_nothing_from_its_bound(runner, songmaker):
     runner.gateway = Gateway(
-        round_of(song(CREATE_SONG)), round_of(song(CREATE_SONG)), round_of(song(GENERATE_SONG)), completion("done")
+        tool_round(song(CREATE_SONG)),
+        tool_round(song(CREATE_SONG)),
+        tool_round(song(GENERATE_SONG)),
+        completion("done"),
     )
     running = runner.gateway.hold_request(1)
     await restarted_in_the_call(runner)
@@ -195,7 +197,7 @@ async def test_a_held_call_to_a_tools_only_app_opens_no_session_and_takes_nothin
 
 async def test_a_held_call_takes_nothing_from_its_apps_bound_so_the_whole_bound_goes_out_after_it(runner):
     bound = runner.config.apps[0].binding.max_tool_calls
-    runner.gateway = Gateway(*(round_of(say(ANSWER)) for _ in range(bound + 1)), completion("done"))
+    runner.gateway = Gateway(*(tool_round(say(ANSWER)) for _ in range(bound + 1)), completion("done"))
     running = runner.gateway.hold_request(1)
     await addressed_in_the_call(runner)
     await runner.gateway.until_requested(1)
@@ -211,9 +213,9 @@ async def test_a_held_call_takes_nothing_from_its_apps_bound_so_the_whole_bound_
 async def test_a_turn_that_spends_every_apps_bound_after_a_hold_ends_normally(runner, songmaker):
     bound = runner.config.apps[0].binding.max_tool_calls
     runner.gateway = Gateway(
-        round_of(say(ANSWER)),
-        *(round_of(say(ANSWER)) for _ in range(bound)),
-        *(round_of(song(CREATE_SONG)) for _ in range(CALLS)),
+        tool_round(say(ANSWER)),
+        *(tool_round(say(ANSWER)) for _ in range(bound)),
+        *(tool_round(song(CREATE_SONG)) for _ in range(CALLS)),
         completion("done"),
     )
     running = runner.gateway.hold_request(1)
@@ -287,8 +289,6 @@ async def test_a_round_after_a_hold_that_passes_the_deadline_ends_the_turn_as_li
 
 
 def _reloaded(runner):
-    from personas.config import load_config
-
     return load_config(runner.files.write())
 
 
@@ -300,9 +300,9 @@ async def test_the_table_state_his_own_card_caused_holds_his_next_call_once_and_
     _, (first, second) = await at_the_table_with_news_to_come(
         runner,
         other,
-        round_of(say(card, TABLE.id)),
-        round_of(say(remark, TABLE.id)),
-        round_of(say(remark, TABLE.id)),
+        tool_round(say(card, TABLE.id)),
+        tool_round(say(remark, TABLE.id)),
+        tool_round(say(remark, TABLE.id)),
         completion("done"),
         holds=(1, 2),
     )
@@ -326,7 +326,11 @@ async def test_a_line_heard_at_a_voice_place_holds_the_call_of_his_turn_and_the_
     sentence, call = f"{secrets.token_hex(4)}.", words(1)[0]
     heard = "Anyone there?"
     await in_a_voice_call_and_at_a_table(
-        runner, completion(sentence), round_of(say(call, TABLE.id)), round_of(say(call, TABLE.id)), completion("done")
+        runner,
+        completion(sentence),
+        tool_round(say(call, TABLE.id)),
+        tool_round(say(call, TABLE.id)),
+        completion("done"),
     )
     running = runner.gateway.hold_request(1)
     waits(runner.app, 1)
