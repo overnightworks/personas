@@ -143,9 +143,12 @@ async def test_a_call_turn_answers_in_the_call_and_plays_at_the_table_in_one_tur
     (_, following) = runner.gateway.turns("view")
     assert following.told("act") == [said_act(runner, written), played_act(runner, played)]
     scope_of_other = runner.config.apps[1].scope
-    assert fingerprints(other.presented) <= fingerprints(runner.realm.issued_for[scope_of_other])
-    assert len(fingerprints(other.presented)) >= 3
-    assert fingerprints(other.presented).isdisjoint(fingerprints(runner.app.presented))
+    table_bearers = fingerprints(other.presented)
+    issued_for_table = fingerprints(runner.realm.issued_for[scope_of_other])
+    call_bearers = fingerprints(runner.app.presented)
+    assert table_bearers <= issued_for_table
+    assert len(table_bearers) >= 3
+    assert table_bearers.isdisjoint(call_bearers)
     assert reported(runner) == []
 
 
@@ -213,9 +216,12 @@ async def test_a_table_turn_holds_the_tools_of_his_call_and_writes_in_it(runner,
     await runner.app.said_count(1)
 
     assert runner.app.said == [(SUBJECT, PLACE_ID, written)]
-    assert fingerprints(runner.app.presented) <= fingerprints(runner.realm.issued_for[runner.config.apps[0].scope])
-    assert fingerprints(runner.app.presented)
-    assert fingerprints(other.presented).isdisjoint(fingerprints(runner.app.presented))
+    call_bearers = fingerprints(runner.app.presented)
+    issued_for_call = fingerprints(runner.realm.issued_for[runner.config.apps[0].scope])
+    table_bearers = fingerprints(other.presented)
+    assert call_bearers <= issued_for_call
+    assert call_bearers
+    assert table_bearers.isdisjoint(call_bearers)
     assert runner.gateway.offered_tools() == [SAY_TOOL, PLAY_TOOL]
 
 
@@ -416,7 +422,9 @@ async def test_a_call_of_a_table_turn_held_by_a_line_in_the_call_is_followed_by_
     assert held["sent"] is False
     assert other.said == [(SUBJECT, TABLE.id, jack)]
     assert runner.app.said == [(SUBJECT, PLACE_ID, written)]
-    assert fingerprints(other.presented).isdisjoint(fingerprints(runner.app.presented))
+    table_bearers = fingerprints(other.presented)
+    call_bearers = fingerprints(runner.app.presented)
+    assert table_bearers.isdisjoint(call_bearers)
 
 
 async def test_a_line_in_the_call_while_the_table_already_had_its_turn_lets_the_call_turn_play(runner, other):
