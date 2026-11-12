@@ -13,6 +13,7 @@ from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.tools import ToolOutcome
 from mcp_types import INVALID_PARAMS, CallToolResult, TextContent
 
+from personas.app_session import READ_SECONDS, open_mcp_session
 from personas.failures import Unreachable
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway
@@ -244,7 +245,7 @@ async def test_a_tools_only_call_that_fails_is_told_as_not_answered_with_the_fai
 CUT_IN_FLIGHT = pytest.mark.parametrize("tools_only", [False, True], ids=["the places app", "a tools-only app"])
 
 
-async def a_call_waiting_for_its_app_while_its_place_leaves(runner, songmaker, *, tools_only):
+async def a_call_waiting_for_its_app_while_its_place_leaves(runner, songmaker, *, tools_only, open_session=None):
     """The call of the first turn hangs at its app, the place leaves, and a line names him at another place.
 
     The act the call made, as the turn at the other place is told it.
@@ -259,7 +260,7 @@ async def a_call_waiting_for_its_app_while_its_place_leaves(runner, songmaker, *
         runner.gateway = Gateway(say_round(ANSWER), completion("done"))
         act = a_say(runner, ANSWER, unanswered("cancelled"))
     runner.app.stand(SUBJECT, active(PLACE_ID), active(OTHER_CALL_ID))
-    runner.start()
+    runner.start(open_session=open_session)
     await runner.app.until_window_read(PLACE_ID)
     await runner.app.until_window_read(OTHER_CALL_ID)
     say_in_the_call(runner, ADDRESSED)
@@ -289,31 +290,30 @@ async def test_a_call_cut_in_flight_because_its_place_left_is_told_cancelled_to_
 
 
 async def test_a_call_cut_in_flight_whose_request_ends_as_a_transport_failure_is_told_cancelled_not_network(
-    runner, songmaker, monkeypatch
+    runner, songmaker
 ):
-    entered = asyncio.Event()
+    class EndsACutCallAsAFailure:
+        def __init__(self, session):
+            self._session = session
 
-    async def cut_as_a_failure(self, name, arguments):
-        entered.set()
-        with contextlib.suppress(asyncio.CancelledError):
-            await asyncio.Event().wait()
-        raise Unreachable("cut")
+        def __getattr__(self, name):
+            return getattr(self._session, name)
 
-    monkeypatch.setattr("personas.app_session._McpAppSession.invoke", cut_as_a_failure)
-    runner.gateway = Gateway(say_round(ANSWER), completion("done"))
-    runner.app.stand(SUBJECT, active(PLACE_ID), active(OTHER_CALL_ID))
-    runner.start()
-    await runner.app.until_window_read(PLACE_ID)
-    await runner.app.until_window_read(OTHER_CALL_ID)
-    say_in_the_call(runner, ADDRESSED)
-    async with asyncio.timeout(10):
-        await entered.wait()
-    runner.app.stand(SUBJECT, active(OTHER_CALL_ID))
-    await runner.reports.until("turn_ended")
-    runner.app.speak(OTHER_CALL_ID, PERSON, SPEAKER, ADDRESSED)
-    await runner.gateway.until_turns(2)
+        async def invoke(self, name, arguments):
+            with contextlib.suppress(asyncio.CancelledError):
+                return await self._session.invoke(name, arguments)
+            raise Unreachable("cut")
 
-    assert written_turns(runner)[1].room["history"]["entries"][1] == a_say(runner, ANSWER, unanswered("cancelled"))
+    @contextlib.asynccontextmanager
+    async def opened(app, token):
+        async with open_mcp_session(app, token, stream_seconds=READ_SECONDS) as session:
+            yield EndsACutCallAsAFailure(session)
+
+    act, second = await a_call_waiting_for_its_app_while_its_place_leaves(
+        runner, songmaker, tools_only=False, open_session=opened
+    )
+
+    assert second.room["history"]["entries"][1] == act
     assert runner.reports.events() == [("started", None), ("turn_ended", "cancelled")]
 
 
@@ -339,7 +339,7 @@ async def test_the_bound_counts_an_act_by_its_tool_its_arguments_as_told_and_its
     runner, bytes_over_the_three, kept_kinds
 ):
     text = "Grüße ♠"
-    act_bytes = len(b"say") + len('{"place": "room-7", "text": "Grüße ♠"}'.encode()) + len(b"said")
+    act_bytes = len(b"say") + len(f'{{"place": "{PLACE_ID}", "text": "{text}"}}'.encode()) + len(b"said")
     own_line_bytes = len((AGENT_NAME + text).encode())
     new_line_bytes = len((SPEAKER + AGAIN).encode())
     runner.config = replace(
