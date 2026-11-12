@@ -1,8 +1,0 @@
-claim_id = "e8209a44b8524853931260286389ec2b"
-agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
-role = "builder"
-base = "317d45fc3b16a708da1decbe9c8b8658b66fe2d2"
-branch = "claude/issue-101-a-call-does-not-go-out-when-something-ne"
-scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/decision.py", "src/personas/mind.py", "src/personas/turning.py", "tests"]
-opened_commit = "79296737f2f7c45a46a92b717a7b96f35590b5b1"
-whole_reason = "The counts, the held result and the relay's check prove nothing apart, and History's changed fields need mind.py's one line; tests is a directory."
