@@ -252,7 +252,7 @@ async def test_a_failed_call_to_his_own_apps_tool_ends_the_turn_into_that_loops_
     runner.app.script(CALL, cuts)
     await seated_in_the_call(runner, other, tool_round(say(words(1)[0]), play(words(1)[0])), completion("done"))
     say_in_the_call(runner, ADDRESSED)
-    await runner.reports.until("resumed")
+    await runner.reports.until(Event.RESUMED)
 
     assert reported(runner) == [(Event.BACKOFF, "network", url_of(runner, 0)), (Event.RESUMED, None, url_of(runner, 0))]
     assert runner.gateway.arrivals == 1
@@ -315,7 +315,7 @@ async def test_a_turn_whose_place_leaves_while_a_held_apps_call_is_in_flight_end
     say_in_the_call(runner, ADDRESSED)
     await entered.wait()
     runner.app.stand(SUBJECT)
-    await runner.reports.until("turn_ended")
+    await runner.reports.until(Event.TURN_ENDED)
     waits(other, 1)
     await runner.gateway.until_turns(2)
 

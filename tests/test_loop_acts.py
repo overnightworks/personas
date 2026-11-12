@@ -246,7 +246,7 @@ async def a_call_waiting_for_its_app_while_its_place_leaves(runner, songmaker, *
     async with asyncio.timeout(10):
         await entered.wait()
     runner.app.stand(SUBJECT, active(OTHER_CALL_ID))
-    await runner.reports.until("turn_ended")
+    await runner.reports.until(Event.TURN_ENDED)
     runner.app.speak(OTHER_CALL_ID, PERSON, SPEAKER, ADDRESSED)
     await runner.gateway.until_turns(2)
     return act, written_turns(runner)[1]
@@ -265,7 +265,7 @@ async def test_a_call_cut_in_flight_because_its_place_left_is_told_cancelled_to_
             entry(url_of(runner, 0), OTHER_CALL_ID, ADDRESSED, new=True),
         ]
     )
-    assert runner.reports.events() == [("started", None), ("turn_ended", "cancelled")]
+    assert runner.reports.events() == [(Event.STARTED, None), (Event.TURN_ENDED, "cancelled")]
 
 
 async def test_a_call_cut_in_flight_whose_request_ends_as_a_transport_failure_is_told_cancelled_not_network(
@@ -293,7 +293,7 @@ async def test_a_call_cut_in_flight_whose_request_ends_as_a_transport_failure_is
     )
 
     assert second.room["history"]["entries"][1] == act
-    assert runner.reports.events() == [("started", None), ("turn_ended", "cancelled")]
+    assert runner.reports.events() == [(Event.STARTED, None), (Event.TURN_ENDED, "cancelled")]
 
 
 async def test_a_say_whose_only_effect_is_an_act_starts_no_further_turn_once_his_own_line_is_read(runner):

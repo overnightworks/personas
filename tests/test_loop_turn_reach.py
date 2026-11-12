@@ -92,7 +92,7 @@ async def test_an_addressed_line_runs_the_bound_tools_of_a_tools_only_app_in_ord
     assert runner.gateway.tool_results(2) == [songmaker.results[CREATE_SONG], songmaker.results[GENERATE_SONG]]
     assert runner.app.said == [(SUBJECT, PLACE_ID, songmaker.results[GENERATE_SONG])]
     assert sorted(runner.gateway.offered_tools()) == sorted([SAY_TOOL, CREATE_SONG, GENERATE_SONG])
-    assert runner.reports.events() == [("started", None)]
+    assert runner.reports.events() == [(Event.STARTED, None)]
 
 
 async def test_each_app_sees_only_the_bearers_issued_for_its_own_scope(runner, songmaker):
@@ -340,9 +340,9 @@ async def test_a_turn_whose_place_left_during_a_tools_only_call_stops_with_no_fu
     await a_turn_inside_a_tools_only_call(runner, songmaker)
 
     runner.app.stand(SUBJECT)
-    await runner.reports.until("turn_ended")
+    await runner.reports.until(Event.TURN_ENDED)
 
-    assert runner.reports.events() == [("started", None), ("turn_ended", TURN_CANCELLED_CODE)]
+    assert runner.reports.events() == [(Event.STARTED, None), (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
     assert len(runner.gateway.requests) == 1
     assert runner.app.said == []
     assert not runner.task.done()
@@ -373,7 +373,7 @@ async def test_a_defect_in_a_tools_only_request_whose_place_then_leaves_while_it
     ended = await ended_by(runner.task)
 
     assert list(leaves_of(ended)) == [defect]
-    assert runner.reports.events() == [("started", None)]
+    assert runner.reports.events() == [(Event.STARTED, None)]
 
 
 def raising_in_the_tools_only_request(runner, monkeypatch, where, defect):
@@ -422,7 +422,7 @@ async def test_a_defect_in_a_tools_only_request_whose_close_outlasts_the_apps_ca
     ended = await ended_by(runner.task)
 
     assert list(leaves_of(ended)) == [defect]
-    assert runner.reports.events() == [("started", None)]
+    assert runner.reports.events() == [(Event.STARTED, None)]
     assert len(runner.gateway.requests) == (0 if where == "listing" else 1)
     assert runner.app.said == []
 
@@ -478,7 +478,7 @@ async def test_a_defect_in_a_tools_only_call_whose_close_outlasts_the_turns_dura
     ended = await ended_by(runner.task)
 
     assert list(leaves_of(ended)) == [defect]
-    assert runner.reports.events() == [("started", None)]
+    assert runner.reports.events() == [(Event.STARTED, None)]
     assert len(runner.gateway.requests) == 1
     assert runner.app.said == []
 
@@ -490,9 +490,9 @@ async def test_a_tools_only_call_whose_cancelled_session_leaves_as_a_failure_sti
     await a_turn_inside_a_tools_only_call(runner, songmaker)
 
     runner.app.stand(SUBJECT)
-    await runner.reports.until("turn_ended")
+    await runner.reports.until(Event.TURN_ENDED)
 
-    assert runner.reports.events() == [("started", None), ("turn_ended", TURN_CANCELLED_CODE)]
+    assert runner.reports.events() == [(Event.STARTED, None), (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
     assert len(runner.gateway.requests) == 1
     assert runner.app.said == []
 
@@ -576,7 +576,7 @@ async def test_a_tools_only_outcome_that_is_an_error_shows_the_model_its_text(ru
     await runner.app.said_count(1)
 
     assert refused.content in runner.gateway.tool_results(2)[0]
-    assert runner.reports.events() == [("started", None)]
+    assert runner.reports.events() == [(Event.STARTED, None)]
 
 
 async def ends_with_the_defect_beside(runner, defect, *others):
@@ -588,7 +588,7 @@ async def ends_with_the_defect_beside(runner, defect, *others):
     assert sorted(type(leaf).__name__ for leaf in leaves if leaf is not defect) == sorted(
         each.__name__ for each in others
     )
-    assert runner.reports.events() == [("started", None)]
+    assert runner.reports.events() == [(Event.STARTED, None)]
 
 
 CHILD_LOST = pytest.mark.parametrize(
@@ -662,7 +662,7 @@ async def test_a_tools_only_call_that_fails_whose_close_adds_a_defect_ends_the_r
     ended = await ended_by(runner.task)
 
     assert sorted(type(leaf).__name__ for leaf in leaves_of(ended)) == ["RuntimeError", "StatusFailure"]
-    assert runner.reports.events() == [("started", None)]
+    assert runner.reports.events() == [(Event.STARTED, None)]
 
 
 @REQUEST_AT
