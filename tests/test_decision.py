@@ -477,27 +477,52 @@ def test_two_earlier_visits_are_told_in_the_order_they_happened_each_as_its_own_
     assert earlier.older_dropped is False
 
 
-def test_lines_beyond_the_size_bound_leave_the_oldest_out_keep_the_newest_and_say_so():
+AWKWARD_TEXT = 'ä♠"\n'
+AWKWARD_TEXT_AS_TOLD = r"ä♠\"\n"
+TOLD_DAY_LINE = '{"name": "Bo", "kind": "message", "text": "middle", "own": false}'
+TOLD_DAY_LINE_BYTES = len(TOLD_DAY_LINE.encode())
+
+
+@pytest.mark.parametrize(
+    ("bound_over_the_two_lines", "told_texts", "older_dropped"),
+    [
+        pytest.param(0, ["middle", "newest"], False, id="the bound is the told lines' size"),
+        pytest.param(-1, ["newest"], True, id="the bound lies one byte below them"),
+    ],
+)
+def test_lines_are_counted_by_the_bytes_they_are_told_as_and_the_oldest_leave_first_and_it_is_said(
+    bound_over_the_two_lines, told_texts, older_dropped
+):
     lines = [
-        kept(MORNING, 1, "oldest" * 20, hours_before=9, name="Bo"),
         kept(NOON, 1, "middle", hours_before=6, name="Bo"),
         kept(NOON, 2, "newest", hours_before=6, name="Bo"),
     ]
-    two_lines = TodayBounds(hours=24.0, size_bytes=2 * len("Bo" + "middle"))
+    bound = TodayBounds(hours=24.0, size_bytes=2 * TOLD_DAY_LINE_BYTES + bound_over_the_two_lines)
 
-    earlier = earlier_today(lines, LATER, two_lines, EMPTY_HISTORY)
+    earlier = earlier_today(lines, LATER, bound, EMPTY_HISTORY)
 
-    assert told(earlier) == [[(1, "middle"), (2, "newest")]]
-    assert earlier.older_dropped is True
+    assert [text for _, text in told(earlier)[-1]] == told_texts
+    assert earlier.older_dropped is older_dropped
 
 
-def test_lines_exactly_at_the_size_bound_are_all_told():
-    lines = [kept(MORNING, 1, "one", hours_before=1, name="Bo"), kept(MORNING, 2, "two", hours_before=1, name="Bo")]
+def test_no_line_of_the_day_is_told_and_the_day_says_so_when_not_even_the_newest_fits_its_bound():
+    lines = [kept(NOON, 1, "middle", hours_before=6, name="Bo")]
 
-    earlier = earlier_today(lines, LATER, TodayBounds(hours=24.0, size_bytes=2 * len("Bo" + "one")), EMPTY_HISTORY)
+    earlier = earlier_today(lines, LATER, TodayBounds(hours=24.0, size_bytes=TOLD_DAY_LINE_BYTES - 1), EMPTY_HISTORY)
 
-    assert told(earlier) == [[(1, "one"), (2, "two")]]
-    assert earlier.older_dropped is False
+    assert earlier == EarlierToday((), older_dropped=True)
+
+
+def test_a_day_line_is_counted_in_utf8_bytes_of_its_json_as_told():
+    told_line = '{"name": "Bo", "kind": "message", "text": "' + AWKWARD_TEXT_AS_TOLD + '", "own": false}'
+    lines = [kept(MORNING, seq, AWKWARD_TEXT, hours_before=1, name="Bo") for seq in (1, 2)]
+    size = 2 * len(told_line.encode())
+
+    fitting = earlier_today(lines, LATER, TodayBounds(hours=24.0, size_bytes=size), EMPTY_HISTORY)
+    one_byte_short = earlier_today(lines, LATER, TodayBounds(hours=24.0, size_bytes=size - 1), EMPTY_HISTORY)
+
+    assert (told(fitting), fitting.older_dropped) == ([[(1, AWKWARD_TEXT), (2, AWKWARD_TEXT)]], False)
+    assert (told(one_byte_short), one_byte_short.older_dropped) == ([[(2, AWKWARD_TEXT)]], True)
 
 
 def test_the_day_reaches_back_the_configured_hours_and_an_unbounded_day_reaches_back_to_any_line():
@@ -720,6 +745,13 @@ def said(seq: int, text: str, *, name: str = "Bo", visit: Visit = MORNING) -> Ke
     return KeptLine(visit, seq, LATER, name, "message", text, own=False)
 
 
+TOLD_LINE = (
+    '{"entry": "line", "app": "https://app.test/mcp", "place": {"kind": "call", "id": "room-7"}, "seconds_ago": 0,'
+    ' "seq": 1, "name": "Bo", "kind": "message", "text": "one", "own": false, "new": false}'
+)
+TOLD_LINE_BYTES = len(TOLD_LINE.encode())
+
+
 def test_a_view_turn_is_told_its_revision_as_the_one_entry_marked_new_and_woke_names_only_why_app_and_place():
     view = PlaceView(revision=3, awaits_you=True, state={"hand": ["x", {"seen": True}], "umläut": "ä"})
     history = History(
@@ -873,7 +905,7 @@ def test_new_lines_join_the_history_after_the_lines_it_holds():
 def test_the_history_keeps_the_newest_lines_that_fit_the_bound_and_says_when_it_dropped_older_ones(
     bound_over_the_two_lines, kept_texts, older_dropped
 ):
-    two_lines = 2 * len("Bo" + "one")
+    two_lines = 2 * TOLD_LINE_BYTES
 
     history = history_after(EMPTY_HISTORY, (said(1, "one"), said(2, "two")), two_lines + bound_over_the_two_lines)
 
@@ -891,7 +923,7 @@ def test_the_history_keeps_the_newest_lines_that_fit_the_bound_and_says_when_it_
 def test_the_newest_entry_stays_even_when_it_alone_is_past_the_bound_and_the_history_says_when_an_older_one_left(
     history, expected_dropped
 ):
-    kept_history = history_after(history, (said(2, "x" * 50),), 10)
+    kept_history = history_after(history, (said(2, "x" * 50),), TOLD_LINE_BYTES - 1)
 
     assert [line.text for line in kept_history.entries] == ["x" * 50]
     assert kept_history.older_dropped is expected_dropped
@@ -940,12 +972,12 @@ def test_a_revision_whose_entry_left_by_the_bound_is_appended_again_when_read_ag
         pytest.param(-1, ["view"], True, id="the bound lies one byte below them"),
     ],
 )
-def test_the_bound_counts_a_line_by_speaker_and_text_and_a_view_by_the_utf8_json_bytes_of_its_state(
+def test_the_bound_counts_a_line_by_its_told_json_and_a_view_by_the_utf8_json_bytes_of_its_state_alone(
     bound_over_the_two, kept_kinds, older_dropped
 ):
     view = ViewSeen(APP, TABLE, PlaceView(revision=1, awaits_you=True, state={"hand": "ä♠"}), LATER)
     state_bytes = len('{"hand": "ä♠"}'.encode())
-    size = len("Bo" + "one") + state_bytes + bound_over_the_two
+    size = TOLD_LINE_BYTES + state_bytes + bound_over_the_two
 
     history = history_after(EMPTY_HISTORY, (said(1, "one"), view), size)
 
@@ -960,15 +992,27 @@ def an_act(*, arguments=None, outcome=None, tool="say", app=APP, at=LATER - time
 
 
 @pytest.mark.parametrize(
-    ("act", "told_size"),
+    ("act", "told_act"),
     [
         pytest.param(
-            an_act(arguments={"text": "ä♠"}),
-            len("say") + len('{"text": "ä♠"}'.encode()) + len("posted"),
+            an_act(),
+            '{"entry": "act", "app": "https://app.test/mcp", "seconds_ago": 0, "tool": "say",'
+            ' "arguments": {"text": "hi"}, "outcome": {"answered": true, "is_error": false, "text": "posted"},'
+            ' "new": false}',
             id="an answer",
         ),
         pytest.param(
-            an_act(outcome=Unanswered("network")), len("say") + len('{"text": "hi"}') + len("network"), id="no answer"
+            an_act(outcome=Unanswered("network")),
+            '{"entry": "act", "app": "https://app.test/mcp", "seconds_ago": 0, "tool": "say",'
+            ' "arguments": {"text": "hi"}, "outcome": {"answered": false, "code": "network"}, "new": false}',
+            id="no answer",
+        ),
+        pytest.param(
+            an_act(arguments={"text": AWKWARD_TEXT}),
+            '{"entry": "act", "app": "https://app.test/mcp", "seconds_ago": 0, "tool": "say",'
+            ' "arguments": {"text": "' + AWKWARD_TEXT_AS_TOLD + '"},'
+            ' "outcome": {"answered": true, "is_error": false, "text": "posted"}, "new": false}',
+            id="arguments of two-, three- and escaped characters",
         ),
     ],
 )
@@ -980,15 +1024,25 @@ def an_act(*, arguments=None, outcome=None, tool="say", app=APP, at=LATER - time
         pytest.param(-1, ["act"], True, id="the bound lies one byte below them"),
     ],
 )
-def test_the_bound_counts_an_act_by_its_tool_its_arguments_as_told_and_its_answer_or_code_in_utf8_bytes(
-    act, told_size, bound_over_the_two, kept_kinds, older_dropped
+def test_the_bound_counts_an_act_by_the_utf8_bytes_of_its_told_json_with_its_age_as_zero(
+    act, told_act, bound_over_the_two, kept_kinds, older_dropped
 ):
-    size = len("Bo" + "one") + told_size + bound_over_the_two
+    size = TOLD_LINE_BYTES + len(told_act.encode()) + bound_over_the_two
 
     history = history_after(EMPTY_HISTORY, (said(1, "one"), act), size)
 
     assert ["line" if isinstance(each, KeptLine) else "act" for each in history.entries] == kept_kinds
     assert history.older_dropped is older_dropped
+
+
+def test_a_line_is_counted_in_utf8_bytes_of_its_told_json():
+    told_line = TOLD_LINE.replace('"one"', '"' + AWKWARD_TEXT_AS_TOLD + '"')
+    awkward = said(1, AWKWARD_TEXT)
+
+    kept_both = history_after(EMPTY_HISTORY, (awkward, said(2, AWKWARD_TEXT)), 2 * len(told_line.encode()))
+    kept_one = history_after(EMPTY_HISTORY, (awkward, said(2, AWKWARD_TEXT)), 2 * len(told_line.encode()) - 1)
+
+    assert [len(kept_both.entries), len(kept_one.entries)] == [2, 1]
 
 
 def test_an_act_is_always_appended_and_alone_past_the_bound_it_stays_as_the_newest_entry():
@@ -1120,15 +1174,15 @@ def test_the_day_is_the_same_whether_or_not_the_history_holds_views_and_holds_no
     ids=["the lines a turn's history holds", "the visit a voice loop is in"],
 )
 def test_what_is_left_out_of_the_day_counts_nothing_toward_its_size_bound(leaving_out):
-    two_lines = TodayBounds(hours=24.0, size_bytes=2 * len("Bo" + "one"))
+    two_lines = TodayBounds(hours=24.0, size_bytes=2 * TOLD_DAY_LINE_BYTES)
     kept_lines = [
         kept(MORNING, 1, "held" * 20, hours_before=5, name="Bo"),
         kept(MORNING, 2, "held" * 20, hours_before=5, name="Bo"),
-        kept(NOON, 1, "one", hours_before=4, name="Bo"),
-        kept(NOON, 2, "two", hours_before=4, name="Bo"),
+        kept(NOON, 1, "middle", hours_before=4, name="Bo"),
+        kept(NOON, 2, "second", hours_before=4, name="Bo"),
     ]
 
     earlier = earlier_today(kept_lines, LATER, two_lines, leaving_out)
 
-    assert told(earlier) == [[(1, "one"), (2, "two")]]
+    assert told(earlier) == [[(1, "middle"), (2, "second")]]
     assert earlier.older_dropped is False

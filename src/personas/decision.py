@@ -388,7 +388,7 @@ def act_outcome(ended: ToolOutcome | BaseException, *, cancelling: bool) -> ActO
 
 @dataclass(frozen=True)
 class TodayBounds:
-    """What a turn is told of the day: the lines first read within ``hours``, at most ``size_bytes`` of them."""
+    """What a turn is told of the day: the lines first read within ``hours``, at most ``size_bytes`` of them as told."""
 
     hours: float
     size_bytes: int
@@ -430,28 +430,29 @@ def swept_before(now: datetime, lines_keep_days: float) -> datetime | None:
     return _before(now, lines_keep_days * SECONDS_PER_DAY)
 
 
-def _size(entry: Entry) -> int:
-    """A line counts its speaker and text, a view its state as it is told, an act its tool, its arguments as told and
-    its answer's text or its code."""
-    if isinstance(entry, ViewSeen):
-        return len(_told_state(entry.view).encode())
+def _own_time(entry: Entry) -> datetime:
     if isinstance(entry, ActDone):
-        outcome = entry.outcome.text if isinstance(entry.outcome, Answered) else entry.outcome.code
-        return len((entry.tool + _told_arguments(entry.arguments) + outcome).encode())
-    return len(entry.name.encode()) + len(entry.text.encode())
+        return entry.at
+    if isinstance(entry, ViewSeen):
+        return entry.read_at
+    return entry.first_read_at
 
 
-def _told_arguments(arguments: JsonObject) -> str:
-    return json.dumps(arguments, ensure_ascii=False)
+def _told_bytes(told: dict[str, object]) -> int:
+    return len(json.dumps(told, ensure_ascii=False).encode())
 
 
-def _told_state(view: PlaceView) -> str:
-    return json.dumps(view.state, ensure_ascii=False)
+def _size(entry: Entry) -> int:
+    """A view counts the bytes of its state's JSON; a line and an act count the bytes of the JSON they are told as, with
+    their age as 0 and no mark as new, so a size does not change while the entry stays in the history."""
+    if isinstance(entry, ViewSeen):
+        return len(json.dumps(entry.view.state, ensure_ascii=False).encode())
+    return _told_bytes(_told_entry(entry, _own_time(entry), new=False))
 
 
-def _newest_that_fit(newest_first: Iterable[Entry], size_bytes: int) -> int:
-    """How many of the entries, taken newest first, fit ``size_bytes``."""
-    return sum(1 for total in itertools.accumulate(map(_size, newest_first)) if total <= size_bytes)
+def _newest_that_fit(sizes_newest_first: Iterable[int], size_bytes: int) -> int:
+    """How many entries, whose sizes are given newest first, fit ``size_bytes``."""
+    return sum(1 for total in itertools.accumulate(sizes_newest_first) if total <= size_bytes)
 
 
 def _remaining(kept: Iterable[KeptLine], leaving_out: History | Visit, now: datetime) -> Iterable[KeptLine]:
@@ -467,14 +468,14 @@ def earlier_today(
     kept: Iterable[KeptLine], now: datetime, bounds: TodayBounds, leaving_out: History | Visit
 ) -> EarlierToday:
     """The lines of the day a turn is told besides its history: grouped by visit, visits in the order of their first
-    line and lines in seq order; past ``size_bytes`` of speakers and text the oldest lines are left out, and what is
+    line and lines in seq order; past ``size_bytes`` of the lines as told the oldest lines are left out, and what is
     left out beforehand (see ``_remaining``) counts nothing toward that bound."""
     by_visit: dict[Visit, list[KeptLine]] = {}
     for line in _remaining(kept, leaving_out, now):
         by_visit.setdefault(line.visit, []).append(line)
     groups = sorted((sorted(lines, key=lambda line: line.seq) for lines in by_visit.values()), key=_first_read)
     newest_first = (line for lines in reversed(groups) for line in reversed(lines))
-    fitting = _newest_that_fit(newest_first, bounds.size_bytes)
+    fitting = _newest_that_fit((_told_bytes(_told_line(line)) for line in newest_first), bounds.size_bytes)
     left_out = sum(len(lines) for lines in groups) - fitting
     older_dropped = left_out > 0
     visits: list[EarlierVisit] = []
@@ -519,7 +520,7 @@ def history_after(history: History, new: Iterable[Entry], size_bytes: int) -> Hi
     for entry in new:
         if not (isinstance(entry, ViewSeen) and _holds_revision(entries, entry)):
             entries = (*entries, entry)
-    left_out = max(0, len(entries) - max(1, _newest_that_fit(reversed(entries), size_bytes)))
+    left_out = max(0, len(entries) - max(1, _newest_that_fit(map(_size, reversed(entries)), size_bytes)))
     return History(entries[left_out:], history.older_dropped or left_out > 0)
 
 
