@@ -225,6 +225,7 @@ class Harness:
             self.files.password,
             self.files.persona_prompt,
             *(held for agent in self.config.agents if agent.figure for held in (agent.figure.url, agent.figure.sha256)),
+            *(agent.voice.name for agent in self.config.agents if agent.voice and agent.voice.name),
             *self.realm.issued,
             *self.app.kept_out_of_logs(),
             *(held for each in [*self.tools_only_apps, *self.other_apps] for held in each.kept_out_of_logs()),

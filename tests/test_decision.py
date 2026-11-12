@@ -1054,6 +1054,17 @@ def test_a_history_its_lines_and_its_views_show_no_name_no_text_and_no_state_in_
     assert marker not in repr(view)
 
 
+def test_an_accept_shows_neither_its_figure_nor_its_voice_in_its_repr():
+    voice = f"Voice_{secrets.token_hex(6)}"
+    figure = FigureRef(url=f"https://figures.test/{secrets.token_hex(6)}.glb", sha256=secrets.token_hex(32))
+
+    shown = repr(Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 4, figure, voice))
+
+    assert voice not in shown
+    assert figure.url not in shown
+    assert figure.sha256 not in shown
+
+
 def test_the_places_and_lines_a_turn_is_due_for_show_no_name_no_text_and_no_state_in_their_repr():
     marker = secrets.token_hex(8)
     taken = said(1, marker, name=marker)
