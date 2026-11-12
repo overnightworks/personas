@@ -1,8 +1,0 @@
-claim_id = "06cb069594594ea693797ffe73e92cbe"
-agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
-role = "builder"
-base = "317d45fc3b16a708da1decbe9c8b8658b66fe2d2"
-branch = "claude/issue-112-mozart-and-leonardo-have-figures-of-thei"
-scope = [".dockerignore", ".github/workflows/ci.yml", "AGENTS.md", "README.md", "docs/ARCHITECTURE.md", "pyproject.toml", "quality/config.toml", "scripts/check_figures.sh", "scripts/figures", "scripts/write_figures.py", "src/characters/leonardo.vrm", "src/characters/mozart.vrm", "tests"]
-opened_commit = "06127a509db6a2964697c3269daae7e26be6d884"
-whole_reason = "A writer without a figure, or a figure without its writer and its check, has no caller and no honest proof; scripts/figures and tests are directories."
