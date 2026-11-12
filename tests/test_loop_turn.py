@@ -43,6 +43,7 @@ from tests.support.hopin import (
     invited,
 )
 from tests.support.transport import transport_closing_with_late_answers
+from tests.support.wire import cuts, hangs
 
 pytestmark = pytest.mark.anyio
 
@@ -278,11 +279,6 @@ async def test_a_bound_tool_the_app_declares_no_more_ends_the_turn_with_a_code(r
     assert runner.gateway.requests == []
 
 
-async def cuts(reply):
-    await reply.open_stream()
-    reply.cut()
-
-
 async def refuses_the_token(reply):
     await reply.status(HTTPStatus.UNAUTHORIZED)
 
@@ -419,10 +415,6 @@ async def test_a_relayed_call_that_fails_beside_a_defect_of_the_turns_teardown_e
     assert sorted(type(leaf).__name__ for leaf in leaves_of(ended)) == [RuntimeError.__name__, Unreachable.__name__]
     assert runner.reports.events() == [("started", None)]
     assert len(runner.gateway.requests) == 1
-
-
-async def hangs(reply):
-    await asyncio.Event().wait()
 
 
 async def test_a_deadline_during_a_relayed_call_ends_the_turn_as_limit_exceeded_and_gives_no_reaction(runner):

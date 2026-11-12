@@ -30,6 +30,7 @@ from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, ISSUER, LIMIT_SECONDS, READ, active, paused
 from tests.support.transport import ClosingHold
 from tests.support.voice import HeldSleeps, in_a_voice_call_and_at_a_table
+from tests.support.wire import answers_with, cuts
 
 pytestmark = pytest.mark.anyio
 
@@ -304,18 +305,6 @@ async def test_two_agents_in_one_call_each_say_once_and_then_every_turn_ends_sil
 
 def person_of(subject: str) -> str:
     return person_fingerprint(Principal(iss=ISSUER, sub=subject))
-
-
-async def cuts(reply):
-    await reply.open_stream()
-    reply.cut()
-
-
-async def answers_with(status):
-    async def answer(reply):
-        await reply.status(status)
-
-    return answer
 
 
 async def test_a_relayed_call_that_fails_at_one_app_ends_its_turn_and_the_turn_due_at_another_app_follows(

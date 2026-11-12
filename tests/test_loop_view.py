@@ -19,6 +19,7 @@ from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, READ, SAY_TOOL, active, invited, paused
 from tests.support.realm import AGENT_NAME
 from tests.support.songmaker import CREATE_SONG, GENERATE_SONG
+from tests.support.wire import cuts
 
 pytestmark = pytest.mark.anyio
 
@@ -177,10 +178,6 @@ async def test_a_view_that_moves_to_a_revision_waiting_for_him_gets_one_turn_tol
 async def test_a_turn_that_ends_and_leaves_its_revision_waiting_gets_no_second_turn_however_the_loop_wakes(
     runner, replies, relay_fails
 ):
-    async def cuts(reply):
-        await reply.open_stream()
-        reply.cut()
-
     runner.gateway = Gateway(*replies)
     if relay_fails:
         runner.app.script(CALL, cuts)
@@ -267,10 +264,6 @@ async def test_a_view_he_cannot_read_starts_no_turn_and_fails_nothing_until_the_
 
 
 async def test_a_reaction_after_a_turn_that_left_its_revision_waiting_starts_no_second_turn_at_that_revision(runner):
-    async def cuts(reply):
-        await reply.open_stream()
-        reply.cut()
-
     first = await seated_at_a_table_whose_view_waits(runner)
     await runner.app.until_view_read(TABLE, 2)
     reads = runner.app.view_reads(TABLE)

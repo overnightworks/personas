@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import secrets
 from dataclasses import dataclass
 from http import HTTPStatus
 from typing import TYPE_CHECKING
@@ -298,3 +299,7 @@ class Gateway(FakeGateway):
     def users(self) -> set[str]:
         """The ``user`` every request carried."""
         return {json.loads(request.content)["user"] for request in self.requests}
+
+
+def words(count: int) -> list[str]:
+    return [secrets.token_hex(4) for _ in range(count)]

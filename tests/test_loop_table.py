@@ -33,6 +33,7 @@ from tests.support.history import (
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import ISSUER, READ, active, paused
 from tests.support.realm import AGENT_NAME
+from tests.support.wire import cuts
 
 pytestmark = pytest.mark.anyio
 
@@ -285,10 +286,6 @@ async def shows_at_start(runner) -> dict[str, str]:
 
 
 async def test_a_view_read_that_fails_enters_nothing_and_the_read_after_the_resume_enters_once(runner):
-    async def cuts(reply):
-        await reply.open_stream()
-        reply.cut()
-
     runner.app.stand(SUBJECT, at_table())
     first = await shows_at_start(runner)
     reads = runner.app.view_reads(TABLE)

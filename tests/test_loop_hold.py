@@ -16,7 +16,7 @@ from tests.support.call import (
     restarted_in_the_call,
     say_in_the_call,
 )
-from tests.support.gateway import Gateway, says_after_a_hold
+from tests.support.gateway import Gateway, says_after_a_hold, words
 from tests.support.history import (
     REMARK,
     SPEAKER,
@@ -41,10 +41,6 @@ STARTED = ("started", None)
 async def addressed_in_the_call(runner):
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
-
-
-def words(count: int) -> list[str]:
-    return [secrets.token_hex(4) for _ in range(count)]
 
 
 def say(text: str, place_id: str = PLACE_ID, tool: str = SAY_TOOL):

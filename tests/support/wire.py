@@ -135,3 +135,23 @@ class Reply:
 
 
 type Handler = Callable[[Reply], Awaitable[None]]
+
+
+async def hangs(reply: Reply) -> None:
+    await asyncio.Event().wait()
+
+
+async def cuts(reply: Reply) -> None:
+    await reply.open_stream()
+    reply.cut()
+
+
+async def refuses_with_a_server_error(reply: Reply) -> None:
+    await reply.status(HTTPStatus.INTERNAL_SERVER_ERROR)
+
+
+async def answers_with(status: HTTPStatus) -> Handler:
+    async def answer(reply: Reply) -> None:
+        await reply.status(status)
+
+    return answer

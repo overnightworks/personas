@@ -41,6 +41,7 @@ from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, ISSUER, LISTEN, PLAY_TOOL, READ, SAY_TOOL, active
 from tests.support.realm import AGENT_NAME
 from tests.support.songmaker import CALLS, CREATE_SONG
+from tests.support.wire import cuts, hangs, refuses_with_a_server_error
 
 pytestmark = pytest.mark.anyio
 
@@ -80,25 +81,12 @@ async def second_written_turn(runner, text: str = AGAIN):
     return written_turns(runner)[1]
 
 
-async def cuts(reply):
-    await reply.open_stream()
-    reply.cut()
-
-
 async def refuses_the_token(reply):
     await reply.status(HTTPStatus.UNAUTHORIZED)
 
 
 async def answers_wrongly(reply):
     await reply.error(INVALID_PARAMS, status=HTTPStatus.OK)
-
-
-async def refuses_with_a_server_error(reply):
-    await reply.status(HTTPStatus.INTERNAL_SERVER_ERROR)
-
-
-async def hangs(reply):
-    await asyncio.Event().wait()
 
 
 def hangs_once_entered(entered):

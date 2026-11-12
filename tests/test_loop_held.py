@@ -18,7 +18,7 @@ from mcp_types import ListToolsResult
 from personas.decision import TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
-from tests.support.gateway import Gateway
+from tests.support.gateway import Gateway, words
 from tests.support.history import (
     REMARK,
     TABLE,
@@ -36,6 +36,7 @@ from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, ISSUER, LIST_TOOLS, PLAY_TOOL, READ, SAY_TOOL, active
 from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG
 from tests.support.voice import HeldSleeps, a_voice_call
+from tests.support.wire import answers_with, cuts, hangs, refuses_with_a_server_error
 
 pytestmark = pytest.mark.anyio
 
@@ -48,10 +49,6 @@ def reported(runner) -> list[tuple[Event, str | None, str | None]]:
 def fingerprints(tokens) -> set[str]:
     """A token never enters an assertion: bearers are compared by the digest of each, the empty one left out."""
     return {hashlib.sha256(each.encode()).hexdigest()[:12] for each in set(tokens) - {""}}
-
-
-def words(count: int) -> list[str]:
-    return [secrets.token_hex(4) for _ in range(count)]
 
 
 def say(text: str):
@@ -68,26 +65,6 @@ def said_act(runner, text: str, outcome=None):
 
 def played_act(runner, text: str, outcome=None):
     return act_entry(url_of(runner, 1), PLAY_TOOL, {"place": TABLE.id, "text": text}, outcome or answered("said"))
-
-
-async def hangs(reply):
-    await asyncio.Event().wait()
-
-
-async def refuses_with_a_server_error(reply):
-    await reply.status(HTTPStatus.INTERNAL_SERVER_ERROR)
-
-
-async def cuts(reply):
-    await reply.open_stream()
-    reply.cut()
-
-
-async def answers_with(status):
-    async def answer(reply):
-        await reply.status(status)
-
-    return answer
 
 
 async def lists_nothing(reply):
