@@ -93,7 +93,7 @@ class AgentCredentials:
     client_secret: Secret
     persona: AgentDefinition | None = None
     figure: FigureRef | None = field(default=None, repr=False)
-    voice: Voice | None = None
+    voice: Voice | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
