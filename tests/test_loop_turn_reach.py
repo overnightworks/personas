@@ -22,7 +22,7 @@ from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_cal
 from tests.support.gateway import Gateway
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, DISCOVER, LIMIT_SECONDS, LIST_TOOLS, LISTEN, SAY_TOOL
-from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG, SCOPE, ToolsOnlyApp
+from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG, SCOPE
 from tests.support.transport import (
     ClosingHold,
     transport_by_url,
@@ -36,14 +36,6 @@ pytestmark = pytest.mark.anyio
 
 FAILED = "tools_only_app_failed"
 SHORT_CALL_SECONDS = 0.3
-
-
-@pytest.fixture
-async def songmaker(runner):
-    app = ToolsOnlyApp()
-    async with app.serving() as url:
-        runner.add_tools_only_app(app, url)
-        yield app
 
 
 def songmaker_url(runner) -> str:

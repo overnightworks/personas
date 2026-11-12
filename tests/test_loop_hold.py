@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import secrets
 
 import pytest
@@ -31,20 +30,12 @@ from tests.support.history import (
 )
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, DISCOVER, PLAY_TOOL, SAY_TOOL
-from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG, ToolsOnlyApp
+from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG
 from tests.support.voice import in_a_voice_call_and_at_a_table
 
 pytestmark = pytest.mark.anyio
 
 STARTED = ("started", None)
-
-
-@pytest.fixture
-async def songmaker(runner):
-    app = ToolsOnlyApp()
-    async with app.serving() as url:
-        runner.add_tools_only_app(app, url)
-        yield app
 
 
 async def addressed_in_the_call(runner):
@@ -66,13 +57,6 @@ def play(text: str):
 
 def song(name: str):
     return tool_call(secrets.token_hex(4), name, {"title": "t"})
-
-
-def held_results(runner, request_number: int) -> list[dict]:
-    """The tool results of a request that are a held call's, as the model read them."""
-    return [
-        json.loads(each) for each in runner.gateway.tool_results(request_number) if each.startswith('{"sent": false')
-    ]
 
 
 async def at_the_table_with_news_to_come(runner, other, *replies, holds=(1,)):
@@ -99,7 +83,7 @@ async def test_a_turn_that_meets_nothing_new_has_every_call_relayed_in_as_many_r
 
     assert [text for _, _, text in other.said] == texts
     assert runner.gateway.arrivals == 4
-    assert [held_results(runner, number) for number in (2, 3, 4)] == [[], [], []]
+    assert [runner.gateway.held_results(number) for number in (2, 3, 4)] == [[], [], []]
 
 
 async def test_his_own_line_read_back_and_his_own_act_hold_no_call(runner):
@@ -114,7 +98,7 @@ async def test_his_own_line_read_back_and_his_own_act_hold_no_call(runner):
     await runner.gateway.until_requested(3)
 
     assert [text for _, _, text in runner.app.said] == [first, then]
-    assert held_results(runner, 3) == []
+    assert runner.gateway.held_results(3) == []
 
 
 async def test_a_call_after_a_line_of_someone_else_is_held_with_every_arrival_told_new_and_the_next_call_goes_out(
@@ -133,7 +117,7 @@ async def test_a_call_after_a_line_of_someone_else_is_held_with_every_arrival_to
     await runner.gateway.until_requested(4)
 
     assert [text for _, _, text in runner.app.said] == [first, last]
-    (held,) = held_results(runner, 3)
+    (held,) = runner.gateway.held_results(3)
     arrived = held["arrived"]["entries"]
     assert held["sent"] is False
     assert held["arrived"]["older_dropped"] is False
@@ -156,7 +140,7 @@ async def test_news_before_each_of_three_calls_holds_only_the_first(runner, othe
     await runner.gateway.until_requested(4)
 
     assert [text for _, _, text in other.said] == texts[1:]
-    assert [len(held_results(runner, number)) for number in (2, 3, 4)] == [1, 1, 1]
+    assert [len(runner.gateway.held_results(number)) for number in (2, 3, 4)] == [1, 1, 1]
 
 
 async def test_two_calls_of_one_reply_after_news_hold_the_first_and_send_the_second(runner, other):
@@ -170,7 +154,7 @@ async def test_two_calls_of_one_reply_after_news_hold_the_first_and_send_the_sec
     await runner.gateway.until_requested(2)
 
     assert [text for _, _, text in other.said] == [sent_text]
-    (held,) = held_results(runner, 2)
+    (held,) = runner.gateway.held_results(2)
     assert held["arrived"]["entries"] == [entry(url_of(runner, 0), PLACE_ID, REMARK, name=SPEAKER, new=True)]
     assert runner.gateway.tool_results(2)[1] == "said"
 
@@ -194,7 +178,7 @@ async def test_a_held_call_to_a_tools_only_app_opens_no_session_and_takes_nothin
     assert [name for name, _ in songmaker.called] == [CREATE_SONG, GENERATE_SONG]
     assert songmaker.log.count(DISCOVER) == sessions_before + CALLS
     assert songmaker.log.count(CALL) == CALLS
-    assert len(held_results(runner, 2)) == 1
+    assert len(runner.gateway.held_results(2)) == 1
     assert not any(each.startswith("Error") for each in runner.gateway.tool_results(4))
     assert runner.reports.events() == [STARTED]
 
@@ -319,11 +303,11 @@ async def test_the_table_state_his_own_card_caused_holds_his_next_call_once_and_
     await runner.gateway.until_requested(4)
 
     assert [text for _, _, text in other.said] == [card, remark]
-    (held,) = held_results(runner, 3)
+    (held,) = runner.gateway.held_results(3)
     kinds = sorted(each["entry"] for each in held["arrived"]["entries"])
     assert kinds == ["act", "view"]
     assert all(each["new"] for each in held["arrived"]["entries"])
-    assert len(held_results(runner, 4)) == 1
+    assert len(runner.gateway.held_results(4)) == 1
 
 
 async def test_a_line_heard_at_a_voice_place_holds_the_call_of_his_table_turn(runner):
@@ -340,7 +324,7 @@ async def test_a_line_heard_at_a_voice_place_holds_the_call_of_his_table_turn(ru
     await runner.app.said_count(1)
     await runner.gateway.until_requested(3)
 
-    (held,) = held_results(runner, 3)
+    (held,) = runner.gateway.held_results(3)
     assert [each["text"] for each in held["arrived"]["entries"] if each["entry"] == "line" and not each["own"]] == [
         heard
     ]

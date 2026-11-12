@@ -37,7 +37,7 @@ from tests.support.fakes import (
 from tests.support.gateway import Gateway
 from tests.support.hopin import AGENT_SUBJECT, ISSUER, PLAY_TOOL, FakeApp, formatted
 from tests.support.realm import TOKEN_ENDPOINT, FakeRealm
-from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG
+from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG, ToolsOnlyApp
 from tests.support.songmaker import SCOPE as TOOLS_ONLY_SCOPE
 
 if TYPE_CHECKING:
@@ -56,7 +56,6 @@ if TYPE_CHECKING:
     from personas.reporting import StateChange
     from personas.sweep import SweptStore
     from personas.tokens import GrantedToken
-    from tests.support.songmaker import ToolsOnlyApp
 
 SCENARIO_LIMIT_SECONDS = 10
 
@@ -228,6 +227,15 @@ class Harness:
             *self.app.kept_out_of_logs(),
             *(held for each in [*self.tools_only_apps, *self.other_apps] for held in each.kept_out_of_logs()),
         ]
+
+
+@pytest.fixture
+async def songmaker(runner: Harness) -> AsyncIterator[ToolsOnlyApp]:
+    """An app that listens to nothing and binds the song tools, served and bound into the runner's configuration."""
+    app = ToolsOnlyApp()
+    async with app.serving() as url:
+        runner.add_tools_only_app(app, url)
+        yield app
 
 
 @pytest.fixture

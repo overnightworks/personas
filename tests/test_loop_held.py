@@ -4,7 +4,6 @@ answer and act in one turn."""
 from __future__ import annotations
 
 import asyncio
-import json
 import secrets
 from dataclasses import replace
 from http import HTTPStatus
@@ -16,6 +15,7 @@ from agents.turn import Principal, person_fingerprint
 from mcp_types import ListToolsResult
 
 from personas.decision import TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE
+from personas.reporting import Event
 from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway
 from tests.support.history import (
@@ -33,28 +33,15 @@ from tests.support.history import (
 )
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, ISSUER, LIST_TOOLS, PLAY_TOOL, READ, SAY_TOOL, active
-from tests.support.songmaker import CREATE_SONG, GENERATE_SONG, ToolsOnlyApp
+from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG
 from tests.support.voice import HeldSleeps, a_voice_call
 
 pytestmark = pytest.mark.anyio
 
-STARTED = ("started", None)
-HELD_APP_FAILED = "held_app_failed"
-SHORT_CALL_SECONDS = 0.3
-SECOND_AGENT, SECOND_SUBJECT, SECOND_NAME = "agent-bach", "agent-subject-2", "Bach"
 
-
-@pytest.fixture
-async def songmaker(runner):
-    app = ToolsOnlyApp()
-    async with app.serving() as url:
-        runner.add_tools_only_app(app, url)
-        yield app
-
-
-def reported(runner) -> list[tuple[str, str | None]]:
-    """What the loops reported but their start."""
-    return [each for each in runner.reports.events() if each != STARTED]
+def reported(runner) -> list[tuple[Event, str | None, str | None]]:
+    """What the loops reported but their start, each as its event, its code and the address of the app it names."""
+    return [(each.event, each.code, each.app) for each in runner.reports.changes if each.event is not Event.STARTED]
 
 
 def words(count: int) -> list[str]:
@@ -75,13 +62,6 @@ def said_act(runner, text: str, outcome=None):
 
 def played_act(runner, text: str, outcome=None):
     return act_entry(url_of(runner, 1), PLAY_TOOL, {"place": TABLE.id, "text": text}, outcome or answered("said"))
-
-
-def held_results(runner, request_number: int) -> list[dict]:
-    """The tool results of a request that are a held call's, as the model read them."""
-    return [
-        json.loads(each) for each in runner.gateway.tool_results(request_number) if each.startswith('{"sent": false')
-    ]
 
 
 async def hangs(reply):
@@ -227,6 +207,7 @@ async def test_a_table_turn_holds_the_tools_of_his_call_and_writes_in_it(runner,
     await runner.app.said_count(1)
 
     assert runner.app.said == [(SUBJECT, PLACE_ID, written)]
+    assert runner.app.presented - {""} <= set(runner.realm.issued_for[runner.config.apps[0].scope])
     assert runner.gateway.offered_tools() == [SAY_TOOL, PLAY_TOOL]
 
 
@@ -235,7 +216,7 @@ async def test_a_table_turn_holds_the_tools_of_his_call_and_writes_in_it(runner,
     [
         (refuses_with_a_server_error, "http_500", None),
         (cuts, "network", None),
-        (hangs, "network", SHORT_CALL_SECONDS),
+        (hangs, "network", 0.3),
     ],
     ids=["a server error", "a cut connection", "a hang past the call time"],
 )
@@ -256,7 +237,7 @@ async def test_a_failed_call_to_a_held_app_is_an_error_that_spends_its_bound_and
     assert first != second
     assert other.log.count(CALL) == 1
     assert runner.app.said == [(SUBJECT, PLACE_ID, written)]
-    assert reported(runner) == [(HELD_APP_FAILED, code)]
+    assert reported(runner) == [(Event.HELD_APP_FAILED, code, url_of(runner, 1))]
 
 
 @pytest.mark.parametrize(
@@ -275,7 +256,7 @@ async def test_a_held_app_whose_tools_cannot_be_listed_is_left_out_and_reported_
     await runner.app.said_count(1)
 
     assert runner.gateway.offered_tools() == [SAY_TOOL]
-    assert reported(runner) == [(HELD_APP_FAILED, code)]
+    assert reported(runner) == [(Event.HELD_APP_FAILED, code, url_of(runner, 1))]
 
 
 async def test_a_failed_call_to_his_own_apps_tool_ends_the_turn_into_that_loops_reaction_and_reports_nothing_held(
@@ -286,26 +267,31 @@ async def test_a_failed_call_to_his_own_apps_tool_ends_the_turn_into_that_loops_
     say_in_the_call(runner, ADDRESSED)
     await runner.reports.until("resumed")
 
-    assert reported(runner) == [("backoff", "network"), ("resumed", None)]
+    assert reported(runner) == [(Event.BACKOFF, "network", url_of(runner, 0)), (Event.RESUMED, None, url_of(runner, 0))]
     assert runner.gateway.arrivals == 1
 
 
-async def test_calls_past_a_held_apps_own_bound_are_errors_while_the_apps_of_the_turn_still_take_theirs(runner, other):
-    bound = runner.config.apps[1].binding.max_tool_calls
-    written = words(1)[0]
+async def test_every_apps_bound_of_a_turn_is_spent_in_full_and_the_call_past_a_held_apps_bound_is_an_error(
+    runner, other, songmaker
+):
+    held_bound = runner.config.apps[1].binding.max_tool_calls
+    own_bound = runner.config.apps[0].binding.max_tool_calls
     await seated_in_the_call(
         runner,
         other,
-        *(tool_round(play(words(1)[0])) for _ in range(bound + 1)),
-        tool_round(say(written)),
+        *(tool_round(play(words(1)[0])) for _ in range(held_bound + 1)),
+        *(tool_round(say(words(1)[0])) for _ in range(own_bound)),
+        *(tool_round(tool_call(secrets.token_hex(4), CREATE_SONG, {"title": "t"})) for _ in range(CALLS)),
         completion("done"),
     )
+    final_request = held_bound + own_bound + CALLS + 2
     say_in_the_call(runner, ADDRESSED)
-    await runner.app.said_count(1)
+    await runner.gateway.until_requested(final_request)
 
-    assert other.calls == [PLAY_TOOL] * bound
-    assert runner.gateway.tool_results(bound + 2)[bound].startswith("Error")
-    assert runner.app.said == [(SUBJECT, PLACE_ID, written)]
+    assert other.calls == [PLAY_TOOL] * held_bound
+    assert len(runner.app.said) == own_bound
+    assert len(songmaker.called) == CALLS
+    assert runner.gateway.tool_results(final_request)[held_bound].startswith("Error")
     assert reported(runner) == []
 
 
@@ -328,7 +314,7 @@ async def test_a_turn_whose_place_leaves_while_a_held_apps_call_is_in_flight_end
     waits(other, 1)
     await runner.gateway.until_turns(2)
 
-    assert reported(runner) == [("turn_ended", TURN_CANCELLED_CODE)]
+    assert reported(runner) == [(Event.TURN_ENDED, TURN_CANCELLED_CODE, url_of(runner, 0))]
     assert runner.gateway.arrivals == 2
     assert runner.gateway.turns("view")[0].told("act") == [played_act(runner, played, unanswered(TURN_CANCELLED_CODE))]
 
@@ -377,16 +363,17 @@ async def test_a_place_that_becomes_active_after_a_turn_was_admitted_is_held_by_
 
 
 async def test_each_agents_turn_holds_the_tools_of_the_apps_where_that_agent_holds_a_place(runner, other):
-    runner.add_agent(SECOND_AGENT, SECOND_SUBJECT, SECOND_NAME)
+    second_subject = "agent-subject-2"
+    runner.add_agent("agent-bach", second_subject, "Bach")
     runner.gateway = Gateway(completion("done"))
     runner.app.stand(SUBJECT, active(PLACE_ID))
-    runner.app.stand(SECOND_SUBJECT, active(PLACE_ID))
+    runner.app.stand(second_subject, active(PLACE_ID))
     other.stand(SUBJECT, at_table())
     runner.start()
     await runner.app.until_window_read(PLACE_ID)
     await other.until_standing_read()
     await settled(other)
-    await settled(runner.app, SECOND_SUBJECT)
+    await settled(runner.app, second_subject)
     say_in_the_call(runner, ADDRESSED)
     await runner.gateway.until_turns(2, why="lines")
 
@@ -395,7 +382,7 @@ async def test_each_agents_turn_holds_the_tools_of_the_apps_where_that_agent_hol
         offered.setdefault(runner.gateway.user_of(number), runner.gateway.offered_tools(number))
     assert offered == {
         person_fingerprint(Principal(iss=ISSUER, sub=SUBJECT)): [SAY_TOOL, PLAY_TOOL],
-        person_fingerprint(Principal(iss=ISSUER, sub=SECOND_SUBJECT)): [SAY_TOOL],
+        person_fingerprint(Principal(iss=ISSUER, sub=second_subject)): [SAY_TOOL],
     }
 
 
@@ -417,7 +404,7 @@ async def test_a_call_of_a_table_turn_held_by_a_line_in_the_call_is_followed_by_
     await runner.app.said_count(1)
     await runner.gateway.until_turns(1, why="lines")
 
-    (held,) = held_results(runner, 2)
+    (held,) = runner.gateway.held_results(2)
     assert held["sent"] is False
     assert other.said == [(SUBJECT, TABLE.id, jack)]
     assert runner.app.said == [(SUBJECT, PLACE_ID, written)]
@@ -458,7 +445,10 @@ async def test_a_held_app_that_refuses_after_the_turn_began_is_an_error_takes_no
 
     assert len(other.log.entries) == requests_after_the_refusal
     assert all(each.startswith("Error") for each in runner.gateway.tool_results(3))
-    assert reported(runner) == [("suspended", "http_403"), (HELD_APP_FAILED, "http_403")]
+    assert reported(runner) == [
+        (Event.SUSPENDED, "http_403", url_of(runner, 1)),
+        (Event.HELD_APP_FAILED, "http_403", url_of(runner, 1)),
+    ]
     assert runner.gateway.offered_tools(4) == [SAY_TOOL]
 
 
@@ -533,7 +523,7 @@ async def test_a_call_to_a_held_app_after_the_move_it_caused_was_read_holds_the_
     await runner.app.said_count(1)
     await runner.gateway.until_requested(4)
 
-    (held,) = held_results(runner, 3)
+    (held,) = runner.gateway.held_results(3)
     assert [each["entry"] for each in held["arrived"]["entries"] if each["entry"] == "view"] == ["view"]
     assert [text for _, _, text in runner.app.said] == [written]
-    assert len(held_results(runner, 4)) == 1
+    assert len(runner.gateway.held_results(4)) == 1

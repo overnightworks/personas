@@ -40,20 +40,12 @@ from tests.support.history import (
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, ISSUER, LISTEN, PLAY_TOOL, READ, SAY_TOOL, active
 from tests.support.realm import AGENT_NAME
-from tests.support.songmaker import CALLS, CREATE_SONG, ToolsOnlyApp
+from tests.support.songmaker import CALLS, CREATE_SONG
 
 pytestmark = pytest.mark.anyio
 
 AGAIN = f"{ADDRESSED} Again."
 SECOND_AGENT, SECOND_SUBJECT, SECOND_NAME = "agent-bach", "agent-subject-2", "Bach"
-
-
-@pytest.fixture
-async def songmaker(runner):
-    app = ToolsOnlyApp()
-    async with app.serving() as url:
-        runner.add_tools_only_app(app, url)
-        yield app
 
 
 def say_round(*texts: str) -> object:
