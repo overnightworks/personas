@@ -18,6 +18,7 @@ from tests.support.history import (
     REMARK,
     SPEAKER,
     TABLE,
+    WindowReturns,
     at_table,
     said_and_taken,
     settled,
@@ -379,17 +380,18 @@ async def test_a_place_that_leaves_before_its_turn_gets_none_and_a_younger_one_e
 
 @pytest.mark.parametrize("leaves", ["gone", "paused"], ids=["the place is gone", "the place is paused"])
 async def test_a_place_that_leaves_while_the_slot_is_free_lets_a_younger_due_place_at_another_app_go_at_once(
-    runner, other, leaves
+    runner, other, leaves, monkeypatch
 ):
     running = await a_call_turn_that_waits_for_the_model(runner, other)
     await said_and_taken(other, OTHER_CALL_ID, AGAIN)
     await said_and_taken(runner.app, PLACE_ID, "A younger line.")
     other.vanished.add(OTHER_CALL_ID)
     held_read = other.hold_next_window_read()
+    returns = WindowReturns(monkeypatch, PLACE_ID)
 
     running.set()
     await other.until_window_read_held()
-    await settled(runner.app)
+    await returns.until(1)
     other.stand(SUBJECT, *([] if leaves == "gone" else [paused(OTHER_CALL_ID)]))
     held_read.set()
     await runner.gateway.until_written_turn(PLACE_ID, 2)

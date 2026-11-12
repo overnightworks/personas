@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import secrets
+from typing import TYPE_CHECKING
 
 from agents.member import STANDING_URI, PlaceRef
 
+from personas import app_session
 from tests.support.call import PERSON
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import FakeApp, active
+from tests.support.hopin import LIMIT_SECONDS, FakeApp, active
+
+if TYPE_CHECKING:
+    import pytest
 
 TABLE = PlaceRef(kind="table", id="table-1")
 OTHER_CALL_ID = "room-9"
@@ -162,6 +168,34 @@ async def settled(app: FakeApp) -> None:
         reads = app.reads[STANDING_URI]
         app.stand(SUBJECT, *app.standings[SUBJECT])
         await app.until_standing_read(reads + 1)
+
+
+class WindowReturns:
+    """Tells when the loop of an app got the window of a place back from its read.
+
+    A reconcile claims in the very step that follows its last read when the place has no view, so once the window is
+    back the loop has claimed and waits for its next wake.
+    """
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, place_id: str) -> None:
+        real_read_place = app_session._McpAppSession.read_place  # noqa: SLF001 - the read the loop makes
+        self.count = 0
+        self._added = asyncio.Event()
+
+        async def read_place(session, place):
+            window = await real_read_place(session, place)
+            if place.id == place_id:
+                self.count += 1
+                self._added.set()
+            return window
+
+        monkeypatch.setattr("personas.app_session._McpAppSession.read_place", read_place)
+
+    async def until(self, count: int) -> None:
+        async with asyncio.timeout(LIMIT_SECONDS):
+            while self.count < count:
+                self._added.clear()
+                await self._added.wait()
 
 
 async def said_and_taken(app: FakeApp, place_id: str, text: str, *, author: str = PERSON, name: str = SPEAKER) -> None:
