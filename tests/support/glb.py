@@ -5,8 +5,7 @@ import struct
 from dataclasses import dataclass
 from typing import Any
 
-WIDTHS = {"SCALAR": 1, "VEC3": 3, "VEC4": 4, "MAT4": 16}
-FORMATS = {5126: "f", 5123: "H", 5121: "B"}
+from figures.glb_container import ACCESSOR_WIDTHS, STRUCT_FORMATS, ComponentType
 
 
 @dataclass(frozen=True)
@@ -17,9 +16,11 @@ class Glb:
     def accessor(self, index: int) -> list[tuple[float, ...]]:
         accessor = self.document["accessors"][index]
         view = self.document["bufferViews"][accessor["bufferView"]]
-        width = WIDTHS[accessor["type"]]
+        width = ACCESSOR_WIDTHS[accessor["type"]]
         values = struct.unpack_from(
-            "<" + FORMATS[accessor["componentType"]] * (accessor["count"] * width), self.binary, view["byteOffset"]
+            "<" + STRUCT_FORMATS[ComponentType(accessor["componentType"])] * (accessor["count"] * width),
+            self.binary,
+            view["byteOffset"],
         )
         return [values[start : start + width] for start in range(0, len(values), width)]
 
