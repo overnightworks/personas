@@ -23,6 +23,12 @@ if ! diff --recursive --brief --exclude='*.md' "${work}/generated" src/character
     exit 1
 fi
 
+untracked="$(git ls-files --others --exclude-standard src/characters)"
+if [[ -n "${untracked}" ]]; then
+    echo "untracked files under src/characters: ${untracked}" >&2
+    exit 1
+fi
+
 curl --proto '=https' --proto-redir '=https' --fail --silent --show-error --location \
     --output "${work}/figure.tgz" "${TARBALL_URL}"
 actual="sha512-$(openssl dgst -sha512 -binary "${work}/figure.tgz" | base64 --wrap=0)"
