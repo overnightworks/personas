@@ -12,7 +12,7 @@ from agents.agent_file import TurnRequest
 from agents.backend import TurnPerson, TurnStopped
 from agents.tools import HandTool, ToolOutcome
 from agents.turn import Turn, TurnMessage, TurnRole
-from agents.turn_events import ToolCallEvent
+from agents.turn_events import FinalEvent, ToolCallEvent
 
 from personas.decision import (
     TOOL_NOT_DECLARED_CODE,
@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     from agents.backend import AgentBackend, TurnEvent
     from agents.member import PlaceRef
     from agents.tools import ToolDeclaration
-    from agents.turn import JsonObject, Principal
+    from agents.turn import JsonObject, Principal, TurnUsage
 
     from personas.app_session import AppSession, SessionOpener
     from personas.clock import Clock
@@ -66,6 +66,15 @@ _APP_FAILED_TEXT: Final = "the app did not answer"
 
 def _failure_event(app: AppTarget) -> Event:
     return Event.HELD_APP_FAILED if app.listens else Event.TOOLS_ONLY_APP_FAILED
+
+
+async def _final_event_of(events: AsyncIterator[TurnEvent]) -> FinalEvent | None:
+    """Reads the turn's events to their end and returns its final event, if it had one."""
+    final = None
+    async for event in events:
+        if isinstance(event, FinalEvent):
+            final = event
+    return final
 
 
 @dataclass(frozen=True)
@@ -165,7 +174,7 @@ class Turning:
         current_token: Callable[[], Awaitable[Token]],
         use_current_token: Callable[[AppSession], Awaitable[None]],
         report: Callable[[Event, str | None, AppTarget | None], None],
-        report_turn_end: Callable[[str], None],
+        report_turn_end: Callable[[str | None, TurnUsage | None], None],
     ) -> None:
         self._agent = agent
         self._app = app
@@ -208,7 +217,7 @@ class Turning:
             # The stop only carries the failure out of the backend; the failure goes to the group, never the stop.
             held = failure_held_by(stopped)
             if held is None and record.defect is None:
-                self._report_turn_end(stopped.code.value)
+                self._report_turn_end(stopped.code.value, None)
             # What left the session beside the stop (a late answer) still goes to the group, to be judged there.
             rest: list[BaseException] = [held] if held is not None else []
             rest.extend(leaf for leaf in leaves if leaf is not stopped)
@@ -247,7 +256,7 @@ class Turning:
         raise_if_cancelled()
         held = await self._hold_tools(setup, session, record, admitted)
         if held is None:
-            self._report_turn_end(TOOL_NOT_DECLARED_CODE)
+            self._report_turn_end(TOOL_NOT_DECLARED_CODE, None)
             return
         request = TurnRequest(
             agent=setup.persona.name,
@@ -271,32 +280,39 @@ class Turning:
                     lambda event, code: self._report(event, code, None),
                     self._mind.take,
                 )
-                await self._speak_along(events, speaking)
+                final = await self._speak_along(events, speaking)
             else:
-                async for _ in events:
-                    continue
+                final = await _final_event_of(events)
+        if final is not None:
+            self._report_turn_end(None, final.usage)
 
-    async def _speak_along(self, events: AsyncIterator[TurnEvent], speaking: Speaking) -> None:
+    async def _speak_along(self, events: AsyncIterator[TurnEvent], speaking: Speaking) -> FinalEvent | None:
         """Reads the turn's events while the sentences they release are spoken beside them.
 
         A call is relayed only when the events are asked for again, so it goes out after every sentence before it was
         spoken. When the events end in an error, the sentence in flight is answered and entered before it is raised;
-        only a cancel cuts the speech. The turn ends once the speech has.
+        only a cancel cuts the speech. The turn ends once the speech has, and its final event, if it had one, is
+        returned.
         """
         async with asyncio.TaskGroup() as group:
             group.create_task(speaking.play())
-            group.create_task(self._hear_events(events, speaking))
+            hearing = group.create_task(self._hear_events(events, speaking))
+        return hearing.result()
 
-    async def _hear_events(self, events: AsyncIterator[TurnEvent], speaking: Speaking) -> None:
+    async def _hear_events(self, events: AsyncIterator[TurnEvent], speaking: Speaking) -> FinalEvent | None:
+        final = None
         try:
             async for event in events:
                 speaking.hear(event)
                 if isinstance(event, ToolCallEvent):
                     await speaking.spoken()
+                elif isinstance(event, FinalEvent):
+                    final = event
         except Exception:
             await speaking.settle()
             raise
         speaking.end()
+        return final
 
     async def _hold_tools(
         self, setup: TurnSetup, session: AppSession, record: TaskRecord, admitted: Admitted
