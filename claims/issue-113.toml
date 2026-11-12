@@ -3,6 +3,6 @@ agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
 role = "builder"
 base = "2483bc9af556ba480f35e4234580d2bc32fd1d92"
 branch = "claude/issue-113-in-his-call-he-answers-aloud-in-writing"
-scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/decision.py", "src/personas/loop.py", "src/personas/turning.py", "src/personas/voice.py", "tests"]
+scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/decision.py", "src/personas/loop.py", "src/personas/remembering.py", "src/personas/turning.py", "src/personas/voice.py", "tests"]
 opened_commit = "9b7c35bdf07aa3386cabc668756f854a20157840"
 whole_reason = "The spoken turn, the rule that admits it and the removal of the loop it replaces have no honest proof apart; tests is a directory."
