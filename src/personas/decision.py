@@ -9,7 +9,7 @@ from __future__ import annotations
 import itertools
 import json
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
@@ -33,7 +33,7 @@ from personas.failures import CallFailure, StatusFailure, TokenStatusFailure, Un
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
 
-    from agents.member import FigureRef, VoiceName
+    from agents.member import FigureRef, Invitation, VoiceName
     from agents.tools import ToolDeclaration, ToolOutcome
     from agents.turn import AgentRole, JsonObject
 
@@ -46,6 +46,8 @@ SECONDS_PER_DAY: Final = 24 * SECONDS_PER_HOUR
 RENEW_BEFORE_EXPIRY_SECONDS: Final = 60.0
 """A token is renewed once this little of its lifetime remains, so no call carries an expired one."""
 NETWORK_FAILURE_CODE: Final = "network"
+NO_TURNS_CODE: Final = "no_turns"
+"""The reason an invitation is left out: the loop has no way to take turns at the place."""
 BACKOFF_BASE_SECONDS: Final = 1.0
 BACKOFF_CAP_SECONDS: Final = 30.0
 _DOUBLINGS_TO_CAP: Final = math.ceil(math.log2(BACKOFF_CAP_SECONDS / BACKOFF_BASE_SECONDS))
@@ -101,15 +103,33 @@ class Token:
 
 @dataclass(frozen=True)
 class Memory:
-    """What a loop remembers: invitations refused as stale, and the last other refusal of each."""
+    """What a loop remembers: invitations refused as stale, the last other refusal of each, and the invitations it
+    reported as left out."""
 
     stale: frozenset[str] = frozenset()
     refused: Mapping[str, Refusal] = field(default_factory=dict[str, Refusal])
+    left_out: frozenset[str] = frozenset()
 
 
 def _is_call(standing: Standing) -> bool:
     """A call place is read through its window; a place that serves a view is read through that, whatever its kind."""
     return standing.place.kind == CALL_PLACE_KIND and not standing.serves_view
+
+
+def _accepted(standing: Standing, *, takes_turns: bool) -> bool:
+    """A call place is accepted as it is read through its window; any other place, and a call place that serves a view,
+    only where the loop takes turns, since an app marks an invited standing as serving no view before it is active."""
+    if _is_call(standing):
+        return True
+    return takes_turns and (standing.serves_view or standing.place.kind != CALL_PLACE_KIND)
+
+
+def _invited(standings: tuple[Standing, ...]) -> tuple[tuple[Standing, Invitation], ...]:
+    return tuple(
+        (standing, standing.invitation)
+        for standing in standings
+        if standing.state is StandingState.INVITED and standing.invitation is not None
+    )
 
 
 def accepts_for(
@@ -121,33 +141,45 @@ def accepts_for(
     voice: VoiceName | None = None,
 ) -> tuple[Accept, ...]:
     """One accept for each invited call standing whose invitation was not refused as stale, and, where the loop can
-    take turns, for each invited place that serves a view: a seated agent that cannot act leaves the place waiting.
-    Every accept brings the agent's figure and the name of his voice, if he has them."""
+    take turns, for each other invited place, whether or not it serves a view yet: a seated agent that cannot act
+    leaves the place waiting. Every accept brings the agent's figure and the name of his voice, if he has them."""
     return tuple(
-        Accept(standing.place, standing.invitation.id, standing.invitation.epoch, figure, voice)
-        for standing in standings
-        if standing.state is StandingState.INVITED
-        and standing.invitation is not None
-        and (_is_call(standing) or (standing.serves_view and takes_turns))
-        and standing.invitation.id not in memory.stale
+        Accept(standing.place, invitation.id, invitation.epoch, figure, voice)
+        for standing, invitation in _invited(standings)
+        if _accepted(standing, takes_turns=takes_turns) and invitation.id not in memory.stale
     )
 
 
+def left_out_for(
+    standings: tuple[Standing, ...], memory: Memory, *, takes_turns: bool
+) -> tuple[Memory, tuple[Standing, ...]]:
+    """The invited standings ``accepts_for`` leaves out that were not reported yet, and the memory that holds them
+    reported: an invitation is news once."""
+    news = tuple(
+        (standing, invitation)
+        for standing, invitation in _invited(standings)
+        if not _accepted(standing, takes_turns=takes_turns) and invitation.id not in memory.left_out
+    )
+    reported = memory.left_out | {invitation.id for _, invitation in news}
+    return replace(memory, left_out=reported), tuple(standing for standing, _ in news)
+
+
 def forget_gone(memory: Memory, standings: tuple[Standing, ...]) -> Memory:
-    """Drop the last refusal of an invitation the standings no longer hold; a stale one stays refused."""
+    """Drop the last refusal and the report of an invitation the standings no longer hold; a stale one stays refused."""
     present = {standing.invitation.id for standing in standings if standing.invitation is not None}
     return Memory(
         stale=memory.stale,
         refused={invitation: code for invitation, code in memory.refused.items() if invitation in present},
+        left_out=memory.left_out & present,
     )
 
 
 def after_refusal(memory: Memory, accept: Accept, refusal: Refusal) -> tuple[Memory, bool]:
     """The memory after a refused accept and whether this refusal is news worth reporting."""
     if refusal is AcceptInvitationRefusal.STALE_INVITATION:
-        return Memory(memory.stale | {accept.invitation_id}, memory.refused), True
+        return replace(memory, stale=memory.stale | {accept.invitation_id}), True
     is_news = memory.refused.get(accept.invitation_id) is not refusal
-    return Memory(memory.stale, {**memory.refused, accept.invitation_id: refusal}), is_news
+    return replace(memory, refused={**memory.refused, accept.invitation_id: refusal}), is_news
 
 
 def renewal_due(token: Token | None, now: float) -> bool:

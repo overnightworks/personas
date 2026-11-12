@@ -21,6 +21,7 @@ class Event(StrEnum):
     BACKOFF = "backoff"
     JOINED = "joined"
     REFUSED = "refused"
+    INVITATION_LEFT_OUT = "invitation_left_out"
     TURN_ENDED = "turn_ended"
     SPEAK_REFUSED = "speak_refused"
     TOOLS_ONLY_APP_FAILED = "tools_only_app_failed"
@@ -35,7 +36,8 @@ class StateChange:
     """One change of an agent's loop for one app, with the HTTP status, refusal, failure or turn code if any.
 
     The sweep belongs to no agent and no app, and says how many lines it removed. A turn that ended with a final
-    event says the tokens it used, when the library had them.
+    event says the tokens it used, when the library had them. An invitation the loop leaves out says its place's
+    kind and the reason as the code.
     """
 
     event: Event
@@ -44,6 +46,7 @@ class StateChange:
     code: str | None = None
     lines: int | None = None
     usage: TurnUsage | None = None
+    place_kind: str | None = None
 
 
 type Reporter = Callable[[StateChange], None]
@@ -53,14 +56,16 @@ def log_state_change(change: StateChange) -> None:
     """Writes the fields below and nothing else: no secret, token or tool content reaches a line."""
     removed = "" if change.lines is None else f" lines={change.lines}"
     used = "" if change.usage is None else _tokens_used(change.usage)
+    kind = "" if change.place_kind is None else f" place_kind={change.place_kind}"
     _LOG.info(
-        "%s client_id=%s app=%s code=%s%s%s",
+        "%s client_id=%s app=%s code=%s%s%s%s",
         change.event,
         change.client_id or "-",
         change.app or "-",
         change.code or "-",
         removed,
         used,
+        kind,
     )
 
 

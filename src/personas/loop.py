@@ -10,6 +10,7 @@ from operator import eq
 from typing import TYPE_CHECKING, Final, Literal, NoReturn
 
 from personas.decision import (
+    NO_TURNS_CODE,
     SUSPENDED_RETRY_SECONDS,
     TURN_CANCELLED_CODE,
     AppPlace,
@@ -33,6 +34,7 @@ from personas.decision import (
     forget_gone,
     is_defect,
     is_voice_app,
+    left_out_for,
     left_standing,
     lends_tools,
     perceive,
@@ -283,10 +285,14 @@ class AgentLoop:
 
     async def _accept_invitations(self, session: AppSession, standings: tuple[Standing, ...]) -> None:
         voice = self._agent.voice
+        takes_turns = self._turn_setup is not None
+        self._memory, left_out = left_out_for(standings, self._memory, takes_turns=takes_turns)
+        for standing in left_out:
+            self._report(Event.INVITATION_LEFT_OUT, NO_TURNS_CODE, place_kind=standing.place.kind)
         for accept in accepts_for(
             standings,
             self._memory,
-            takes_turns=self._turn_setup is not None,
+            takes_turns=takes_turns,
             figure=self._agent.figure,
             voice=None if voice is None else voice.name,
         ):
@@ -423,8 +429,12 @@ class AgentLoop:
         self._mind.undue(lambda at: at.app == self._app.mcp_url)
         self._mind.stand_at(self._app.mcp_url, holds=False)
 
-    def _report(self, event: Event, code: str | None = None, app: AppTarget | None = None) -> None:
-        self._boundaries.report(StateChange(event, self._agent.client_id, (app or self._app).mcp_url, code))
+    def _report(
+        self, event: Event, code: str | None = None, app: AppTarget | None = None, *, place_kind: str | None = None
+    ) -> None:
+        self._boundaries.report(
+            StateChange(event, self._agent.client_id, (app or self._app).mcp_url, code, place_kind=place_kind)
+        )
 
 
 async def _run_loop(loop: AgentLoop, runner: asyncio.Task[object]) -> None:
