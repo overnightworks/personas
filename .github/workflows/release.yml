@@ -54,14 +54,22 @@ jobs:
         shell: bash
     env:
       VERSION: ${{ inputs.version }}
+      COMMIT: ${{ needs.gate.outputs.commit }}
     outputs:
       notes: ${{ steps.notes.outputs.notes }}
     steps:
-      - name: Check out the commit the gate judged
+      - name: Check out the dispatch's commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.gate.outputs.commit }}
           persist-credentials: false
+
+      - name: Refuse unless the checkout is the commit the gate judged
+        run: |
+          head=$(git rev-parse HEAD)
+          if [ "$head" != "$COMMIT" ]; then
+            echo "Refused: the checkout is $head, not the gated commit $COMMIT." >&2
+            exit 1
+          fi
 
       - name: Write the notes' figure lines from the files the release carries
         id: notes
