@@ -4,19 +4,21 @@ from __future__ import annotations
 
 import logging
 import secrets
+from dataclasses import replace
 from http import HTTPStatus
 
 import pytest
 from agents.backend.fake_gateway import Reply, completion, tool_call, tool_round
-from agents.member import STANDING_URI, PlaceRef
+from agents.member import STANDING_URI, FigureRef, PlaceRef
 
-from personas.config import load_config
-from personas.decision import TURN_CANCELLED_CODE
+from personas.config import Voice, load_config
+from personas.decision import NO_TURNS_CODE, TURN_CANCELLED_CODE
+from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, say_in_the_call
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
 from tests.support.history import history_of, view_entry, woke_at_table
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import CALL, READ, SAY_TOOL, active, invited, paused
+from tests.support.hopin import CALL, READ, SAY_TOOL, active, formatted, invited, paused
 from tests.support.realm import AGENT_NAME
 from tests.support.songmaker import CREATE_SONG, GENERATE_SONG
 from tests.support.wire import cuts
@@ -67,7 +69,7 @@ async def wakes_at_the_same_revision(runner, state, count: int = 2) -> None:
         await runner.app.until_view_read(TABLE, reads + 1)
 
 
-async def test_an_invitation_to_a_view_place_at_an_app_that_binds_no_tools_is_not_accepted_and_nothing_is_read(runner):
+async def an_invited_table_at_an_app_that_binds_no_tools_read_twice(runner) -> None:
     runner.files.text = runner.files.valid_text(runner.app_url, "mcp-app", binds_tools=False)
     runner.config = load_config(runner.files.write())
     invitation = invited(TABLE.id, "inv-3", kind=TABLE.kind, serves_view=True)
@@ -77,8 +79,47 @@ async def test_an_invitation_to_a_view_place_at_an_app_that_binds_no_tools_is_no
     runner.app.stand(SUBJECT, invitation)
     await runner.app.until_standing_read(2)
 
+
+async def test_an_invitation_to_a_view_place_at_an_app_that_binds_no_tools_is_not_accepted_and_nothing_is_read(runner):
+    await an_invited_table_at_an_app_that_binds_no_tools_read_twice(runner)
+
     assert runner.app.accepted == []
     assert runner.app.view_reads(TABLE) == 0
+
+
+async def test_an_invitation_the_loop_leaves_out_is_reported_once_with_its_place_kind_and_a_reason_and_no_content(
+    runner, caplog
+):
+    await an_invited_table_at_an_app_that_binds_no_tools_read_twice(runner)
+
+    [left_out] = [change for change in runner.reports.changes if change.event is Event.INVITATION_LEFT_OUT]
+    assert (left_out.place_kind, left_out.code) == (TABLE.kind, NO_TURNS_CODE)
+    logged = [line for line in formatted(caplog.get_records("call")).splitlines() if Event.INVITATION_LEFT_OUT in line]
+    assert len(logged) == 1
+    assert logged[0].endswith(f" code={NO_TURNS_CODE} place_kind={TABLE.kind}")
+    assert not [value for value in (TABLE.id, "inv-3") if value in logged[0]]
+
+
+async def test_a_table_that_serves_no_view_yet_is_accepted_with_figure_and_voice_and_his_turn_runs_once_it_is_active(
+    runner,
+):
+    figure = FigureRef(url=f"https://figures.test/{secrets.token_hex(6)}.glb", sha256=secrets.token_hex(32))
+    voice_name = f"voice-{secrets.token_hex(4)}"
+    runner.config = replace(
+        runner.config, agents=(replace(runner.config.agents[0], figure=figure, voice=Voice(voice_name)),)
+    )
+    runner.app.stand(SUBJECT, invited(TABLE.id, "inv-3", kind=TABLE.kind))
+    runner.start()
+    await runner.reports.until("joined")
+    [(_, wire)] = runner.app.accepted_on_the_wire
+    runner.app.stand(SUBJECT, at_table())
+    told = waits(runner, 1)
+    await runner.gateway.until_turns(1)
+
+    assert wire["figure"] == {"url": figure.url, "sha256": figure.sha256}
+    assert wire["voice"] == voice_name
+    assert told_states(runner) == [told]
+    assert runner.app.window_reads(TABLE.id) == 0
 
 
 async def test_an_invitation_to_a_place_that_serves_a_view_is_accepted_once_and_the_place_is_then_served(runner):
@@ -99,22 +140,13 @@ async def test_an_invitation_to_a_place_that_serves_a_view_is_accepted_once_and_
     assert runner.app.window_reads(TABLE.id) == 0
 
 
-@pytest.mark.parametrize(
-    "standings",
-    [
-        [invited(TABLE.id, "inv-3", kind=TABLE.kind)],
-        [active(TABLE.id, TABLE.kind)],
-    ],
-    ids=["invited to a place that serves no view", "active in a place that serves no view"],
-)
-async def test_a_place_of_another_kind_that_serves_no_view_is_ignored_unread_and_unaccepted(runner, standings):
-    runner.app.stand(SUBJECT, *standings)
+async def test_an_active_place_of_another_kind_that_serves_no_view_is_ignored_and_unread(runner):
+    runner.app.stand(SUBJECT, active(TABLE.id, TABLE.kind))
     runner.start()
     await runner.app.until_standing_read(1)
-    runner.app.stand(SUBJECT, *standings)
+    runner.app.stand(SUBJECT, active(TABLE.id, TABLE.kind))
     await runner.app.until_standing_read(2)
 
-    assert runner.app.accepted == []
     assert set(runner.app.reads) == {STANDING_URI}
 
 

@@ -17,7 +17,7 @@ A turn that ends with the model's final answer is logged as `turn_ended` with no
 A place whose state is no conversation, a table for instance, is served through a view.
 The app sets `serves_view` on the agent's standing there, whatever the place's kind, and the agent reads that place through its view and never through a window.
 The view holds a `revision`, whether the place waits for him, and the app's own `state`.
-An invitation to such a place is accepted like a call's, but only in an app where the agent can take turns (a persona, the gateway and bound tools), because a seated agent that cannot act leaves the place waiting.
+An invitation to a place of another kind than a call is accepted like a call's, whether or not its standing serves a view yet (an app marks an invited standing as serving none until it is active), but only in an app where the agent can take turns (a persona, the gateway and bound tools), because a seated agent that cannot act leaves the place waiting; an invitation left out for that reason is logged once with the place's kind and the code `no_turns`.
 Only apps the operator configured to listen can invite the agent, and what people put into a view reaches him as their lines do.
 After every read of the standing, the agent reads the views of his active view places in the standing's order.
 Each that waits for him gets one model turn.
