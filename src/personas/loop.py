@@ -31,10 +31,10 @@ from personas.decision import (
     decisive_failure,
     failure_code,
     forget_gone,
-    holds_a_place,
     is_defect,
     is_voice_app,
     left_standing,
+    lends_tools,
     perceive,
     reaction_to,
     renewal_due,
@@ -246,9 +246,7 @@ class AgentLoop:
         self._checkpoints = sync_checkpoints(self._checkpoints, standing.standings)
         self._turned_revisions = sync_turned_revisions(self._turned_revisions, standing.standings)
         self._mind.undue(left_standing(self._app.mcp_url, standing.standings))
-        self._mind.stand_at(
-            self._app.mcp_url, holds=self._app.binding is not None and holds_a_place(standing.standings)
-        )
+        self._mind.stand_at(self._app.mcp_url, holds=lends_tools(self._app.binding is not None, standing.standings))
         self._cancel_turn_if_its_place_left(standing.standings)
         await self._accept_invitations(session, standing.standings)
         return standing.standings

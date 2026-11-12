@@ -82,6 +82,7 @@ from personas.decision import (
     holds_a_place,
     is_voice_app,
     left_standing,
+    lends_tools,
     past_deadline,
     perceive,
     reaction_to,
@@ -529,6 +530,20 @@ def test_a_due_place_of_an_app_leaves_with_its_call_or_table_and_stays_while_it_
 )
 def test_he_holds_a_place_at_an_app_while_any_of_his_standings_there_is_active(standings, holds):
     assert holds_a_place(standings) is holds
+
+
+@pytest.mark.parametrize(
+    ("binds_tools", "standings", "lends"),
+    [
+        (True, (active("room-1"),), True),
+        (False, (active("room-1"),), False),
+        (True, (paused("room-1"),), False),
+        (False, (), False),
+    ],
+    ids=["binds tools and holds a place", "binds no tools", "holds no place", "neither"],
+)
+def test_an_app_lends_its_tools_only_while_it_binds_tools_and_he_holds_a_place_there(binds_tools, standings, lends):
+    assert lends_tools(binds_tools, standings) is lends
 
 
 def test_the_apps_a_turn_holds_are_those_he_holds_a_place_at_other_than_its_own():

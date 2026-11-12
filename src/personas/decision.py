@@ -311,6 +311,11 @@ def holds_a_place(standings: tuple[Standing, ...]) -> bool:
     return any(standing.state is StandingState.ACTIVE for standing in standings)
 
 
+def lends_tools(binds_tools: bool, standings: tuple[Standing, ...]) -> bool:
+    """Whether the tools of an app are held by other apps' turns: it binds tools and he holds a place there."""
+    return binds_tools and holds_a_place(standings)
+
+
 def held_apps(own: str, placed: frozenset[str]) -> frozenset[str]:
     """The apps a turn at ``own`` also holds the tools of: every other app where he holds an active place."""
     return placed - {own}

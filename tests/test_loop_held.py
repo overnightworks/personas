@@ -208,6 +208,8 @@ async def test_a_table_turn_holds_the_tools_of_his_call_and_writes_in_it(runner,
 
     assert runner.app.said == [(SUBJECT, PLACE_ID, written)]
     assert runner.app.presented - {""} <= set(runner.realm.issued_for[runner.config.apps[0].scope])
+    assert runner.app.presented - {""}
+    assert (other.presented - {""}).isdisjoint(runner.app.presented - {""})
     assert runner.gateway.offered_tools() == [SAY_TOOL, PLAY_TOOL]
 
 
