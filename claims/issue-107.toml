@@ -1,8 +1,0 @@
-claim_id = "fe402cbff71247b093678b956e313320"
-agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
-role = "builder"
-base = "333c8f5ac409c616b906bf1147b5f865643299e1"
-branch = "claude/issue-107-move-to-quality-v0-12-0-the-pins"
-scope = [".github/workflows/ci.yml", ".github/workflows/code-scanning.yml", ".github/workflows/release.yml", "README.md"]
-opened_commit = "c26d80324e5431f8859b27e26b4503a3562a54f8"
-whole_reason = "Every quality pin and README's one link to quality's release docs at v0.11.0 move together to v0.12.0."
