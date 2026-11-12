@@ -155,7 +155,7 @@ async def test_a_line_at_an_app_that_declares_no_speak_makes_a_turn_not_told_alo
     assert quiet.said == []
 
 
-async def test_a_line_for_a_persona_without_a_voice_section_makes_a_turn_not_told_aloud_and_its_text_is_not_spoken(
+async def test_a_line_for_an_agent_without_a_voice_table_makes_a_turn_not_told_aloud_and_its_text_is_not_spoken(
     runner,
 ):
     runner.gateway = Gateway(completion("Not spoken."))
