@@ -22,6 +22,7 @@ from tests.support.history import (
     said_and_taken,
     settled,
     shows,
+    told_line_bytes,
     url_of,
     view_entry,
     view_turns,
@@ -350,7 +351,9 @@ async def test_each_agent_is_told_only_the_tables_of_his_own_places_in_his_writt
 
 async def test_without_a_memory_the_table_displaces_the_early_call_lines_and_they_reach_no_part_of_the_message(runner):
     early = "early-call-line"
-    runner.config = replace(runner.config, history_bytes=len(SPEAKER + ADDRESSED) + 2 * STATE_BYTES)
+    runner.config = replace(
+        runner.config, history_bytes=told_line_bytes(url_of(runner, 0), PLACE_ID, ADDRESSED, seq=2) + 2 * STATE_BYTES
+    )
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
     await said_and_taken(runner.app, PLACE_ID, early)

@@ -27,6 +27,7 @@ from tests.support.history import (
     history_of,
     said_and_taken,
     settled,
+    told_line_bytes,
     url_of,
     view_entry,
     view_turns,
@@ -170,7 +171,9 @@ async def test_what_was_said_before_the_runner_started_is_not_told_and_what_is_s
 
 
 async def test_lines_past_the_bound_leave_the_oldest_out_and_the_history_says_so(runner):
-    runner.config = replace(runner.config, history_bytes=2 * len(SPEAKER + "line-1") + STATE_BYTES)
+    runner.config = replace(
+        runner.config, history_bytes=2 * told_line_bytes(url_of(runner, 0), PLACE_ID, "line-1") + STATE_BYTES
+    )
     await restarted_in_the_call(runner)
     for number in (1, 2, 3):
         await said_and_taken(runner.app, PLACE_ID, f"line-{number}")
@@ -188,6 +191,25 @@ async def test_lines_past_the_bound_leave_the_oldest_out_and_the_history_says_so
             older_dropped=True,
         )
     ]
+
+
+async def test_a_turn_is_told_as_many_of_the_newest_lines_as_the_bytes_they_are_told_as_fit_the_bound(runner):
+    app = url_of(runner, 0)
+    runner.config = replace(
+        runner.config,
+        history_bytes=told_line_bytes(app, PLACE_ID, "second", seq=2)
+        + told_line_bytes(app, PLACE_ID, ADDRESSED, seq=3),
+    )
+    await restarted_in_the_call(runner)
+    await said_and_taken(runner.app, PLACE_ID, "first")
+    await said_and_taken(runner.app, PLACE_ID, "second")
+    runner.app.speak(PLACE_ID, PERSON, SPEAKER, ADDRESSED)
+    await runner.gateway.until_turns(1)
+
+    (written,) = written_turns(runner)
+    assert written.room["history"] == history_of(
+        [entry(app, PLACE_ID, "second", seq=2), entry(app, PLACE_ID, ADDRESSED, seq=3, new=True)], older_dropped=True
+    )
 
 
 class DownStore:

@@ -28,6 +28,7 @@ from tests.support.history import (
     history_of,
     said_and_taken,
     settled,
+    told_line_bytes,
     unanswered,
     url_of,
     view_entry,
@@ -335,13 +336,17 @@ async def test_a_say_whose_only_effect_is_an_act_starts_no_further_turn_once_his
         pytest.param(-1, ["line", "line"], id="the bound lies one byte below them"),
     ],
 )
-async def test_the_bound_counts_an_act_by_its_tool_its_arguments_as_told_and_its_answer_in_utf8_bytes(
-    runner, bytes_over_the_three, kept_kinds
-):
+async def test_the_bound_counts_an_act_by_the_utf8_bytes_of_its_told_json(runner, bytes_over_the_three, kept_kinds):
     text = "Grüße ♠"
-    act_bytes = len(b"say") + len(f'{{"place": "{PLACE_ID}", "text": "{text}"}}'.encode()) + len(b"said")
-    own_line_bytes = len((AGENT_NAME + text).encode())
-    new_line_bytes = len((SPEAKER + AGAIN).encode())
+    app = url_of(runner, 0)
+    told_act = (
+        f'{{"entry": "act", "app": "{app}", "seconds_ago": 0, "tool": "say",'
+        f' "arguments": {{"place": "{PLACE_ID}", "text": "{text}"}},'
+        ' "outcome": {"answered": true, "is_error": false, "text": "said"}, "new": false}'
+    )
+    act_bytes = len(told_act.encode())
+    own_line_bytes = told_line_bytes(app, PLACE_ID, text, seq=2, name=AGENT_NAME, own=True)
+    new_line_bytes = told_line_bytes(app, PLACE_ID, AGAIN, seq=3)
     runner.config = replace(
         runner.config, history_bytes=act_bytes + own_line_bytes + new_line_bytes + bytes_over_the_three
     )

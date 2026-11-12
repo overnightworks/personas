@@ -24,6 +24,24 @@ STATE_BYTES = len('{"hand": "0123456789abcdef"}')
 """The size of every state ``waits`` shows, as a history counts it."""
 
 
+def told_line_bytes(
+    app_url: str, place_id: str, text: str, *, seq: int = 1, name: str = SPEAKER, own: bool = False
+) -> int:
+    """The bytes a line of a call is told as in the history, its age 0, not new, its text with no escape."""
+    told = (
+        f'{{"entry": "line", "app": "{app_url}", "place": {{"kind": "call", "id": "{place_id}"}}, "seconds_ago": 0,'
+        f' "seq": {seq}, "name": "{name}", "kind": "message", "text": "{text}", "own": {str(own).lower()},'
+        ' "new": false}'
+    )
+    return len(told.encode())
+
+
+def told_day_line_bytes(text: str, *, name: str = SPEAKER, own: bool = False) -> int:
+    """The bytes a line of the day is told as, its text with no escape."""
+    told = f'{{"name": "{name}", "kind": "message", "text": "{text}", "own": {str(own).lower()}}}'
+    return len(told.encode())
+
+
 def url_of(runner, number: int) -> str:
     return runner.config.apps[number].mcp_url
 

@@ -36,6 +36,7 @@ from tests.support.history import (
     said_and_taken,
     settled,
     shows,
+    told_line_bytes,
     url_of,
     view_entry,
     waits,
@@ -539,7 +540,9 @@ async def test_a_view_turn_is_told_the_same_message_as_a_written_turn_with_the_d
 async def test_lines_past_the_history_bound_leave_it_oldest_first_and_are_told_in_the_day_and_in_no_both(
     runner, remembered
 ):
-    runner.config = replace(runner.config, history_bytes=2 * len(SPEAKER + "line-1") + STATE_BYTES)
+    runner.config = replace(
+        runner.config, history_bytes=2 * told_line_bytes(url_of(runner, 0), PLACE_ID, "line-1") + STATE_BYTES
+    )
     await restarted_in_the_call(runner)
     for number in (1, 2, 3):
         await said_and_taken(runner.app, PLACE_ID, f"line-{number}")
@@ -619,7 +622,9 @@ async def test_a_line_said_during_a_pause_is_never_in_the_history_and_told_in_th
 async def test_the_table_displaces_the_early_call_lines_from_his_history_and_they_are_told_in_the_day_in_no_both(
     runner, remembered
 ):
-    runner.config = replace(runner.config, history_bytes=len(SPEAKER + ADDRESSED) + 2 * STATE_BYTES)
+    runner.config = replace(
+        runner.config, history_bytes=told_line_bytes(url_of(runner, 0), PLACE_ID, ADDRESSED, seq=2) + 2 * STATE_BYTES
+    )
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
     await said_and_taken(runner.app, PLACE_ID, "early-call-line")
