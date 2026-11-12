@@ -1,0 +1,8 @@
+claim_id = "ca963b5fc93f43349b04d111f2025c1d"
+agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
+role = "builder"
+base = "2c35d882ea3862df676b3e5b5fd2ff9716cf3853"
+branch = "claude/issue-103-he-takes-one-turn-at-a-time-across-his-a"
+scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/decision.py", "src/personas/loop.py", "src/personas/mind.py", "src/personas/turning.py", "tests"]
+opened_commit = "98441e812b0a29eda97eb01a19fcf0e34b6bb37f"
+whole_reason = "The slot without the wake shows nothing, and the wake without the slot runs a turn per line in every app at once, which line 10 A forbids; tests is a directory."
