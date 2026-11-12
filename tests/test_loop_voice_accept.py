@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import secrets
 from dataclasses import replace
 
 import pytest
 from agents.backend.fake_gateway import completion
+from agents.member import FigureRef
 
 from personas.config import Voice
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, say_in_the_call
@@ -20,20 +22,31 @@ SECOND_AGENT, SECOND_SUBJECT = "agent-bach", "agent-subject-2"
 VOICE_NAME = "Rachel_V2.en-GB"
 
 
-def the_voice_sent(app, subject: str = SUBJECT) -> str | None:
+def the_wire_sent(app, subject: str = SUBJECT) -> dict:
     [wire] = [arguments for sender, arguments in app.accepted_on_the_wire if sender == subject]
-    return wire.get("voice")
+    return wire
 
 
-async def test_an_agent_with_a_named_voice_brings_it_to_a_call_and_to_a_table_of_a_second_app(runner, other):
-    runner.config = replace(runner.config, agents=(replace(runner.config.agents[0], voice=Voice(VOICE_NAME)),))
+def the_voice_sent(app, subject: str = SUBJECT) -> str | None:
+    return the_wire_sent(app, subject).get("voice")
+
+
+async def test_an_agent_with_a_named_voice_brings_it_beside_his_figure_to_a_call_and_to_a_table_of_a_second_app(
+    runner, other
+):
+    figure = FigureRef(url=f"https://figures.test/{secrets.token_hex(6)}.glb", sha256=secrets.token_hex(32))
+    runner.config = replace(
+        runner.config, agents=(replace(runner.config.agents[0], figure=figure, voice=Voice(VOICE_NAME)),)
+    )
     runner.app.stand(SUBJECT, invited(PLACE_ID, "inv-3"))
     other.stand(SUBJECT, invited(TABLE.id, "inv-4", kind=TABLE.kind, serves_view=True))
     runner.start()
     await runner.reports.until("joined", count=2)
 
-    assert the_voice_sent(runner.app) == VOICE_NAME
-    assert the_voice_sent(other) == VOICE_NAME
+    for app in (runner.app, other):
+        wire = the_wire_sent(app)
+        assert wire["voice"] == VOICE_NAME
+        assert wire["figure"] == {"url": figure.url, "sha256": figure.sha256}
 
 
 @pytest.mark.parametrize("voice", [Voice(None), None], ids=["a table without a name", "no table"])
