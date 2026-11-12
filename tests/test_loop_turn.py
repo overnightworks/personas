@@ -166,7 +166,7 @@ async def test_a_line_said_while_a_turn_ran_is_answered_once_that_turn_ends_thou
     assert runner.reports.events()[:3] == [("started", None), ("joined", None), ("turn_ended", "busy")]
 
 
-async def test_one_turn_runs_at_a_time_and_a_line_said_meanwhile_is_answered_after_a_turn_that_spoke(runner):
+async def test_a_line_said_while_a_turn_ran_is_read_at_once_and_answered_after_a_turn_that_spoke(runner):
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER, "Another answer."))
     first_round = runner.gateway.hold_request(1)
     await restarted_in_the_call(runner)
@@ -178,14 +178,14 @@ async def test_one_turn_runs_at_a_time_and_a_line_said_meanwhile_is_answered_aft
     later_wake = runner.app.hold_next_read()
     runner.app.stand(SUBJECT, active(PLACE_ID))
     await runner.app.until_read_held()
-    assert runner.app.window_reads(PLACE_ID) == window_reads
+    assert runner.app.window_reads(PLACE_ID) > window_reads
     later_wake.set()
     first_round.set()
     await runner.app.said_count(2)
     await runner.gateway.until_requested(4)
 
     assert runner.gateway.round_sizes() == [2, 4, 2, 4]
-    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [2, 3]]
+    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [2]]
 
 
 async def test_every_line_addressed_to_him_gets_its_own_turn_one_after_the_other(runner):

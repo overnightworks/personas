@@ -98,7 +98,7 @@ class _HeldTools:
 @dataclass(frozen=True)
 class Admitted:
     """A turn decided on, with the facts it was decided from: the token's, what woke it, what its agent had taken in
-    and the wall time of the read that admitted it."""
+    and the wall time it was admitted at."""
 
     facts: TokenFacts
     place: PlaceRef

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
+import httpx2
 from agents.backend.fake_gateway import FakeGateway, Reply, completion, tool_call, tool_round
 
 from tests.support.hopin import LIMIT_SECONDS, SAY_TOOL
@@ -65,6 +66,12 @@ class Gateway(FakeGateway):
         self._answered = asyncio.Event()
         self.cancelling_at_arrival: list[int] = []
         """The cancel requests pending on the task that made each request, in arrival order: a turn's own task."""
+        self._scripts: dict[str, list[Reply]] = {}
+
+    def script_for(self, user: str, *replies: Reply) -> None:
+        """The requests of this ``user`` take their replies from these, each the next one and the last repeating,
+        whatever the other users are answered."""
+        self._scripts[user] = list(replies)
 
     def hold_request(self, number: int) -> asyncio.Event:
         """The request that arrives as this number (from one) waits, once it arrived, until the event is set."""
@@ -79,7 +86,14 @@ class Gateway(FakeGateway):
         self._arrived.set()
         if held is not None:
             await held.wait()
-        response = await super().handle_async_request(request)
+        await request.aread()
+        script = self._scripts.get(json.loads(request.content)["user"])
+        if script is None:
+            response = await super().handle_async_request(request)
+        else:
+            self.requests.append(request)
+            reply = script.pop(0) if len(script) > 1 else script[0]
+            response = httpx2.Response(reply.status, headers=dict(reply.headers), content=reply.body)
         self._answered.set()
         return response
 
@@ -90,12 +104,41 @@ class Gateway(FakeGateway):
                 self._arrived.clear()
                 await self._arrived.wait()
 
-    async def until_turns(self, count: int) -> None:
-        """Returns once this many turns have been answered their first round; fails after the limit."""
+    async def until_turns(self, count: int, why: str | None = None) -> None:
+        """Returns once this many turns (of this kind, when told: ``lines`` or ``view``) have been answered their first
+        round; fails after the limit."""
         async with asyncio.timeout(LIMIT_SECONDS):
-            while len(self.openings()) < count:
+            while len(self.turns(why)) < count:
                 self._answered.clear()
                 await self._answered.wait()
+
+    def turns(self, why: str | None = None) -> list[TurnOpening]:
+        """The turns' first requests in arrival order, all or those whose message says they woke for this reason; a
+        voice decision's request is no turn."""
+        return [opening for opening in self.openings() if why is None or opening.room.get("woke", {}).get("why") == why]
+
+    async def until_written_turn(self, place_id: str, seq: int, user: str | None = None) -> TurnOpening:
+        """The first written turn (of this ``user``, when told) at this place whose message marks this line new, once
+        it was answered its first round; fails after the limit. Lines taken while another turn runs join one turn, so
+        how many turns precede it is not told."""
+
+        def for_the_line() -> TurnOpening | None:
+            return next(
+                (
+                    each
+                    for each in self.turns("lines")
+                    if each.room["woke"]["place"]["id"] == place_id
+                    and seq in each.new_seqs
+                    and user in (None, each.user)
+                ),
+                None,
+            )
+
+        async with asyncio.timeout(LIMIT_SECONDS):
+            while (found := for_the_line()) is None:
+                self._answered.clear()
+                await self._answered.wait()
+        return found
 
     def openings(self) -> list[TurnOpening]:
         bodies = [json.loads(request.content) for request in self.requests]

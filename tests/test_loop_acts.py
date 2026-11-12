@@ -11,6 +11,7 @@ from http import HTTPStatus
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.tools import ToolOutcome
+from agents.turn import Principal, person_fingerprint
 from mcp_types import INVALID_PARAMS, CallToolResult, TextContent
 
 from personas.app_session import READ_SECONDS, open_mcp_session
@@ -37,7 +38,7 @@ from tests.support.history import (
     written_turns,
 )
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import CALL, LISTEN, READ, SAY_TOOL, active
+from tests.support.hopin import CALL, ISSUER, LISTEN, READ, SAY_TOOL, active
 from tests.support.realm import AGENT_NAME
 from tests.support.songmaker import CALLS, CREATE_SONG, ToolsOnlyApp
 
@@ -363,23 +364,32 @@ async def test_the_bound_counts_an_act_by_the_utf8_bytes_of_its_told_json(runner
 
 async def test_each_agent_is_told_only_his_own_acts(runner):
     runner.add_agent(SECOND_AGENT, SECOND_SUBJECT, SECOND_NAME)
-    runner.gateway = Gateway(
-        say_round("one"), completion("done"), say_round("two"), completion("done"), completion("again")
-    )
+    first, second = (person_fingerprint(Principal(iss=ISSUER, sub=subject)) for subject in (SUBJECT, SECOND_SUBJECT))
+    runner.gateway = Gateway(completion("done"))
+    runner.gateway.script_for(first, say_round("one"), completion("done"))
+    runner.gateway.script_for(second, completion("done"), say_round("two"), completion("done"))
     runner.app.stand(SUBJECT, active(PLACE_ID))
     runner.app.stand(SECOND_SUBJECT, active(PLACE_ID))
     runner.start()
     await runner.app.until_window_read(PLACE_ID)
     await said_and_taken(runner.app, PLACE_ID, ADDRESSED)
-    await runner.gateway.until_requested(2)
+    await runner.app.said_count(1)
     await said_and_taken(runner.app, PLACE_ID, f"{SECOND_NAME}, are you there?")
-    await runner.gateway.until_requested(4)
-    await said_and_taken(runner.app, PLACE_ID, f"{SECOND_NAME}, again?")
-    await runner.gateway.until_turns(3)
+    await runner.app.said_count(2)
+    await said_and_taken(runner.app, PLACE_ID, AGAIN)
 
-    third = written_turns(runner)[2]
-    acts = [each for each in third.room["history"]["entries"] if each["entry"] == "act"]
-    assert acts == [a_say(runner, "two", answered("said"))]
+    told = {
+        user: [
+            each
+            for each in (await runner.gateway.until_written_turn(PLACE_ID, 5, user)).room["history"]["entries"]
+            if each["entry"] == "act"
+        ]
+        for user in (first, second)
+    }
+    assert told == {
+        first: [a_say(runner, "one", answered("said"))],
+        second: [a_say(runner, "two", answered("said"))],
+    }
 
 
 async def test_an_act_is_told_after_the_line_taken_while_its_turn_ran_and_ages_from_the_moment_its_answer_came(
@@ -402,7 +412,7 @@ async def test_an_act_is_told_after_the_line_taken_while_its_turn_ran_and_ages_f
     running.set()
     await runner.gateway.until_requested(2)
     second = waits(other, 2)
-    await runner.gateway.until_turns(2)
+    await runner.gateway.until_turns(2, why="view")
 
     table = url_of(runner, 1)
     assert view_turns(runner)[1].room["history"] == history_of(

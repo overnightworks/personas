@@ -9,8 +9,7 @@ from __future__ import annotations
 import itertools
 import json
 import math
-import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
@@ -29,7 +28,7 @@ from agents.member import (
 from personas.failures import CallFailure, StatusFailure, TokenStatusFailure, UnusableAnswer
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping, Sequence
+    from collections.abc import Callable, Iterable, Mapping, Sequence
 
     from agents.tools import ToolDeclaration, ToolOutcome
     from agents.turn import AgentRole, JsonObject
@@ -549,9 +548,9 @@ def _take_after(window: PlaceWindow, last_seq: int) -> Perception:
     )
 
 
-def addressed(line: PlaceEntry, name: str) -> bool:
-    """Whether the line names the agent as a whole word, whatever the case; a line of his own never does."""
-    return not line.own and re.search(rf"(?<!\w){re.escape(name.casefold())}(?!\w)", line.text.casefold()) is not None
+def wakes_him(new: Iterable[PlaceEntry]) -> bool:
+    """Whether a line taken at a written place makes a turn due: any line that is not his own."""
+    return any(not line.own for line in new)
 
 
 def bound_declarations(declared: Sequence[ToolDeclaration], names: Sequence[str]) -> tuple[ToolDeclaration, ...] | None:
@@ -574,8 +573,8 @@ def call_within_bound(made: int, bound: int) -> bool:
 
 @dataclass(frozen=True)
 class Lines:
-    """Why a written turn runs: the lines of one visit's window that a read took, which the history holds, and whether
-    older ones were never seen."""
+    """Why a written turn runs: the lines of one visit's window taken since his last turn there, which the history
+    holds, and whether older ones were never seen."""
 
     generation: str
     seqs: frozenset[int]
@@ -590,6 +589,62 @@ class Waiting:
 
 
 type Occasion = Lines | Waiting
+
+
+@dataclass(frozen=True)
+class AppPlace:
+    """One of an agent's places, whichever of his apps it is in."""
+
+    app: str
+    place: PlaceRef
+
+
+@dataclass(frozen=True)
+class Turns:
+    """Whether a turn of one agent runs, and which places have a turn due, in the order they became due, with what the
+    turn is for."""
+
+    running: bool = False
+    due: Mapping[AppPlace, Occasion] = field(default_factory=dict[AppPlace, Occasion])
+
+
+def _joined(held: Occasion | None, occasion: Occasion) -> Occasion:
+    if isinstance(held, Lines) and isinstance(occasion, Lines) and held.generation == occasion.generation:
+        return Lines(held.generation, held.seqs | occasion.seqs, held.missed or occasion.missed)
+    return occasion
+
+
+def with_due(turns: Turns, at: AppPlace, occasion: Occasion) -> Turns:
+    """A turn due at ``at`` for ``occasion``: a place already due keeps its position, lines of one generation join, and
+    lines of another generation or a newer view revision replace what was due."""
+    return replace(turns, due={**turns.due, at: _joined(turns.due.get(at), occasion)})
+
+
+def without_due(turns: Turns, leaving: Callable[[AppPlace], bool]) -> Turns:
+    """The turns without the due places for which ``leaving`` holds."""
+    return replace(turns, due={at: occasion for at, occasion in turns.due.items() if not leaving(at)})
+
+
+def claimed(turns: Turns, app: str) -> tuple[Turns, AppPlace, Occasion] | None:
+    """The turns after a turn starts at the place that has waited longest, with that place and what the turn is for;
+    none while a turn runs or when that place is not in ``app``."""
+    if turns.running or not turns.due:
+        return None
+    at, occasion = next(iter(turns.due.items()))
+    if at.app != app:
+        return None
+    return replace(without_due(turns, lambda each: each == at), running=True), at, occasion
+
+
+def released(turns: Turns) -> Turns:
+    """The turns once the running turn ended; what is due stays."""
+    return replace(turns, running=False)
+
+
+def left_standing(app: str, standings: tuple[Standing, ...]) -> Callable[[AppPlace], bool]:
+    """Whether a due place is one of ``app`` that is no active call or view place any more."""
+    active = {AppPlace(app, place) for place in (*active_call_places(standings), *active_view_places(standings))}
+    return lambda at: at.app == app and at not in active
 
 
 class WakeReason(StrEnum):
@@ -614,7 +669,7 @@ def _told_place(place: PlaceRef) -> dict[str, str]:
 
 
 def _is_new(entry: Entry, app: str, place: PlaceRef, occasion: Occasion) -> bool:
-    """Whether the turn is for this entry: a line the read that admitted a written turn took, or the revision a view
+    """Whether the turn is for this entry: a line taken at its place since his last turn there, or the revision a view
     turn waits at."""
     if isinstance(occasion, Waiting):
         return isinstance(entry, ViewSeen) and _revision_key(entry) == (app, place, occasion.revision)

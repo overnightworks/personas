@@ -57,7 +57,7 @@ async def test_a_table_that_does_not_wait_is_told_to_his_written_turn_with_its_a
     state = await seated_in_the_call_and_at_the_table(runner)
     runner.clock.time += 90
     say_in_the_call(runner, ADDRESSED)
-    await runner.gateway.until_turns(1)
+    await runner.gateway.until_turns(1, why="lines")
 
     (written,) = runner.gateway.openings()
     app = url_of(runner, 0)
@@ -76,7 +76,7 @@ async def test_a_view_turn_is_told_the_state_once_in_its_entry_marked_new_and_wo
     runner.app.stand(SUBJECT, at_table())
     state = waits(runner.app, 1)
     runner.start()
-    await runner.gateway.until_turns(1)
+    await runner.gateway.until_turns(1, why="view")
 
     (opening,) = view_turns(runner)
     assert opening.room["woke"] == {
@@ -121,7 +121,7 @@ async def test_revisions_and_lines_are_told_in_the_order_read_and_only_the_waiti
     second = await shows(runner.app, 2)
     await said_and_taken(runner.app, PLACE_ID, "second")
     third = waits(runner.app, 3)
-    await runner.gateway.until_turns(1)
+    await runner.gateway.until_turns(1, why="view")
 
     app = url_of(runner, 0)
     (opening,) = view_turns(runner)
@@ -141,9 +141,9 @@ async def test_a_revision_asked_again_by_the_app_with_the_same_state_is_a_second
     runner.app.stand(SUBJECT, at_table())
     state = waits(runner.app, 5)
     runner.start()
-    await runner.gateway.until_turns(1)
+    await runner.gateway.until_turns(1, why="view")
     runner.app.show_view(TABLE.id, 6, state)
-    await runner.gateway.until_turns(2)
+    await runner.gateway.until_turns(2, why="view")
 
     app = url_of(runner, 0)
     assert [each["history"] for each in (opening.room for opening in view_turns(runner))][1] == history_of(
@@ -181,7 +181,7 @@ async def test_a_view_turn_is_told_its_state_alone_when_the_bound_is_below_one_s
         await said_and_taken(runner.app, PLACE_ID, REMARK)
     runner.app.stand(SUBJECT, active(PLACE_ID), at_table())
     state = waits(runner.app, 1)
-    await runner.gateway.until_turns(1)
+    await runner.gateway.until_turns(1, why="view")
 
     assert [opening.room["history"] for opening in view_turns(runner)] == [
         history_of([view_entry(url_of(runner, 0), state, revision=1, new=True)], older_dropped=earlier_line)
@@ -193,15 +193,14 @@ async def test_a_line_that_names_him_and_alone_exceeds_the_bound_is_told_alone_a
     runner, earlier_line
 ):
     runner.config = replace(runner.config, history_bytes=len(SPEAKER + ADDRESSED) - 1)
-    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    runner.gateway = Gateway(*([completion("done")] if earlier_line else []), *says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
     if earlier_line:
         await said_and_taken(runner.app, PLACE_ID, REMARK)
     say_in_the_call(runner, ADDRESSED)
-    await runner.gateway.until_turns(1)
-
-    (written,) = runner.gateway.openings()
     seq = 2 if earlier_line else 1
+    written = await runner.gateway.until_written_turn(PLACE_ID, seq)
+
     assert written.room["history"] == history_of(
         [entry(url_of(runner, 0), PLACE_ID, ADDRESSED, seq=seq, new=True)], older_dropped=earlier_line
     )
@@ -211,12 +210,12 @@ async def test_a_place_that_leaves_and_returns_at_its_held_waiting_revision_gets
     runner.app.stand(SUBJECT, at_table())
     state = waits(runner.app, 1)
     runner.start()
-    await runner.gateway.until_turns(1)
+    await runner.gateway.until_turns(1, why="view")
     await settled(runner.app)
     runner.app.stand(SUBJECT)
     await settled(runner.app)
     runner.app.stand(SUBJECT, at_table())
-    await runner.gateway.until_turns(2)
+    await runner.gateway.until_turns(2, why="view")
 
     assert [opening.room["history"] for opening in view_turns(runner)] == [
         history_of([view_entry(url_of(runner, 0), state, revision=1, new=True)])
@@ -233,11 +232,11 @@ async def test_a_table_that_serves_no_view_for_a_while_is_not_read_and_its_earli
     reads = runner.app.view_reads(TABLE)
     runner.clock.time += 20
     say_in_the_call(runner, ADDRESSED)
-    await runner.gateway.until_turns(1)
+    await runner.gateway.until_turns(1, why="lines")
     assert runner.app.view_reads(TABLE) == reads
     runner.app.stand(SUBJECT, active(PLACE_ID), at_table())
     third = waits(runner.app, 2)
-    await runner.gateway.until_turns(2)
+    await runner.gateway.until_turns(1, why="view")
 
     app = url_of(runner, 0)
     assert runner.gateway.openings()[0].room["history"]["entries"][0] == view_entry(
@@ -262,7 +261,7 @@ async def test_a_view_he_cannot_read_enters_nothing_and_the_earlier_entries_stay
     await runner.app.until_view_read(TABLE, reads + 1)
     runner.app.vanished.discard(TABLE.id)
     third = waits(runner.app, 3)
-    await runner.gateway.until_turns(1)
+    await runner.gateway.until_turns(1, why="view")
 
     app = url_of(runner, 0)
     assert [opening.room["history"] for opening in view_turns(runner)] == [
@@ -299,7 +298,7 @@ async def test_a_view_read_that_fails_enters_nothing_and_the_read_after_the_resu
     await runner.app.until_view_read(TABLE, reads + 1)
     await settled(runner.app)
     third = waits(runner.app, 3)
-    await runner.gateway.until_turns(1)
+    await runner.gateway.until_turns(1, why="view")
 
     (opening,) = view_turns(runner)
     assert [(each["revision"], each["state"], each["new"]) for each in opening.room["history"]["entries"]] == [
@@ -319,7 +318,7 @@ async def test_a_table_in_a_paused_place_enters_nothing_and_the_first_read_after
     assert runner.app.view_reads(TABLE) == 0
     runner.app.stand(SUBJECT, at_table())
     second = waits(runner.app, 2)
-    await runner.gateway.until_turns(1)
+    await runner.gateway.until_turns(1, why="view")
 
     assert view_turns(runner)[0].room["history"]["entries"][-1] == view_entry(
         url_of(runner, 0), second, revision=2, new=True
@@ -339,7 +338,7 @@ async def test_each_agent_is_told_only_the_tables_of_his_own_places_in_his_writt
     await runner.app.until_view_read(TABLE)
     await settled(runner.app)
     runner.app.speak(PLACE_ID, "visitor-subject", "Ada", f"{AGENT_NAME} and {SECOND_NAME}, are you there?")
-    await runner.gateway.until_turns(2)
+    await runner.gateway.until_turns(2, why="lines")
 
     told = {opening.user: opening.room["history"]["entries"] for opening in written_turns(runner)}
     app = url_of(runner, 0)
@@ -354,7 +353,7 @@ async def test_without_a_memory_the_table_displaces_the_early_call_lines_and_the
     runner.config = replace(
         runner.config, history_bytes=told_line_bytes(url_of(runner, 0), PLACE_ID, ADDRESSED, seq=2) + 2 * STATE_BYTES
     )
-    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    runner.gateway = Gateway(completion("done"), *says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
     await said_and_taken(runner.app, PLACE_ID, early)
     runner.app.stand(SUBJECT, active(PLACE_ID), at_table())
@@ -362,9 +361,8 @@ async def test_without_a_memory_the_table_displaces_the_early_call_lines_and_the
     second = await shows(runner.app, 2)
     third = await shows(runner.app, 3)
     say_in_the_call(runner, ADDRESSED)
-    await runner.gateway.until_turns(1)
+    written = await runner.gateway.until_written_turn(PLACE_ID, 2)
 
-    (written,) = runner.gateway.openings()
     app = url_of(runner, 0)
     assert written.room["history"] == history_of(
         [
@@ -374,11 +372,13 @@ async def test_without_a_memory_the_table_displaces_the_early_call_lines_and_the
         ],
         older_dropped=True,
     )
-    assert early not in runner.gateway.told_in(1)
+    assert early not in runner.gateway.told_in(2)
     assert "earlier_today" not in written.room
 
 
-async def test_a_table_that_moves_during_his_view_turn_enters_at_the_first_read_after_that_turn(runner):
+async def test_a_table_that_moves_during_his_view_turn_enters_at_the_read_during_that_turn_and_is_told_in_the_next(
+    runner,
+):
     runner.gateway = Gateway(completion("done"), completion("done"))
     ending = runner.gateway.hold_request(1)
     runner.app.stand(SUBJECT, at_table())
@@ -387,7 +387,7 @@ async def test_a_table_that_moves_during_his_view_turn_enters_at_the_first_read_
     await runner.gateway.until_requested(1)
     second = waits(runner.app, 2)
     ending.set()
-    await runner.gateway.until_turns(2)
+    await runner.gateway.until_turns(2, why="view")
 
     app = url_of(runner, 0)
     assert [opening.room["history"] for opening in view_turns(runner)] == [
@@ -410,7 +410,7 @@ async def test_a_table_that_moves_during_a_call_turn_is_not_in_that_turns_input_
     running.set()
     await runner.app.said_count(1)
     say_in_the_call(runner, ADDRESSED)
-    await runner.gateway.until_turns(2)
+    await runner.gateway.until_turns(2, why="lines")
 
     table = url_of(runner, 1)
     during, after = (opening.room["history"]["entries"] for opening in written_turns(runner))

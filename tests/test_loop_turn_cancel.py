@@ -128,7 +128,7 @@ async def test_while_a_cancelled_turn_still_unwinds_a_new_addressed_line_starts_
         runner.app.stand(SUBJECT, active(OTHER_PLACE_ID))
         await runner.app.until_read_held()
 
-        assert runner.app.window_reads(OTHER_PLACE_ID) == window_reads
+        assert runner.app.window_reads(OTHER_PLACE_ID) > window_reads
         assert runner.gateway.requests == []
         unwinding.release.set()
         later_read.set()

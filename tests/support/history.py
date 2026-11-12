@@ -133,8 +133,7 @@ def woke_at_lines(app_url: str, place_id: str, *, missed: bool = False) -> dict[
 
 
 def turns_woken_by(runner, why: str):
-    """The turns whose first message says they woke for this reason; a voice decision's request is no turn."""
-    return [opening for opening in runner.gateway.openings() if opening.room.get("woke", {}).get("why") == why]
+    return runner.gateway.turns(why)
 
 
 def view_turns(runner):

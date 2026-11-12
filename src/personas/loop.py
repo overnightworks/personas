@@ -6,6 +6,7 @@ import asyncio
 from contextlib import aclosing
 from dataclasses import dataclass, replace
 from functools import partial
+from operator import eq
 from typing import TYPE_CHECKING, Final, Literal, NoReturn
 
 from agents.backend import TurnPerson
@@ -16,10 +17,10 @@ from personas.decision import (
     SUSPENDED_RETRY_SECONDS,
     TURN_CANCELLED_CODE,
     TURN_ROLE,
+    AppPlace,
     Joined,
     Lines,
     Memory,
-    Perception,
     Reaction,
     Suspend,
     Token,
@@ -30,7 +31,6 @@ from personas.decision import (
     accepts_for,
     active_call_places,
     active_view_places,
-    addressed,
     after_refusal,
     backoff_delay,
     decisive_failure,
@@ -38,16 +38,17 @@ from personas.decision import (
     forget_gone,
     is_defect,
     is_voice_app,
+    left_standing,
     perceive,
     reaction_to,
     renewal_due,
-    sets_where_reading_starts,
     sync_checkpoints,
     sync_turned_revisions,
     taken_lines,
     turn_invalid,
     view_turn_due,
     voice_context,
+    wakes_him,
 )
 from personas.failures import CallFailure, leaves_of, raise_if_cancelled
 from personas.mind import Mind
@@ -119,9 +120,11 @@ class AgentLoop:
     A refusal by the realm or the app suspends the loop: it makes no further call until its next
     retry, and resumes once a read answers again. A network failure, a lost stream or a 5xx backs off,
     logged once until a read answers. In an app that binds tools, the lines of the agent's call places are read too,
-    every new line and every view read goes into the agent's history, and one addressed to him starts a turn; at
-    most one turn runs per loop, over its own session, and a failure of the turn's calls to this app goes into the
-    one reaction of the loop. The turn also holds the bound tools of the tools-only apps: each request to one runs
+    while any turn of his runs, and every new line and every view read goes into the agent's history. A line that is
+    not his own and a view that waits for him make a turn due in the agent's mind, and after each read the loop starts
+    the turn of the place that has waited longest when it is in this app; at most one turn of the agent runs across all
+    his loops, over its own session, and a failure of the turn's calls to this app goes into the one reaction of the
+    loop. The turn also holds the bound tools of the tools-only apps: each request to one runs
     in a session of its own under the token for its own scope, and its failure never reaches the reaction. Each call
     the turn relays, to this app or a tools-only one, enters the agent's history when its request ends. In an app
     that declares ``speak``, for an agent whose persona has a voice section, each active call place instead runs one
@@ -165,7 +168,7 @@ class AgentLoop:
         self._checkpoints: dict[PlaceRef, Checkpoint] = {}
         self._turned_revisions: dict[PlaceRef, int] = {}
         self._turn: ActiveTurn | None = None
-        self._turn_ended = asyncio.Event()
+        self._turn_ended = mind.wake_event()
         self._voices: dict[PlaceRef, ActiveVoice] = {}
         self._voice_app = False
         persona, binding, backend = agent.persona, app.binding, boundaries.backend
@@ -207,7 +210,7 @@ class AgentLoop:
         return is_voice_app(has_voice_section, declared)
 
     async def _wakes(self, changes: AsyncIterator[object]) -> AsyncGenerator[None]:
-        """A wake for each change the app signals and for each end of a turn; it ends when the stream does."""
+        """A wake for each change the app signals and for each wake of his mind; it ends when the stream does."""
         change = asyncio.ensure_future(anext(changes, _STREAM_ENDED))
         ended = asyncio.ensure_future(self._turn_ended.wait())
         try:
@@ -233,10 +236,11 @@ class AgentLoop:
     async def _reconcile(self, session: AppSession, turns: asyncio.TaskGroup) -> None:
         """Reads the standing as it is now and acts on it; a wake says only that it may have changed."""
         standings = await self._take_standing(session)
-        if await self._answer_addressed_lines(session, turns, standings):
+        if await self._read_call_places(session, turns, standings):
             # A window the app lost dropped its place's checkpoint: the standing says where the place stands now.
             standings = await self._take_standing(session)
-        await self._answer_waiting_view(session, turns, standings)
+        await self._read_views(session, standings)
+        await self._start_due_turn(turns)
         self._served()
 
     async def _take_standing(self, session: AppSession) -> tuple[Standing, ...]:
@@ -248,6 +252,7 @@ class AgentLoop:
         self._memory = forget_gone(self._memory, standing.standings)
         self._checkpoints = sync_checkpoints(self._checkpoints, standing.standings)
         self._turned_revisions = sync_turned_revisions(self._turned_revisions, standing.standings)
+        self._mind.undue(left_standing(self._app.mcp_url, standing.standings))
         self._cancel_turn_if_its_place_left(standing.standings)
         await self._accept_invitations(session, standing.standings)
         return standing.standings
@@ -295,22 +300,18 @@ class AgentLoop:
             if is_news:
                 self._report(Event.REFUSED, refusal.value)
 
-    async def _answer_addressed_lines(
+    async def _read_call_places(
         self, session: AppSession, turns: asyncio.TaskGroup, standings: tuple[Standing, ...]
     ) -> bool:
-        """Reads the active call places' windows; a line addressed to the agent starts the one turn.
+        """Reads the active call places' windows, a turn of his running or not, and takes their lines in.
 
-        While a turn runs it reads only the windows that set where reading starts, which take no line.
         It says whether a window was lost, which dropped its place's checkpoint.
         """
         if self._turn_setup is None:
             return False
-        places = active_call_places(standings)
-        if self._turn is not None:
-            places = tuple(place for place in places if sets_where_reading_starts(self._checkpoints[place]))
         facts = facts_of((await self._current_token()).value)
         lost = False
-        for place in places:
+        for place in active_call_places(standings):
             await self._use_current_token(session)
             window = await session.read_place(place)
             if window is None:
@@ -318,37 +319,46 @@ class AgentLoop:
                 lost = True
                 continue
             read_at = self._boundaries.clock.wall()
-            turn_started = self._take_lines(turns, self._turn_setup, place, window, facts, read_at)
+            self._take_lines(turns, self._turn_setup, place, window, facts, read_at)
             await self._remembering.keep(WindowRead(self._agent.client_id, self._app.mcp_url, place, window, read_at))
-            if turn_started:
-                return lost
         return lost
 
-    async def _answer_waiting_view(
-        self, session: AppSession, turns: asyncio.TaskGroup, standings: tuple[Standing, ...]
-    ) -> None:
-        """Reads the views of the active view places in the standing's order, takes each into the agent's history and
-        starts the turn at the first that is due.
+    async def _read_views(self, session: AppSession, standings: tuple[Standing, ...]) -> None:
+        """Reads the views of the active view places in the standing's order and takes each into the agent's history.
 
-        It reads none while a turn runs or was just started. A revision starts one turn, whatever that turn did.
+        A revision that waits for him and has no turn yet makes a turn due at its place; one that does not wait, and a
+        view the app gives none of, take the place's due away. A revision gets one turn, whatever that turn did.
         """
-        setup = self._turn_setup
-        if setup is None or self._turn is not None:
+        if self._turn_setup is None:
             return
-        facts = facts_of((await self._current_token()).value)
         for place in active_view_places(standings):
             await self._use_current_token(session)
             view = await session.read_view(place)
+            at = AppPlace(self._app.mcp_url, place)
             if view is None:
+                self._mind.undue(partial(eq, at))
                 continue
-            read_at = self._boundaries.clock.wall()
-            self._mind.take((ViewSeen(self._app.mcp_url, place, view, read_at),))
-            if not view_turn_due(self._turned_revisions.get(place), view):
-                continue
-            self._turned_revisions[place] = view.revision
-            admitted = Admitted(facts, place, Waiting(view.revision), self._mind.history, read_at)
-            self._start_turn(turns, setup, place, admitted)
+            self._mind.take((ViewSeen(at.app, place, view, self._boundaries.clock.wall()),))
+            if view_turn_due(self._turned_revisions.get(place), view):
+                self._mind.due(at, Waiting(view.revision))
+            else:
+                self._mind.undue(partial(eq, at))
+
+    async def _start_due_turn(self, turns: asyncio.TaskGroup) -> None:
+        """Starts the turn of the place that has waited longest when it is in this app and none of his runs. The claim
+        and the turn's start share one synchronous step."""
+        setup = self._turn_setup
+        if setup is None:
             return
+        facts = facts_of((await self._current_token()).value)
+        claim = self._mind.claim(self._app.mcp_url)
+        if claim is None:
+            return
+        at, occasion = claim
+        if isinstance(occasion, Waiting):
+            self._turned_revisions[at.place] = occasion.revision
+        admitted = Admitted(facts, at.place, occasion, self._mind.history, self._boundaries.clock.wall())
+        self._start_turn(turns, setup, at.place, admitted)
 
     def _take_lines(
         self,
@@ -358,15 +368,18 @@ class AgentLoop:
         window: PlaceWindow,
         facts: TokenFacts,
         read_at: datetime,
-    ) -> bool:
+    ) -> None:
         """Moves the place's checkpoint and takes the new lines into the agent's history: a voice loop hears all of
-        them, and else one addressed to the agent starts a turn, which this says. No await stands in it."""
+        them, and at a written place a line that is not his own makes a turn due. No await stands in it."""
         perception = perceive(window, self._checkpoints[place])
         self._checkpoints[place] = perception.checkpoint
         visit = Visit(self._app.mcp_url, place, window.generation)
         self._mind.take(taken_lines(visit, perception.new, read_at))
         if not self._voice_app:
-            return self._start_turn_if_addressed(turns, setup, place, window, facts, perception, read_at)
+            if wakes_him(perception.new):
+                lines = Lines(window.generation, frozenset(line.seq for line in perception.new), perception.missed)
+                self._mind.due(AppPlace(self._app.mcp_url, place), lines)
+            return
         voice = self._voices.get(place)
         if voice is None or voice.generation != window.generation:
             if voice is not None:
@@ -374,25 +387,6 @@ class AgentLoop:
             voice = self._start_voice(turns, setup, visit, facts)
         for line in perception.new:
             voice.hearing.put(line)
-        return False
-
-    def _start_turn_if_addressed(
-        self,
-        turns: asyncio.TaskGroup,
-        setup: TurnSetup,
-        place: PlaceRef,
-        window: PlaceWindow,
-        facts: TokenFacts,
-        perception: Perception,
-        read_at: datetime,
-    ) -> bool:
-        """Starts the turn when a new line addresses the agent. A line starts at most one turn."""
-        if not any(addressed(line, facts.name) for line in perception.new):
-            return False
-        lines = Lines(window.generation, frozenset(line.seq for line in perception.new), perception.missed)
-        admitted = Admitted(facts, place, lines, self._mind.history, read_at)
-        self._start_turn(turns, setup, place, admitted)
-        return True
 
     def _start_turn(self, turns: asyncio.TaskGroup, setup: TurnSetup, place: PlaceRef, admitted: Admitted) -> None:
         task = turns.create_task(self._turning.take(setup, admitted, TaskRecord()))
@@ -456,7 +450,7 @@ class AgentLoop:
         turn, self._turn = self._turn, None
         if turn is not None and turn.cancel_requested and task.cancelled() and not turn.end_reported:
             self._report(Event.TURN_ENDED, TURN_CANCELLED_CODE)
-        self._turn_ended.set()
+        self._mind.release()
 
     def _report_turn_end(self, code: str) -> None:
         """A turn reports its end at most once; the record tells the loop, which then reports no cancel."""
@@ -477,6 +471,7 @@ class AgentLoop:
                 await self._back_off(failure)
 
     async def _suspend(self, code: str) -> None:
+        self._drop_due_places()
         if self._suspension != code:
             self._suspension = code
             self._report(Event.SUSPENDED, code)
@@ -485,11 +480,16 @@ class AgentLoop:
         await self._boundaries.clock.sleep(SUSPENDED_RETRY_SECONDS)
 
     async def _back_off(self, failure: CallFailure) -> None:
+        self._drop_due_places()
         if not self._backing_off:
             self._backing_off = True
             self._report(Event.BACKOFF, failure_code(failure))
         self._failures += 1
         await self._boundaries.clock.sleep(backoff_delay(self._failures))
+
+    def _drop_due_places(self) -> None:
+        """A parked app holds up no place of his other apps: its due places are dropped; it reads them again after."""
+        self._mind.undue(lambda at: at.app == self._app.mcp_url)
 
     def _report(self, event: Event, code: str | None = None, app: AppTarget | None = None) -> None:
         self._boundaries.report(StateChange(event, self._agent.client_id, (app or self._app).mcp_url, code))

@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 from agents.member import PlaceRef, PlaceView
 
-from personas.decision import KeptLine, ViewSeen, Visit
+from personas.decision import AppPlace, KeptLine, Lines, ViewSeen, Visit, Waiting
 from personas.mind import Mind
 
 READ_AT = datetime(2026, 11, 11, 20, 0, tzinfo=UTC)
@@ -59,3 +59,51 @@ def test_the_views_he_read_join_his_lines_in_the_order_read_and_a_revision_he_ho
     mind.take(())
 
     assert [type(each) for each in mind.history.entries] == [KeptLine, ViewSeen]
+
+
+TABLE_AT_A = AppPlace(CALL.app, PlaceRef(kind="table", id="table-1"))
+CALL_AT_B = AppPlace(OTHER_CALL.app, OTHER_CALL.place)
+
+
+def test_one_turn_runs_at_a_time_and_the_next_goes_to_the_place_that_waited_longest_once_it_ended():
+    mind = Mind(size_bytes=1_000)
+    mind.due(CALL_AT_B, Waiting(1))
+    mind.due(TABLE_AT_A, Waiting(2))
+
+    assert mind.claim(TABLE_AT_A.app) is None
+    assert mind.claim(CALL_AT_B.app) == (CALL_AT_B, Waiting(1))
+    assert mind.claim(TABLE_AT_A.app) is None
+
+    mind.release()
+
+    assert mind.claim(TABLE_AT_A.app) == (TABLE_AT_A, Waiting(2))
+
+
+def test_the_end_of_a_turn_wakes_every_loop_of_the_agent():
+    mind = Mind(size_bytes=1_000)
+    events = [mind.wake_event(), mind.wake_event()]
+
+    mind.release()
+
+    assert [each.is_set() for each in events] == [True, True]
+
+
+def test_a_place_dropped_while_no_turn_runs_wakes_the_loops_and_one_dropped_during_a_turn_does_not():
+    mind = Mind(size_bytes=1_000)
+    event = mind.wake_event()
+    mind.due(CALL_AT_B, Lines("generation-1", frozenset({1}), missed=False))
+    mind.due(TABLE_AT_A, Waiting(1))
+    assert mind.claim(CALL_AT_B.app) is not None
+
+    mind.undue(lambda at: at == TABLE_AT_A)
+    assert not event.is_set()
+
+    mind.release()
+    event.clear()
+    mind.undue(lambda at: at == CALL_AT_B)
+    assert not event.is_set()
+
+    mind.due(TABLE_AT_A, Waiting(2))
+    mind.undue(lambda at: at == TABLE_AT_A)
+    assert event.is_set()
+    assert mind.claim(TABLE_AT_A.app) is None
