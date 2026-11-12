@@ -16,6 +16,7 @@ from mcp_types import INVALID_PARAMS, CallToolResult, TextContent
 
 from personas.app_session import READ_SECONDS, open_mcp_session
 from personas.failures import Unreachable
+from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, says_after_a_hold
 from tests.support.history import (
@@ -212,7 +213,11 @@ async def test_a_tools_only_call_that_fails_is_told_as_not_answered_with_the_fai
 
     acts = [each for each in second.room["history"]["entries"] if each["entry"] == "act"]
     assert acts[0] == a_song(runner, songmaker_url(runner), unanswered(code))
-    assert runner.reports.events() == [("started", None), ("tools_only_app_failed", code)]
+    assert [
+        (each.event, each.code, each.app)
+        for each in runner.reports.without_completed_turns
+        if each.event is not Event.STARTED
+    ] == [(Event.TOOLS_ONLY_APP_FAILED, code, songmaker_url(runner))]
     assert runner.gateway.tool_results(2)[0].startswith("Error")
 
 
@@ -241,7 +246,7 @@ async def a_call_waiting_for_its_app_while_its_place_leaves(runner, songmaker, *
     async with asyncio.timeout(10):
         await entered.wait()
     runner.app.stand(SUBJECT, active(OTHER_CALL_ID))
-    await runner.reports.until("turn_ended")
+    await runner.reports.until(Event.TURN_ENDED)
     runner.app.speak(OTHER_CALL_ID, PERSON, SPEAKER, ADDRESSED)
     await runner.gateway.until_turns(2)
     return act, written_turns(runner)[1]
@@ -260,7 +265,7 @@ async def test_a_call_cut_in_flight_because_its_place_left_is_told_cancelled_to_
             entry(url_of(runner, 0), OTHER_CALL_ID, ADDRESSED, new=True),
         ]
     )
-    assert runner.reports.events() == [("started", None), ("turn_ended", "cancelled")]
+    assert runner.reports.events() == [(Event.STARTED, None), (Event.TURN_ENDED, "cancelled")]
 
 
 async def test_a_call_cut_in_flight_whose_request_ends_as_a_transport_failure_is_told_cancelled_not_network(
@@ -288,7 +293,7 @@ async def test_a_call_cut_in_flight_whose_request_ends_as_a_transport_failure_is
     )
 
     assert second.room["history"]["entries"][1] == act
-    assert runner.reports.events() == [("started", None), ("turn_ended", "cancelled")]
+    assert runner.reports.events() == [(Event.STARTED, None), (Event.TURN_ENDED, "cancelled")]
 
 
 async def test_a_say_whose_only_effect_is_an_act_starts_no_further_turn_once_his_own_line_is_read(runner):

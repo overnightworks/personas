@@ -12,7 +12,7 @@ from http import HTTPStatus
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.tools import ToolOutcome
-from agents.turn import Principal, person_fingerprint
+from agents.turn import FailureCode, Principal, person_fingerprint
 from mcp_types import ListToolsResult
 
 from personas.decision import TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE
@@ -252,10 +252,23 @@ async def test_a_failed_call_to_his_own_apps_tool_ends_the_turn_into_that_loops_
     runner.app.script(CALL, cuts)
     await seated_in_the_call(runner, other, tool_round(say(words(1)[0]), play(words(1)[0])), completion("done"))
     say_in_the_call(runner, ADDRESSED)
-    await runner.reports.until("resumed")
+    await runner.reports.until(Event.RESUMED)
 
     assert reported(runner) == [(Event.BACKOFF, "network", url_of(runner, 0)), (Event.RESUMED, None, url_of(runner, 0))]
     assert runner.gateway.arrivals == 1
+
+
+def rounds_spending_every_bound(runner) -> list[object]:
+    """One call a round until every app's bound is spent: the held app's bound plus one, the last of which its own
+    bound refuses, then the place's and the tools-only app's. Their calls number the turn's bound, the sum of the
+    apps' bounds plus one, so the call after them is past it."""
+    held_bound = runner.config.apps[1].binding.max_tool_calls
+    own_bound = runner.config.apps[0].binding.max_tool_calls
+    return [
+        *(tool_round(play(words(1)[0])) for _ in range(held_bound + 1)),
+        *(tool_round(say(words(1)[0])) for _ in range(own_bound)),
+        *(tool_round(tool_call(secrets.token_hex(4), CREATE_SONG, {"title": "t"})) for _ in range(CALLS)),
+    ]
 
 
 async def test_every_apps_bound_of_a_turn_is_spent_in_full_and_the_call_past_a_held_apps_bound_is_an_error(
@@ -263,15 +276,9 @@ async def test_every_apps_bound_of_a_turn_is_spent_in_full_and_the_call_past_a_h
 ):
     held_bound = runner.config.apps[1].binding.max_tool_calls
     own_bound = runner.config.apps[0].binding.max_tool_calls
-    await seated_in_the_call(
-        runner,
-        other,
-        *(tool_round(play(words(1)[0])) for _ in range(held_bound + 1)),
-        *(tool_round(say(words(1)[0])) for _ in range(own_bound)),
-        *(tool_round(tool_call(secrets.token_hex(4), CREATE_SONG, {"title": "t"})) for _ in range(CALLS)),
-        completion("done"),
-    )
-    final_request = held_bound + own_bound + CALLS + 2
+    rounds = rounds_spending_every_bound(runner)
+    await seated_in_the_call(runner, other, *rounds, completion("done"))
+    final_request = len(rounds) + 1
     say_in_the_call(runner, ADDRESSED)
     await runner.gateway.until_requested(final_request)
 
@@ -280,6 +287,21 @@ async def test_every_apps_bound_of_a_turn_is_spent_in_full_and_the_call_past_a_h
     assert len(songmaker.called) == CALLS
     assert runner.gateway.tool_results(final_request)[held_bound].startswith("Error")
     assert reported(runner) == []
+
+
+async def test_the_call_past_the_turn_bound_of_the_three_apps_ends_the_turn_as_limit_exceeded_and_is_not_sent(
+    runner, other, songmaker
+):
+    rounds = rounds_spending_every_bound(runner)
+    await seated_in_the_call(runner, other, *rounds, tool_round(play(words(1)[0])), completion("done"))
+    say_in_the_call(runner, ADDRESSED)
+    await runner.reports.until(Event.TURN_ENDED)
+
+    assert runner.gateway.arrivals == len(rounds) + 1
+    assert other.calls == [PLAY_TOOL] * runner.config.apps[1].binding.max_tool_calls
+    assert len(runner.app.said) == runner.config.apps[0].binding.max_tool_calls
+    assert len(songmaker.called) == CALLS
+    assert reported(runner) == [(Event.TURN_ENDED, FailureCode.LIMIT_EXCEEDED.value, url_of(runner, 0))]
 
 
 async def test_a_turn_whose_place_leaves_while_a_held_apps_call_is_in_flight_ends_cancelled_and_the_act_is_told(
@@ -293,7 +315,7 @@ async def test_a_turn_whose_place_leaves_while_a_held_apps_call_is_in_flight_end
     say_in_the_call(runner, ADDRESSED)
     await entered.wait()
     runner.app.stand(SUBJECT)
-    await runner.reports.until("turn_ended")
+    await runner.reports.until(Event.TURN_ENDED)
     waits(other, 1)
     await runner.gateway.until_turns(2)
 
