@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import secrets
 
 from agents.member import STANDING_URI, PlaceRef
@@ -21,7 +20,7 @@ def a_state() -> dict[str, str]:
     return {"hand": secrets.token_hex(8)}
 
 
-STATE_BYTES = len(json.dumps(a_state()))
+STATE_BYTES = len('{"hand": "0123456789abcdef"}')
 """The size of every state ``waits`` shows, as a history counts it."""
 
 
@@ -82,6 +81,28 @@ def view_entry(
         "awaits_you": awaits_you,
         "state": state,
         "new": new,
+    }
+
+
+def answered(text: str, *, is_error: bool = False) -> dict[str, object]:
+    return {"answered": True, "is_error": is_error, "text": text}
+
+
+def unanswered(code: str) -> dict[str, object]:
+    return {"answered": False, "code": code}
+
+
+def act_entry(
+    app_url: str, tool: str, arguments: dict[str, object], outcome: dict[str, object], *, seconds_ago: int = 0
+) -> dict[str, object]:
+    return {
+        "entry": "act",
+        "app": app_url,
+        "seconds_ago": seconds_ago,
+        "tool": tool,
+        "arguments": arguments,
+        "outcome": outcome,
+        "new": False,
     }
 
 
