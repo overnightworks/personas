@@ -18,7 +18,7 @@ from tests.support.history import history_of, view_entry, woke_at_table
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, READ, SAY_TOOL, active, invited, paused
 from tests.support.realm import AGENT_NAME
-from tests.support.songmaker import CREATE_SONG, GENERATE_SONG, ToolsOnlyApp
+from tests.support.songmaker import CREATE_SONG, GENERATE_SONG
 
 pytestmark = pytest.mark.anyio
 
@@ -64,14 +64,6 @@ async def wakes_at_the_same_revision(runner, state, count: int = 2) -> None:
         reads = runner.app.view_reads(TABLE)
         runner.app.show_view(TABLE.id, 1, state)
         await runner.app.until_view_read(TABLE, reads + 1)
-
-
-@pytest.fixture
-async def songmaker(runner):
-    app = ToolsOnlyApp()
-    async with app.serving() as url:
-        runner.add_tools_only_app(app, url)
-        yield app
 
 
 async def test_an_invitation_to_a_view_place_at_an_app_that_binds_no_tools_is_not_accepted_and_nothing_is_read(runner):
