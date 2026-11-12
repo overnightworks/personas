@@ -25,20 +25,30 @@ STATE_BYTES = len('{"hand": "0123456789abcdef"}')
 
 
 def told_line_bytes(
-    app_url: str, place_id: str, text: str, *, seq: int = 1, name: str = SPEAKER, own: bool = False
+    app_url: str,
+    place_id: str,
+    text: str,
+    *,
+    seq: int = 1,
+    name: str = SPEAKER,
+    own: bool = False,
+    spoken: bool = False,
 ) -> int:
     """The bytes a line of a call is told as in the history, its age 0, not new, its text with no escape."""
     told = (
         f'{{"entry": "line", "app": "{app_url}", "place": {{"kind": "call", "id": "{place_id}"}}, "seconds_ago": 0,'
         f' "seq": {seq}, "name": "{name}", "kind": "message", "text": "{text}", "own": {str(own).lower()},'
-        ' "new": false}'
+        f' "spoken": {str(spoken).lower()}, "new": false}}'
     )
     return len(told.encode())
 
 
-def told_day_line_bytes(text: str, *, name: str = SPEAKER, own: bool = False) -> int:
+def told_day_line_bytes(text: str, *, name: str = SPEAKER, own: bool = False, spoken: bool = False) -> int:
     """The bytes a line of the day is told as, its text with no escape."""
-    told = f'{{"name": "{name}", "kind": "message", "text": "{text}", "own": {str(own).lower()}}}'
+    told = (
+        f'{{"name": "{name}", "kind": "message", "text": "{text}", "own": {str(own).lower()},'
+        f' "spoken": {str(spoken).lower()}}}'
+    )
     return len(told.encode())
 
 
@@ -65,6 +75,7 @@ def entry(
     seconds_ago: int = 0,
     name: str = SPEAKER,
     own: bool = False,
+    spoken: bool = False,
     new: bool = False,
 ) -> dict[str, object]:
     return {
@@ -77,6 +88,7 @@ def entry(
         "kind": "message",
         "text": text,
         "own": own,
+        "spoken": spoken,
         "new": new,
     }
 
@@ -164,9 +176,11 @@ async def settled(app: FakeApp, subject: str = SUBJECT) -> None:
         await app.until_standing_read(reads + 1)
 
 
-async def said_and_taken(app: FakeApp, place_id: str, text: str, *, author: str = PERSON, name: str = SPEAKER) -> None:
+async def said_and_taken(
+    app: FakeApp, place_id: str, text: str, *, author: str = PERSON, name: str = SPEAKER, spoken: bool = False
+) -> None:
     reads = app.window_reads(place_id)
-    app.speak(place_id, author, name, text)
+    app.speak(place_id, author, name, text, spoken=spoken)
     await app.until_window_read(place_id, reads + 1)
     await settled(app)
 

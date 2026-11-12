@@ -14,7 +14,6 @@ if TYPE_CHECKING:
 PERSONA_NAME = "mozart"
 GATEWAY_ORIGIN = "http://gateway.test"
 MAX_TOOL_CALLS = 4
-VOICE_WINDOW_BYTES = 8192
 PERSONA_MAX_DURATION_SECONDS = 30
 
 
@@ -49,12 +48,6 @@ class Files:
             f"---\nname: {PERSONA_NAME}\ndescription: persona-{secrets.token_hex(4)}\nappRoles: [admin, user]\n"
             f"model: text/{secrets.token_hex(4)}\nmaxDurationSeconds: {max_duration_seconds}\n{voice}---\n"
             f"{self.persona_prompt}\n"
-        )
-
-    def give_voice(self, max_duration_seconds: int = PERSONA_MAX_DURATION_SECONDS) -> None:
-        """Gives the persona a voice section, which the next ``write`` and config load carry."""
-        self.persona_path.write_text(
-            self.persona_text(max_duration_seconds, voice_window_bytes=VOICE_WINDOW_BYTES), encoding="utf-8"
         )
 
     def valid_text(self, mcp_url: str = "https://hopin.test/mcp", scope: str = "mcp-hopin", *, binds_tools=True) -> str:

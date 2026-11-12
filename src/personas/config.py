@@ -2,7 +2,8 @@
 
 The file holds the realm's token endpoint, the ready file's path, the apps (an MCP URL and its scope) and the agents
 (a client id and the path of the file holding its client secret, and optionally the ``figure`` table, a ``url`` and
-a ``sha256``, that every accept of the agent carries). Which apps an agent may reach
+a ``sha256``, that every accept of the agent carries, and the ``voice`` table, which turns the agent's spoken turns on
+and may name the speech service's voice that every accept of the agent carries). Which apps an agent may reach
 is the realm's group membership, never this file. An app that binds tools to its agents' turns
 names them with their call bound, and then the model gateway and each agent's persona file are required.
 An app with ``listens = false`` serves tools only: it starts no turn, and its bound tools reach the turns of the apps
@@ -29,7 +30,7 @@ from typing import TYPE_CHECKING, Final, Self
 
 from agents.agent_file import AgentDefinition, AgentFileError, load_agent
 from agents.config import AgentConfig  # noqa: TC002 - pydantic resolves the field's type at run time
-from agents.member import SPEAK_TOOL, FigureRef
+from agents.member import SPEAK_TOOL, FigureRef, VoiceName
 from pydantic import (
     AnyHttpUrl,
     BaseModel,
@@ -79,11 +80,20 @@ class AppTarget:
 
 
 @dataclass(frozen=True)
+class Voice:
+    """An agent whose turns at the call places of an app that declares ``speak`` are spoken, in the voice ``name`` the
+    speech service knows, or in the app's default voice."""
+
+    name: VoiceName | None
+
+
+@dataclass(frozen=True)
 class AgentCredentials:
     client_id: str
     client_secret: Secret
     persona: AgentDefinition | None = None
     figure: FigureRef | None = field(default=None, repr=False)
+    voice: Voice | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -153,11 +163,16 @@ class _AppEntry(_Entry):
         return ToolBinding(self.tools, self.max_tool_calls)
 
 
+class _VoiceEntry(_Entry):
+    name: VoiceName | None = None
+
+
 class _AgentEntry(_Entry):
     client_id: str = Field(min_length=1)
     secret_file: Path
     persona_file: Path | None = None
     figure: FigureRef | None = None
+    voice: _VoiceEntry | None = None
 
 
 class _MemoryEntry(_Entry):
@@ -268,6 +283,10 @@ def _read_persona(index: int, path: Path | None) -> AgentDefinition | None:
         raise ConfigError(f"{field_name}: appRoles must include {TURN_ROLE}, the role a turn acts under")
     if persona.picture_size is not None:
         raise ConfigError(f"{field_name}: a picture agent cannot take a turn")
+    if persona.voice_window_bytes is not None:
+        raise ConfigError(
+            f"{field_name}: voice: the voice is set in the agent's [agents.voice] table, not in the persona file"
+        )
     return persona
 
 
@@ -311,6 +330,7 @@ def load_config(environment: Mapping[str, str]) -> Config:
                 _read_secret(f"agents.{index}.secret_file", agent.secret_file),
                 _read_persona(index, agent.persona_file),
                 agent.figure,
+                None if agent.voice is None else Voice(agent.voice.name),
             )
             for index, agent in enumerate(parsed.agents)
         ),

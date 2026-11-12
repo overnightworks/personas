@@ -155,7 +155,7 @@ async def test_a_line_at_an_app_that_declares_no_speak_makes_a_turn_not_told_alo
     assert quiet.said == []
 
 
-async def test_a_line_for_a_persona_without_a_voice_section_makes_a_turn_not_told_aloud_and_its_text_is_not_spoken(
+async def test_a_line_for_an_agent_without_a_voice_table_makes_a_turn_not_told_aloud_and_its_text_is_not_spoken(
     runner,
 ):
     runner.gateway = Gateway(completion("Not spoken."))
@@ -298,17 +298,35 @@ async def test_a_line_heard_while_he_speaks_holds_the_call_after_the_sentence_on
     await a_voice_call(runner, tool_round(first, content=ANSWER), tool_round(again), completion("done"))
     say_in_the_call(runner, ADDRESSED)
     await sleeps.until_began(1)
-    await said_and_taken(runner.app, PLACE_ID, "Anyone there?")
+    await said_and_taken(runner.app, PLACE_ID, "Anyone there?", spoken=True)
     sleeps.release.set()
     await runner.app.said_count(1)
     await runner.gateway.until_answered(3)
 
     (held,) = (json.loads(each) for each in runner.gateway.tool_results(3) if each.startswith('{"sent": false'))
     arrived = held["arrived"]["entries"]
-    assert [each["text"] for each in arrived if each["entry"] == "line" and not each["own"]] == ["Anyone there?"]
+    assert [(each["text"], each["spoken"]) for each in arrived if each["entry"] == "line" and not each["own"]] == [
+        ("Anyone there?", True)
+    ]
     assert [(each["text"], each["new"]) for each in arrived if each["entry"] == "speech"] == [(ANSWER, False)]
     assert runner.app.said == [(SUBJECT, PLACE_ID, "Written.")]
     assert sentences_spoken(runner) == [ANSWER]
+
+
+async def test_the_next_turn_is_told_which_lines_were_said_aloud_and_that_his_own_sentence_was_one(runner):
+    await a_voice_call(runner, completion(ANSWER), completion("done"))
+    say_in_the_call(runner, "Anyone there?", spoken=True)
+    await runner.app.spoken_count(1)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.gateway.until_turns(2)
+
+    second = runner.gateway.turns()[1]
+    assert [(each["text"], each["own"], each["spoken"]) for each in second.told("line")] == [
+        ("Anyone there?", False, True),
+        (ANSWER, True, True),
+        (ADDRESSED, False, False),
+    ]
+    assert [(each["text"], each["new"]) for each in second.told("speech")] == [(ANSWER, False)]
 
 
 async def test_a_spoken_turn_logs_its_start_and_no_sentence(runner, caplog):

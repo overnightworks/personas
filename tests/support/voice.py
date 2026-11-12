@@ -50,15 +50,15 @@ async def ended_by(task):
 
 
 async def a_voice_call(runner, *replies, max_duration_seconds=PERSONA_MAX_DURATION_SECONDS):
-    """The runner restarted in a call of a speaking app, for an agent whose persona has a voice section."""
+    """The runner restarted in a call of a speaking app, for an agent whose entry has a voice table."""
     runner.give_voice(max_duration_seconds)
     runner.gateway = Gateway(*replies)
     await restarted_in_the_call(runner)
 
 
 async def in_a_voice_call_and_at_a_table(runner, *replies):
-    """The runner started for an agent with a voice section, standing in a call and at a table of the same app, and
-    has read the call's window once."""
+    """The runner started for an agent whose entry has a voice table, standing in a call and at a table of the same
+    app, and has read the call's window once."""
     runner.give_voice()
     runner.gateway = Gateway(*replies)
     runner.app.stand(AGENT_SUBJECT, active(PLACE_ID), at_table())
