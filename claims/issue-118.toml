@@ -1,7 +1,0 @@
-claim_id = "33f11ab99ab849a2ba69986dad601413"
-agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
-role = "builder"
-base = "2483bc9af556ba480f35e4234580d2bc32fd1d92"
-branch = "claude/issue-118-the-figures-are-checked-with-figure-v0-3"
-scope = ["README.md", "docs/ARCHITECTURE.md", "scripts/check_figures.sh"]
-opened_commit = "b4479774a0054d8505a6c3e633be2b52a3629049"
