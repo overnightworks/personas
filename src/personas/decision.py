@@ -9,7 +9,7 @@ from __future__ import annotations
 import itertools
 import json
 import math
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
@@ -617,12 +617,12 @@ def _joined(held: Occasion | None, occasion: Occasion) -> Occasion:
 def with_due(turns: Turns, at: AppPlace, occasion: Occasion) -> Turns:
     """A turn due at ``at`` for ``occasion``: a place already due keeps its position, lines of one generation join, and
     lines of another generation or a newer view revision replace what was due."""
-    return replace(turns, due={**turns.due, at: _joined(turns.due.get(at), occasion)})
+    return Turns(turns.running, {**turns.due, at: _joined(turns.due.get(at), occasion)})
 
 
 def without_due(turns: Turns, leaving: Callable[[AppPlace], bool]) -> Turns:
     """The turns without the due places for which ``leaving`` holds."""
-    return replace(turns, due={at: occasion for at, occasion in turns.due.items() if not leaving(at)})
+    return Turns(turns.running, {at: occasion for at, occasion in turns.due.items() if not leaving(at)})
 
 
 def claimed(turns: Turns, app: str) -> tuple[Turns, AppPlace, Occasion] | None:
@@ -633,12 +633,12 @@ def claimed(turns: Turns, app: str) -> tuple[Turns, AppPlace, Occasion] | None:
     at, occasion = next(iter(turns.due.items()))
     if at.app != app:
         return None
-    return replace(without_due(turns, lambda each: each == at), running=True), at, occasion
+    return Turns(True, without_due(turns, lambda each: each == at).due), at, occasion
 
 
 def released(turns: Turns) -> Turns:
     """The turns once the running turn ended; what is due stays."""
-    return replace(turns, running=False)
+    return Turns(False, turns.due)
 
 
 def left_standing(app: str, standings: tuple[Standing, ...]) -> Callable[[AppPlace], bool]:
