@@ -281,6 +281,9 @@ async def test_two_agents_in_one_call_each_say_once_and_then_every_turn_ends_sil
     await runner.app.until_window_read(PLACE_ID)
     say_in_the_call(runner, REMARK)
     await runner.app.said_count(2)
+    seq_of = {line.author: line.seq for line in runner.app.lines[PLACE_ID]}
+    await runner.gateway.until_written_turn(PLACE_ID, seq_of[SUBJECT], user=person_of(SECOND_SUBJECT))
+    await runner.gateway.until_written_turn(PLACE_ID, seq_of[SECOND_SUBJECT], user=person_of(SUBJECT))
     for _ in range(3):
         await settled(runner.app)
     turns = len(runner.gateway.requests)
