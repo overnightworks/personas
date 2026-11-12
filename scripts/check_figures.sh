@@ -9,8 +9,8 @@ set -euo pipefail
 # A directory without a figure is a failure, not an empty loop.
 shopt -s failglob
 
-VERSION='0.2.0'
-INTEGRITY='sha512-4YGqA8NQbEEl6+Q3x8uj3p8ZHDW4mpUlxiEhnkux9upt8ESPh9cY7jFqNXYcTHmyqvAy80vFrhqf5Z13LYr9ug=='
+VERSION='0.3.0'
+INTEGRITY='sha512-1eTIGs9vI8wTxu0/ccogZxJqJRgim4fYt+5I9XIYtv4VOu1XVoHH/4lDP6OY/juh8Jb7bAgxkslfJ0FcQn6UKw=='
 TARBALL_URL="https://github.com/overnightworks/figure/releases/download/v${VERSION}/overnightworks-figure-${VERSION}.tgz"
 
 cd "$(git rev-parse --show-toplevel)"
