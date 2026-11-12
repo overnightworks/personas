@@ -1385,12 +1385,7 @@ def test_the_day_is_the_same_whether_or_not_the_history_holds_views_and_holds_no
     assert told(with_views) == [[(1, "not held")]]
 
 
-@pytest.mark.parametrize(
-    "leaving_out",
-    [history_holding((said(1, "held"), said(2, "held"))), MORNING],
-    ids=["the lines a turn's history holds", "the visit a voice loop is in"],
-)
-def test_what_is_left_out_of_the_day_counts_nothing_toward_its_size_bound(leaving_out):
+def test_what_is_left_out_of_the_day_counts_nothing_toward_its_size_bound():
     two_lines = TodayBounds(hours=24.0, size_bytes=2 * told_day_line_bytes("middle", name="Bo"))
     kept_lines = [
         kept(MORNING, 1, "held" * 20, hours_before=5, name="Bo"),
@@ -1399,7 +1394,7 @@ def test_what_is_left_out_of_the_day_counts_nothing_toward_its_size_bound(leavin
         kept(NOON, 2, "second", hours_before=4, name="Bo"),
     ]
 
-    earlier = earlier_today(kept_lines, LATER, two_lines, leaving_out)
+    earlier = earlier_today(kept_lines, LATER, two_lines, history_holding((said(1, "held"), said(2, "held"))))
 
     assert told(earlier) == [[(1, "middle"), (2, "second")]]
     assert earlier.older_dropped is False

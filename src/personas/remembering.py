@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from datetime import datetime
 
-    from personas.decision import EarlierToday, History, KeptLine, TodayBounds, Visit, WindowRead
+    from personas.decision import EarlierToday, History, KeptLine, TodayBounds, WindowRead
     from personas.reporting import Event
 
 
@@ -60,7 +60,7 @@ class Remembering:
         else:
             self._outage.answered()
 
-    async def read_day(self, now: datetime, leaving_out: History | Visit) -> EarlierToday | None:
+    async def read_day(self, now: datetime, leaving_out: History) -> EarlierToday | None:
         """What the store kept of the agent's day up to ``now`` besides what ``leaving_out`` holds, or nothing without a
         store or a day, or when the store cannot be read now; that failure is reported once, as a write's is."""
         store, bounds = self._store, self._today

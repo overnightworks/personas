@@ -496,18 +496,14 @@ def _newest_that_fit(sizes_newest_first: Iterable[int], size_bytes: int) -> int:
     return sum(1 for total in itertools.accumulate(sizes_newest_first) if total <= size_bytes)
 
 
-def _remaining(kept: Iterable[KeptLine], leaving_out: History | Visit, now: datetime) -> Iterable[KeptLine]:
+def _remaining(kept: Iterable[KeptLine], leaving_out: History, now: datetime) -> Iterable[KeptLine]:
     """The kept lines a turn is still to be told: those the history holds are left out by visit and seq, and those first
-    read after ``now``, which no history of that turn holds yet; a voice loop leaves out the lines of its own visit."""
-    if isinstance(leaving_out, Visit):
-        return (line for line in kept if line.visit != leaving_out)
+    read after ``now``, which no history of that turn holds yet."""
     held = {(entry.visit, entry.seq) for entry in leaving_out.entries if isinstance(entry, KeptLine)}
     return (line for line in kept if (line.visit, line.seq) not in held and line.first_read_at <= now)
 
 
-def earlier_today(
-    kept: Iterable[KeptLine], now: datetime, bounds: TodayBounds, leaving_out: History | Visit
-) -> EarlierToday:
+def earlier_today(kept: Iterable[KeptLine], now: datetime, bounds: TodayBounds, leaving_out: History) -> EarlierToday:
     """The lines of the day a turn is told besides its history: grouped by visit, visits in the order of their first
     line and lines in seq order; past ``size_bytes`` of the lines as told the oldest lines are left out, and what is
     left out beforehand (see ``_remaining``) counts nothing toward that bound."""
