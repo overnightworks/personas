@@ -1,0 +1,8 @@
+claim_id = "c505b5d257f645e1ae65923d05d86c40"
+agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
+role = "builder"
+base = "151dfe5edaa14439de1d45eed07e242ed8d62096"
+branch = "claude/issue-127-his-voice-is-the-deployment-s-and-a-turn"
+scope = ["README.md", "docs/ARCHITECTURE.md", "src/characters/leonardo.md", "src/characters/mozart.md", "src/personas/app_session.py", "src/personas/config.py", "src/personas/decision.py", "src/personas/loop.py", "src/personas/memory.py", "tests"]
+opened_commit = "0b551de16659ceefeb6562d47572c74d5595dbf8"
+whole_reason = "The switch, the name and the persona refusal (6.2) and the spoken mark (6.3) change the same decision module, the same told-line test helpers and the same README paragraphs, and the characters' sentence on answering a written line in writing is false without the mark; tests is a directory."
