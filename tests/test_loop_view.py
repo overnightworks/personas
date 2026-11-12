@@ -110,7 +110,7 @@ async def test_a_table_that_serves_no_view_yet_is_accepted_with_figure_and_voice
     )
     runner.app.stand(SUBJECT, invited(TABLE.id, "inv-3", kind=TABLE.kind))
     runner.start()
-    await runner.reports.until("joined")
+    await runner.reports.until(Event.JOINED)
     [(_, wire)] = runner.app.accepted_on_the_wire
     runner.app.stand(SUBJECT, at_table())
     told = waits(runner, 1)
@@ -126,7 +126,7 @@ async def test_an_invitation_to_a_place_that_serves_a_view_is_accepted_once_and_
     told = []
 
     def seated_once_joined(change):
-        if change.event.value == "joined":
+        if change.event is Event.JOINED:
             runner.app.stand(SUBJECT, at_table())
             told.append(waits(runner, 1))
 
@@ -259,11 +259,11 @@ async def test_a_place_that_leaves_the_standing_during_its_turn_cancels_it_and_i
     await runner.gateway.until_requested(1)
 
     runner.app.stand(SUBJECT)
-    await runner.reports.until("turn_ended")
+    await runner.reports.until(Event.TURN_ENDED)
     runner.app.stand(SUBJECT, at_table())
     await runner.gateway.until_turns(1)
 
-    assert [code for event, code in runner.reports.events() if event == "turn_ended"] == [TURN_CANCELLED_CODE]
+    assert [code for event, code in runner.reports.reported() if event is Event.TURN_ENDED] == [TURN_CANCELLED_CODE]
     assert told_states(runner) == [state]
 
 
@@ -292,7 +292,7 @@ async def test_a_view_he_cannot_read_starts_no_turn_and_fails_nothing_until_the_
     await runner.gateway.until_turns(1)
 
     assert told_states(runner) == [state]
-    assert runner.reports.events() == [("started", None)]
+    assert runner.reports.reported() == [(Event.STARTED, None)]
 
 
 async def test_a_reaction_after_a_turn_that_left_its_revision_waiting_starts_no_second_turn_at_that_revision(runner):
@@ -301,7 +301,7 @@ async def test_a_reaction_after_a_turn_that_left_its_revision_waiting_starts_no_
     reads = runner.app.view_reads(TABLE)
     runner.app.script(READ, cuts)
     runner.app.show_view(TABLE.id, 1, first)
-    await runner.reports.until("resumed")
+    await runner.reports.until(Event.RESUMED)
     await runner.app.until_view_read(TABLE, reads + 1)
     second = waits(runner, 2)
     await runner.gateway.until_turns(2)

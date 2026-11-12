@@ -15,6 +15,7 @@ from agents.turn import Principal, person_fingerprint
 from mcp_types import INVALID_PARAMS, CallToolResult, TextContent
 
 from personas.app_session import READ_SECONDS, open_mcp_session
+from personas.decision import TURN_CANCELLED_CODE
 from personas.failures import Unreachable
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
@@ -213,11 +214,9 @@ async def test_a_tools_only_call_that_fails_is_told_as_not_answered_with_the_fai
 
     acts = [each for each in second.room["history"]["entries"] if each["entry"] == "act"]
     assert acts[0] == a_song(runner, songmaker_url(runner), unanswered(code))
-    assert [
-        (each.event, each.code, each.app)
-        for each in runner.reports.without_completed_turns
-        if each.event is not Event.STARTED
-    ] == [(Event.TOOLS_ONLY_APP_FAILED, code, songmaker_url(runner))]
+    assert runner.reports.reported(apps=True, started=False) == [
+        (Event.TOOLS_ONLY_APP_FAILED, code, songmaker_url(runner))
+    ]
     assert runner.gateway.tool_results(2)[0].startswith("Error")
 
 
@@ -233,11 +232,11 @@ async def a_call_waiting_for_its_app_while_its_place_leaves(runner, songmaker, *
     if tools_only:
         songmaker.script(CALL, hangs_once_entered(entered))
         runner.gateway = Gateway(song_round(1), completion("done"))
-        act = a_song(runner, songmaker_url(runner), unanswered("cancelled"))
+        act = a_song(runner, songmaker_url(runner), unanswered(TURN_CANCELLED_CODE))
     else:
         runner.app.script(CALL, hangs_once_entered(entered))
         runner.gateway = Gateway(say_round(ANSWER), completion("done"))
-        act = a_say(runner, ANSWER, unanswered("cancelled"))
+        act = a_say(runner, ANSWER, unanswered(TURN_CANCELLED_CODE))
     runner.app.stand(SUBJECT, active(PLACE_ID), active(OTHER_CALL_ID))
     runner.start(open_session=open_session)
     await runner.app.until_window_read(PLACE_ID)
@@ -265,7 +264,7 @@ async def test_a_call_cut_in_flight_because_its_place_left_is_told_cancelled_to_
             entry(url_of(runner, 0), OTHER_CALL_ID, ADDRESSED, new=True),
         ]
     )
-    assert runner.reports.events() == [(Event.STARTED, None), (Event.TURN_ENDED, "cancelled")]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
 
 
 async def test_a_call_cut_in_flight_whose_request_ends_as_a_transport_failure_is_told_cancelled_not_network(
@@ -293,7 +292,7 @@ async def test_a_call_cut_in_flight_whose_request_ends_as_a_transport_failure_is
     )
 
     assert second.room["history"]["entries"][1] == act
-    assert runner.reports.events() == [(Event.STARTED, None), (Event.TURN_ENDED, "cancelled")]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
 
 
 async def test_a_say_whose_only_effect_is_an_act_starts_no_further_turn_once_his_own_line_is_read(runner):

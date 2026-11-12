@@ -7,7 +7,7 @@ import secrets
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, NamedTuple, overload
 
 from agents.member import MemberStanding, PlaceEntry, PlaceWindow, Standing
 
@@ -231,10 +231,18 @@ class FakeReadyMarker:
         self.announced += 1
 
 
+class Report(NamedTuple):
+    """One reported state change as a scenario reads it: its event, its code and the address of the app it names."""
+
+    event: Event
+    code: str | None
+    app: str | None
+
+
 class Reports:
     """The state changes a loop reported, in order, and a way to wait for one.
 
-    A turn that ended with its final event is reported with no code; ``events`` and ``until`` leave it out, so a
+    A turn that ended with its final event is reported with no code; ``reported`` and ``until`` leave it out, so a
     scenario reads what went wrong or was cut short, and ``until_a_turn_completed`` waits for it.
     """
 
@@ -254,13 +262,25 @@ class Reports:
     def without_completed_turns(self) -> list[StateChange]:
         return [change for change in self.changes if not self._completes_a_turn(change)]
 
-    def events(self) -> list[tuple[str, str | None]]:
-        return [(change.event.value, change.code) for change in self.without_completed_turns]
+    @overload
+    def reported(self, *, apps: Literal[False] = False, started: bool = True) -> list[tuple[Event, str | None]]: ...
 
-    async def until(self, event: str, *, count: int = 1, limit_seconds: float = 10.0) -> None:
+    @overload
+    def reported(self, *, apps: Literal[True], started: bool = True) -> list[Report]: ...
+
+    def reported(self, *, apps: bool = False, started: bool = True) -> list[tuple[Event, str | None]] | list[Report]:
+        """Each reported change as its event and code, with the address of the app it names when ``apps``."""
+        reports = [
+            Report(change.event, change.code, change.app)
+            for change in self.without_completed_turns
+            if started or change.event is not Event.STARTED
+        ]
+        return reports if apps else [(each.event, each.code) for each in reports]
+
+    async def until(self, event: Event, *, count: int = 1, limit_seconds: float = 10.0) -> None:
         """Returns once this many changes of this event have been reported; fails after the limit."""
         async with asyncio.timeout(limit_seconds):
-            while sum(change.event.value == event for change in self.without_completed_turns) < count:
+            while sum(change.event is event for change in self.without_completed_turns) < count:
                 self._added.clear()
                 await self._added.wait()
 

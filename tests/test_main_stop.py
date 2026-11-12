@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import personas
+from personas.reporting import Event
 from tests.support.configfiles import Files
 
 if TYPE_CHECKING:
@@ -45,7 +46,9 @@ def test_a_sigterm_ends_a_backing_off_runner_with_exit_code_0(tmp_path: Path):
     )
     assert runner.stderr is not None
     backing_off = threading.Event()
-    watcher = threading.Thread(target=_flag_when_logged, args=(runner.stderr, "backoff", backing_off), daemon=True)
+    watcher = threading.Thread(
+        target=_flag_when_logged, args=(runner.stderr, Event.BACKOFF.value, backing_off), daemon=True
+    )
     watcher.start()
     try:
         assert backing_off.wait(WAIT_SECONDS), "the runner never logged a backoff"

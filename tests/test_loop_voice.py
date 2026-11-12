@@ -11,6 +11,7 @@ from agents.tools import ToolOutcome
 from agents.turn import Principal, person_fingerprint
 
 from personas.decision import SPOKEN_WAIT_BOUND_SECONDS
+from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, says, speaks_and_says
 from tests.support.history import REMARK, SPEAKER, said_and_taken, waits
@@ -137,7 +138,7 @@ async def test_a_turn_that_stays_silent_says_nothing_relays_nothing_and_logs_not
 
     assert runner.app.spoken == []
     assert runner.app.said == []
-    assert runner.reports.events() == [("started", None)]
+    assert runner.reports.reported() == [(Event.STARTED, None)]
 
 
 async def test_a_line_at_an_app_that_declares_no_speak_makes_a_turn_not_told_aloud_and_its_text_is_not_spoken(
@@ -185,13 +186,13 @@ async def test_a_refused_sentence_ends_the_turns_speech_but_not_the_turn_and_the
     await a_voice_call(runner, *replies, completion("Later."))
     runner.app.speak_outcomes.append(refusing(refusal))
     say_in_the_call(runner, ADDRESSED)
-    await runner.reports.until("speak_refused")
+    await runner.reports.until(Event.SPEAK_REFUSED)
     await runner.app.said_count(1)
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.app.spoken_count(1)
 
     assert sentences_spoken(runner) == ["Later."]
-    assert runner.reports.events() == [("started", None), ("speak_refused", refusal.value)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.SPEAK_REFUSED, refusal.value)]
     assert runner.app.said == [(SUBJECT, PLACE_ID, "Written.")]
     (refused,) = runner.gateway.turns()[1].told("speech")
     assert (refused["text"], refused["outcome"]) == ("First sentence.", {"answered": True, "refused": refusal.value})
@@ -335,4 +336,4 @@ async def test_a_spoken_turn_logs_its_start_and_no_sentence(runner, caplog):
     await runner.app.spoken_count(1)
 
     logged = [record.getMessage() for record in caplog.get_records("call") if record.name == "personas"]
-    assert [message.split()[0] for message in logged] == ["started"]
+    assert [message.split()[0] for message in logged] == [Event.STARTED.value]

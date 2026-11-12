@@ -10,6 +10,7 @@ from agents.backend.fake_gateway import completion
 from agents.member import FigureRef
 
 from personas.config import Voice
+from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, say_in_the_call
 from tests.support.gateway import Gateway
 from tests.support.history import TABLE
@@ -41,7 +42,7 @@ async def test_an_agent_with_a_named_voice_brings_it_beside_his_figure_to_a_call
     runner.app.stand(SUBJECT, invited(PLACE_ID, "inv-3"))
     other.stand(SUBJECT, invited(TABLE.id, "inv-4", kind=TABLE.kind, serves_view=True))
     runner.start()
-    await runner.reports.until("joined", count=2)
+    await runner.reports.until(Event.JOINED, count=2)
 
     for app in (runner.app, other):
         wire = the_wire_sent(app)
@@ -54,7 +55,7 @@ async def test_an_agent_without_a_named_voice_sends_no_voice_key(runner, voice):
     runner.config = replace(runner.config, agents=(replace(runner.config.agents[0], voice=voice),))
     runner.app.stand(SUBJECT, invited(PLACE_ID, "inv-3"))
     runner.start()
-    await runner.reports.until("joined")
+    await runner.reports.until(Event.JOINED)
 
     [(_, arguments)] = runner.app.accepted_on_the_wire
     assert "voice" not in arguments
@@ -69,7 +70,7 @@ async def test_two_agents_each_bring_their_own_voice_or_none(runner):
     runner.app.stand(SUBJECT, invited(PLACE_ID, "inv-3"))
     runner.app.stand(SECOND_SUBJECT, invited(PLACE_ID, "inv-4"))
     runner.start()
-    await runner.reports.until("joined", count=2)
+    await runner.reports.until(Event.JOINED, count=2)
 
     assert the_voice_sent(runner.app) == VOICE_NAME
     assert the_voice_sent(runner.app, SECOND_SUBJECT) is None

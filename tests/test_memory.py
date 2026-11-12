@@ -345,7 +345,7 @@ async def test_a_runner_whose_store_cannot_be_reached_starts_and_reports_the_fai
     say_in_the_call(runner, "Second line")
     await runner.lines.until_finished(2)
 
-    assert runner.reports.events() == [("started", None), ("store_failed", STORE_UNREACHABLE_CODE)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.STORE_FAILED, STORE_UNREACHABLE_CODE)]
     await runner.lines.close()
 
 
@@ -474,7 +474,7 @@ async def test_a_read_slower_than_its_bound_is_cut_as_a_timeout_and_the_turn_ans
         await store.close()
 
     assert "earlier_today" not in runner.gateway.openings()[0].room
-    assert runner.reports.events().count(("store_failed", STORE_TIMEOUT_CODE)) == 1
+    assert runner.reports.reported().count((Event.STORE_FAILED, STORE_TIMEOUT_CODE)) == 1
 
 
 async def test_every_line_first_read_before_the_time_is_erased_of_every_agent_whether_or_not_it_is_configured(

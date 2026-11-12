@@ -9,6 +9,7 @@ import pytest
 from agents.member import FigureRef
 
 from personas.config import load_config
+from personas.reporting import Event
 from tests.support.history import TABLE
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import invited
@@ -38,7 +39,7 @@ async def test_an_agent_with_a_figure_brings_it_to_a_call(runner):
     brings(runner, figure)
     runner.app.stand(SUBJECT, invited("room-7", "inv-3"))
     runner.start()
-    await runner.reports.until("joined")
+    await runner.reports.until(Event.JOINED)
 
     assert the_figure_sent(runner.app) == {"url": figure.url, "sha256": figure.sha256}
 
@@ -48,7 +49,7 @@ async def test_the_same_agent_brings_his_figure_to_a_table_of_a_second_app(runne
     brings(runner, figure)
     other.stand(SUBJECT, invited(TABLE.id, "inv-4", kind=TABLE.kind, serves_view=True))
     runner.start()
-    await runner.reports.until("joined")
+    await runner.reports.until(Event.JOINED)
 
     assert the_figure_sent(other) == {"url": figure.url, "sha256": figure.sha256}
 
@@ -56,7 +57,7 @@ async def test_the_same_agent_brings_his_figure_to_a_table_of_a_second_app(runne
 async def test_an_agent_without_a_figure_sends_no_figure_key(runner):
     runner.app.stand(SUBJECT, invited("room-7", "inv-3"))
     runner.start()
-    await runner.reports.until("joined")
+    await runner.reports.until(Event.JOINED)
 
     [(_, arguments)] = runner.app.accepted_on_the_wire
     assert "figure" not in arguments
@@ -72,7 +73,7 @@ async def test_two_agents_each_bring_their_own_figure_or_none(runner):
     runner.app.stand(SUBJECT, invited("room-7", "inv-3"))
     runner.app.stand(SECOND_SUBJECT, invited("room-7", "inv-4"))
     runner.start()
-    await runner.reports.until("joined", count=2)
+    await runner.reports.until(Event.JOINED, count=2)
 
     assert the_figure_sent(runner.app) == {"url": figure.url, "sha256": figure.sha256}
     assert the_figure_sent(runner.app, SECOND_SUBJECT) is None

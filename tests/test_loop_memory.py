@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from personas.failures import STORE_TIMEOUT_CODE, STORE_UNREACHABLE_CODE, StoreUnavailable
+from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import memory_target
 from tests.support.gateway import Gateway, says
@@ -22,7 +23,7 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.anyio
 
-OUTAGE_EVENTS = {"backoff", "suspended"}
+OUTAGE_EVENTS = {Event.BACKOFF, Event.SUSPENDED}
 
 
 class ScriptedStore:
@@ -81,13 +82,13 @@ async def test_a_store_that_is_down_is_reported_once_and_costs_no_answer_and_the
     await store.until_attempts(2)
     store.failure = None
     say_in_the_call(runner, "A line once it is back")
-    await runner.reports.until("store_resumed")
+    await runner.reports.until(Event.STORE_RESUMED)
 
     assert runner.app.said == [(runner.app_principal.sub, PLACE_ID, ANSWER)]
-    assert runner.reports.events() == [
-        ("started", None),
-        ("store_failed", STORE_UNREACHABLE_CODE),
-        ("store_resumed", None),
+    assert runner.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.STORE_FAILED, STORE_UNREACHABLE_CODE),
+        (Event.STORE_RESUMED, None),
     ]
     assert store.seqs_kept()[-3:] == [1, 2, 3]
 
@@ -104,10 +105,10 @@ async def test_a_write_that_ends_in_a_timeout_is_reported_by_its_code_and_the_tu
     assert runner.gateway.requests == []
     store.release.set()
     await runner.app.said_count(1)
-    await runner.reports.until("store_failed")
+    await runner.reports.until(Event.STORE_FAILED)
 
-    assert ("store_failed", STORE_TIMEOUT_CODE) in runner.reports.events()
-    assert not OUTAGE_EVENTS & {event for event, _ in runner.reports.events()}
+    assert (Event.STORE_FAILED, STORE_TIMEOUT_CODE) in runner.reports.reported()
+    assert not OUTAGE_EVENTS & {event for event, _ in runner.reports.reported()}
 
 
 async def test_a_store_that_cannot_be_read_when_a_turn_starts_costs_no_answer_and_is_reported_once(runner):
@@ -119,12 +120,12 @@ async def test_a_store_that_cannot_be_read_when_a_turn_starts_costs_no_answer_an
     say_in_the_call(runner, ADDRESSED)
     await runner.app.said_count(1)
     await runner.gateway.until_requested(2)
-    await runner.reports.until("store_resumed")
+    await runner.reports.until(Event.STORE_RESUMED)
 
     assert runner.app.said == [(runner.app_principal.sub, PLACE_ID, ANSWER)]
     assert "earlier_today" not in runner.gateway.openings()[0].room
-    assert runner.reports.events() == [
-        ("started", None),
-        ("store_failed", STORE_UNREACHABLE_CODE),
-        ("store_resumed", None),
+    assert runner.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.STORE_FAILED, STORE_UNREACHABLE_CODE),
+        (Event.STORE_RESUMED, None),
     ]

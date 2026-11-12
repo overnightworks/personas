@@ -292,7 +292,7 @@ def test_an_addressed_line_gets_one_say_through_the_entry_point_and_nothing_secr
     assert [type(leaf) for leaf in leaves_of(ended.value)] == [Stop]
     assert world.app.said == [(AGENT_SUBJECT, "room-7", answer)]
     logged = formatted(caplog.get_records("call"))
-    assert "started" in logged
+    assert Event.STARTED.value in logged
     for held in (world.files.secret, world.files.gateway_key, *world.issued, *world.app.kept_out_of_logs()):
         assert held not in logged
 

@@ -24,6 +24,7 @@ from personas.decision import (
 from personas.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer, leaves_of
 from personas.loop import AgentLoop, Boundaries
 from personas.mind import Mind
+from personas.reporting import Event
 from tests.support.fakes import (
     FakeClock,
     FakeReadyMarker,
@@ -47,7 +48,7 @@ async def test_an_invitation_is_accepted_once_with_its_place_invitation_and_epoc
     await run.play()
 
     assert run.session.accepted == [Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 2)]
-    assert run.reports.events() == [("started", None), ("joined", None)]
+    assert run.reports.reported() == [(Event.STARTED, None), (Event.JOINED, None)]
 
 
 async def test_a_stale_invitation_is_not_retried_and_is_reported_once(scenario):
@@ -60,7 +61,10 @@ async def test_a_stale_invitation_is_not_retried_and_is_reported_once(scenario):
     await run.play()
 
     assert len(run.session.accepted) == 1
-    assert run.reports.events() == [("started", None), ("refused", "stale_invitation")]
+    assert run.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.REFUSED, AcceptInvitationRefusal.STALE_INVITATION.value),
+    ]
 
 
 @pytest.mark.parametrize(
@@ -76,7 +80,7 @@ async def test_a_transient_refusal_is_retried_at_the_next_answer_and_reported_on
     await run.play()
 
     assert len(run.session.accepted) == 3
-    assert run.reports.events() == [("started", None), ("refused", refusal.value), ("joined", None)]
+    assert run.reports.reported() == [(Event.STARTED, None), (Event.REFUSED, refusal.value), (Event.JOINED, None)]
 
 
 async def test_a_token_is_renewed_before_it_expires_and_never_sent_expired(scenario):
@@ -108,7 +112,7 @@ async def test_a_refused_token_suspends_the_loop_without_an_app_call_and_logs_it
 
     assert run.session.opened == 0
     assert run.clock.slept == [SUSPENDED_RETRY_SECONDS] * 3
-    assert run.reports.events() == [("started", None), ("suspended", "http_401")]
+    assert run.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, "http_401")]
 
 
 @pytest.mark.parametrize(
@@ -127,7 +131,7 @@ async def test_an_app_refusal_suspends_the_loop_and_it_resumes_when_a_read_answe
     await run.play()
 
     assert run.clock.slept == [SUSPENDED_RETRY_SECONDS] * 2
-    assert run.reports.events() == [("started", None), ("suspended", code), ("resumed", None)]
+    assert run.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, code), (Event.RESUMED, None)]
     assert run.tokens.fetched == 3
 
 
@@ -138,7 +142,7 @@ async def test_a_401_renews_the_token_once_and_a_second_one_suspends_the_loop(sc
 
     assert run.tokens.fetched == 3
     assert run.clock.slept == [SUSPENDED_RETRY_SECONDS]
-    assert run.reports.events() == [("started", None), ("suspended", "http_401"), ("resumed", None)]
+    assert run.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, "http_401"), (Event.RESUMED, None)]
 
 
 async def test_a_401_the_renewed_token_cures_suspends_nothing(scenario):
@@ -147,7 +151,7 @@ async def test_a_401_the_renewed_token_cures_suspends_nothing(scenario):
     await run.play()
 
     assert run.clock.slept == []
-    assert run.reports.events() == [("started", None)]
+    assert run.reports.reported() == [(Event.STARTED, None)]
 
 
 async def test_a_loop_resumed_after_a_suspension_joins_only_when_invited_anew(scenario):
@@ -157,11 +161,11 @@ async def test_a_loop_resumed_after_a_suspension_joins_only_when_invited_anew(sc
 
     await run.play()
 
-    assert run.reports.events() == [
-        ("started", None),
-        ("suspended", "http_403"),
-        ("resumed", None),
-        ("joined", None),
+    assert run.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.SUSPENDED, "http_403"),
+        (Event.RESUMED, None),
+        (Event.JOINED, None),
     ]
     assert run.session.accepted == [Accept(PlaceRef(kind="call", id="room-7"), "inv-9", 0)]
 
@@ -182,7 +186,7 @@ async def test_an_app_failure_that_is_not_a_refusal_backs_off_with_a_capped_grow
     assert run.clock.slept == [backoff_delay(attempt) for attempt in range(1, failures + 1)]
     assert max(run.clock.slept) == BACKOFF_CAP_SECONDS
     assert min(run.clock.slept) > 0
-    assert run.reports.events() == [("started", None), ("backoff", code)]
+    assert run.reports.reported() == [(Event.STARTED, None), (Event.BACKOFF, code)]
 
 
 async def test_a_realm_that_does_not_answer_or_fails_backs_off_without_suspending(scenario):
@@ -192,7 +196,7 @@ async def test_a_realm_that_does_not_answer_or_fails_backs_off_without_suspendin
     await run.play()
 
     assert run.clock.slept == [backoff_delay(1), backoff_delay(2), backoff_delay(3)]
-    assert run.reports.events() == [("started", None), ("backoff", "network")]
+    assert run.reports.reported() == [(Event.STARTED, None), (Event.BACKOFF, "network")]
 
 
 async def test_the_backoff_starts_over_after_an_answer(scenario):
@@ -211,13 +215,13 @@ async def test_an_accept_the_app_cannot_answer_suspends_the_loop_with_its_code_a
     await run.play()
 
     assert run.clock.slept == [SUSPENDED_RETRY_SECONDS] * 2
-    assert run.reports.events() == [
-        ("started", None),
-        ("suspended", "jsonrpc_-32602"),
-        ("resumed", None),
-        ("suspended", "jsonrpc_-32602"),
-        ("resumed", None),
-        ("joined", None),
+    assert run.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.SUSPENDED, "jsonrpc_-32602"),
+        (Event.RESUMED, None),
+        (Event.SUSPENDED, "jsonrpc_-32602"),
+        (Event.RESUMED, None),
+        (Event.JOINED, None),
     ]
 
 
@@ -230,13 +234,13 @@ async def test_a_loop_resumes_once_a_read_answers_though_the_accept_after_it_fai
 
     await run.play()
 
-    assert run.reports.events() == [
-        ("started", None),
-        ("suspended", "jsonrpc_-32602"),
-        ("resumed", None),
-        ("backoff", "http_503"),
-        ("resumed", None),
-        ("joined", None),
+    assert run.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.SUSPENDED, "jsonrpc_-32602"),
+        (Event.RESUMED, None),
+        (Event.BACKOFF, "http_503"),
+        (Event.RESUMED, None),
+        (Event.JOINED, None),
     ]
 
 
@@ -250,7 +254,7 @@ async def test_an_accept_that_answers_401_again_after_a_renewal_suspends_the_loo
     await run.play()
 
     assert run.clock.slept == [SUSPENDED_RETRY_SECONDS]
-    assert run.reports.events()[:2] == [("started", None), ("suspended", "http_401")]
+    assert run.reports.reported()[:2] == [(Event.STARTED, None), (Event.SUSPENDED, "http_401")]
 
 
 async def test_an_accept_that_fails_on_the_network_backs_off_and_does_not_retry_every_second(scenario):
@@ -299,12 +303,12 @@ async def test_a_backoff_is_logged_once_for_its_retries_and_again_after_the_loop
 
     await run.play()
 
-    assert run.reports.events() == [
-        ("started", None),
-        ("backoff", "network"),
-        ("resumed", None),
-        ("backoff", "http_503"),
-        ("resumed", None),
+    assert run.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.BACKOFF, "network"),
+        (Event.RESUMED, None),
+        (Event.BACKOFF, "http_503"),
+        (Event.RESUMED, None),
     ]
 
 
@@ -313,11 +317,11 @@ async def test_a_backoff_after_a_suspension_is_logged_and_one_answer_resumes_bot
 
     await run.play()
 
-    assert run.reports.events() == [
-        ("started", None),
-        ("suspended", "http_403"),
-        ("backoff", "network"),
-        ("resumed", None),
+    assert run.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.SUSPENDED, "http_403"),
+        (Event.BACKOFF, "network"),
+        (Event.RESUMED, None),
     ]
 
 
@@ -348,7 +352,10 @@ async def test_a_place_gone_between_the_read_and_the_accept_is_the_refusal_and_n
 
     await run.play()
 
-    assert run.reports.events() == [("started", None), ("refused", "stale_invitation")]
+    assert run.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.REFUSED, AcceptInvitationRefusal.STALE_INVITATION.value),
+    ]
     assert run.clock.slept == []
 
 
@@ -359,7 +366,7 @@ async def test_a_refusal_and_a_network_failure_leaving_one_session_together_susp
     await run.play()
 
     assert run.clock.slept == [SUSPENDED_RETRY_SECONDS]
-    assert run.reports.events() == [("started", None), ("suspended", "http_403"), ("resumed", None)]
+    assert run.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, "http_403"), (Event.RESUMED, None)]
 
 
 async def test_a_failure_together_with_a_programming_error_ends_the_runner_with_both_and_no_reaction(scenario):
@@ -371,7 +378,7 @@ async def test_a_failure_together_with_a_programming_error_ends_the_runner_with_
 
     assert list(leaves_of(ended.value)) == [failure, defect]
     assert run.clock.slept == []
-    assert run.reports.events() == [("started", None)]
+    assert run.reports.reported() == [(Event.STARTED, None)]
 
 
 class _Wakes:
@@ -488,7 +495,7 @@ async def test_a_lifecycle_and_a_turn_failing_together_give_one_reaction_and_a_r
         await asyncio.gather(task, return_exceptions=True)
 
     assert together.clock.slept == [SUSPENDED_RETRY_SECONDS]
-    assert together.reports.events() == [("started", None), ("joined", None), ("suspended", "http_403")]
+    assert together.reports.reported() == [(Event.STARTED, None), (Event.JOINED, None), (Event.SUSPENDED, "http_403")]
 
 
 async def test_a_failure_of_a_call_and_a_defect_together_give_no_reaction_and_every_leaf_ends_the_runner(files):
@@ -503,7 +510,7 @@ async def test_a_failure_of_a_call_and_a_defect_together_give_no_reaction_and_ev
 
     assert sorted(leaves_of(ended.value), key=repr) == sorted([failure, defect], key=repr)
     assert together.clock.slept == []
-    assert together.reports.events() == [("started", None), ("joined", None)]
+    assert together.reports.reported() == [(Event.STARTED, None), (Event.JOINED, None)]
 
 
 class SwallowedCancellation(TurnAndLifecycle):
@@ -559,7 +566,7 @@ async def test_a_cancelled_turn_whose_opener_swallowed_it_reports_nothing_calls_
     assert isinstance(ended, asyncio.CancelledError)
     assert swallowed.relayed == []
     assert swallowed.clock.slept == []
-    assert swallowed.reports.events() == [("started", None), ("joined", None)]
+    assert swallowed.reports.reported() == [(Event.STARTED, None), (Event.JOINED, None)]
 
 
 class _TurnThatEnds:
@@ -626,7 +633,7 @@ class TurnEndingInTheStepItsPlaceLeaves(TurnAndLifecycle):
 @pytest.mark.parametrize(
     ("ending", "own_reports", "sleeps"),
     [
-        ("stop", [("turn_ended", "busy")], []),
+        ("stop", [(Event.TURN_ENDED, RejectionCode.BUSY.value)], []),
         ("completion", [], []),
         ("relayed failure", [], [backoff_delay(1)]),
     ],
@@ -646,7 +653,7 @@ async def test_a_turn_that_ends_on_its_own_in_the_step_its_place_leaves_reports_
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
 
-    assert [event for event in together.reports.events() if event[0] == "turn_ended"] == own_reports
+    assert [event for event in together.reports.reported() if event[0] is Event.TURN_ENDED] == own_reports
     assert together.clock.slept == sleeps
 
 
@@ -764,7 +771,7 @@ async def test_a_failure_of_the_wake_stream_that_loses_the_race_to_a_failing_rea
         await asyncio.gather(task, return_exceptions=True)
 
     assert failing.clock.slept == [SUSPENDED_RETRY_SECONDS]
-    assert failing.reports.events() == [("started", None), ("suspended", "http_403")]
+    assert failing.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, "http_403")]
 
 
 class DefectInARelayedCall(ScriptedSessions):
@@ -827,4 +834,4 @@ async def test_a_relayed_call_that_raises_a_defect_ends_the_runner_loud_with_eve
     assert raising.requests_at_failure == 1
     assert len(raising.gateway.requests) == 1
     assert raising.clock.slept == []
-    assert raising.reports.events() == [("started", None), ("joined", None)]
+    assert raising.reports.reported() == [(Event.STARTED, None), (Event.JOINED, None)]

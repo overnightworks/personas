@@ -11,6 +11,7 @@ from agents.backend.fake_gateway import Reply, completion
 from agents.turn import Principal, person_fingerprint
 
 from personas.decision import TURN_CANCELLED_CODE
+from personas.reporting import Event
 from tests.support.call import ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import BUDGET_SPENT, Gateway, says, says_after_a_hold
 from tests.support.history import (
@@ -36,11 +37,6 @@ pytestmark = pytest.mark.anyio
 
 AGAIN = "And once more."
 SECOND_AGENT, SECOND_SUBJECT, SECOND_NAME = "agent-bach", "agent-subject-2", "Bach"
-
-
-def reported(runner) -> list[tuple[str, str | None]]:
-    """What the loops reported besides the start of each."""
-    return [each for each in runner.reports.events() if each != ("started", None)]
 
 
 def turn_order(runner) -> list[tuple[int, str]]:
@@ -104,7 +100,7 @@ async def test_a_turn_that_calls_nothing_says_nothing_reports_nothing_and_gives_
     await settled(runner.app)
 
     assert runner.app.said == []
-    assert reported(runner) == []
+    assert runner.reports.reported(started=False) == []
     assert len(runner.gateway.requests) == 1
     assert [each["entry"] for each in runner.gateway.openings()[0].room["history"]["entries"]] == ["line"]
 
@@ -324,8 +320,8 @@ async def test_a_relayed_call_that_fails_at_one_app_ends_its_turn_and_the_turn_d
     await runner.gateway.until_turns(2, why="lines")
 
     assert turn_order(runner) == [(0, "lines"), (1, "lines")]
-    await runner.reports.until("resumed")
-    assert reported(runner) == [("backoff", "network"), ("resumed", None)]
+    await runner.reports.until(Event.RESUMED)
+    assert runner.reports.reported(started=False) == [(Event.BACKOFF, "network"), (Event.RESUMED, None)]
     assert runner.gateway.round_sizes() == [2, 4, 2]
 
 
@@ -355,7 +351,7 @@ async def test_while_a_cancelled_turn_still_unwinds_no_turn_of_his_starts_at_ano
         unwinding.release.set()
 
     assert turn_order(runner) == [(1, "lines")]
-    assert reported(runner) == [("turn_ended", TURN_CANCELLED_CODE)]
+    assert runner.reports.reported(started=False) == [(Event.TURN_ENDED, TURN_CANCELLED_CODE)]
 
 
 @pytest.mark.parametrize("leaves", ["gone", "paused"], ids=["the place is gone", "the place is paused"])
@@ -441,7 +437,7 @@ async def test_a_turn_that_ends_short_is_reported_and_the_turn_due_at_another_ap
     await runner.gateway.until_turns(2, why="lines")
 
     assert turn_order(runner) == [(0, "lines"), (1, "lines")]
-    assert [event for event, _ in reported(runner)] == ["turn_ended"]
+    assert [event for event, _ in runner.reports.reported(started=False)] == [Event.TURN_ENDED]
 
 
 async def test_a_loop_that_renews_its_token_keeps_its_due_place_and_that_place_goes_before_a_younger_one(runner, other):
@@ -457,7 +453,7 @@ async def test_a_loop_that_renews_its_token_keeps_its_due_place_and_that_place_g
 
     assert turn_order(runner) == [(0, "lines"), (1, "lines"), (0, "lines")]
     assert runner.gateway.openings()[1].new_seqs == [1]
-    assert reported(runner) == []
+    assert runner.reports.reported(started=False) == []
 
 
 async def test_a_call_whose_window_the_app_lost_keeps_its_due_and_its_turn_runs_before_a_younger_place(runner, other):

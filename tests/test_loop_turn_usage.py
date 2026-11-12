@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from agents.backend.fake_gateway import completion, tool_round
 
+from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, say
 from tests.support.hopin import formatted
@@ -54,6 +55,8 @@ async def test_a_turn_that_ends_with_its_final_event_logs_the_tokens_it_used_or_
     say_in_the_call(runner, ADDRESSED, spoken=aloud)
     await runner.reports.until_a_turn_completed()
 
-    ended = [line for line in formatted(caplog.get_records("call")).splitlines() if line.startswith("turn_ended")]
+    ended = [
+        line for line in formatted(caplog.get_records("call")).splitlines() if line.startswith(Event.TURN_ENDED.value)
+    ]
     assert len(ended) == 1
     assert ended[0].endswith(f" code=-{counts}")

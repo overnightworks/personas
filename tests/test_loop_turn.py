@@ -13,7 +13,7 @@ from agents.member import (
     place_window_uri,
 )
 from agents.tools import ToolOutcome
-from agents.turn import person_fingerprint
+from agents.turn import FailureCode, RejectionCode, person_fingerprint
 from mcp_types import (
     INVALID_PARAMS,
     ListToolsResult,
@@ -21,7 +21,7 @@ from mcp_types import (
 
 from personas import app_session
 from personas.config import load_config
-from personas.decision import TOOL_NOT_DECLARED_CODE
+from personas.decision import TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE
 from personas.failures import (
     Unreachable,
     leaves_of,
@@ -60,7 +60,7 @@ async def test_an_addressed_line_gets_exactly_one_say_under_the_agents_own_finge
     assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1]]
     assert runner.gateway.openings()[0].system == runner.files.persona_prompt
     assert runner.gateway.users() == {person_fingerprint(runner.app_principal)}
-    assert runner.reports.events() == [("started", None)]
+    assert runner.reports.reported() == [(Event.STARTED, None)]
 
 
 async def test_his_own_line_naming_him_starts_no_turn(runner):
@@ -164,7 +164,11 @@ async def test_a_line_said_while_a_turn_ran_is_answered_once_that_turn_ends_thou
 
     assert runner.gateway.round_sizes() == [2, 2, 4]
     assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [2]]
-    assert runner.reports.events()[:3] == [("started", None), ("joined", None), ("turn_ended", "busy")]
+    assert runner.reports.reported()[:3] == [
+        (Event.STARTED, None),
+        (Event.JOINED, None),
+        (Event.TURN_ENDED, RejectionCode.BUSY.value),
+    ]
 
 
 async def test_a_line_said_while_a_turn_ran_is_read_at_once_and_answered_after_a_turn_that_spoke(runner):
@@ -196,13 +200,13 @@ async def test_every_line_addressed_to_him_gets_its_own_turn_one_after_the_other
     await restarted_in_the_call(runner)
     for round_number in range(1, 4):
         say_in_the_call(runner, f"{ADDRESSED} Round {round_number}.")
-        await runner.reports.until("turn_ended", count=round_number)
+        await runner.reports.until(Event.TURN_ENDED, count=round_number)
 
     assert len(runner.gateway.openings()) == 3
-    assert [code for event, code in runner.reports.events() if event == "turn_ended"] == [
-        "busy",
-        "budget_spent",
-        "busy",
+    assert [code for event, code in runner.reports.reported() if event is Event.TURN_ENDED] == [
+        RejectionCode.BUSY.value,
+        RejectionCode.BUDGET_SPENT.value,
+        RejectionCode.BUSY.value,
     ]
 
 
@@ -210,9 +214,9 @@ async def a_turn_ended_short(runner, code):
     """Runs the runner on one addressed line until its turn reported this code."""
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
-    await runner.reports.until("turn_ended")
+    await runner.reports.until(Event.TURN_ENDED)
 
-    assert runner.reports.events() == [("started", None), ("turn_ended", code)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, code)]
     assert runner.app.said == []
     assert runner.clock.slept == []
     assert not runner.task.done()
@@ -222,10 +226,10 @@ async def a_turn_ended_short(runner, code):
 @pytest.mark.parametrize(
     ("reply", "code"),
     [
-        (Reply(status=HTTPStatus.TOO_MANY_REQUESTS, headers={"Retry-After": "3"}), "busy"),
-        (Reply(status=HTTPStatus.FORBIDDEN), "provider_unavailable"),
-        (Reply(status=HTTPStatus.SERVICE_UNAVAILABLE), "provider_unavailable"),
-        (BUDGET_SPENT, "budget_spent"),
+        (Reply(status=HTTPStatus.TOO_MANY_REQUESTS, headers={"Retry-After": "3"}), RejectionCode.BUSY.value),
+        (Reply(status=HTTPStatus.FORBIDDEN), FailureCode.PROVIDER_UNAVAILABLE.value),
+        (Reply(status=HTTPStatus.SERVICE_UNAVAILABLE), FailureCode.PROVIDER_UNAVAILABLE.value),
+        (BUDGET_SPENT, RejectionCode.BUDGET_SPENT.value),
     ],
     ids=["rate limited", "refused", "failing", "budget spent"],
 )
@@ -240,7 +244,7 @@ async def test_a_gateway_refusal_is_silent_logs_one_code_and_leaves_the_lifecycl
 async def test_a_key_the_gateway_cannot_use_ends_the_turn_before_any_gateway_call(runner):
     runner.files.key_path.write_text("a key with spaces\n", encoding="utf-8")
 
-    await a_turn_ended_short(runner, "provider_unavailable")
+    await a_turn_ended_short(runner, FailureCode.PROVIDER_UNAVAILABLE.value)
 
     assert runner.gateway.requests == []
 
@@ -248,7 +252,7 @@ async def test_a_key_the_gateway_cannot_use_ends_the_turn_before_any_gateway_cal
 async def test_a_missing_api_group_is_refused_with_no_gateway_call(runner):
     runner.realm.groups = []
 
-    await a_turn_ended_short(runner, "not_enabled")
+    await a_turn_ended_short(runner, RejectionCode.NOT_ENABLED.value)
 
     assert runner.gateway.requests == []
 
@@ -264,7 +268,7 @@ async def test_a_tool_that_answers_gone_shows_the_model_that_and_leaves_the_life
 
     assert gone.content in runner.gateway.requests[1].content.decode()
     assert runner.app.said == []
-    assert runner.reports.events() == [("started", None)]
+    assert runner.reports.reported() == [(Event.STARTED, None)]
     assert runner.clock.slept == []
 
 
@@ -290,10 +294,10 @@ async def answers_wrongly(reply):
 @pytest.mark.parametrize(
     ("method", "fails", "events"),
     [
-        (DISCOVER, cuts, [("started", None), ("backoff", "network"), ("resumed", None)]),
-        (LIST_TOOLS, cuts, [("started", None), ("backoff", "network"), ("resumed", None)]),
-        (DISCOVER, refuses_the_token, [("started", None)]),
-        (LIST_TOOLS, refuses_the_token, [("started", None)]),
+        (DISCOVER, cuts, [(Event.STARTED, None), (Event.BACKOFF, "network"), (Event.RESUMED, None)]),
+        (LIST_TOOLS, cuts, [(Event.STARTED, None), (Event.BACKOFF, "network"), (Event.RESUMED, None)]),
+        (DISCOVER, refuses_the_token, [(Event.STARTED, None)]),
+        (LIST_TOOLS, refuses_the_token, [(Event.STARTED, None)]),
     ],
     ids=["discovery cut", "tool listing cut", "discovery refuses the token", "tool listing refuses the token"],
 )
@@ -309,7 +313,7 @@ async def test_a_turn_whose_session_fails_before_the_model_is_asked_leads_to_one
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.app.said_count(1)
 
-    assert runner.reports.events() == events
+    assert runner.reports.reported() == events
     assert [opening.new_seqs for opening in runner.gateway.openings()] == [[2]]
     assert len(runner.realm.issued) == (2 if fails is refuses_the_token else 1)
 
@@ -325,14 +329,14 @@ async def test_a_turn_ended_short_beside_a_late_answer_is_reported_and_costs_one
     runner.gateway = Gateway(Reply(status=HTTPStatus.TOO_MANY_REQUESTS))
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
-    await runner.reports.until("resumed")
+    await runner.reports.until(Event.RESUMED)
     await runner.app.log.until(LISTEN, 2)
 
-    assert runner.reports.events() == [
-        ("started", None),
-        ("turn_ended", "busy"),
-        ("backoff", "network"),
-        ("resumed", None),
+    assert runner.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.TURN_ENDED, RejectionCode.BUSY.value),
+        (Event.BACKOFF, "network"),
+        (Event.RESUMED, None),
     ]
     assert not runner.task.done()
     assert len(runner.gateway.requests) == 1
@@ -355,7 +359,7 @@ async def test_a_turn_failure_cancelling_a_lifecycle_that_unwinds_with_a_late_an
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.app.said_count(1)
 
-    assert runner.reports.events() == [("started", None), ("backoff", "network"), ("resumed", None)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.BACKOFF, "network"), (Event.RESUMED, None)]
     assert [opening.new_seqs for opening in runner.gateway.openings()] == [[2]]
 
 
@@ -370,9 +374,13 @@ async def relayed_say_fails(runner, fails):
 @pytest.mark.parametrize(
     ("fails", "events", "issued"),
     [
-        (cuts, [("started", None), ("backoff", "network"), ("resumed", None)], 1),
-        (refuses_the_token, [("started", None)], 2),
-        (answers_wrongly, [("started", None), ("suspended", f"jsonrpc_{INVALID_PARAMS}"), ("resumed", None)], 2),
+        (cuts, [(Event.STARTED, None), (Event.BACKOFF, "network"), (Event.RESUMED, None)], 1),
+        (refuses_the_token, [(Event.STARTED, None)], 2),
+        (
+            answers_wrongly,
+            [(Event.STARTED, None), (Event.SUSPENDED, f"jsonrpc_{INVALID_PARAMS}"), (Event.RESUMED, None)],
+            2,
+        ),
     ],
     ids=["transport", "401", "protocol error"],
 )
@@ -385,7 +393,7 @@ async def test_a_relayed_call_that_fails_ends_the_turn_after_one_round_and_leads
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.gateway.until_requested(3)
 
-    assert runner.reports.events() == events
+    assert runner.reports.reported() == events
     assert runner.gateway.round_sizes() == [2, 2, 4]
     assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [2]]
     assert len(runner.realm.issued) == issued
@@ -395,9 +403,9 @@ async def test_a_relayed_call_beside_a_late_answer_gives_one_reaction_and_no_tur
     failing = transport_closing_with_late_answers(echo=anyio.BrokenResourceError, only_close=1)
     monkeypatch.setattr(app_session, "streamable_http_client", failing)
     await relayed_say_fails(runner, cuts)
-    await runner.reports.until("resumed")
+    await runner.reports.until(Event.RESUMED)
 
-    assert runner.reports.events() == [("started", None), ("backoff", "network"), ("resumed", None)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.BACKOFF, "network"), (Event.RESUMED, None)]
     assert len(runner.gateway.requests) == 1
     assert not runner.task.done()
 
@@ -413,7 +421,7 @@ async def test_a_relayed_call_that_fails_beside_a_defect_of_the_turns_teardown_e
         (ended,) = await asyncio.gather(runner.task, return_exceptions=True)
 
     assert sorted(type(leaf).__name__ for leaf in leaves_of(ended)) == [RuntimeError.__name__, Unreachable.__name__]
-    assert runner.reports.events() == [("started", None)]
+    assert runner.reports.reported() == [(Event.STARTED, None)]
     assert len(runner.gateway.requests) == 1
 
 
@@ -424,14 +432,14 @@ async def test_a_deadline_during_a_relayed_call_ends_the_turn_as_limit_exceeded_
     await restarted_in_the_call(runner)
     runner.app.script(CALL, hangs)
     say_in_the_call(runner, ADDRESSED)
-    await runner.reports.until("turn_ended")
+    await runner.reports.until(Event.TURN_ENDED)
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.gateway.until_requested(2)
 
-    assert runner.reports.events() == [("started", None), ("turn_ended", "limit_exceeded")]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, FailureCode.LIMIT_EXCEEDED.value)]
     assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [2]]
     assert runner.gateway.openings()[1].room["history"]["entries"][1] == act_entry(
-        url_of(runner, 0), "say", {"place": PLACE_ID, "text": ANSWER}, unanswered("cancelled")
+        url_of(runner, 0), "say", {"place": PLACE_ID, "text": ANSWER}, unanswered(TURN_CANCELLED_CODE)
     )
     assert runner.clock.slept == []
     assert runner.task is not None
@@ -449,16 +457,16 @@ async def test_a_window_the_app_lost_is_skipped_and_is_no_suspension(runner):
     await runner.app.said_count(1)
 
     assert runner.app.said == [(SUBJECT, "room-8", ANSWER)]
-    assert runner.reports.events() == [("started", None)]
+    assert runner.reports.reported() == [(Event.STARTED, None)]
 
 
 async def test_a_refused_and_an_answered_turn_log_a_code_and_no_secret_or_content(runner, caplog):
     runner.gateway = Gateway(Reply(status=HTTPStatus.TOO_MANY_REQUESTS), *says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
-    await runner.reports.until("turn_ended")
+    await runner.reports.until(Event.TURN_ENDED)
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.app.said_count(1)
 
     logged = formatted(caplog.get_records("call"))
-    assert "turn_ended" in logged
+    assert Event.TURN_ENDED.value in logged
