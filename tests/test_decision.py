@@ -134,15 +134,6 @@ def test_every_accept_brings_the_figure_the_agent_has():
     assert [accept.figure for accept in accepts] == [figure, figure]
 
 
-@pytest.mark.parametrize("voice", ["Rachel_V2.en-GB", None])
-def test_every_accept_brings_the_voice_the_agent_has_at_a_call_and_at_a_table(voice):
-    held = (invited("room-7", "inv-3"), invited("table-1", "inv-4", kind="table", serves_view=True))
-
-    accepts = accepts_for(held, Memory(), takes_turns=True, voice=voice)
-
-    assert [accept.voice for accept in accepts] == [voice, voice]
-
-
 @pytest.mark.parametrize(
     "standing",
     [

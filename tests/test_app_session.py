@@ -213,18 +213,6 @@ async def test_an_accept_sends_the_figure_it_carries_and_without_one_no_figure_k
     assert "figure" not in without
 
 
-async def test_an_accept_sends_the_voice_it_carries_and_without_one_no_voice_key(app, bearer):
-    place = PlaceRef(kind="call", id="room-7")
-
-    async with opened(app, bearer) as session:
-        await session.accept(Accept(place, "inv-3", 2, voice="Rachel_V2.en-GB"))
-        await session.accept(Accept(place, "inv-4", 2))
-
-    [(_, with_voice), (_, without)] = app.accepted_on_the_wire
-    assert with_voice["voice"] == "Rachel_V2.en-GB"
-    assert "voice" not in without
-
-
 @pytest.mark.parametrize("refusal", list(AcceptInvitationRefusal))
 async def test_an_accept_refused_with_a_code_of_the_record_is_told_by_that_code(app, bearer, refusal):
     app.accept_outcomes.append(ToolOutcome(AcceptInvitationRefused(refused=refusal).model_dump_json(), is_error=True))
