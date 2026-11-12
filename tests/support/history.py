@@ -131,3 +131,13 @@ async def said_and_taken(app: FakeApp, place_id: str, text: str, *, author: str 
     app.speak(place_id, author, name, text)
     await app.until_window_read(place_id, reads + 1)
     await settled(app)
+
+
+async def shows(app, revision: int, state=None, *, awaits_you: bool = False) -> dict[str, str]:
+    """The place's view shows this revision and the loop of the app has read it and taken it."""
+    state = state or a_state()
+    reads = app.view_reads(TABLE)
+    app.show_view(TABLE.id, revision, state, awaits_you=awaits_you)
+    await app.until_view_read(TABLE, reads + 1)
+    await settled(app)
+    return state
