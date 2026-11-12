@@ -35,9 +35,9 @@ from tests.support.fakes import (
     grant,
 )
 from tests.support.gateway import Gateway
-from tests.support.hopin import AGENT_SUBJECT, ISSUER, FakeApp, formatted
+from tests.support.hopin import AGENT_SUBJECT, ISSUER, PLAY_TOOL, FakeApp, formatted
 from tests.support.realm import TOKEN_ENDPOINT, FakeRealm
-from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG
+from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG, ToolsOnlyApp
 from tests.support.songmaker import SCOPE as TOOLS_ONLY_SCOPE
 
 if TYPE_CHECKING:
@@ -56,7 +56,6 @@ if TYPE_CHECKING:
     from personas.reporting import StateChange
     from personas.sweep import SweptStore
     from personas.tokens import GrantedToken
-    from tests.support.songmaker import ToolsOnlyApp
 
 SCENARIO_LIMIT_SECONDS = 10
 
@@ -76,7 +75,7 @@ class Scenario:
         self.reports = reports
         self.ready = FakeReadyMarker()
         boundaries = Boundaries(tokens, session.open, clock, reports, self.ready)
-        self.loop = AgentLoop(credentials(), app_target(), boundaries, Mind(DEFAULT_HISTORY_BYTES))
+        self.loop = AgentLoop(credentials(), app_target(), boundaries, Mind(DEFAULT_HISTORY_BYTES), (app_target(),))
 
     async def play(self) -> None:
         """Runs the loop until the script is spent, which is when a boundary blocks, then stops it."""
@@ -157,12 +156,13 @@ class Harness:
         self.tools_only_apps.append(app)
 
     def add_listening_app(self, app: FakeApp, url: str, scope: str) -> None:
-        """Binds ``say`` in one more app the agents listen to, and lets their tokens for its scope into it.
+        """Binds the line tool of one more app the agents listen to, and lets their tokens for its scope into it.
 
         It reloads the configuration, so it comes before the other changes of a scenario.
         """
         self.files.text += (
-            f'[[apps]]\nmcp_url = "{url}"\nscope = "{scope}"\ntools = ["say"]\nmax_tool_calls = {MAX_TOOL_CALLS}\n'
+            f'[[apps]]\nmcp_url = "{url}"\nscope = "{scope}"\ntools = ["{app.line_tool}"]\n'
+            f"max_tool_calls = {MAX_TOOL_CALLS}\n"
         )
         self.config = load_config(self.files.write())
         self.realm.add_app(scope, app)
@@ -227,6 +227,15 @@ class Harness:
             *self.app.kept_out_of_logs(),
             *(held for each in [*self.tools_only_apps, *self.other_apps] for held in each.kept_out_of_logs()),
         ]
+
+
+@pytest.fixture
+async def songmaker(runner: Harness) -> AsyncIterator[ToolsOnlyApp]:
+    """An app that listens to nothing and binds the song tools, served and bound into the runner's configuration."""
+    app = ToolsOnlyApp()
+    async with app.serving() as url:
+        runner.add_tools_only_app(app, url)
+        yield app
 
 
 @pytest.fixture
@@ -295,7 +304,7 @@ def unmigrated_database() -> Iterator[MemoryTarget]:
 @pytest.fixture
 async def other(runner):
     """A second app the agent listens to."""
-    app = FakeApp()
+    app = FakeApp(line_tool=PLAY_TOOL)
     async with app.serving() as url:
         runner.add_listening_app(app, url, "mcp-other")
         yield app

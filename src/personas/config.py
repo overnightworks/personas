@@ -5,9 +5,11 @@ The file holds the realm's token endpoint, the ready file's path, the apps (an M
 a ``sha256``, that every accept of the agent carries). Which apps an agent may reach
 is the realm's group membership, never this file. An app that binds tools to its agents' turns
 names them with their call bound, and then the model gateway and each agent's persona file are required.
-An app with ``listens = false`` serves tools only: it starts no turn, its bound tools reach the turns of the apps that
-listen, and ``call_seconds`` bounds each request to it. No tool name is shared with a tools-only app, and no app names
-``speak``, the voice's own tool, which is never offered to a turn.
+An app with ``listens = false`` serves tools only: it starts no turn, and its bound tools reach the turns of the apps
+that listen. An app that listens lends its bound tools to a turn of another app too, while the agent holds a place
+there. ``call_seconds`` bounds each request a turn of another app makes to an app. No tool name is bound by two apps,
+since one turn holds the tools of several, and no app names ``speak``, the voice's own tool, which is never offered to
+a turn.
 The top-level ``history_bytes`` bounds the history each agent keeps in memory of the lines he took in, the views he
 read and the calls relayed for him at any of his apps and tells every turn.
 The optional ``[memory]`` table names the Postgres database that keeps every line the agents read: its host, port,
@@ -124,11 +126,9 @@ class _AppEntry(_Entry):
     call_seconds: PositiveFloat | None = None
 
     @model_validator(mode="after")
-    def _a_tools_only_app_has_tools_and_only_it_a_call_time(self) -> Self:
+    def _a_tools_only_app_has_tools(self) -> Self:
         if not self.listens and not self.tools:
             raise ValueError("listens = false needs tools")
-        if self.listens and self.call_seconds is not None:
-            raise ValueError("call_seconds is for an app that does not listen")
         return self
 
     @field_validator("tools")
@@ -208,10 +208,9 @@ class _FileModel(_Entry):
     @field_validator("apps")
     @classmethod
     def _a_turn_holds_no_tool_name_twice(cls, apps: tuple[_AppEntry, ...]) -> tuple[_AppEntry, ...]:
-        for index, app in enumerate(apps):
-            held_elsewhere = {name for other in apps[:index] + apps[index + 1 :] for name in other.tools}
-            if not app.listens and held_elsewhere & set(app.tools):
-                raise ValueError("a tools-only app shares a tool name with another app")
+        names = [name for app in apps for name in app.tools]
+        if len(set(names)) != len(names):
+            raise ValueError("a tool name is bound by two apps")
         return apps
 
     @field_validator("apps")

@@ -22,7 +22,7 @@ from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_cal
 from tests.support.gateway import Gateway
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, DISCOVER, LIMIT_SECONDS, LIST_TOOLS, LISTEN, SAY_TOOL
-from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG, SCOPE, ToolsOnlyApp
+from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG, SCOPE
 from tests.support.transport import (
     ClosingHold,
     transport_by_url,
@@ -31,19 +31,12 @@ from tests.support.transport import (
     transport_whose_close_loses_a_child,
     transport_whose_session_loses_a_child,
 )
+from tests.support.wire import cuts, hangs, hangs_once_entered, refuses_with_a_server_error
 
 pytestmark = pytest.mark.anyio
 
 FAILED = "tools_only_app_failed"
 SHORT_CALL_SECONDS = 0.3
-
-
-@pytest.fixture
-async def songmaker(runner):
-    app = ToolsOnlyApp()
-    async with app.serving() as url:
-        runner.add_tools_only_app(app, url)
-        yield app
 
 
 def songmaker_url(runner) -> str:
@@ -72,27 +65,6 @@ async def addressed_in_the_call(runner):
 
 def failed_apps(runner):
     return [change.code for change in runner.reports.changes if change.event.value == FAILED]
-
-
-async def hangs(reply):
-    await asyncio.Event().wait()
-
-
-async def refuses_with_a_server_error(reply):
-    await reply.status(HTTPStatus.INTERNAL_SERVER_ERROR)
-
-
-async def cuts(reply):
-    await reply.open_stream()
-    reply.cut()
-
-
-def hangs_once_entered(entered):
-    async def hang(reply):
-        entered.set()
-        await asyncio.Event().wait()
-
-    return hang
 
 
 async def a_song_is_made_and_announced(runner, songmaker):
@@ -231,14 +203,20 @@ async def test_a_session_of_a_tools_only_call_whose_sdk_child_is_lost_shows_the_
     await a_call_that_fails_and_a_turn_that_goes_on(runner, songmaker, "network")
 
 
-async def test_a_tools_only_call_that_fails_twice_in_one_turn_is_reported_once(runner, songmaker):
-    songmaker.script(CALL, refuses_with_a_server_error, refuses_with_a_server_error)
+async def test_a_tools_only_app_whose_call_failed_takes_no_more_calls_in_the_turn_and_is_reported_once(
+    runner, songmaker
+):
+    songmaker.script(CALL, refuses_with_a_server_error)
     runner.gateway = Gateway(calling(CREATE_SONG, GENERATE_SONG), saying(ANSWER), completion("done"))
 
     await addressed_in_the_call(runner)
     await runner.app.said_count(1)
 
-    assert [each.startswith("Error") for each in runner.gateway.tool_results(2)] == [True, True]
+    failed, closed = runner.gateway.tool_results(2)
+    assert failed.startswith("Error")
+    assert closed.startswith("Error")
+    assert closed != failed
+    assert songmaker.log.count(CALL) == 1
     assert runner.reports.events() == [("started", None), (FAILED, "http_500")]
 
 

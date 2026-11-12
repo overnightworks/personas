@@ -38,7 +38,7 @@ from tests.support.history import (
     written_turns,
 )
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import ISSUER, active, paused
+from tests.support.hopin import ISSUER, PLAY_TOOL, active, paused
 from tests.support.realm import AGENT_NAME
 from tests.support.voice import a_voice_call
 
@@ -349,7 +349,7 @@ async def test_a_window_read_again_with_the_same_lines_tells_each_line_once(runn
 async def test_a_line_said_while_a_view_turn_runs_holds_its_call_once_and_is_told_to_the_next_turn_with_the_recall(
     runner, other
 ):
-    runner.gateway = Gateway(*says_after_a_hold(TABLE.id, ANSWER))
+    runner.gateway = Gateway(*says_after_a_hold(TABLE.id, ANSWER, tool=PLAY_TOOL))
     running = runner.gateway.hold_request(1)
     other.stand(SUBJECT, at_table())
     await restarted_in_the_call(runner)
@@ -371,7 +371,7 @@ async def test_a_line_said_while_a_view_turn_runs_holds_its_call_once_and_is_tol
             [
                 view_entry(table, first, revision=1),
                 entry(url_of(runner, 0), PLACE_ID, REMARK),
-                act_entry(table, "say", {"place": TABLE.id, "text": ANSWER}, answered("said")),
+                act_entry(table, PLAY_TOOL, {"place": TABLE.id, "text": ANSWER}, answered("said")),
                 view_entry(table, second, revision=2, new=True),
             ]
         ),

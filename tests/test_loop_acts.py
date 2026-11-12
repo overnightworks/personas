@@ -38,22 +38,15 @@ from tests.support.history import (
     written_turns,
 )
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import CALL, ISSUER, LISTEN, READ, SAY_TOOL, active
+from tests.support.hopin import CALL, ISSUER, LISTEN, PLAY_TOOL, READ, SAY_TOOL, active
 from tests.support.realm import AGENT_NAME
-from tests.support.songmaker import CALLS, CREATE_SONG, ToolsOnlyApp
+from tests.support.songmaker import CALLS, CREATE_SONG
+from tests.support.wire import cuts, hangs, hangs_once_entered, refuses_with_a_server_error
 
 pytestmark = pytest.mark.anyio
 
 AGAIN = f"{ADDRESSED} Again."
 SECOND_AGENT, SECOND_SUBJECT, SECOND_NAME = "agent-bach", "agent-subject-2", "Bach"
-
-
-@pytest.fixture
-async def songmaker(runner):
-    app = ToolsOnlyApp()
-    async with app.serving() as url:
-        runner.add_tools_only_app(app, url)
-        yield app
 
 
 def say_round(*texts: str) -> object:
@@ -88,33 +81,12 @@ async def second_written_turn(runner, text: str = AGAIN):
     return written_turns(runner)[1]
 
 
-async def cuts(reply):
-    await reply.open_stream()
-    reply.cut()
-
-
 async def refuses_the_token(reply):
     await reply.status(HTTPStatus.UNAUTHORIZED)
 
 
 async def answers_wrongly(reply):
     await reply.error(INVALID_PARAMS, status=HTTPStatus.OK)
-
-
-async def refuses_with_a_server_error(reply):
-    await reply.status(HTTPStatus.INTERNAL_SERVER_ERROR)
-
-
-async def hangs(reply):
-    await asyncio.Event().wait()
-
-
-def hangs_once_entered(entered):
-    async def hang(reply):
-        entered.set()
-        await asyncio.Event().wait()
-
-    return hang
 
 
 async def test_a_say_the_app_answered_is_told_to_his_next_turn_before_his_own_line_read_back_and_no_closing_text(
@@ -400,7 +372,7 @@ async def test_an_act_is_told_after_the_line_taken_while_its_turn_ran_and_ages_f
         runner.clock.time += 30
         await reply.result(CallToolResult(content=[TextContent(text="said")], is_error=False))
 
-    runner.gateway = Gateway(*says_after_a_hold(OTHER_CALL_ID, ANSWER))
+    runner.gateway = Gateway(*says_after_a_hold(OTHER_CALL_ID, ANSWER, tool=PLAY_TOOL))
     running = runner.gateway.hold_request(1)
     other.script(CALL, answers_after_a_while)
     other.stand(SUBJECT, at_table())
@@ -418,7 +390,7 @@ async def test_an_act_is_told_after_the_line_taken_while_its_turn_ran_and_ages_f
         [
             view_entry(table, first, revision=1, seconds_ago=30),
             entry(url_of(runner, 0), PLACE_ID, REMARK, seconds_ago=30),
-            act_entry(table, SAY_TOOL, {"place": OTHER_CALL_ID, "text": ANSWER}, answered("said")),
+            act_entry(table, PLAY_TOOL, {"place": OTHER_CALL_ID, "text": ANSWER}, answered("said")),
             view_entry(table, second, revision=2, new=True),
         ]
     )

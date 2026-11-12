@@ -1,13 +1,13 @@
 """One agent's mind: the history of the lines he took in, the views he read and the calls relayed for him at any of his
-apps, and the one turn he takes at a time, with the places that have one due. His loops and turns feed it and every
-turn reads it."""
+apps, the apps where he holds an active place, and the one turn he takes at a time, with the places that have one due.
+His loops and turns feed it and every turn reads it."""
 
 from __future__ import annotations
 
 import asyncio
 from typing import TYPE_CHECKING
 
-from personas.decision import History, Turns, claimed, history_after, released, with_due, without_due
+from personas.decision import History, Turns, claimed, held_apps, history_after, released, with_due, without_due
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -23,6 +23,7 @@ class Mind:
         self._size_bytes = size_bytes
         self._history = History((), left_out=0, heard=0)
         self._turns = Turns()
+        self._placed = frozenset[str]()
         self._wake_events: list[asyncio.Event] = []
 
     @property
@@ -30,11 +31,20 @@ class Mind:
         return self._history
 
     def take(self, entries: Iterable[Entry]) -> None:
-        """Appends the lines, views and acts taken, in order; taking nothing leaves the history as it is."""
+        """Appends the lines, spoken sentences, views and acts taken, in order; taking nothing leaves the history as
+        it is."""
         taken = tuple(entries)
         if not taken:
             return
         self._history = history_after(self._history, taken, self._size_bytes)
+
+    def stand_at(self, app: str, *, holds: bool) -> None:
+        """Records whether he holds an active place at ``app``, as its loop last read his standing."""
+        self._placed = self._placed | {app} if holds else self._placed - {app}
+
+    def held_apps(self, own: str) -> frozenset[str]:
+        """The apps, other than ``own``, where he holds an active place."""
+        return held_apps(own, self._placed)
 
     def wake_event(self) -> asyncio.Event:
         """A new event a loop waits on; the end of a turn, and a place dropped while no turn runs, set it."""

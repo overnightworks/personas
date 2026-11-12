@@ -43,7 +43,7 @@ def test_an_admission_repr_shows_neither_a_view_state_nor_a_line_nor_an_act_of_t
     marker, history = marked_history
     occasion = occasion_of(marker)
 
-    admission = repr(Admitted(FACTS, PLACE, occasion, history, TAKEN_AT, aloud=False))
+    admission = repr(Admitted(FACTS, PLACE, occasion, history, TAKEN_AT, aloud=False, apps=frozenset()))
 
     assert "Admitted(" in admission
     assert marker not in admission

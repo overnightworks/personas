@@ -22,6 +22,7 @@ from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, LIMIT_SECONDS, LISTEN, READ, SAY_TOOL, active, paused
 from tests.support.transport import ClosingHold, transport_whose_session_loses_a_child
 from tests.support.voice import TWO_SENTENCES, HeldSleeps, a_voice_call, ended_by, sentences_spoken
+from tests.support.wire import hangs
 
 pytestmark = pytest.mark.anyio
 
@@ -298,9 +299,6 @@ async def test_a_speak_that_never_answers_is_given_up_at_the_sessions_read_bound
         nonlocal opens
         opens += 1
         return open_mcp_session(app, token, stream_seconds=READ_SECONDS if opens == 1 else SHORT_SPEAK_SECONDS)
-
-    async def hangs(reply):
-        await asyncio.Event().wait()
 
     runner.give_voice()
     runner.gateway = Gateway(completion(TWO_SENTENCES))

@@ -124,3 +124,19 @@ def test_a_mind_holding_lines_views_and_due_places_shows_no_name_no_text_and_no_
     mind.due(CALL_AT_B, Lines(OTHER_CALL.generation, frozenset({1}), missed=False))
 
     assert marker not in repr(mind)
+
+
+def test_he_holds_the_apps_where_he_has_an_active_place_other_than_the_one_asking_until_it_is_recorded_gone():
+    mind = Mind(size_bytes=1_000)
+
+    mind.stand_at(CALL.app, holds=True)
+    mind.stand_at(OTHER_CALL.app, holds=True)
+    mind.stand_at(OTHER_CALL.app, holds=True)
+
+    assert mind.held_apps(CALL.app) == {OTHER_CALL.app}
+    assert mind.held_apps("https://third.test/mcp") == {CALL.app, OTHER_CALL.app}
+
+    mind.stand_at(OTHER_CALL.app, holds=False)
+    mind.stand_at("https://third.test/mcp", holds=False)
+
+    assert mind.held_apps(CALL.app) == frozenset()

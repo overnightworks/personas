@@ -64,6 +64,10 @@ _CALL_BOUND_TEXT: Final = "this app takes no more calls in this turn"
 _APP_FAILED_TEXT: Final = "the app did not answer"
 
 
+def _failure_event(app: AppTarget) -> Event:
+    return Event.HELD_APP_FAILED if app.listens else Event.TOOLS_ONLY_APP_FAILED
+
+
 @dataclass(frozen=True)
 class TurnSetup:
     """What an agent's turn in an app is made of: the persona, the tools bound and the backend that runs it."""
@@ -85,6 +89,10 @@ class _Calls:
             return False
         self.made += 1
         return True
+
+    def close(self) -> None:
+        """The app takes no more calls in this turn."""
+        self.made = self.bound
 
 
 @dataclass
@@ -119,7 +127,7 @@ class _HeldTools:
 @dataclass(frozen=True)
 class Admitted:
     """A turn decided on, with the facts it was decided from: the token's, what woke it, what its agent had taken in,
-    the wall time it was admitted at and whether its text is spoken."""
+    the wall time it was admitted at, whether its text is spoken and the other apps whose tools it holds."""
 
     facts: TokenFacts
     place: PlaceRef
@@ -127,6 +135,7 @@ class Admitted:
     history: History = field(repr=False)
     at: datetime
     aloud: bool
+    apps: frozenset[str]
 
     def groups(self) -> Coroutine[None, None, frozenset[str]]:
         """The library's GroupSource wants an awaitable; the groups are already known."""
@@ -134,7 +143,8 @@ class Admitted:
 
 
 class Turning:
-    """Runs the turns of one agent in one app, each over a session of its own.
+    """Runs the turns of one agent in one app, each over a session of its own, holding the tools of every app in the
+    configuration's order: the app's own, those of the apps in ``admitted.apps`` and those of the tools-only apps.
 
     It holds no state across turns beyond what it records into the agent's mind: each relayed call that passed its
     app's bound, once its request ended. A call is held back, once per turn, when something not his own arrived in
@@ -146,7 +156,7 @@ class Turning:
         self,
         agent: AgentCredentials,
         app: AppTarget,
-        tools_only: tuple[AppTarget, ...],
+        apps: tuple[AppTarget, ...],
         tokens: TokenSource,
         open_session: SessionOpener,
         remembering: Remembering,
@@ -159,7 +169,7 @@ class Turning:
     ) -> None:
         self._agent = agent
         self._app = app
-        self._tools_only = tuple((each, each.binding) for each in tools_only if each.binding is not None)
+        self._apps = tuple((each, each.binding) for each in apps if each.binding is not None)
         self._tokens = tokens
         self._open_session = open_session
         self._remembering = remembering
@@ -235,7 +245,7 @@ class Turning:
         self, setup: TurnSetup, admitted: Admitted, told: str, session: AppSession, record: TaskRecord
     ) -> None:
         raise_if_cancelled()
-        held = await self._hold_tools(setup, session, record, admitted.history)
+        held = await self._hold_tools(setup, session, record, admitted)
         if held is None:
             self._report_turn_end(TOOL_NOT_DECLARED_CODE)
             return
@@ -289,37 +299,45 @@ class Turning:
         speaking.end()
 
     async def _hold_tools(
-        self, setup: TurnSetup, session: AppSession, record: TaskRecord, admitted: History
+        self, setup: TurnSetup, session: AppSession, record: TaskRecord, admitted: Admitted
     ) -> _HeldTools | None:
-        """The tools of the place's app and of each tools-only app that answers, each app counting its own calls.
+        """The tools of the place's app, of each app named in the admission and of each tools-only app that answers,
+        in the configuration's order, each app counting its own calls.
 
-        ``None`` when the place's app declares a bound tool no more. A tools-only app that fails or declares one
-        no more is left out, and the turn holds the rest.
+        ``None`` when the place's app declares a bound tool no more. Another app that fails or declares one no more
+        is left out and reported once, and the turn holds the rest.
         """
         own = bound_declarations(await session.declared_tools(), setup.binding.tools)
         if own is None:
             return None
-        own_calls = _Calls(setup.binding.max_tool_calls)
-        hold = _Hold(admitted)
-        tools = [HandTool(each, partial(self._relay, session, each.name, own_calls, hold)) for each in own]
-        bounds = [own_calls.bound]
-        failed_apps: set[str] = set()
-        for app, binding in self._tools_only:
-            declared = await self._ask_tools_only(app, lambda session: session.declared_tools(), record)
-            if isinstance(declared, CallFailure):
-                self._report_tools_only_failure(app, failed_apps, failure_code(declared))
-                continue
-            listed = bound_declarations(declared, binding.tools)
-            if listed is None:
-                self._report_tools_only_failure(app, failed_apps, TOOL_NOT_DECLARED_CODE)
-                continue
+        hold = _Hold(admitted.history)
+        tools: list[HandTool] = []
+        bounds: list[int] = []
+        for app, binding in self._apps:
             calls = _Calls(binding.max_tool_calls)
-            tools.extend(
-                HandTool(each, partial(self._relay_tools_only, app, each.name, calls, hold, failed_apps, record))
-                for each in listed
-            )
-            bounds.append(calls.bound)
+            if app.mcp_url == self._app.mcp_url:
+                lent = [HandTool(each, partial(self._relay, session, each.name, calls, hold)) for each in own]
+            elif not app.listens or app.mcp_url in admitted.apps:
+                lent = await self._list_elsewhere(app, binding, calls, hold, record)
+            else:
+                continue
+            if lent is not None:
+                tools.extend(lent)
+                bounds.append(calls.bound)
         return _HeldTools(tuple(tools), turn_call_bound(bounds))
+
+    async def _list_elsewhere(
+        self, app: AppTarget, binding: ToolBinding, calls: _Calls, hold: _Hold, record: TaskRecord
+    ) -> list[HandTool] | None:
+        """The hand tools of another app's bound tools, or ``None`` after the one report of why it lends none."""
+        declared = await self._ask_elsewhere(app, lambda session: session.declared_tools(), record)
+        if isinstance(declared, CallFailure):
+            self._report(_failure_event(app), failure_code(declared), app)
+            return None
+        if (listed := bound_declarations(declared, binding.tools)) is None:
+            self._report(_failure_event(app), TOOL_NOT_DECLARED_CODE, app)
+            return None
+        return [HandTool(each, partial(self._relay_elsewhere, app, each.name, calls, hold, record)) for each in listed]
 
     def _held(self, hold: _Hold) -> ToolOutcome | None:
         """The result of a call that is not sent, or ``None`` when the call goes on. It is asked before any await."""
@@ -344,13 +362,12 @@ class Turning:
         await self._use_current_token(session)
         return await session.invoke(name, arguments)
 
-    async def _relay_tools_only(
+    async def _relay_elsewhere(
         self,
         app: AppTarget,
         name: str,
         calls: _Calls,
         hold: _Hold,
-        failed_apps: set[str],
         record: TaskRecord,
         _principal: Principal,
         arguments: JsonObject,
@@ -361,12 +378,13 @@ class Turning:
             return ToolOutcome(_CALL_BOUND_TEXT, is_error=True)
         try:
             answer = await self._recorded_as_act(
-                app, name, arguments, self._ask_tools_only(app, lambda session: session.invoke(name, arguments), record)
+                app, name, arguments, self._ask_elsewhere(app, lambda session: session.invoke(name, arguments), record)
             )
         except Exception as error:
             raise RelayFailed(error) from None
         if isinstance(answer, CallFailure):
-            self._report_tools_only_failure(app, failed_apps, failure_code(answer))
+            calls.close()
+            self._report(_failure_event(app), failure_code(answer), app)
             return ToolOutcome(_APP_FAILED_TEXT, is_error=True)
         return answer
 
@@ -393,10 +411,10 @@ class Turning:
             if outcome is not None:
                 self._mind.take((ActDone(app.mcp_url, name, arguments, outcome, self._clock.wall()),))
 
-    async def _ask_tools_only[Answer](
+    async def _ask_elsewhere[Answer](
         self, app: AppTarget, ask: Callable[[AppSession], Awaitable[Answer]], record: TaskRecord
     ) -> Answer | CallFailure:
-        """Asks a tools-only app in a session of its own, under the token for its own scope.
+        """Asks another app in a session of its own, under the token for its own scope.
 
         The session lives only for this request. A failure of the call, a session that died of its own child and
         an expiry of the app's call time come back as the failure; any other error is raised, and a turn whose
@@ -434,9 +452,3 @@ class Turning:
             if not bound.expired():
                 raise
             raise Unreachable("the app did not answer in time") from None
-
-    def _report_tools_only_failure(self, app: AppTarget, failed_apps: set[str], code: str) -> None:
-        """One report per app and turn."""
-        if app.mcp_url not in failed_apps:
-            failed_apps.add(app.mcp_url)
-            self._report(Event.TOOLS_ONLY_APP_FAILED, code, app)

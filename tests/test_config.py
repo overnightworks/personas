@@ -341,11 +341,15 @@ def test_a_tools_only_app_has_its_tools_its_call_bound_and_the_default_call_boun
 @pytest.mark.parametrize(
     ("break_it", "named", "reason"),
     [
-        (lambda text: text + TOOLS_ONLY_TABLE.replace("create_song", "say"), "apps", "shares a tool name"),
+        (
+            lambda text: text + TOOLS_ONLY_TABLE.replace("create_song", "say"),
+            "apps",
+            "a tool name is bound by two apps",
+        ),
         (
             lambda text: text + TOOLS_ONLY_TABLE.replace("generate_song", "say").replace("songmaker", "x"),
             "apps",
-            "shares a tool name",
+            "a tool name is bound by two apps",
         ),
         (
             lambda text: (
@@ -354,7 +358,7 @@ def test_a_tools_only_app_has_its_tools_its_call_bound_and_the_default_call_boun
                 + TOOLS_ONLY_TABLE.replace("songmaker", "other").replace('"create_song"', '"play"')
             ),
             "apps",
-            "shares a tool name",
+            "a tool name is bound by two apps",
         ),
         (
             lambda text: text + TOOLS_ONLY_TABLE.replace('tools = ["create_song", "generate_song"]\n', ""),
@@ -367,11 +371,7 @@ def test_a_tools_only_app_has_its_tools_its_call_bound_and_the_default_call_boun
             "no app listens",
         ),
         (lambda text: text + TOOLS_ONLY_TABLE + "call_seconds = 0\n", "apps.1.call_seconds", "greater than 0"),
-        (
-            lambda text: text.replace('scope = "mcp-hopin"\n', 'scope = "mcp-hopin"\ncall_seconds = 5\n'),
-            "apps.0",
-            "call_seconds is for an app that does not listen",
-        ),
+        (lambda text: text + APP_TABLE.replace("hopin", "other"), "apps", "a tool name is bound by two apps"),
     ],
     ids=[
         "a tool name the first app has too",
@@ -380,7 +380,7 @@ def test_a_tools_only_app_has_its_tools_its_call_bound_and_the_default_call_boun
         "a tools-only app without tools",
         "no listening app",
         "no call time",
-        "a call time on a listening app",
+        "a tool name another listening app has too",
     ],
 )
 def test_a_tool_name_two_apps_of_one_turn_share_and_a_file_without_a_listening_app_are_refused(
@@ -394,12 +394,23 @@ def test_a_tool_name_two_apps_of_one_turn_share_and_a_file_without_a_listening_a
     assert reason in error
 
 
-def test_two_listening_apps_may_each_bind_the_same_tool(files):
-    files.text += APP_TABLE.replace("hopin", "other")
+def test_a_listening_app_may_set_the_call_time_a_turn_of_another_app_has_for_each_request_to_it(files):
+    files.text += APP_TABLE.replace("hopin", "other").replace('tools = ["say"]', 'tools = ["play"]') + (
+        "call_seconds = 4.5\n"
+    )
 
-    apps = load_config(files.write()).apps
+    hopin, other = load_config(files.write()).apps
 
-    assert [app.binding for app in apps] == [ToolBinding(("say",), MAX_TOOL_CALLS)] * 2
+    assert (hopin.call_seconds, other.call_seconds) == (DEFAULT_CALL_SECONDS, 4.5)
+
+
+def test_a_file_that_binds_many_differently_named_tools_in_a_second_listening_app_starts(files):
+    many = ", ".join(f'"{secrets.token_hex(4)}"' for _ in range(29))
+    files.text += APP_TABLE.replace("hopin", "table").replace('tools = ["say"]', f"tools = [{many}]")
+
+    hopin, table = load_config(files.write()).apps
+
+    assert (len(hopin.binding.tools), len(table.binding.tools)) == (1, 29)
 
 
 def test_a_memory_table_gives_the_runner_its_database_its_password_and_a_default_write_bound(files):
