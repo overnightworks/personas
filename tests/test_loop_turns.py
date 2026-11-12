@@ -10,7 +10,6 @@ import pytest
 from agents.backend.fake_gateway import Reply, completion
 from agents.turn import Principal, person_fingerprint
 
-from personas import app_session
 from personas.decision import TURN_CANCELLED_CODE
 from tests.support.call import ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
@@ -316,15 +315,14 @@ async def test_a_relayed_call_that_fails_at_one_app_ends_its_turn_and_the_turn_d
     assert runner.gateway.round_sizes() == [2, 2]
 
 
-async def test_while_a_cancelled_turn_still_unwinds_no_turn_of_his_starts_at_another_app_until_it_ended(
-    runner, other, monkeypatch
-):
+async def test_while_a_cancelled_turn_still_unwinds_no_turn_of_his_starts_at_another_app_until_it_ended(runner, other):
     unwinding = ClosingHold()
-    monkeypatch.setattr(app_session, "streamable_http_client", unwinding.transport(of_url=runner.app_url))
     runner.gateway = Gateway(completion("done"))
     runner.gateway.hold_request(1)
+    runner.app.stand(SUBJECT, active(PLACE_ID))
     other.stand(SUBJECT, active(OTHER_CALL_ID))
-    await restarted_in_the_call(runner)
+    runner.start(open_session=unwinding.opener(of_url=runner.app_url))
+    await runner.app.until_window_read(PLACE_ID)
     await other.until_window_read(OTHER_CALL_ID)
     say_in_the_call(runner, REMARK)
     await runner.gateway.until_requested(1)

@@ -9,10 +9,15 @@ from typing import TYPE_CHECKING, Any
 import anyio
 
 from personas import app_session
+from personas.app_session import open_mcp_session
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import AsyncGenerator, Callable
     from contextlib import AbstractAsyncContextManager
+
+    from personas.app_session import AppSession, SessionOpener
+    from personas.config import AppTarget
+    from personas.secret import Secret
 
 
 def transport_closing_with_late_answers(*, echo: type[Exception], echoes: int = 1, only_close: int | None = None):
@@ -94,6 +99,33 @@ class ClosingHold:
                 finally:
                     closes += counted
                     if counted and closes == nth:
+                        self.closing.set()
+                        try:
+                            await self.release.wait()
+                        except asyncio.CancelledError:
+                            self.cancelled.set()
+                            raise
+
+        return waiting
+
+    def opener(self, *, nth: int = 1, of_url: str | None = None) -> SessionOpener:
+        """A session opener whose ``nth`` session leaves only once ``release`` is set, the real session at that app.
+
+        ``closing`` is set when that session starts to leave and ``cancelled`` when the task was cancelled while it
+        waited. With ``of_url`` only the sessions at that URL are counted.
+        """
+        leaves = 0
+
+        @asynccontextmanager
+        async def waiting(app: AppTarget, token: Secret) -> AsyncGenerator[AppSession]:
+            nonlocal leaves
+            try:
+                async with open_mcp_session(app, token) as session:
+                    yield session
+            finally:
+                if of_url in (None, str(app.mcp_url)):
+                    leaves += 1
+                    if leaves == nth:
                         self.closing.set()
                         try:
                             await self.release.wait()
