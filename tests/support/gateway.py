@@ -68,6 +68,11 @@ class Gateway(FakeGateway):
         """The cancel requests pending on the task that made each request, in arrival order: a turn's own task."""
         self._scripts: dict[str, list[Reply]] = {}
 
+    @property
+    def arrivals(self) -> int:
+        """How many requests arrived, a held one included."""
+        return self._arrivals
+
     def script_for(self, user: str, *replies: Reply) -> None:
         """The requests of this ``user`` take their replies from these, each the next one and the last repeating,
         whatever the other users are answered."""
