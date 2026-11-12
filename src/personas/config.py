@@ -1,7 +1,8 @@
 """The operator's configuration: one TOML file named by ``PERSONAS_CONFIG``.
 
 The file holds the realm's token endpoint, the ready file's path, the apps (an MCP URL and its scope) and the agents
-(a client id and the path of the file holding its client secret). Which apps an agent may reach
+(a client id and the path of the file holding its client secret, and optionally the ``figure`` table, a ``url`` and
+a ``sha256``, that every accept of the agent carries). Which apps an agent may reach
 is the realm's group membership, never this file. An app that binds tools to its agents' turns
 names them with their call bound, and then the model gateway and each agent's persona file are required.
 An app with ``listens = false`` serves tools only: it starts no turn, its bound tools reach the turns of the apps that
@@ -20,13 +21,13 @@ Every value is validated at start and an error names the field or path, never a 
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Self
 
 from agents.agent_file import AgentDefinition, AgentFileError, load_agent
 from agents.config import AgentConfig  # noqa: TC002 - pydantic resolves the field's type at run time
-from agents.member import SPEAK_TOOL
+from agents.member import SPEAK_TOOL, FigureRef
 from pydantic import (
     AnyHttpUrl,
     BaseModel,
@@ -80,6 +81,7 @@ class AgentCredentials:
     client_id: str
     client_secret: Secret
     persona: AgentDefinition | None = None
+    figure: FigureRef | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -155,6 +157,7 @@ class _AgentEntry(_Entry):
     client_id: str = Field(min_length=1)
     secret_file: Path
     persona_file: Path | None = None
+    figure: FigureRef | None = None
 
 
 class _MemoryEntry(_Entry):
@@ -308,6 +311,7 @@ def load_config(environment: Mapping[str, str]) -> Config:
                 agent.client_id,
                 _read_secret(f"agents.{index}.secret_file", agent.secret_file),
                 _read_persona(index, agent.persona_file),
+                agent.figure,
             )
             for index, agent in enumerate(parsed.agents)
         ),

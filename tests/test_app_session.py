@@ -18,6 +18,7 @@ from agents.member import (
     AcceptInvitationArguments,
     AcceptInvitationRefusal,
     AcceptInvitationRefused,
+    FigureRef,
     PlaceRef,
     SpeakRefusal,
     SpeakRefused,
@@ -197,6 +198,19 @@ async def test_an_accept_sends_the_place_invitation_and_epoch_and_a_success_is_n
 
     assert refusal is None
     assert app.accepted == [AcceptInvitationArguments(place=place, invitation="inv-3", epoch=2)]
+
+
+async def test_an_accept_sends_the_figure_it_carries_and_without_one_no_figure_key(app, bearer):
+    place = PlaceRef(kind="call", id="room-7")
+    figure = FigureRef(url="https://figures.test/figure.glb", sha256=secrets.token_hex(32))
+
+    async with opened(app, bearer) as session:
+        await session.accept(Accept(place, "inv-3", 2, figure))
+        await session.accept(Accept(place, "inv-4", 2))
+
+    [(_, with_figure), (_, without)] = app.accepted_on_the_wire
+    assert with_figure["figure"] == {"url": figure.url, "sha256": figure.sha256}
+    assert "figure" not in without
 
 
 @pytest.mark.parametrize("refusal", list(AcceptInvitationRefusal))

@@ -16,6 +16,7 @@ from agents.member import (
     LISTEN_BOUND_SECONDS,
     SPEAK_TOOL,
     AcceptInvitationRefusal,
+    FigureRef,
     PlaceEntry,
     PlaceRef,
     PlaceView,
@@ -110,6 +111,15 @@ def test_an_invited_call_standing_is_accepted_with_its_place_invitation_and_epoc
     held = (invited("room-7", "inv-3", epoch=4),)
 
     assert accepts_for(held, Memory(), takes_turns=False) == (Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 4),)
+
+
+def test_every_accept_brings_the_figure_the_agent_has():
+    figure = FigureRef(url="https://figures.test/figure.glb", sha256=secrets.token_hex(32))
+    held = (invited("room-7", "inv-3"), invited("table-1", "inv-4", kind="table", serves_view=True))
+
+    accepts = accepts_for(held, Memory(), takes_turns=True, figure=figure)
+
+    assert [accept.figure for accept in accepts] == [figure, figure]
 
 
 @pytest.mark.parametrize(
