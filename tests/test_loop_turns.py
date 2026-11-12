@@ -73,6 +73,18 @@ async def a_call_turn_that_waits_for_the_model(runner, other):
     return running
 
 
+async def a_call_turn_beside_a_table_that_waits_for_the_model(runner):
+    """His call turn waits for the model; the call and the table it has are both at the first app."""
+    runner.gateway = Gateway(completion("done"))
+    running = runner.gateway.hold_request(1)
+    runner.app.stand(SUBJECT, active(PLACE_ID), at_table())
+    runner.start()
+    await runner.app.until_window_read(PLACE_ID)
+    say_in_the_call(runner, REMARK)
+    await runner.gateway.until_requested(1)
+    return running
+
+
 async def test_a_line_that_does_not_name_him_gives_one_turn_told_it_as_new_at_its_place(runner):
     await restarted_in_the_call(runner)
     say_in_the_call(runner, "Hello everyone", author=PERSON)
@@ -145,13 +157,7 @@ async def test_a_line_in_his_own_call_while_his_call_turn_runs_enters_the_histor
 
 
 async def test_the_place_that_waited_longest_goes_first_when_a_table_starts_waiting_before_a_line_is_said(runner):
-    runner.gateway = Gateway(completion("done"))
-    running = runner.gateway.hold_request(1)
-    runner.app.stand(SUBJECT, active(PLACE_ID), at_table())
-    runner.start()
-    await runner.app.until_window_read(PLACE_ID)
-    say_in_the_call(runner, REMARK)
-    await runner.gateway.until_requested(1)
+    running = await a_call_turn_beside_a_table_that_waits_for_the_model(runner)
     waits(runner.app, 1)
     await settled(runner.app)
     await said_and_taken(runner.app, PLACE_ID, AGAIN)
@@ -166,13 +172,7 @@ async def test_the_place_that_waited_longest_goes_first_when_a_table_starts_wait
 
 
 async def test_the_place_that_waited_longest_goes_first_when_a_line_is_read_before_a_table_starts_waiting(runner):
-    runner.gateway = Gateway(completion("done"))
-    running = runner.gateway.hold_request(1)
-    runner.app.stand(SUBJECT, active(PLACE_ID), at_table())
-    runner.start()
-    await runner.app.until_window_read(PLACE_ID)
-    say_in_the_call(runner, REMARK)
-    await runner.gateway.until_requested(1)
+    running = await a_call_turn_beside_a_table_that_waits_for_the_model(runner)
     await said_and_taken(runner.app, PLACE_ID, AGAIN)
     state = waits(runner.app, 1)
     await settled(runner.app)
@@ -187,13 +187,7 @@ async def test_the_place_that_waited_longest_goes_first_when_a_line_is_read_befo
 
 
 async def test_a_table_that_moves_to_a_revision_that_does_not_wait_before_his_turn_frees_gets_no_turn(runner):
-    runner.gateway = Gateway(completion("done"))
-    running = runner.gateway.hold_request(1)
-    runner.app.stand(SUBJECT, active(PLACE_ID), at_table())
-    runner.start()
-    await runner.app.until_window_read(PLACE_ID)
-    say_in_the_call(runner, REMARK)
-    await runner.gateway.until_requested(1)
+    running = await a_call_turn_beside_a_table_that_waits_for_the_model(runner)
     waits(runner.app, 1)
     await settled(runner.app)
     runner.app.show_view(TABLE.id, 2, {"hand": "none"}, awaits_you=False)
@@ -208,13 +202,7 @@ async def test_a_table_that_moves_to_a_revision_that_does_not_wait_before_his_tu
 
 
 async def test_a_table_that_waits_at_several_revisions_during_a_turn_gets_one_turn_at_the_last_in_its_place(runner):
-    runner.gateway = Gateway(completion("done"))
-    running = runner.gateway.hold_request(1)
-    runner.app.stand(SUBJECT, active(PLACE_ID), at_table())
-    runner.start()
-    await runner.app.until_window_read(PLACE_ID)
-    say_in_the_call(runner, REMARK)
-    await runner.gateway.until_requested(1)
+    running = await a_call_turn_beside_a_table_that_waits_for_the_model(runner)
     waits(runner.app, 1)
     await settled(runner.app)
     await said_and_taken(runner.app, PLACE_ID, AGAIN)
