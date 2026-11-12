@@ -24,7 +24,7 @@ fi
 
 echo "## Agent figures"
 echo
-echo "Each line is an agent's \`figure\` for the runner's configuration (its \`[agents.figure]\` table):"
+echo "Each line is an agent's \`figure\` for the runner's configuration: paste it, without the name and its colon, into that agent's \`[[agents]]\` entry:"
 echo
 for figure in "${figures[@]}"; do
     name="$(basename "${figure}" .vrm)"
