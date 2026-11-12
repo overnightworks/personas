@@ -1,8 +1,0 @@
-claim_id = "411208cffbe94dbb91c2c34f87e66727"
-agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
-role = "builder"
-base = "40f2c067b07f003dbcb850173624057840ae02cc"
-branch = "claude/issue-132-the-loop-tests-read-reports-through-one"
-scope = ["tests"]
-opened_commit = "a041922743712cb876bf81f5767670a630855114"
-whole_reason = "Every loop test module reads reports through the same helper."
