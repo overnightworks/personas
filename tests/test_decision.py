@@ -81,6 +81,7 @@ from personas.decision import (
     history_after,
     holds_a_place,
     is_voice_app,
+    left_out_for,
     left_standing,
     lends_tools,
     past_deadline,
@@ -801,16 +802,53 @@ def a_view(revision: int, *, awaits_you: bool = True) -> PlaceView:
     return PlaceView(revision=revision, awaits_you=awaits_you, state={"hand": secrets.token_hex(4)})
 
 
-@pytest.mark.parametrize(
-    ("takes_turns", "accepted"),
-    [(True, True), (False, False)],
-    ids=["the loop can take turns", "the loop cannot take turns"],
-)
-def test_an_invited_place_that_serves_a_view_is_accepted_only_where_the_loop_can_take_turns(takes_turns, accepted):
-    standing = serving(state=StandingState.INVITED)
+@pytest.mark.parametrize("serves_view", [False, True], ids=["not yet serving a view", "serving a view"])
+def test_an_invited_place_that_is_no_call_is_accepted_wherever_the_loop_takes_turns_whether_or_not_it_serves_a_view(
+    serves_view,
+):
+    standing = invited("table-1", "inv-3", kind="table", serves_view=serves_view)
 
-    expected = (Accept(TABLE, "inv-3", 0),) if accepted else ()
-    assert accepts_for((standing,), Memory(), takes_turns=takes_turns) == expected
+    assert accepts_for((standing,), Memory(), takes_turns=True) == (Accept(TABLE, "inv-3", 0),)
+    assert accepts_for((standing,), Memory(), takes_turns=False) == ()
+
+
+def test_an_invited_call_that_serves_a_view_is_accepted_only_where_the_loop_takes_turns():
+    standing = invited("room-7", "inv-3", serves_view=True)
+
+    assert accepts_for((standing,), Memory(), takes_turns=True) == (Accept(PLACE, "inv-3", 0),)
+    assert accepts_for((standing,), Memory(), takes_turns=False) == ()
+
+
+@pytest.mark.parametrize("kind", ["table", "call"])
+def test_an_invitation_the_loop_leaves_out_is_news_once_with_its_standing_and_news_again_in_a_new_invitation(kind):
+    standing = invited("place-1", "inv-3", kind=kind, serves_view=True)
+    memory, first = left_out_for((standing,), Memory(), takes_turns=False)
+    memory, repeated = left_out_for((standing,), memory, takes_turns=False)
+    _, renewed = left_out_for((invited("place-1", "inv-4", kind=kind, serves_view=True),), memory, takes_turns=False)
+
+    assert (first, repeated, len(renewed)) == ((standing,), (), 1)
+
+
+@pytest.mark.parametrize(
+    ("standing", "takes_turns"),
+    [
+        (invited("room-7", "inv-3"), False),
+        (invited("table-1", "inv-3", kind="table"), True),
+        (active("table-1", "table"), False),
+    ],
+    ids=["a call", "a table the loop takes", "a standing that is no invitation"],
+)
+def test_an_invitation_the_loop_accepts_or_holds_is_no_news_of_being_left_out(standing, takes_turns):
+    assert left_out_for((standing,), Memory(), takes_turns=takes_turns)[1] == ()
+
+
+def test_an_invitation_left_out_is_reported_again_after_the_standing_stopped_holding_it():
+    standing = invited("table-1", "inv-3", kind="table")
+    memory, _ = left_out_for((standing,), Memory(), takes_turns=False)
+
+    memory = forget_gone(memory, ())
+
+    assert left_out_for((standing,), memory, takes_turns=False)[1] == (standing,)
 
 
 def test_an_invited_view_place_whose_invitation_was_refused_as_stale_is_not_accepted_again():

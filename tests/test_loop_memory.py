@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.anyio
 
-OUTAGE_EVENTS = {"backoff", "suspended"}
+OUTAGE_EVENTS = {Event.BACKOFF, Event.SUSPENDED}
 
 
 class ScriptedStore:
