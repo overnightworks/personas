@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import itertools
 import json
 import math
@@ -22,7 +23,7 @@ from agents.member import (
     Standing,
     StandingState,
 )
-from agents.tools import ToolDeclaration
+from agents.tools import ToolDeclaration, ToolOutcome
 
 from personas.app_session import READ_SECONDS
 from personas.decision import (
@@ -30,7 +31,10 @@ from personas.decision import (
     NETWORK_FAILURE_CODE,
     RENEW_BEFORE_EXPIRY_SECONDS,
     SPOKEN_WAIT_BOUND_SECONDS,
+    TURN_CANCELLED_CODE,
     Accept,
+    ActDone,
+    Answered,
     EarlierToday,
     History,
     Joined,
@@ -45,11 +49,13 @@ from personas.decision import (
     Suspend,
     TodayBounds,
     Token,
+    Unanswered,
     UnrecognisedRefusal,
     ViewSeen,
     Visit,
     Waiting,
     accepts_for,
+    act_outcome,
     active_call_places,
     active_view_places,
     addressed,
@@ -914,7 +920,7 @@ def test_a_view_that_differs_in_app_place_or_revision_from_every_held_one_is_app
 
 
 def test_a_revision_whose_entry_left_by_the_bound_is_appended_again_when_read_again():
-    state_bytes = len(json.dumps(a_view(1).state))
+    state_bytes = len('{"hand": "00000000"}')
     first = ViewSeen(APP, TABLE, a_view(1), LATER)
     second = ViewSeen(APP, TABLE, a_view(2), LATER)
     again = ViewSeen(APP, TABLE, a_view(1), LATER + timedelta(seconds=5))
@@ -945,6 +951,133 @@ def test_the_bound_counts_a_line_by_speaker_and_text_and_a_view_by_the_utf8_json
 
     assert ["line" if isinstance(each, KeptLine) else "view" for each in history.entries] == kept_kinds
     assert history.older_dropped is older_dropped
+
+
+def an_act(*, arguments=None, outcome=None, tool="say", app=APP, at=LATER - timedelta(seconds=9)) -> ActDone:
+    return ActDone(
+        app, tool, {"text": "hi"} if arguments is None else arguments, outcome or Answered("posted", is_error=False), at
+    )
+
+
+@pytest.mark.parametrize(
+    ("act", "told_size"),
+    [
+        pytest.param(
+            an_act(arguments={"text": "ä♠"}),
+            len("say") + len('{"text": "ä♠"}'.encode()) + len("posted"),
+            id="an answer",
+        ),
+        pytest.param(
+            an_act(outcome=Unanswered("network")), len("say") + len('{"text": "hi"}') + len("network"), id="no answer"
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    ("bound_over_the_two", "kept_kinds", "older_dropped"),
+    [
+        pytest.param(1, ["line", "act"], False, id="the bound lies above a line and an act"),
+        pytest.param(0, ["line", "act"], False, id="the bound is a line's and an act's size"),
+        pytest.param(-1, ["act"], True, id="the bound lies one byte below them"),
+    ],
+)
+def test_the_bound_counts_an_act_by_its_tool_its_arguments_as_told_and_its_answer_or_code_in_utf8_bytes(
+    act, told_size, bound_over_the_two, kept_kinds, older_dropped
+):
+    size = len("Bo" + "one") + told_size + bound_over_the_two
+
+    history = history_after(EMPTY_HISTORY, (said(1, "one"), act), size)
+
+    assert ["line" if isinstance(each, KeptLine) else "act" for each in history.entries] == kept_kinds
+    assert history.older_dropped is older_dropped
+
+
+def test_an_act_is_always_appended_and_alone_past_the_bound_it_stays_as_the_newest_entry():
+    first, second = an_act(), an_act(tool="play")
+
+    history = history_after(History((said(1, "one"),), older_dropped=False), (first, second), 1)
+
+    assert history.entries == (second,)
+    assert history.older_dropped is True
+
+
+def test_an_act_the_history_already_holds_is_appended_again():
+    act = an_act()
+
+    assert history_after(History((act,), older_dropped=False), (act,), 10_000).entries == (act, act)
+
+
+def test_an_answered_act_is_told_with_its_app_tool_arguments_answer_and_age_and_is_never_new():
+    act = an_act(arguments={"place": "room-7", "text": "ä"}, outcome=Answered("gone", is_error=True))
+
+    told_entries = json.loads(told_a_written_turn(None, History((act,), older_dropped=False)))["history"]["entries"]
+
+    assert told_entries == [
+        {
+            "entry": "act",
+            "app": APP,
+            "seconds_ago": 9,
+            "tool": "say",
+            "arguments": {"place": "room-7", "text": "ä"},
+            "outcome": {"answered": True, "is_error": True, "text": "gone"},
+            "new": False,
+        }
+    ]
+
+
+def test_an_unanswered_act_is_told_with_the_code_and_no_text():
+    act = an_act(outcome=Unanswered(TURN_CANCELLED_CODE))
+
+    told_entry = json.loads(told_a_written_turn(None, History((act,), older_dropped=False)))["history"]["entries"][0]
+
+    assert told_entry["outcome"] == {"answered": False, "code": TURN_CANCELLED_CODE}
+
+
+def test_a_view_turn_marks_no_act_new():
+    history = History((an_act(), ViewSeen(APP, TABLE, a_view(3), LATER)), older_dropped=False)
+
+    told_entries = json.loads(turn_told("Mozart", APP, TABLE, Waiting(3), history, None, LATER))["history"]["entries"]
+
+    assert [each["new"] for each in told_entries] == [False, True]
+
+
+def test_the_day_is_the_same_whether_or_not_the_history_holds_acts_and_holds_no_act():
+    kept_lines = [kept(MORNING, 1, "held", hours_before=5), kept(NOON, 1, "not held", hours_before=4)]
+
+    without = earlier_today(kept_lines, LATER, ROOMY, History((said(1, "held"),), older_dropped=False))
+    with_acts = earlier_today(kept_lines, LATER, ROOMY, History((said(1, "held"), an_act()), older_dropped=False))
+
+    assert with_acts == without
+
+
+@pytest.mark.parametrize(
+    ("ended", "cancelling", "expected"),
+    [
+        pytest.param(
+            ToolOutcome("posted", is_error=False),
+            True,
+            Answered("posted", is_error=False),
+            id="an answer while cancelled",
+        ),
+        pytest.param(ToolOutcome("gone", is_error=True), False, Answered("gone", is_error=True), id="an error answer"),
+        pytest.param(StatusFailure(502), True, Unanswered(TURN_CANCELLED_CODE), id="a failure while cancelled"),
+        pytest.param(StatusFailure(502), False, Unanswered("http_502"), id="a failure"),
+        pytest.param(Unreachable("cut"), False, Unanswered(NETWORK_FAILURE_CODE), id="an unreachable app"),
+        pytest.param(asyncio.CancelledError(), True, Unanswered(TURN_CANCELLED_CODE), id="a cancellation"),
+        pytest.param(RuntimeError("defect"), True, Unanswered(TURN_CANCELLED_CODE), id="another error while cancelled"),
+        pytest.param(RuntimeError("defect"), False, None, id="another error"),
+    ],
+)
+def test_how_a_request_ended_decides_the_outcome_of_the_act_it_made(ended, cancelling, expected):
+    assert act_outcome(ended, cancelling=cancelling) == expected
+
+
+def test_an_act_shows_no_arguments_and_no_answer_in_its_repr_nor_in_the_history_that_holds_it():
+    marker = secrets.token_hex(8)
+    act = an_act(arguments={"text": marker}, outcome=Answered(marker, is_error=False))
+
+    assert marker not in repr(act)
+    assert marker not in repr(act.outcome)
+    assert marker not in repr(History((act,), older_dropped=False))
 
 
 def test_the_history_stays_marked_once_it_dropped_older_lines_though_the_next_lines_fit():
