@@ -82,13 +82,18 @@ class Speaking:
         self._stop_past_deadline()
 
     async def play(self) -> None:
-        """Speaks the queued sentences in order until the queue ends."""
+        """Speaks the queued sentences in order until the queue ends; a turn past its deadline by the last one's end
+        ends."""
+        spoke = False
         while (sentence := await self._queue.get()) is not None:
             try:
                 if not self._silenced:
+                    spoke = True
                     await self._speak(sentence)
             finally:
                 self._queue.task_done()
+        if spoke and not self._silenced:
+            self._stop_past_deadline()
 
     async def _speak(self, sentence: str) -> None:
         self._stop_past_deadline()
