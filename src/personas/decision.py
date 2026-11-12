@@ -31,8 +31,8 @@ from personas.failures import CallFailure, StatusFailure, TokenStatusFailure, Un
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
-    from agents.tools import ToolDeclaration
-    from agents.turn import AgentRole
+    from agents.tools import ToolDeclaration, ToolOutcome
+    from agents.turn import AgentRole, JsonObject
 
     from personas.secret import Secret
 
@@ -53,7 +53,8 @@ TURN_ROLE: Final[AgentRole] = "user"
 TOOL_NOT_DECLARED_CODE: Final = "tool_not_declared"
 """The code of a turn that ends because the app no longer declares a tool the configuration binds."""
 TURN_CANCELLED_CODE: Final = "cancelled"
-"""The code of a turn the loop cancelled because its place left the standing."""
+"""The code of a turn the loop cancelled because its place left the standing, and of an act whose call was cut while it
+was in flight, by that or by the turn's deadline."""
 SPOKEN_WAIT_BOUND_SECONDS: Final = 30.0
 """The longest the voice waits after a sentence, whatever length the app says it plays."""
 EARLIER_TODAY_KEY: Final = "earlier_today"
@@ -336,7 +337,53 @@ class ViewSeen:
     read_at: datetime
 
 
-type Entry = KeptLine | ViewSeen
+@dataclass(frozen=True)
+class Answered:
+    """The app answered a call; an error result is an answer too."""
+
+    text: str = field(repr=False)
+    is_error: bool
+
+
+@dataclass(frozen=True)
+class Unanswered:
+    """The app gave no answer, so whether the call took effect is unknown: ``code`` is the failure's, or the code of a
+    call cut in flight."""
+
+    code: str
+
+
+type ActOutcome = Answered | Unanswered
+
+
+@dataclass(frozen=True)
+class ActDone:
+    """A call relayed for an agent to the app at ``app``, with the wall time its relay ended."""
+
+    app: str
+    tool: str
+    arguments: JsonObject = field(repr=False)
+    outcome: ActOutcome
+    at: datetime
+
+
+type Entry = KeptLine | ViewSeen | ActDone
+
+
+def act_outcome(ended: ToolOutcome | BaseException, *, cancelling: bool) -> ActOutcome | None:
+    """The outcome of a relayed call from how its request ended and whether the turn's task is being cancelled.
+
+    An answer is an answer even while a cancel is pending. A cancellation can come out of a request as a failure, so
+    any other ending while cancelling is a call cut in flight. Without a cancel a failure is told by its code, and any
+    other error is a defect, which records nothing.
+    """
+    if not isinstance(ended, BaseException):
+        return Answered(ended.content, ended.is_error)
+    if cancelling:
+        return Unanswered(TURN_CANCELLED_CODE)
+    if isinstance(ended, CallFailure):
+        return Unanswered(failure_code(ended))
+    return None
 
 
 @dataclass(frozen=True)
@@ -384,10 +431,18 @@ def swept_before(now: datetime, lines_keep_days: float) -> datetime | None:
 
 
 def _size(entry: Entry) -> int:
-    """A line counts its speaker and text, a view its state as it is told."""
+    """A line counts its speaker and text, a view its state as it is told, an act its tool, its arguments as told and
+    its answer's text or its code."""
     if isinstance(entry, ViewSeen):
         return len(_told_state(entry.view).encode())
+    if isinstance(entry, ActDone):
+        outcome = entry.outcome.text if isinstance(entry.outcome, Answered) else entry.outcome.code
+        return len((entry.tool + _told_arguments(entry.arguments) + outcome).encode())
     return len(entry.name.encode()) + len(entry.text.encode())
+
+
+def _told_arguments(arguments: JsonObject) -> str:
+    return json.dumps(arguments, ensure_ascii=False)
 
 
 def _told_state(view: PlaceView) -> str:
@@ -436,8 +491,9 @@ def _first_read(lines: Sequence[KeptLine]) -> datetime:
 
 @dataclass(frozen=True)
 class History:
-    """Every line one agent took in and every view revision he read at any of his places since the runner started, in
-    the order he took them, and whether older entries were left out to keep it within its bound."""
+    """Every line one agent took in, every view revision he read and every call relayed for him at any of his places
+    since the runner started, in the order they came, and whether older entries were left out to keep it within its
+    bound."""
 
     entries: tuple[Entry, ...] = field(repr=False)
     older_dropped: bool
@@ -448,17 +504,17 @@ def taken_lines(visit: Visit, new: Iterable[PlaceEntry], read_at: datetime) -> t
     return tuple(KeptLine(visit, line.seq, read_at, line.name, line.kind, line.text, line.own) for line in new)
 
 
+def _revision_key(view: ViewSeen) -> tuple[str, PlaceRef, int]:
+    return view.app, view.place, view.view.revision
+
+
 def _holds_revision(entries: Iterable[Entry], view: ViewSeen) -> bool:
-    return any(
-        isinstance(entry, ViewSeen)
-        and (entry.app, entry.place, entry.view.revision) == (view.app, view.place, view.view.revision)
-        for entry in entries
-    )
+    return any(isinstance(entry, ViewSeen) and _revision_key(entry) == _revision_key(view) for entry in entries)
 
 
 def history_after(history: History, new: Iterable[Entry], size_bytes: int) -> History:
-    """The history with ``new`` appended, a view revision it already holds adding nothing; past ``size_bytes`` the
-    oldest entries are left out, but the newest always stays."""
+    """The history with ``new`` appended, a view revision it already holds adding nothing and an act always added; past
+    ``size_bytes`` the oldest entries are left out, but the newest always stays."""
     entries = history.entries
     for entry in new:
         if not (isinstance(entry, ViewSeen) and _holds_revision(entries, entry)):
@@ -564,11 +620,7 @@ def _is_new(entry: Entry, app: str, place: PlaceRef, occasion: Occasion) -> bool
     """Whether the turn is for this entry: a line the read that admitted a written turn took, or the revision a view
     turn waits at."""
     if isinstance(occasion, Waiting):
-        return isinstance(entry, ViewSeen) and (entry.app, entry.place, entry.view.revision) == (
-            app,
-            place,
-            occasion.revision,
-        )
+        return isinstance(entry, ViewSeen) and _revision_key(entry) == (app, place, occasion.revision)
     return (
         isinstance(entry, KeptLine)
         and entry.visit == Visit(app, place, occasion.generation)
@@ -576,7 +628,23 @@ def _is_new(entry: Entry, app: str, place: PlaceRef, occasion: Occasion) -> bool
     )
 
 
+def _told_outcome(outcome: ActOutcome) -> dict[str, object]:
+    if isinstance(outcome, Answered):
+        return {"answered": True, "is_error": outcome.is_error, "text": outcome.text}
+    return {"answered": False, "code": outcome.code}
+
+
 def _told_entry(entry: Entry, at: datetime, *, new: bool) -> dict[str, object]:
+    if isinstance(entry, ActDone):
+        return {
+            "entry": "act",
+            "app": entry.app,
+            "seconds_ago": int((at - entry.at).total_seconds()),
+            "tool": entry.tool,
+            "arguments": entry.arguments,
+            "outcome": _told_outcome(entry.outcome),
+            "new": False,
+        }
     if isinstance(entry, ViewSeen):
         return {
             "entry": "view",

@@ -122,10 +122,10 @@ class AgentLoop:
     every new line and every view read goes into the agent's history, and one addressed to him starts a turn; at
     most one turn runs per loop, over its own session, and a failure of the turn's calls to this app goes into the
     one reaction of the loop. The turn also holds the bound tools of the tools-only apps: each request to one runs
-    in a session of its own under the token for its own scope, and its failure never reaches the reaction. In an app
+    in a session of its own under the token for its own scope, and its failure never reaches the reaction. Each call
+    the turn relays, to this app or a tools-only one, enters the agent's history when its request ends. In an app
     that declares ``speak``, for an agent whose persona has a voice section, each active call place instead runs one
-    voice loop,
-    which hears every line the place gives and speaks through ``speak``.
+    voice loop, which hears every line the place gives and speaks through ``speak``.
     """
 
     def __init__(
@@ -149,6 +149,8 @@ class AgentLoop:
             boundaries.tokens,
             boundaries.open_session,
             self._remembering,
+            mind,
+            boundaries.clock,
             self._current_token,
             self._use_current_token,
             self._report,

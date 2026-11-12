@@ -29,6 +29,7 @@ from personas.failures import (
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
+from tests.support.history import act_entry, unanswered, url_of
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import (
     CALL,
@@ -437,6 +438,9 @@ async def test_a_deadline_during_a_relayed_call_ends_the_turn_as_limit_exceeded_
 
     assert runner.reports.events() == [("started", None), ("turn_ended", "limit_exceeded")]
     assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [2]]
+    assert runner.gateway.openings()[1].room["history"]["entries"][1] == act_entry(
+        url_of(runner, 0), "say", {"place": PLACE_ID, "text": ANSWER}, unanswered("cancelled")
+    )
     assert runner.clock.slept == []
     assert runner.task is not None
     assert not runner.task.done()

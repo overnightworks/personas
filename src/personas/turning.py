@@ -16,6 +16,8 @@ from agents.turn import Turn, TurnMessage, TurnRole
 from personas.decision import (
     TOOL_NOT_DECLARED_CODE,
     TURN_ROLE,
+    ActDone,
+    act_outcome,
     bound_declarations,
     call_within_bound,
     decisive_failure,
@@ -23,7 +25,7 @@ from personas.decision import (
     turn_call_bound,
     turn_told,
 )
-from personas.failures import CallFailure, Unreachable, leaves_of, raise_if_cancelled
+from personas.failures import CallFailure, Unreachable, leaves_of, raise_if_cancelled, task_is_being_cancelled
 from personas.reporting import Event
 from personas.task_record import (
     RelayFailed,
@@ -44,8 +46,10 @@ if TYPE_CHECKING:
     from agents.turn import JsonObject, Principal
 
     from personas.app_session import AppSession, SessionOpener
+    from personas.clock import Clock
     from personas.config import AgentCredentials, AppTarget, ToolBinding
     from personas.decision import History, Occasion, Token
+    from personas.mind import Mind
     from personas.remembering import Remembering
     from personas.task_record import TaskRecord
     from personas.tokens import TokenFacts, TokenSource
@@ -110,8 +114,9 @@ class Admitted:
 class Turning:
     """Runs the turns of one agent in one app, each over a session of its own.
 
-    It holds no state across turns. The token, its use on a session and the two reports are the loop's, handed over
-    as callables and read at each call.
+    It holds no state across turns beyond what it records into the agent's mind: each relayed call that passed its
+    app's bound, once its request ended. The token, its use on a session and the two reports are the loop's, handed
+    over as callables and read at each call.
     """
 
     def __init__(
@@ -122,6 +127,8 @@ class Turning:
         tokens: TokenSource,
         open_session: SessionOpener,
         remembering: Remembering,
+        mind: Mind,
+        clock: Clock,
         current_token: Callable[[], Awaitable[Token]],
         use_current_token: Callable[[AppSession], Awaitable[None]],
         report: Callable[[Event, str | None, AppTarget | None], None],
@@ -133,6 +140,8 @@ class Turning:
         self._tokens = tokens
         self._open_session = open_session
         self._remembering = remembering
+        self._mind = mind
+        self._clock = clock
         self._current_token = current_token
         self._use_current_token = use_current_token
         self._report = report
@@ -256,10 +265,13 @@ class Turning:
         if not calls.take():
             return ToolOutcome(_CALL_BOUND_TEXT, is_error=True)
         try:
-            await self._use_current_token(session)
-            return await session.invoke(name, arguments)
+            return await self._recorded_as_act(self._app, name, arguments, self._invoke(session, name, arguments))
         except Exception as error:
             raise RelayFailed(error) from None
+
+    async def _invoke(self, session: AppSession, name: str, arguments: JsonObject) -> ToolOutcome:
+        await self._use_current_token(session)
+        return await session.invoke(name, arguments)
 
     async def _relay_tools_only(
         self,
@@ -274,13 +286,38 @@ class Turning:
         if not calls.take():
             return ToolOutcome(_CALL_BOUND_TEXT, is_error=True)
         try:
-            answer = await self._ask_tools_only(app, lambda session: session.invoke(name, arguments), record)
+            answer = await self._recorded_as_act(
+                app, name, arguments, self._ask_tools_only(app, lambda session: session.invoke(name, arguments), record)
+            )
         except Exception as error:
             raise RelayFailed(error) from None
         if isinstance(answer, CallFailure):
             self._report_tools_only_failure(app, failed_apps, failure_code(answer))
             return ToolOutcome(_APP_FAILED_TEXT, is_error=True)
         return answer
+
+    async def _recorded_as_act[Answer: ToolOutcome | CallFailure](
+        self, app: AppTarget, name: str, arguments: JsonObject, request: Awaitable[Answer]
+    ) -> Answer:
+        """Awaits the request of a relayed call and records it as an act of the agent however it ends.
+
+        Whether the turn is being cancelled is asked once the request and every scope inside it have exited.
+        """
+        ended: ToolOutcome | BaseException | None = None
+        try:
+            answer = await request
+            ended = answer
+            return answer
+        except Exception as error:
+            ended = error
+            raise
+        except asyncio.CancelledError as cancelled:
+            ended = cancelled
+            raise
+        finally:
+            outcome = None if ended is None else act_outcome(ended, cancelling=task_is_being_cancelled())
+            if outcome is not None:
+                self._mind.take((ActDone(app.mcp_url, name, arguments, outcome, self._clock.wall()),))
 
     async def _ask_tools_only[Answer](
         self, app: AppTarget, ask: Callable[[AppSession], Awaitable[Answer]], record: TaskRecord

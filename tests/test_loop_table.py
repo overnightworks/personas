@@ -245,6 +245,7 @@ async def test_a_table_that_serves_no_view_for_a_while_is_not_read_and_its_earli
     assert [each["entry"] for each in view_turns(runner)[0].room["history"]["entries"]] == [
         "view",
         "line",
+        "act",
         "line",
         "view",
     ]
