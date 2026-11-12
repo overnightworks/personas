@@ -21,6 +21,8 @@ from agents.member import (
     PlaceRef,
     PlaceView,
     PlaceWindow,
+    SpeakRefusal,
+    Spoken,
     Standing,
     StandingState,
 )
@@ -185,14 +187,24 @@ def reaction_to(failure: CallFailure, *, already_renewed: bool) -> Reaction | Su
 
 
 def is_voice_app(has_voice_section: bool, declared: Iterable[ToolDeclaration]) -> bool:
-    """Whether the places of an app run a voice loop: its agent's persona has a voice section and the app declares
-    ``speak``. Every other app keeps the per-line turn."""
+    """Whether the turns at the call places of an app are spoken: its agent's persona has a voice section and the app
+    declares ``speak``."""
     return has_voice_section and any(each.name == SPEAK_TOOL for each in declared)
+
+
+def speaks_aloud(voice_app: bool, occasion: Occasion) -> bool:
+    """Whether a turn is spoken: it is for lines, which a call place gives, in the app of a voice."""
+    return voice_app and isinstance(occasion, Lines)
 
 
 def spoken_wait_seconds(duration_ms: int) -> float:
     """How long the voice waits after a sentence the app says plays for ``duration_ms``."""
     return min(duration_ms / 1000, SPOKEN_WAIT_BOUND_SECONDS)
+
+
+def past_deadline(now: float, started: float, max_duration_seconds: float) -> bool:
+    """Whether a turn that started at ``started`` has used its longest duration at ``now``, on one monotonic scale."""
+    return now - started >= max_duration_seconds
 
 
 def is_defect(leaf: BaseException) -> bool:
@@ -372,23 +384,50 @@ class ActDone:
     at: datetime
 
 
-type Entry = KeptLine | ViewSeen | ActDone
+type SpeechOutcome = Spoken | SpeakRefusal | Unanswered
 
 
-def act_outcome(ended: ToolOutcome | BaseException, *, cancelling: bool) -> ActOutcome | None:
-    """The outcome of a relayed call from how its request ended and whether the turn's task is being cancelled.
+@dataclass(frozen=True)
+class SaidAloud:
+    """A sentence an agent's turn sent to the ``speak`` of the app at ``app``, with the wall time its request ended."""
 
-    An answer is an answer even while a cancel is pending. A cancellation can come out of a request as a failure, so
-    any other ending while cancelling is a call cut in flight. Without a cancel a failure is told by its code, and any
-    other error is a defect, which records nothing.
-    """
-    if not isinstance(ended, BaseException):
-        return Answered(ended.content, ended.is_error)
+    app: str
+    place: PlaceRef
+    text: str = field(repr=False)
+    outcome: SpeechOutcome
+    at: datetime
+
+
+type Entry = KeptLine | ViewSeen | ActDone | SaidAloud
+
+
+def _unanswered(ended: BaseException, *, cancelling: bool) -> Unanswered | None:
+    """The outcome of a request that ended without an answer. A cancellation can come out of a request as a failure,
+    so any ending while cancelling is a request cut in flight. Without a cancel a failure is told by its code, and any
+    other error is a defect, which records nothing."""
     if cancelling:
         return Unanswered(TURN_CANCELLED_CODE)
     if isinstance(ended, CallFailure):
         return Unanswered(failure_code(ended))
     return None
+
+
+def act_outcome(ended: ToolOutcome | BaseException, *, cancelling: bool) -> ActOutcome | None:
+    """The outcome of a relayed call from how its request ended and whether the turn's task is being cancelled.
+
+    An answer is an answer even while a cancel is pending.
+    """
+    if not isinstance(ended, BaseException):
+        return Answered(ended.content, ended.is_error)
+    return _unanswered(ended, cancelling=cancelling)
+
+
+def speech_outcome(ended: Spoken | SpeakRefusal | BaseException, *, cancelling: bool) -> SpeechOutcome | None:
+    """The outcome of a sentence sent to ``speak`` from how its request ended and whether the turn's task is being
+    cancelled. The app's answer, a refusal included, is an answer even while a cancel is pending."""
+    if isinstance(ended, Spoken | SpeakRefusal):
+        return ended
+    return _unanswered(ended, cancelling=cancelling)
 
 
 @dataclass(frozen=True)
@@ -435,8 +474,8 @@ def swept_before(now: datetime, lines_keep_days: float) -> datetime | None:
     return _before(now, lines_keep_days * SECONDS_PER_DAY)
 
 
-def _own_time(entry: KeptLine | ActDone) -> datetime:
-    return entry.at if isinstance(entry, ActDone) else entry.first_read_at
+def _own_time(entry: KeptLine | ActDone | SaidAloud) -> datetime:
+    return entry.first_read_at if isinstance(entry, KeptLine) else entry.at
 
 
 def _told_bytes(told: dict[str, object]) -> int:
@@ -444,8 +483,9 @@ def _told_bytes(told: dict[str, object]) -> int:
 
 
 def _size(entry: Entry) -> int:
-    """A view counts the bytes of its state's JSON; a line and an act count the bytes of the JSON they are told as, with
-    their age as 0 and no mark as new, so a size does not change while the entry stays in the history."""
+    """A view counts the bytes of its state's JSON; a line, an act and a spoken sentence count the bytes of the JSON
+    they are told as, with their age as 0 and no mark as new, so a size does not change while the entry stays in the
+    history."""
     if isinstance(entry, ViewSeen):
         return len(json.dumps(entry.view.state, ensure_ascii=False).encode())
     return _told_bytes(_told_entry(entry, _own_time(entry), new=False))
@@ -493,8 +533,8 @@ def _first_read(lines: Sequence[KeptLine]) -> datetime:
 
 @dataclass(frozen=True)
 class History:
-    """Every line one agent took in, every view revision he read and every call relayed for him at any of his places
-    since the runner started, in the order they came, within the bound of the history.
+    """Every line one agent took in, every view revision he read, every call relayed for him and every sentence sent to
+    a ``speak`` for him since the runner started, in the order they came, within the bound of the history.
 
     ``left_out`` counts the entries that ever left it by the bound and ``heard`` the entries not his own that were ever
     appended. ``entries`` are the entries ever appended with the ordinals ``left_out`` up to ``taken - 1``, without a
@@ -530,7 +570,7 @@ def _holds_revision(entries: Iterable[Entry], view: ViewSeen) -> bool:
 
 
 def _not_his_own(entry: Entry) -> bool:
-    return not isinstance(entry, ActDone) and not (isinstance(entry, KeptLine) and entry.own)
+    return not isinstance(entry, ActDone | SaidAloud) and not (isinstance(entry, KeptLine) and entry.own)
 
 
 def history_after(history: History, new: Iterable[Entry], size_bytes: int) -> History:
@@ -557,7 +597,7 @@ class Arrived:
 
 def arrived_since(current: History, admitted: History) -> Arrived | None:
     """What entered ``current`` since ``admitted``, an earlier value of the same history, when any of it is not his own;
-    otherwise ``None``. His own lines and his acts alone arrive as nothing."""
+    otherwise ``None``. His own lines, his acts and his spoken sentences alone arrive as nothing."""
     if current.heard == admitted.heard:
         return None
     return Arrived(current.entries[max(0, admitted.taken - current.left_out) :], current.left_out > admitted.taken)
@@ -731,7 +771,25 @@ def _told_outcome(outcome: ActOutcome) -> dict[str, object]:
     return {"answered": False, "code": outcome.code}
 
 
+def _told_speech_outcome(outcome: SpeechOutcome) -> dict[str, object]:
+    if isinstance(outcome, Spoken):
+        return {"answered": True}
+    if isinstance(outcome, SpeakRefusal):
+        return {"answered": True, "refused": outcome.value}
+    return {"answered": False, "code": outcome.code}
+
+
 def _told_entry(entry: Entry, at: datetime, *, new: bool) -> dict[str, object]:
+    if isinstance(entry, SaidAloud):
+        return {
+            "entry": "speech",
+            "app": entry.app,
+            "place": _told_place(entry.place),
+            "seconds_ago": int((at - entry.at).total_seconds()),
+            "text": entry.text,
+            "outcome": _told_speech_outcome(entry.outcome),
+            "new": new,
+        }
     if isinstance(entry, ActDone):
         return {
             "entry": "act",
@@ -789,9 +847,15 @@ def _told_entries(history: History, app: str, place: PlaceRef, occasion: Occasio
     return {"older_dropped": history.older_dropped, "entries": entries}
 
 
-def _told_wake(app: str, place: PlaceRef, occasion: Occasion) -> dict[str, object]:
+def _told_wake(app: str, place: PlaceRef, occasion: Occasion, *, aloud: bool) -> dict[str, object]:
     if isinstance(occasion, Lines):
-        return {"why": WakeReason.LINES, "app": app, "place": _told_place(place), "missed": occasion.missed}
+        woke: dict[str, object] = {
+            "why": WakeReason.LINES,
+            "app": app,
+            "place": _told_place(place),
+            "missed": occasion.missed,
+        }
+        return woke | {"aloud": True} if aloud else woke
     return {"why": WakeReason.VIEW, "app": app, "place": _told_place(place)}
 
 
@@ -803,10 +867,13 @@ def turn_told(
     history: History,
     earlier: EarlierToday | None,
     at: datetime,
+    *,
+    aloud: bool,
 ) -> str:
     """The one user message of every turn, the facts in the order things happened: his name, with a memory what he kept
     of the day that his history does not hold, his history as it stood when the turn was admitted at ``at`` with the
-    lines or the view revision the turn is for marked new, and what woke him.
+    lines or the view revision the turn is for marked new, and what woke him; a turn for lines is told when its answer
+    is heard aloud.
 
     It holds no instruction; those live in the persona.
     """
@@ -814,13 +881,5 @@ def turn_told(
     if earlier is not None:
         told[EARLIER_TODAY_KEY] = told_earlier_today(earlier)
     told["history"] = _told_entries(history, app, place, occasion, at)
-    told["woke"] = _told_wake(app, place, occasion)
+    told["woke"] = _told_wake(app, place, occasion, aloud=aloud)
     return json.dumps(told, ensure_ascii=False)
-
-
-def voice_context(earlier: EarlierToday | None) -> str:
-    """What a voice loop is told of the day, once, when it starts: the facts a turn is told under the same key; none
-    without a memory or when the store cannot be read."""
-    if earlier is None:
-        return ""
-    return json.dumps({EARLIER_TODAY_KEY: told_earlier_today(earlier)}, ensure_ascii=False)

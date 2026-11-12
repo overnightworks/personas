@@ -1,88 +1,131 @@
-"""The voice loop's ports: the lines it hears, the sentences it speaks and the log."""
+"""What a spoken turn does with its text: the sentences it releases, sent one at a time to the app's ``speak``."""
 
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from agents.backend import TurnStopKind, TurnStopped
 from agents.member import SpeakRefusal
-from agents.voice import DecisionFailed, VoiceRefused
+from agents.turn import FailureCode
+from agents.voice.reply import ReplyReader
 
-from personas.decision import spoken_wait_seconds
+from personas.decision import SaidAloud, past_deadline, speech_outcome, spoken_wait_seconds
+from personas.failures import task_is_being_cancelled
 from personas.reporting import Event
+from personas.task_record import RelayFailed
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Iterable
 
-    from agents.member import PlaceEntry, PlaceRef
-    from agents.voice import VoiceEvent
+    from agents.backend import TurnEvent
+    from agents.member import PlaceRef, Spoken
 
     from personas.app_session import AppSession
     from personas.clock import Clock
-
-type Report = Callable[[Event, str | None], None]
-
-
-class Hearing:
-    """The lines a voice loop hears: the runner puts in what it reads, and the loop takes them in order, for good."""
-
-    def __init__(self) -> None:
-        self._lines: asyncio.Queue[PlaceEntry] = asyncio.Queue()
-
-    def put(self, line: PlaceEntry) -> None:
-        self._lines.put_nowait(line)
-
-    def __aiter__(self) -> Hearing:
-        return self
-
-    async def __anext__(self) -> PlaceEntry:
-        return await self._lines.get()
+    from personas.decision import Entry
 
 
-@dataclass(frozen=True)
-class ActiveVoice:
-    """A place's running voice loop: its task, the window generation it hears and the lines it is yet to take."""
+class Speaking:
+    """One spoken turn's speech: the sentences its reply releases, spoken in order, each after the one before has been
+    answered and its length has passed.
 
-    task: asyncio.Task[None]
-    generation: str
-    hearing: Hearing
-
-
-@dataclass(frozen=True)
-class SpeakingVoice:
-    """The app's ``speak`` as the loop's voice: a sentence is rendered and queued by the app when it is played.
-
-    The session is the loop's own, and its token is renewed before each call.
+    The turn hands every event to ``hear`` and runs ``play`` beside its events. A sentence is sent only before the
+    turn's deadline; each one sent enters the agent's history as a ``SaidAloud`` however its request ends. A refusal
+    ends the speech and is reported; the turn goes on without it.
     """
 
-    session: AppSession
-    place: PlaceRef
-    clock: Clock
-    report: Report
-    renew_token: Callable[[], Awaitable[None]]
+    def __init__(
+        self,
+        session: AppSession,
+        app: str,
+        place: PlaceRef,
+        clock: Clock,
+        max_duration_seconds: float,
+        renew_token: Callable[[], Awaitable[None]],
+        report: Callable[[Event, str | None], None],
+        enter: Callable[[Iterable[Entry]], None],
+    ) -> None:
+        self._session = session
+        self._app = app
+        self._place = place
+        self._clock = clock
+        self._started = clock.now()
+        self._max_duration_seconds = max_duration_seconds
+        self._renew_token = renew_token
+        self._report = report
+        self._enter = enter
+        self._reader = ReplyReader()
+        self._queue: asyncio.Queue[str | None] = asyncio.Queue()
+        self._silenced = False
+        self._idle = asyncio.Event()
+        self._idle.set()
 
-    # The library's port is an ``async def`` that pyright holds this to, and there is nothing to await: the app renders
-    # the sentence when it is played.
-    async def render(self, sentence: str) -> str:  # NOSONAR(S7503)
-        return sentence
+    def hear(self, event: TurnEvent) -> None:
+        """Queues the sentences the event completed."""
+        for sentence in self._reader.read(event).sentences:
+            self._queue.put_nowait(sentence)
 
-    async def play(self, audio: str) -> None:
-        """Speaks the sentence and waits for as long as the app says it plays, to a bound; a refusal ends the answer."""
-        await self.renew_token()
-        outcome = await self.session.speak(self.place, audio)
+    def end(self) -> None:
+        """No more events come: ``play`` ends once the queued sentences are spoken."""
+        self._queue.put_nowait(None)
+
+    async def settle(self) -> None:
+        """The turn's events failed: no sentence is sent from now on, and one in flight is answered and entered."""
+        self._silenced = True
+        await self._idle.wait()
+
+    async def spoken(self) -> None:
+        """Returns once every sentence heard so far is answered and its length has passed; a turn past its deadline by
+        then ends."""
+        await self._queue.join()
+        self._stop_past_deadline()
+
+    async def play(self) -> None:
+        """Speaks the queued sentences in order until the queue ends."""
+        while (sentence := await self._queue.get()) is not None:
+            try:
+                if not self._silenced:
+                    await self._speak(sentence)
+            finally:
+                self._queue.task_done()
+
+    async def _speak(self, sentence: str) -> None:
+        self._stop_past_deadline()
+        try:
+            outcome = await self._entered_as_said(sentence)
+        except Exception as error:
+            raise RelayFailed(error) from None
         if isinstance(outcome, SpeakRefusal):
-            self.report(Event.SPEAK_REFUSED, outcome.value)
-            raise VoiceRefused
-        await self.clock.sleep(spoken_wait_seconds(outcome.duration_ms))
+            self._report(Event.SPEAK_REFUSED, outcome.value)
+            self._silenced = True
+        elif not self._silenced:
+            await self._clock.sleep(spoken_wait_seconds(outcome.duration_ms))
 
+    def _stop_past_deadline(self) -> None:
+        if past_deadline(self._clock.now(), self._started, self._max_duration_seconds):
+            raise TurnStopped(TurnStopKind.FAILED, FailureCode.LIMIT_EXCEEDED)
 
-def reporting_decisions(report: Report) -> Callable[[VoiceEvent], None]:
-    """A failed decision is logged by its code; nothing the loop hears or says is logged."""
+    async def _entered_as_said(self, sentence: str) -> Spoken | SpeakRefusal:
+        """Sends the sentence and enters it into the history however its request ends.
 
-    def on_event(event: VoiceEvent) -> None:
-        if not isinstance(event, DecisionFailed):
-            return
-        report(Event.TURN_ENDED, event.code.value)
-
-    return on_event
+        Whether the turn is being cancelled is asked once the request and every scope inside it have exited.
+        """
+        ended: Spoken | SpeakRefusal | BaseException | None = None
+        self._idle.clear()
+        try:
+            await self._renew_token()
+            answer = await self._session.speak(self._place, sentence)
+            ended = answer
+            return answer
+        except Exception as error:
+            ended = error
+            raise
+        except asyncio.CancelledError as cancelled:
+            ended = cancelled
+            raise
+        finally:
+            self._idle.set()
+            outcome = None if ended is None else speech_outcome(ended, cancelling=task_is_being_cancelled())
+            if outcome is not None:
+                self._enter((SaidAloud(self._app, self._place, sentence, outcome, self._clock.wall()),))

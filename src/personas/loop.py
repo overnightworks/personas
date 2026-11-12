@@ -9,14 +9,9 @@ from functools import partial
 from operator import eq
 from typing import TYPE_CHECKING, Final, Literal, NoReturn
 
-from agents.backend import TurnPerson
-from agents.voice.loop import run_voice_loop
-from agents.voice.wake import addressed_or_asked
-
 from personas.decision import (
     SUSPENDED_RETRY_SECONDS,
     TURN_CANCELLED_CODE,
-    TURN_ROLE,
     AppPlace,
     Joined,
     Lines,
@@ -42,12 +37,12 @@ from personas.decision import (
     perceive,
     reaction_to,
     renewal_due,
+    speaks_aloud,
     sync_checkpoints,
     sync_turned_revisions,
     taken_lines,
     turn_invalid,
     view_turn_due,
-    voice_context,
     wakes_him,
 )
 from personas.failures import CallFailure, leaves_of, raise_if_cancelled
@@ -57,12 +52,10 @@ from personas.reporting import Event, Reporter, StateChange
 from personas.task_record import (
     TaskRecord,
     ending_loud_when_cancelled,
-    ending_with_recorded_defect,
     unrequested_unless_cancelling,
 )
-from personas.tokens import TokenFacts, facts_of
+from personas.tokens import facts_of
 from personas.turning import Admitted, Turning, TurnSetup
-from personas.voice import ActiveVoice, Hearing, SpeakingVoice, reporting_decisions
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
@@ -127,8 +120,8 @@ class AgentLoop:
     loop. The turn also holds the bound tools of the tools-only apps: each request to one runs
     in a session of its own under the token for its own scope, and its failure never reaches the reaction. Each call
     the turn relays, to this app or a tools-only one, enters the agent's history when its request ends. In an app
-    that declares ``speak``, for an agent whose persona has a voice section, each active call place instead runs one
-    voice loop, which hears every line the place gives and speaks through ``speak``.
+    that declares ``speak``, for an agent whose persona has a voice section, a turn at a call place is spoken: its text
+    is said sentence by sentence through ``speak``.
     """
 
     def __init__(
@@ -169,7 +162,6 @@ class AgentLoop:
         self._turned_revisions: dict[PlaceRef, int] = {}
         self._turn: ActiveTurn | None = None
         self._turn_ended = mind.wake_event()
-        self._voices: dict[PlaceRef, ActiveVoice] = {}
         self._voice_app = False
         persona, binding, backend = agent.persona, app.binding, boundaries.backend
         self._turn_setup = (
@@ -194,7 +186,6 @@ class AgentLoop:
             asyncio.TaskGroup() as turns,
             self._boundaries.open_session(self._app, token.value) as session,
         ):
-            self._voices = {}
             self._voice_app = await self._is_voice_app(session)
             while True:
                 await self._use_current_token(session)
@@ -204,7 +195,7 @@ class AgentLoop:
                         await self._reconcile(session, turns)
 
     async def _is_voice_app(self, session: AppSession) -> bool:
-        """Whether this app's places run the voice loop, decided once for the lifecycle session."""
+        """Whether the turns at this app's call places are spoken, decided once for the lifecycle session."""
         has_voice_section = self._turn_setup is not None and self._turn_setup.persona.voice_window_bytes is not None
         declared = await session.declared_tools() if has_voice_section else ()
         return is_voice_app(has_voice_section, declared)
@@ -236,7 +227,7 @@ class AgentLoop:
     async def _reconcile(self, session: AppSession, turns: asyncio.TaskGroup) -> None:
         """Reads the standing as it is now and acts on it; a wake says only that it may have changed."""
         standings = await self._take_standing(session)
-        if await self._read_call_places(session, turns, standings):
+        if await self._read_call_places(session, standings):
             # A window the app lost dropped its place's checkpoint: the standing says where the place stands now.
             standings = await self._take_standing(session)
         await self._read_views(session, standings)
@@ -258,9 +249,7 @@ class AgentLoop:
         return standing.standings
 
     def _cancel_turn_if_its_place_left(self, standings: tuple[Standing, ...]) -> None:
-        """A turn and a voice loop end with their place; a turn's slot stays taken until its task has ended."""
-        for place in [each for each in self._voices if turn_invalid(each, standings)]:
-            self._voices.pop(place).task.cancel()
+        """A turn ends with its place; its slot stays taken until its task has ended."""
         turn = self._turn
         if turn is not None and not turn.cancel_requested and turn_invalid(turn.place, standings):
             self._turn = replace(turn, cancel_requested=True)
@@ -302,16 +291,13 @@ class AgentLoop:
             if is_news:
                 self._report(Event.REFUSED, refusal.value)
 
-    async def _read_call_places(
-        self, session: AppSession, turns: asyncio.TaskGroup, standings: tuple[Standing, ...]
-    ) -> bool:
+    async def _read_call_places(self, session: AppSession, standings: tuple[Standing, ...]) -> bool:
         """Reads the active call places' windows, a turn of his running or not, and takes their lines in.
 
         It says whether a window was lost, which dropped its place's checkpoint.
         """
         if self._turn_setup is None:
             return False
-        facts = facts_of((await self._current_token()).value)
         lost = False
         for place in active_call_places(standings):
             await self._use_current_token(session)
@@ -321,7 +307,7 @@ class AgentLoop:
                 lost = True
                 continue
             read_at = self._boundaries.clock.wall()
-            self._take_lines(turns, self._turn_setup, place, window, facts, read_at)
+            self._take_lines(place, window, read_at)
             await self._remembering.keep(WindowRead(self._agent.client_id, self._app.mcp_url, place, window, read_at))
         return lost
 
@@ -359,94 +345,24 @@ class AgentLoop:
         at, occasion = claim
         if isinstance(occasion, Waiting):
             self._turned_revisions[at.place] = occasion.revision
-        admitted = Admitted(facts, at.place, occasion, self._mind.history, self._boundaries.clock.wall())
+        aloud = speaks_aloud(self._voice_app, occasion)
+        admitted = Admitted(facts, at.place, occasion, self._mind.history, self._boundaries.clock.wall(), aloud)
         self._start_turn(turns, setup, at.place, admitted)
 
-    def _take_lines(
-        self,
-        turns: asyncio.TaskGroup,
-        setup: TurnSetup,
-        place: PlaceRef,
-        window: PlaceWindow,
-        facts: TokenFacts,
-        read_at: datetime,
-    ) -> None:
-        """Moves the place's checkpoint and takes the new lines into the agent's history: a voice loop hears all of
-        them, and at a written place a line that is not his own makes a turn due. No await stands in it."""
+    def _take_lines(self, place: PlaceRef, window: PlaceWindow, read_at: datetime) -> None:
+        """Moves the place's checkpoint and takes the new lines into the agent's history; a line that is not his own
+        makes a turn due. No await stands in it."""
         perception = perceive(window, self._checkpoints[place])
         self._checkpoints[place] = perception.checkpoint
-        visit = Visit(self._app.mcp_url, place, window.generation)
-        self._mind.take(taken_lines(visit, perception.new, read_at))
-        if not self._voice_app:
-            if wakes_him(perception.new):
-                lines = Lines(window.generation, frozenset(line.seq for line in perception.new), perception.missed)
-                self._mind.due(AppPlace(self._app.mcp_url, place), lines)
-            return
-        voice = self._voices.get(place)
-        if voice is None or voice.generation != window.generation:
-            if voice is not None:
-                voice.task.cancel()
-            voice = self._start_voice(turns, setup, visit, facts)
-        for line in perception.new:
-            voice.hearing.put(line)
+        self._mind.take(taken_lines(Visit(self._app.mcp_url, place, window.generation), perception.new, read_at))
+        if wakes_him(perception.new):
+            lines = Lines(window.generation, frozenset(line.seq for line in perception.new), perception.missed)
+            self._mind.due(AppPlace(self._app.mcp_url, place), lines)
 
     def _start_turn(self, turns: asyncio.TaskGroup, setup: TurnSetup, place: PlaceRef, admitted: Admitted) -> None:
         task = turns.create_task(self._turning.take(setup, admitted, TaskRecord()))
         self._turn = ActiveTurn(task, place)
         task.add_done_callback(self._turn_over)
-
-    def _start_voice(self, turns: asyncio.TaskGroup, setup: TurnSetup, visit: Visit, facts: TokenFacts) -> ActiveVoice:
-        hearing = Hearing()
-        task = turns.create_task(self._take_voice(setup, visit, facts, hearing, TaskRecord()))
-        self._voices[visit.place] = voice = ActiveVoice(task, visit.generation, hearing)
-        return voice
-
-    async def _take_voice(
-        self, setup: TurnSetup, visit: Visit, facts: TokenFacts, hearing: Hearing, record: TaskRecord
-    ) -> None:
-        """Runs a place's voice loop; whatever way it ends, a defect met in it ends the runner loud.
-
-        The loud end is asked here, in the task's own coroutine, and the record joins a defect the session's close
-        can lose from what leaves.
-        """
-        await ending_loud_when_cancelled(
-            ending_with_recorded_defect(self._run_voice(setup, visit, facts, hearing, record), record), record.loud_end
-        )
-
-    async def _run_voice(
-        self, setup: TurnSetup, visit: Visit, facts: TokenFacts, hearing: Hearing, record: TaskRecord
-    ) -> None:
-        """Reads the day, then hears and speaks over a session of its own until it is cancelled.
-
-        Lines heard meanwhile wait in the hearing. A decision's tools are none, so nothing relays a call.
-        """
-        context = voice_context(await self._remembering.read_day(self._boundaries.clock.wall(), visit))
-        token = await self._current_token()
-        async with self._boundaries.open_session(self._app, token.value) as session:
-            try:
-                voice = SpeakingVoice(
-                    session,
-                    visit.place,
-                    self._boundaries.clock,
-                    self._report,
-                    partial(self._use_current_token, session),
-                )
-                await run_voice_loop(
-                    setup.persona,
-                    setup.backend(()),
-                    TurnPerson(facts.principal, TURN_ROLE, self._current_groups),
-                    hearing,
-                    voice,
-                    wakes=addressed_or_asked(frozenset({facts.name})),
-                    context=context,
-                    report=reporting_decisions(self._report),
-                )
-            except Exception as error:
-                record.note(error)
-                raise
-
-    async def _current_groups(self) -> frozenset[str]:
-        return facts_of((await self._current_token()).value).groups
 
     def _turn_over(self, task: asyncio.Task[None]) -> None:
         turn, self._turn = self._turn, None

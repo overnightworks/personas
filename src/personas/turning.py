@@ -12,6 +12,7 @@ from agents.agent_file import TurnRequest
 from agents.backend import TurnPerson, TurnStopped
 from agents.tools import HandTool, ToolOutcome
 from agents.turn import Turn, TurnMessage, TurnRole
+from agents.turn_events import ToolCallEvent
 
 from personas.decision import (
     TOOL_NOT_DECLARED_CODE,
@@ -36,13 +37,14 @@ from personas.task_record import (
     failure_held_by,
     unreachable_unless_cancelling,
 )
+from personas.voice import Speaking
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Coroutine, Iterable
+    from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterable
     from datetime import datetime
 
     from agents.agent_file import AgentDefinition
-    from agents.backend import AgentBackend
+    from agents.backend import AgentBackend, TurnEvent
     from agents.member import PlaceRef
     from agents.tools import ToolDeclaration
     from agents.turn import JsonObject, Principal
@@ -116,14 +118,15 @@ class _HeldTools:
 
 @dataclass(frozen=True)
 class Admitted:
-    """A turn decided on, with the facts it was decided from: the token's, what woke it, what its agent had taken in
-    and the wall time it was admitted at."""
+    """A turn decided on, with the facts it was decided from: the token's, what woke it, what its agent had taken in,
+    the wall time it was admitted at and whether its text is spoken."""
 
     facts: TokenFacts
     place: PlaceRef
     occasion: Occasion
     history: History = field(repr=False)
     at: datetime
+    aloud: bool
 
     def groups(self) -> Coroutine[None, None, frozenset[str]]:
         """The library's GroupSource wants an awaitable; the groups are already known."""
@@ -225,6 +228,7 @@ class Turning:
             admitted.history,
             earlier,
             admitted.at,
+            aloud=admitted.aloud,
         )
 
     async def _run_session_body(
@@ -246,8 +250,40 @@ class Turning:
         )
         person = TurnPerson(admitted.facts.principal, TURN_ROLE, admitted.groups)
         async with aclosing(setup.backend(held.tools).run(request, person)) as events:
-            async for _ in events:
-                continue
+            if admitted.aloud:
+                speaking = Speaking(
+                    session,
+                    self._app.mcp_url,
+                    admitted.place,
+                    self._clock,
+                    setup.persona.max_duration_seconds,
+                    partial(self._use_current_token, session),
+                    lambda event, code: self._report(event, code, None),
+                    self._mind.take,
+                )
+                await self._speak_along(events, speaking)
+            else:
+                async for _ in events:
+                    continue
+
+    async def _speak_along(self, events: AsyncIterator[TurnEvent], speaking: Speaking) -> None:
+        """Reads the turn's events while the sentences they release are spoken beside them.
+
+        A call is relayed only when the events are asked for again, so it goes out after every sentence before it was
+        spoken. When the events end in an error, the sentence in flight is answered and entered before it is raised;
+        only a cancel cuts the speech. The turn ends once the speech has.
+        """
+        async with asyncio.TaskGroup() as group:
+            group.create_task(speaking.play())
+            try:
+                async for event in events:
+                    speaking.hear(event)
+                    if isinstance(event, ToolCallEvent):
+                        await speaking.spoken()
+            except Exception:
+                await speaking.settle()
+                raise
+            speaking.end()
 
     async def _hold_tools(
         self, setup: TurnSetup, session: AppSession, record: TaskRecord, admitted: History
