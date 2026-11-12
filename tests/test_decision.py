@@ -134,6 +134,15 @@ def test_every_accept_brings_the_figure_the_agent_has():
     assert [accept.figure for accept in accepts] == [figure, figure]
 
 
+@pytest.mark.parametrize("voice", ["Rachel_V2.en-GB", None])
+def test_every_accept_brings_the_voice_the_agent_has_at_a_call_and_at_a_table(voice):
+    held = (invited("room-7", "inv-3"), invited("table-1", "inv-4", kind="table", serves_view=True))
+
+    accepts = accepts_for(held, Memory(), takes_turns=True, voice=voice)
+
+    assert [accept.voice for accept in accepts] == [voice, voice]
+
+
 @pytest.mark.parametrize(
     "standing",
     [
@@ -738,14 +747,14 @@ def test_a_turn_is_told_his_name_then_the_day_then_his_history_and_last_what_wok
     assert list(json.loads(told_a_written_turn(earlier))) == keys
 
 
-@pytest.mark.parametrize("has_voice_section", [True, False])
+@pytest.mark.parametrize("has_voice", [True, False])
 @pytest.mark.parametrize("declared_names", [[SPEAK_TOOL, "say"], ["say"]], ids=["declares speak", "declares none"])
-def test_the_places_of_an_app_are_spoken_only_for_a_persona_with_a_voice_section_and_an_app_that_declares_speak(
-    has_voice_section, declared_names
+def test_the_places_of_an_app_are_spoken_only_for_an_agent_with_a_voice_and_an_app_that_declares_speak(
+    has_voice, declared_names
 ):
     declared = [_declaration(name) for name in declared_names]
 
-    assert is_voice_app(has_voice_section, declared) is (has_voice_section and SPEAK_TOOL in declared_names)
+    assert is_voice_app(has_voice, declared) is (has_voice and SPEAK_TOOL in declared_names)
 
 
 @pytest.mark.parametrize(

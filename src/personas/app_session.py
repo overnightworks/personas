@@ -226,7 +226,11 @@ class _McpAppSession:
 
     async def accept(self, accept: Accept) -> Refusal | None:
         arguments = AcceptInvitationArguments(
-            place=accept.place, invitation=accept.invitation_id, epoch=accept.epoch, figure=accept.figure
+            place=accept.place,
+            invitation=accept.invitation_id,
+            epoch=accept.epoch,
+            figure=accept.figure,
+            voice=accept.voice,
         ).model_dump(mode="json")
         result = await self._called(ACCEPT_INVITATION_TOOL, arguments)
         return _refusal_of(_text_of(result)) if result.is_error else None

@@ -33,7 +33,7 @@ from personas.failures import CallFailure, StatusFailure, TokenStatusFailure, Un
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
 
-    from agents.member import FigureRef
+    from agents.member import FigureRef, VoiceName
     from agents.tools import ToolDeclaration, ToolOutcome
     from agents.turn import AgentRole, JsonObject
 
@@ -90,6 +90,7 @@ class Accept:
     invitation_id: str
     epoch: int
     figure: FigureRef | None = field(default=None, repr=False)
+    voice: VoiceName | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -112,13 +113,18 @@ def _is_call(standing: Standing) -> bool:
 
 
 def accepts_for(
-    standings: tuple[Standing, ...], memory: Memory, *, takes_turns: bool, figure: FigureRef | None = None
+    standings: tuple[Standing, ...],
+    memory: Memory,
+    *,
+    takes_turns: bool,
+    figure: FigureRef | None = None,
+    voice: VoiceName | None = None,
 ) -> tuple[Accept, ...]:
     """One accept for each invited call standing whose invitation was not refused as stale, and, where the loop can
     take turns, for each invited place that serves a view: a seated agent that cannot act leaves the place waiting.
-    Every accept brings the agent's figure, if he has one."""
+    Every accept brings the agent's figure and the name of his voice, if he has them."""
     return tuple(
-        Accept(standing.place, standing.invitation.id, standing.invitation.epoch, figure)
+        Accept(standing.place, standing.invitation.id, standing.invitation.epoch, figure, voice)
         for standing in standings
         if standing.state is StandingState.INVITED
         and standing.invitation is not None
@@ -186,10 +192,10 @@ def reaction_to(failure: CallFailure, *, already_renewed: bool) -> Reaction | Su
             return Reaction.BACKOFF
 
 
-def is_voice_app(has_voice_section: bool, declared: Iterable[ToolDeclaration]) -> bool:
-    """Whether the turns at the call places of an app are spoken: its agent's persona has a voice section and the app
-    declares ``speak``."""
-    return has_voice_section and any(each.name == SPEAK_TOOL for each in declared)
+def is_voice_app(has_voice: bool, declared: Iterable[ToolDeclaration]) -> bool:
+    """Whether the turns at the call places of an app are spoken: its agent has a voice and the app declares
+    ``speak``."""
+    return has_voice and any(each.name == SPEAK_TOOL for each in declared)
 
 
 def speaks_aloud(voice_app: bool, occasion: Occasion) -> bool:

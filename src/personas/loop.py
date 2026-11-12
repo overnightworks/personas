@@ -122,7 +122,7 @@ class AgentLoop:
     active place when it is admitted, which the loops of those apps record in his mind: each request to one runs in a
     session of its own under the token for its own scope, and its failure never reaches the reaction. Each call the
     turn relays, to this app or another, enters the agent's history when its request ends. In an app
-    that declares ``speak``, for an agent whose persona has a voice section, a turn at a call place is spoken: its text
+    that declares ``speak``, for an agent whose entry has a voice table, a turn at a call place is spoken: its text
     is said sentence by sentence through ``speak``.
     """
 
@@ -198,9 +198,9 @@ class AgentLoop:
 
     async def _is_voice_app(self, session: AppSession) -> bool:
         """Whether the turns at this app's call places are spoken, decided once for the lifecycle session."""
-        has_voice_section = self._turn_setup is not None and self._turn_setup.persona.voice_window_bytes is not None
-        declared = await session.declared_tools() if has_voice_section else ()
-        return is_voice_app(has_voice_section, declared)
+        has_voice = self._turn_setup is not None and self._agent.voice is not None
+        declared = await session.declared_tools() if has_voice else ()
+        return is_voice_app(has_voice, declared)
 
     async def _wakes(self, changes: AsyncIterator[object]) -> AsyncGenerator[None]:
         """A wake for each change the app signals and for each wake of his mind; it ends when the stream does."""
@@ -281,8 +281,13 @@ class AgentLoop:
             self._report(Event.RESUMED)
 
     async def _accept_invitations(self, session: AppSession, standings: tuple[Standing, ...]) -> None:
+        voice = self._agent.voice
         for accept in accepts_for(
-            standings, self._memory, takes_turns=self._turn_setup is not None, figure=self._agent.figure
+            standings,
+            self._memory,
+            takes_turns=self._turn_setup is not None,
+            figure=self._agent.figure,
+            voice=None if voice is None else voice.name,
         ):
             await self._use_current_token(session)
             refusal = await session.accept(accept)
