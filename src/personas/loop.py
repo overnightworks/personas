@@ -63,6 +63,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from agents.member import PlaceRef, PlaceWindow, Standing
+    from agents.turn import TurnUsage
 
     from personas.app_session import AppSession, SessionOpener
     from personas.clock import Clock
@@ -379,11 +380,13 @@ class AgentLoop:
             self._report(Event.TURN_ENDED, TURN_CANCELLED_CODE)
         self._mind.release()
 
-    def _report_turn_end(self, code: str) -> None:
+    def _report_turn_end(self, code: str | None, usage: TurnUsage | None) -> None:
         """A turn reports its end at most once; the record tells the loop, which then reports no cancel."""
         assert self._turn is not None  # noqa: S101 - only the running turn's task reports its end
         self._turn = replace(self._turn, end_reported=True)
-        self._report(Event.TURN_ENDED, code)
+        self._boundaries.report(
+            StateChange(Event.TURN_ENDED, self._agent.client_id, self._app.mcp_url, code, usage=usage)
+        )
 
     async def _react(self, failure: CallFailure) -> None:
         match reaction_to(failure, already_renewed=self._renewed_after_401):

@@ -43,7 +43,11 @@ pytestmark = pytest.mark.anyio
 
 def reported(runner) -> list[tuple[Event, str | None, str | None]]:
     """What the loops reported but their start, each as its event, its code and the address of the app it names."""
-    return [(each.event, each.code, each.app) for each in runner.reports.changes if each.event is not Event.STARTED]
+    return [
+        (each.event, each.code, each.app)
+        for each in runner.reports.without_completed_turns
+        if each.event is not Event.STARTED
+    ]
 
 
 def fingerprints(tokens) -> set[str]:

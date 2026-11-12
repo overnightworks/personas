@@ -14,6 +14,7 @@ from agents.member import MemberStanding, PlaceEntry, PlaceWindow, Standing
 from personas.config import AgentCredentials, AppTarget, MemoryTarget
 from personas.decision import Accept, Refusal
 from personas.failures import CallFailure
+from personas.reporting import Event
 from personas.secret import Secret
 from personas.tokens import GrantedToken
 from tests.support.hopin import GENERATION, ISSUER
@@ -231,7 +232,11 @@ class FakeReadyMarker:
 
 
 class Reports:
-    """The state changes a loop reported, in order, and a way to wait for one."""
+    """The state changes a loop reported, in order, and a way to wait for one.
+
+    A turn that ended with its final event is reported with no code; ``events`` and ``until`` leave it out, so a
+    scenario reads what went wrong or was cut short, and ``until_a_turn_completed`` waits for it.
+    """
 
     def __init__(self) -> None:
         self.changes: list[StateChange] = []
@@ -241,12 +246,26 @@ class Reports:
         self.changes.append(change)
         self._added.set()
 
+    @staticmethod
+    def _completes_a_turn(change: StateChange) -> bool:
+        return change.event is Event.TURN_ENDED and change.code is None
+
+    @property
+    def without_completed_turns(self) -> list[StateChange]:
+        return [change for change in self.changes if not self._completes_a_turn(change)]
+
     def events(self) -> list[tuple[str, str | None]]:
-        return [(change.event.value, change.code) for change in self.changes]
+        return [(change.event.value, change.code) for change in self.without_completed_turns]
 
     async def until(self, event: str, *, count: int = 1, limit_seconds: float = 10.0) -> None:
         """Returns once this many changes of this event have been reported; fails after the limit."""
         async with asyncio.timeout(limit_seconds):
-            while sum(change.event.value == event for change in self.changes) < count:
+            while sum(change.event.value == event for change in self.without_completed_turns) < count:
+                self._added.clear()
+                await self._added.wait()
+
+    async def until_a_turn_completed(self, *, limit_seconds: float = 10.0) -> None:
+        async with asyncio.timeout(limit_seconds):
+            while not any(self._completes_a_turn(change) for change in self.changes):
                 self._added.clear()
                 await self._added.wait()

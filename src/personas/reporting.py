@@ -6,7 +6,10 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Final
+from typing import TYPE_CHECKING, Final
+
+if TYPE_CHECKING:
+    from agents.turn import TurnUsage
 
 _LOG: Final = logging.getLogger("personas")
 
@@ -31,7 +34,8 @@ class Event(StrEnum):
 class StateChange:
     """One change of an agent's loop for one app, with the HTTP status, refusal, failure or turn code if any.
 
-    The sweep belongs to no agent and no app, and says how many lines it removed.
+    The sweep belongs to no agent and no app, and says how many lines it removed. A turn that ended with a final
+    event says the tokens it used, when the library had them.
     """
 
     event: Event
@@ -39,6 +43,7 @@ class StateChange:
     app: str | None
     code: str | None = None
     lines: int | None = None
+    usage: TurnUsage | None = None
 
 
 type Reporter = Callable[[StateChange], None]
@@ -47,13 +52,22 @@ type Reporter = Callable[[StateChange], None]
 def log_state_change(change: StateChange) -> None:
     """Writes the fields below and nothing else: no secret, token or tool content reaches a line."""
     removed = "" if change.lines is None else f" lines={change.lines}"
+    used = "" if change.usage is None else _tokens_used(change.usage)
     _LOG.info(
-        "%s client_id=%s app=%s code=%s%s",
+        "%s client_id=%s app=%s code=%s%s%s",
         change.event,
         change.client_id or "-",
         change.app or "-",
         change.code or "-",
         removed,
+        used,
+    )
+
+
+def _tokens_used(usage: TurnUsage) -> str:
+    return (
+        f" input={usage.input_tokens} cache_read={usage.cached_input_tokens}"
+        f" cache_write={usage.cache_write_tokens} output={usage.output_tokens}"
     )
 
 
