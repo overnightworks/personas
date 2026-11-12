@@ -1,8 +1,0 @@
-claim_id = "3cef1feafe884b54873d163697c1f47b"
-agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
-role = "builder"
-base = "d98bc300f643118a6ac2fb3dd28d8592339cad04"
-branch = "claude/issue-119-a-turn-s-end-says-how-many-tokens-it-use"
-scope = ["README.md", "docs/ARCHITECTURE.md", "pyproject.toml", "src/personas/loop.py", "src/personas/reporting.py", "src/personas/turning.py", "tests", "uv.lock"]
-opened_commit = "139bad1f14a26cb49522d6777f4769eee1b74198"
-whole_reason = "The fields have no value without the turn handing them over; the agents pins move with the lane as agents v0.34.0's release asks; tests is a directory."
