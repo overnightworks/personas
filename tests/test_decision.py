@@ -958,6 +958,18 @@ def test_a_history_its_lines_and_its_views_show_no_name_no_text_and_no_state_in_
     assert marker not in repr(view)
 
 
+def test_the_places_and_lines_a_turn_is_due_for_show_no_name_no_text_and_no_state_in_their_repr():
+    marker = secrets.token_hex(8)
+    taken = said(1, marker, name=marker)
+    at = AppPlace(taken.visit.app, taken.visit.place)
+    lines = Lines(taken.visit.generation, frozenset({taken.seq}), missed=False)
+    turns = with_due(with_due(Turns(), at, lines), AppPlace(APP, TABLE), Waiting(revision=1))
+
+    assert marker not in repr(at)
+    assert marker not in repr(lines)
+    assert marker not in repr(turns)
+
+
 def test_new_lines_join_the_history_after_the_lines_it_holds():
     history = history_after(History((said(1, "one"),), older_dropped=False), (said(2, "two"), said(3, "three")), 10_000)
 
