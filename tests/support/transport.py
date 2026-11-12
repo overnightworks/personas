@@ -80,6 +80,15 @@ class ClosingHold:
         self.release = asyncio.Event()
         self.cancelled = asyncio.Event()
 
+    async def _held(self) -> None:
+        """Tells ``closing`` and waits for ``release``; a cancel while it waits tells ``cancelled``."""
+        self.closing.set()
+        try:
+            await self.release.wait()
+        except asyncio.CancelledError:
+            self.cancelled.set()
+            raise
+
     def transport(self, *, nth: int = 1, of_url: str | None = None):
         """A stand-in for ``streamable_http_client`` whose ``nth`` close waits for ``release``.
 
@@ -99,12 +108,7 @@ class ClosingHold:
                 finally:
                     closes += counted
                     if counted and closes == nth:
-                        self.closing.set()
-                        try:
-                            await self.release.wait()
-                        except asyncio.CancelledError:
-                            self.cancelled.set()
-                            raise
+                        await self._held()
 
         return waiting
 
@@ -126,12 +130,7 @@ class ClosingHold:
                 if of_url in (None, str(app.mcp_url)):
                     leaves += 1
                     if leaves == nth:
-                        self.closing.set()
-                        try:
-                            await self.release.wait()
-                        except asyncio.CancelledError:
-                            self.cancelled.set()
-                            raise
+                        await self._held()
 
         return waiting
 
