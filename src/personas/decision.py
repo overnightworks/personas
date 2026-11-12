@@ -430,12 +430,8 @@ def swept_before(now: datetime, lines_keep_days: float) -> datetime | None:
     return _before(now, lines_keep_days * SECONDS_PER_DAY)
 
 
-def _own_time(entry: Entry) -> datetime:
-    if isinstance(entry, ActDone):
-        return entry.at
-    if isinstance(entry, ViewSeen):
-        return entry.read_at
-    return entry.first_read_at
+def _own_time(entry: KeptLine | ActDone) -> datetime:
+    return entry.at if isinstance(entry, ActDone) else entry.first_read_at
 
 
 def _told_bytes(told: dict[str, object]) -> int:
