@@ -17,6 +17,7 @@ from personas.config import (
     DEFAULT_TODAY,
     DEFAULT_WRITE_SECONDS,
     ToolBinding,
+    Voice,
     load_config,
 )
 from personas.decision import TodayBounds
@@ -220,6 +221,55 @@ def test_a_malformed_figure_stops_the_start_and_names_the_field(files, monkeypat
 
     assert named in error
     assert "figures.test" not in error
+
+
+def test_an_agent_entry_turns_his_voice_on_with_a_table_and_may_name_it(files):
+    assert load_config(files.write()).agents[0].voice is None
+    files.text += "[agents.voice]\n"
+    assert load_config(files.write()).agents[0].voice == Voice(None)
+    files.text += 'name = "Rachel_V2.en-GB"\n'
+
+    assert load_config(files.write()).agents[0].voice == Voice("Rachel_V2.en-GB")
+
+
+@pytest.mark.parametrize(
+    ("table", "named"),
+    [
+        ('[agents.voice]\nname = ""\n', "agents.0.voice.name"),
+        ('[agents.voice]\nname = "two words"\n', "agents.0.voice.name"),
+        ('[agents.voice]\nname = "a/b"\n', "agents.0.voice.name"),
+        (f'[agents.voice]\nname = "{"a" * 65}"\n', "agents.0.voice.name"),
+        ("[agents.voice]\nname = 7\n", "agents.0.voice.name"),
+        ('[agents.voice]\nspeed = "fast"\n', "agents.0.voice.speed"),
+        ('voice = "ryan"\n', "agents.0.voice"),
+    ],
+    ids=["empty", "space", "slash", "too long", "not a string", "unknown key", "not a table"],
+)
+def test_a_malformed_voice_stops_the_start_and_names_the_field_but_not_its_value(
+    files, monkeypatch, capsys, table, named
+):
+    files.text += table
+
+    error = fails_at_start(files.write(), monkeypatch, capsys)
+
+    assert named in error
+    for value in ("two words", "a/b", "ryan", "fast"):
+        assert value not in error
+
+
+@pytest.mark.parametrize("table", ["", "[agents.voice]\n"], ids=["without the table", "with the table"])
+def test_a_persona_file_with_a_voice_section_stops_the_start_and_names_the_field_but_not_its_content(
+    files, monkeypatch, capsys, table
+):
+    files.persona_path.write_text(files.persona_text(voice_window_bytes=8192), encoding="utf-8")
+    files.text += table
+
+    error = fails_at_start(files.write(), monkeypatch, capsys)
+
+    assert "agents.0.persona_file" in error
+    assert "voice" in error
+    assert "8192" not in error
+    assert files.persona_prompt not in error
 
 
 def test_a_configuration_without_tools_in_any_app_needs_no_gateway_and_no_persona(files):
