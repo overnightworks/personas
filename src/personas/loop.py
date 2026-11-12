@@ -23,6 +23,7 @@ from personas.decision import (
     Reaction,
     Suspend,
     Token,
+    ViewSeen,
     Visit,
     Waiting,
     WindowRead,
@@ -118,8 +119,8 @@ class AgentLoop:
     A refusal by the realm or the app suspends the loop: it makes no further call until its next
     retry, and resumes once a read answers again. A network failure, a lost stream or a 5xx backs off,
     logged once until a read answers. In an app that binds tools, the lines of the agent's call places are
-    read too, every new line goes into the agent's history, and one addressed to him starts a turn; at most one turn
-    runs per loop, over its own session, and a failure of the turn's calls to this app goes into the one reaction of
+    read too, every new line and every view read goes into the agent's history, and one addressed to him starts a turn;
+    at most one turn runs per loop, over its own session, and a failure of the turn's calls to this app goes into the one reaction of
     the loop. The turn also holds the bound tools of the tools-only apps: each request to one runs in a session of
     its own under the token for its own scope, and its failure never reaches the reaction. In an app that declares
     ``speak``, for an agent whose persona has a voice section, each active call place instead runs one voice loop,
@@ -323,7 +324,8 @@ class AgentLoop:
     async def _answer_waiting_view(
         self, session: AppSession, turns: asyncio.TaskGroup, standings: tuple[Standing, ...]
     ) -> None:
-        """Reads the views of the active view places in the standing's order; the first that is due starts the turn.
+        """Reads the views of the active view places in the standing's order, takes each into the agent's history and
+        starts the turn at the first that is due.
 
         It reads none while a turn runs or was just started. A revision starts one turn, whatever that turn did.
         """
@@ -334,10 +336,14 @@ class AgentLoop:
         for place in active_view_places(standings):
             await self._use_current_token(session)
             view = await session.read_view(place)
-            if view is None or not view_turn_due(self._turned_revisions.get(place), view):
+            if view is None:
+                continue
+            read_at = self._boundaries.clock.wall()
+            self._mind.take((ViewSeen(self._app.mcp_url, place, view, read_at),))
+            if not view_turn_due(self._turned_revisions.get(place), view):
                 continue
             self._turned_revisions[place] = view.revision
-            admitted = Admitted(facts, place, Waiting(view), self._mind.history, self._boundaries.clock.wall())
+            admitted = Admitted(facts, place, Waiting(view.revision), self._mind.history, read_at)
             self._start_turn(turns, setup, place, admitted)
             return
 

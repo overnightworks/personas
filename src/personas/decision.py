@@ -29,7 +29,7 @@ from agents.member import (
 from personas.failures import CallFailure, StatusFailure, TokenStatusFailure, UnusableAnswer
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Iterable, Mapping, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     from agents.tools import ToolDeclaration
     from agents.turn import AgentRole
@@ -327,6 +327,19 @@ class KeptLine:
 
 
 @dataclass(frozen=True)
+class ViewSeen:
+    """A revision of a place's view as an agent read it, with the wall time of that read."""
+
+    app: str
+    place: PlaceRef
+    view: PlaceView = field(repr=False)
+    read_at: datetime
+
+
+type Entry = KeptLine | ViewSeen
+
+
+@dataclass(frozen=True)
 class TodayBounds:
     """What a turn is told of the day: the lines first read within ``hours``, at most ``size_bytes`` of them."""
 
@@ -336,7 +349,8 @@ class TodayBounds:
 
 @dataclass(frozen=True)
 class EarlierVisit:
-    """An earlier visit as a turn is told it: how many minutes ago its first line was read, and its lines."""
+    """An earlier visit as a turn is told it: how many minutes ago its first line was read, and its lines. It is a
+    visit whose lines the history does not hold."""
 
     minutes_ago: int
     lines: tuple[KeptLine, ...]
@@ -344,7 +358,8 @@ class EarlierVisit:
 
 @dataclass(frozen=True)
 class EarlierToday:
-    """The earlier visits of the day in the order they happened, and whether older lines were left out."""
+    """The kept lines of the day that the history does not hold, as earlier visits in the order they happened, and
+    whether older lines were left out."""
 
     visits: tuple[EarlierVisit, ...]
     older_dropped: bool
@@ -368,12 +383,19 @@ def swept_before(now: datetime, lines_keep_days: float) -> datetime | None:
     return _before(now, lines_keep_days * SECONDS_PER_DAY)
 
 
-def _size(line: KeptLine) -> int:
-    return len(line.name.encode()) + len(line.text.encode())
+def _size(entry: Entry) -> int:
+    """A line counts its speaker and text, a view its state as it is told."""
+    if isinstance(entry, ViewSeen):
+        return len(_told_state(entry.view).encode())
+    return len(entry.name.encode()) + len(entry.text.encode())
 
 
-def _newest_that_fit(newest_first: Iterable[KeptLine], size_bytes: int) -> int:
-    """How many of the lines, taken newest first, fit ``size_bytes`` of speakers and text."""
+def _told_state(view: PlaceView) -> str:
+    return json.dumps(view.state, ensure_ascii=False)
+
+
+def _newest_that_fit(newest_first: Iterable[Entry], size_bytes: int) -> int:
+    """How many of the entries, taken newest first, fit ``size_bytes``."""
     return sum(1 for total in itertools.accumulate(map(_size, newest_first)) if total <= size_bytes)
 
 
@@ -382,7 +404,7 @@ def _remaining(kept: Iterable[KeptLine], leaving_out: History | Visit, now: date
     read after ``now``, which no history of that turn holds yet; a voice loop leaves out the lines of its own visit."""
     if isinstance(leaving_out, Visit):
         return (line for line in kept if line.visit != leaving_out)
-    held = {(line.visit, line.seq) for line in leaving_out.entries}
+    held = {(entry.visit, entry.seq) for entry in leaving_out.entries if isinstance(entry, KeptLine)}
     return (line for line in kept if (line.visit, line.seq) not in held and line.first_read_at <= now)
 
 
@@ -414,10 +436,10 @@ def _first_read(lines: Sequence[KeptLine]) -> datetime:
 
 @dataclass(frozen=True)
 class History:
-    """Every line one agent took in at any of his places since the runner started, in the order he took it, and
-    whether older ones were left out to keep it within its bound."""
+    """Every line one agent took in and every view revision he read at any of his places since the runner started, in
+    the order he took them, and whether older entries were left out to keep it within its bound."""
 
-    entries: tuple[KeptLine, ...] = field(repr=False)
+    entries: tuple[Entry, ...] = field(repr=False)
     older_dropped: bool
 
 
@@ -426,10 +448,22 @@ def taken_lines(visit: Visit, new: Iterable[PlaceEntry], read_at: datetime) -> t
     return tuple(KeptLine(visit, line.seq, read_at, line.name, line.kind, line.text, line.own) for line in new)
 
 
-def history_after(history: History, new: Iterable[KeptLine], size_bytes: int) -> History:
-    """The history with ``new`` appended; past ``size_bytes`` of speakers and text the oldest lines are left out."""
-    entries = (*history.entries, *new)
-    left_out = len(entries) - _newest_that_fit(reversed(entries), size_bytes)
+def _holds_revision(entries: Iterable[Entry], view: ViewSeen) -> bool:
+    return any(
+        isinstance(entry, ViewSeen)
+        and (entry.app, entry.place, entry.view.revision) == (view.app, view.place, view.view.revision)
+        for entry in entries
+    )
+
+
+def history_after(history: History, new: Iterable[Entry], size_bytes: int) -> History:
+    """The history with ``new`` appended, a view revision it already holds adding nothing; past ``size_bytes`` the
+    oldest entries are left out, but the newest always stays."""
+    entries = history.entries
+    for entry in new:
+        if not (isinstance(entry, ViewSeen) and _holds_revision(entries, entry)):
+            entries = (*entries, entry)
+    left_out = max(0, len(entries) - max(1, _newest_that_fit(reversed(entries), size_bytes)))
     return History(entries[left_out:], history.older_dropped or left_out > 0)
 
 
@@ -497,9 +531,9 @@ class Lines:
 
 @dataclass(frozen=True)
 class Waiting:
-    """Why a view turn runs: the place's view waits for the agent."""
+    """Why a view turn runs: the place's view waits for the agent at this revision, which the history holds."""
 
-    view: PlaceView = field(repr=False)
+    revision: int
 
 
 type Occasion = Lines | Waiting
@@ -526,39 +560,56 @@ def _told_place(place: PlaceRef) -> dict[str, str]:
     return {"kind": place.kind, "id": place.id}
 
 
-def _told_entries(history: History, new: Collection[tuple[Visit, int]], at: datetime) -> dict[str, object]:
-    entries = [
+def _is_new(entry: Entry, app: str, place: PlaceRef, occasion: Occasion) -> bool:
+    """Whether the turn is for this entry: a line the read that admitted a written turn took, or the revision a view
+    turn waits at."""
+    if isinstance(occasion, Waiting):
+        return isinstance(entry, ViewSeen) and (entry.app, entry.place, entry.view.revision) == (
+            app,
+            place,
+            occasion.revision,
+        )
+    return (
+        isinstance(entry, KeptLine)
+        and entry.visit == Visit(app, place, occasion.generation)
+        and entry.seq in occasion.seqs
+    )
+
+
+def _told_entry(entry: Entry, at: datetime, *, new: bool) -> dict[str, object]:
+    if isinstance(entry, ViewSeen):
+        return {
+            "entry": "view",
+            "app": entry.app,
+            "place": _told_place(entry.place),
+            "seconds_ago": int((at - entry.read_at).total_seconds()),
+            "revision": entry.view.revision,
+            "awaits_you": entry.view.awaits_you,
+            "state": entry.view.state,
+            "new": new,
+        }
+    return (
         {
             "entry": "line",
-            "app": line.visit.app,
-            "place": _told_place(line.visit.place),
-            "seconds_ago": int((at - line.first_read_at).total_seconds()),
-            "seq": line.seq,
+            "app": entry.visit.app,
+            "place": _told_place(entry.visit.place),
+            "seconds_ago": int((at - entry.first_read_at).total_seconds()),
+            "seq": entry.seq,
         }
-        | _told_line(line)
-        | {"new": (line.visit, line.seq) in new}
-        for line in history.entries
-    ]
+        | _told_line(entry)
+        | {"new": new}
+    )
+
+
+def _told_entries(history: History, app: str, place: PlaceRef, occasion: Occasion, at: datetime) -> dict[str, object]:
+    entries = [_told_entry(entry, at, new=_is_new(entry, app, place, occasion)) for entry in history.entries]
     return {"older_dropped": history.older_dropped, "entries": entries}
 
 
 def _told_wake(app: str, place: PlaceRef, occasion: Occasion) -> dict[str, object]:
     if isinstance(occasion, Lines):
         return {"why": WakeReason.LINES, "app": app, "place": _told_place(place), "missed": occasion.missed}
-    return {
-        "why": WakeReason.VIEW,
-        "app": app,
-        "place": _told_place(place),
-        "awaits_you": occasion.view.awaits_you,
-        "state": occasion.view.state,
-    }
-
-
-def _lines_taken_for(app: str, place: PlaceRef, occasion: Occasion) -> frozenset[tuple[Visit, int]]:
-    if isinstance(occasion, Waiting):
-        return frozenset()
-    visit = Visit(app, place, occasion.generation)
-    return frozenset((visit, seq) for seq in occasion.seqs)
+    return {"why": WakeReason.VIEW, "app": app, "place": _told_place(place)}
 
 
 def turn_told(
@@ -572,14 +623,14 @@ def turn_told(
 ) -> str:
     """The one user message of every turn, the facts in the order things happened: his name, with a memory what he kept
     of the day that his history does not hold, his history as it stood when the turn was admitted at ``at`` with the
-    lines the turn is for marked new, and what woke him.
+    lines or the view revision the turn is for marked new, and what woke him.
 
     It holds no instruction; those live in the persona.
     """
     told: dict[str, object] = {"you": you}
     if earlier is not None:
         told[EARLIER_TODAY_KEY] = told_earlier_today(earlier)
-    told["history"] = _told_entries(history, _lines_taken_for(app, place, occasion), at)
+    told["history"] = _told_entries(history, app, place, occasion, at)
     told["woke"] = _told_wake(app, place, occasion)
     return json.dumps(told, ensure_ascii=False)
 
