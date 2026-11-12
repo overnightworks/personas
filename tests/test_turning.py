@@ -7,7 +7,7 @@ import pytest
 from agents.member import PlaceRef, PlaceView
 from agents.turn import Principal
 
-from personas.decision import History, KeptLine, Lines, ViewSeen, Visit, Waiting
+from personas.decision import ActDone, Answered, History, KeptLine, Lines, ViewSeen, Visit, Waiting
 from personas.tokens import TokenFacts
 from personas.turning import Admitted
 
@@ -30,10 +30,13 @@ def lines_occasion(_marker: str) -> Lines:
     [view_occasion, lines_occasion],
     ids=["a view turn whose history holds a state with the marker", "the lines a window gave"],
 )
-def test_an_admission_repr_shows_neither_a_view_state_nor_a_line_of_the_history(occasion_of):
+def test_an_admission_repr_shows_neither_a_view_state_nor_a_line_nor_an_act_of_the_history(occasion_of):
     marker = secrets.token_hex(8)
     view = ViewSeen(VISIT.app, PLACE, PlaceView(revision=1, awaits_you=True, state={"hand": marker}), TAKEN_AT)
-    history = History((KeptLine(VISIT, 1, TAKEN_AT, marker, "message", marker, own=False), view), older_dropped=False)
+    act = ActDone(VISIT.app, "say", {"text": marker}, Answered(marker, is_error=False), TAKEN_AT)
+    history = History(
+        (KeptLine(VISIT, 1, TAKEN_AT, marker, "message", marker, own=False), view, act), older_dropped=False
+    )
     occasion = occasion_of(marker)
 
     admission = repr(Admitted(FACTS, PLACE, occasion, history, TAKEN_AT))

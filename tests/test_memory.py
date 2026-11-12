@@ -28,6 +28,8 @@ from tests.support.history import (
     SPEAKER,
     STATE_BYTES,
     TABLE,
+    act_entry,
+    answered,
     at_table,
     entry,
     history_of,
@@ -404,6 +406,13 @@ async def test_back_four_hours_after_a_visit_his_first_turn_is_told_its_lines_wi
     assert back_again.room["history"] == history_of(
         [
             entry(url_of(runner, 0), PLACE_ID, ADDRESSED, seconds_ago=4 * 3600, new=False),
+            act_entry(
+                url_of(runner, 0),
+                "say",
+                {"place": PLACE_ID, "text": ANSWER},
+                answered("said"),
+                seconds_ago=4 * 3600,
+            ),
             entry(url_of(runner, 0), PLACE_ID, ANSWER, seq=2, seconds_ago=4 * 3600, name=AGENT_NAME, own=True),
             entry(url_of(runner, 0), PLACE_ID, welcome_back, new=True),
         ]

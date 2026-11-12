@@ -19,6 +19,8 @@ from tests.support.history import (
     SPEAKER,
     STATE_BYTES,
     TABLE,
+    act_entry,
+    answered,
     at_table,
     entry,
     histories,
@@ -342,6 +344,7 @@ async def test_a_line_said_while_a_view_turn_runs_is_told_to_the_next_one_and_th
             [
                 view_entry(table, first, revision=1),
                 entry(url_of(runner, 0), PLACE_ID, REMARK),
+                act_entry(table, "say", {"place": TABLE.id, "text": ANSWER}, answered("said")),
                 view_entry(table, second, revision=2, new=True),
             ]
         ),
