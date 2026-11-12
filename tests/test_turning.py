@@ -30,7 +30,7 @@ def marked_history() -> tuple[str, History]:
     marker = secrets.token_hex(8)
     view = ViewSeen(VISIT.app, PLACE, PlaceView(revision=1, awaits_you=True, state={"hand": marker}), TAKEN_AT)
     act = ActDone(VISIT.app, "say", {"text": marker}, Answered(marker, is_error=False), TAKEN_AT)
-    line = KeptLine(VISIT, 1, TAKEN_AT, marker, "message", marker, own=False)
+    line = KeptLine(VISIT, 1, TAKEN_AT, marker, "message", marker, own=False, spoken=False)
     return marker, history_after(History((), left_out=0, heard=0), (line, view, act), size_bytes=10_000)
 
 

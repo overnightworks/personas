@@ -590,9 +590,9 @@ def history_holding(entries):
     return history_after(EMPTY_HISTORY, entries, ROOMY.size_bytes)
 
 
-def kept(visit, seq, text, *, hours_before, own=False, name="Ada"):
+def kept(visit, seq, text, *, hours_before, own=False, spoken=False, name="Ada"):
     """A kept line of a visit, first read this many hours before ``LATER``."""
-    return KeptLine(visit, seq, LATER - timedelta(hours=hours_before), name, "message", text, own)
+    return KeptLine(visit, seq, LATER - timedelta(hours=hours_before), name, "message", text, own, spoken)
 
 
 def told(earlier):
@@ -713,7 +713,10 @@ def told_a_written_turn(
 def test_a_turn_is_told_each_earlier_visit_how_long_ago_it_was_its_lines_their_speakers_and_his_own():
     mine, theirs = secrets.token_hex(4), secrets.token_hex(4)
     earlier = earlier_today(
-        [kept(NOON, 1, theirs, hours_before=4), kept(NOON, 2, mine, hours_before=4, own=True, name="Mozart")],
+        [
+            kept(NOON, 1, theirs, hours_before=4),
+            kept(NOON, 2, mine, hours_before=4, own=True, spoken=True, name="Mozart"),
+        ],
         LATER,
         ROOMY,
         EMPTY_HISTORY,
@@ -727,8 +730,8 @@ def test_a_turn_is_told_each_earlier_visit_how_long_ago_it_was_its_lines_their_s
             {
                 "minutes_ago": 240,
                 "lines": [
-                    {"name": "Ada", "kind": "message", "text": theirs, "own": False},
-                    {"name": "Mozart", "kind": "message", "text": mine, "own": True},
+                    {"name": "Ada", "kind": "message", "text": theirs, "own": False, "spoken": False},
+                    {"name": "Mozart", "kind": "message", "text": mine, "own": True, "spoken": True},
                 ],
             }
         ],
@@ -883,8 +886,8 @@ def test_a_view_is_due_a_turn_while_it_waits_at_a_revision_no_turn_was_started_f
 APP = "https://app.test/mcp"
 
 
-def said(seq: int, text: str, *, name: str = "Bo", visit: Visit = MORNING) -> KeptLine:
-    return KeptLine(visit, seq, LATER, name, "message", text, own=False)
+def said(seq: int, text: str, *, name: str = "Bo", visit: Visit = MORNING, spoken: bool = False) -> KeptLine:
+    return KeptLine(visit, seq, LATER, name, "message", text, own=False, spoken=spoken)
 
 
 @pytest.fixture
@@ -897,7 +900,10 @@ def test_a_view_turn_is_told_its_revision_as_the_one_entry_marked_new_and_woke_n
     view = PlaceView(revision=3, awaits_you=True, state={"hand": ["x", {"seen": True}], "umläut": "ä"})
     history = history_after(
         ONCE_DROPPED,
-        (said(1, "Spiel den Buben", name="Ada", visit=NOON), ViewSeen(APP, TABLE, view, LATER - timedelta(seconds=7))),
+        (
+            said(1, "Spiel den Buben", name="Ada", visit=NOON, spoken=True),
+            ViewSeen(APP, TABLE, view, LATER - timedelta(seconds=7)),
+        ),
         ROOMY.size_bytes,
     )
 
@@ -918,6 +924,7 @@ def test_a_view_turn_is_told_its_revision_as_the_one_entry_marked_new_and_woke_n
                     "kind": "message",
                     "text": "Spiel den Buben",
                     "own": False,
+                    "spoken": True,
                     "new": False,
                 },
                 {
@@ -1003,10 +1010,12 @@ def test_a_history_line_is_new_only_when_the_turn_is_for_that_line_of_that_visit
     evening = replace(MORNING, generation="evening")
     history = history_holding(
         (
-            KeptLine(NOON, 1, LATER - timedelta(seconds=300), "Bo", "message", "elsewhere", own=False),
-            KeptLine(evening, 1, LATER - timedelta(seconds=200), "Bo", "message", "an earlier run", own=False),
-            KeptLine(MORNING, 1, LATER - timedelta(seconds=90), "Ada", "message", "woke him", own=False),
-            KeptLine(MORNING, 2, LATER - timedelta(seconds=1), "Mozart", "message", "his own", own=True),
+            KeptLine(NOON, 1, LATER - timedelta(seconds=300), "Bo", "message", "elsewhere", own=False, spoken=False),
+            KeptLine(
+                evening, 1, LATER - timedelta(seconds=200), "Bo", "message", "an earlier run", own=False, spoken=False
+            ),
+            KeptLine(MORNING, 1, LATER - timedelta(seconds=90), "Ada", "message", "woke him", own=False, spoken=False),
+            KeptLine(MORNING, 2, LATER - timedelta(seconds=1), "Mozart", "message", "his own", own=True, spoken=False),
         )
     )
     occasion = Lines(MORNING.generation, frozenset({1}), missed=False)
@@ -1035,12 +1044,12 @@ def test_the_history_is_told_in_the_order_it_holds_its_entries():
 def test_taken_lines_are_the_visits_lines_as_kept_with_the_time_of_the_read():
     entries = (
         PlaceEntry(seq=4, kind="message", name="Ada", text="four", own=False),
-        PlaceEntry(seq=5, kind="message", name="Mozart", text="five", own=True),
+        PlaceEntry(seq=5, kind="message", name="Mozart", text="five", own=True, spoken=True),
     )
 
     assert taken_lines(MORNING, entries, LATER) == (
-        KeptLine(MORNING, 4, LATER, "Ada", "message", "four", own=False),
-        KeptLine(MORNING, 5, LATER, "Mozart", "message", "five", own=True),
+        KeptLine(MORNING, 4, LATER, "Ada", "message", "four", own=False, spoken=False),
+        KeptLine(MORNING, 5, LATER, "Mozart", "message", "five", own=True, spoken=True),
     )
 
 
@@ -1449,7 +1458,7 @@ def test_what_is_left_out_of_the_day_counts_nothing_toward_its_size_bound():
 
 
 def an_own_line(seq: int, text: str = "mine") -> KeptLine:
-    return KeptLine(MORNING, seq, LATER, "Mozart", "message", text, own=True)
+    return KeptLine(MORNING, seq, LATER, "Mozart", "message", text, own=True, spoken=False)
 
 
 def a_view_seen(revision: int, *, size: int | None = None) -> ViewSeen:

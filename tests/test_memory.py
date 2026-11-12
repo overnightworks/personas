@@ -434,6 +434,15 @@ async def test_lines_first_read_longer_ago_than_the_day_reaches_are_not_read(sto
     assert [each.text for each in kept] == ["Within the day"]
 
 
+async def test_a_line_is_read_back_with_the_mark_of_having_been_said_aloud_as_it_was_kept(store):
+    visit = a_visit("morning")
+    await store.keep(a_read_in(visit, line(1, "Written"), line(2, "Said aloud", spoken=True)))
+
+    kept = await store.kept_since(AGENT, WALL_START)
+
+    assert [(each.seq, each.spoken) for each in kept] == [(1, False), (2, True)]
+
+
 async def test_two_agents_with_lines_in_one_place_each_read_only_their_own(store):
     morning, now = a_visit("morning"), a_visit("now")
     await store.keep(a_read_in(morning, line(1, "Mozart heard this")))
@@ -496,7 +505,7 @@ def remembered(runner, store: HoldingStore, database: MemoryTarget) -> HoldingSt
 
 def day_of(*texts: str) -> dict[str, object]:
     """What a turn is told of the day when the lines are one visit of ``Ada``'s, first read just now."""
-    lines = [{"name": SPEAKER, "kind": "message", "text": text, "own": False} for text in texts]
+    lines = [{"name": SPEAKER, "kind": "message", "text": text, "own": False, "spoken": False} for text in texts]
     return {"older_dropped": False, "visits": [{"minutes_ago": 0, "lines": lines}] if lines else []}
 
 

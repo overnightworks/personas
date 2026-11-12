@@ -90,7 +90,7 @@ async def test_back_after_a_restart_his_first_turn_at_the_voice_place_is_told_th
     first, second = runner.gateway.turns()
     assert first.room["earlier_today"] == {"older_dropped": False, "visits": []}
     (visit,) = second.room["earlier_today"]["visits"]
-    assert [each["text"] for each in visit["lines"]] == [ADDRESSED, ANSWER]
+    assert [(each["text"], each["spoken"]) for each in visit["lines"]] == [(ADDRESSED, True), (ANSWER, True)]
     assert [each["text"] for each in second.room["history"]["entries"] if each["new"]] == [welcome_back]
 
 

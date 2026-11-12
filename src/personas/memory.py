@@ -203,7 +203,14 @@ def _rows_of(read: WindowRead) -> list[dict[str, object]]:
 def _kept_line(row: Row[tuple[object, ...]]) -> KeptLine:
     place = PlaceRef(kind=row.place_kind, id=row.place_id)
     return KeptLine(
-        Visit(row.app, place, row.generation), int(row.seq), row.first_read_at, row.speaker, row.kind, row.text, row.own
+        Visit(row.app, place, row.generation),
+        int(row.seq),
+        row.first_read_at,
+        row.speaker,
+        row.kind,
+        row.text,
+        row.own,
+        row.spoken,
     )
 
 

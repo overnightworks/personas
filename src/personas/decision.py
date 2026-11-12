@@ -363,6 +363,7 @@ class KeptLine:
     kind: str
     text: str = field(repr=False)
     own: bool
+    spoken: bool
 
 
 @dataclass(frozen=True)
@@ -575,7 +576,9 @@ class History:
 
 def taken_lines(visit: Visit, new: Iterable[PlaceEntry], read_at: datetime) -> tuple[KeptLine, ...]:
     """The lines a read of the visit's window took, as the history keeps them."""
-    return tuple(KeptLine(visit, line.seq, read_at, line.name, line.kind, line.text, line.own) for line in new)
+    return tuple(
+        KeptLine(visit, line.seq, read_at, line.name, line.kind, line.text, line.own, line.spoken) for line in new
+    )
 
 
 def _revision_key(view: ViewSeen) -> tuple[str, PlaceRef, int]:
@@ -763,7 +766,7 @@ def told_earlier_today(earlier: EarlierToday) -> dict[str, object]:
 
 
 def _told_line(line: KeptLine) -> dict[str, object]:
-    return {"name": line.name, "kind": line.kind, "text": line.text, "own": line.own}
+    return {"name": line.name, "kind": line.kind, "text": line.text, "own": line.own, "spoken": line.spoken}
 
 
 def _told_place(place: PlaceRef) -> dict[str, str]:
