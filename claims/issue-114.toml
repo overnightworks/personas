@@ -1,0 +1,8 @@
+claim_id = "64060b1b20b3492f9eb34f610df3f082"
+agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
+role = "builder"
+base = "9dec771f97221dac6f863565a1e9fb6d0420f12c"
+branch = "claude/issue-114-a-release-carries-the-agents-figures-and"
+scope = [".github/workflows/release.yml", "README.md", "scripts/figure_release_notes.sh", "tests"]
+opened_commit = "0997d324f3d51e54baff843a498795b5e745e9b7"
+whole_reason = "The script has no caller without the workflow's job, and the job prints nothing without the script; tests is a directory."
