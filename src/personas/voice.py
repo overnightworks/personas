@@ -101,18 +101,25 @@ class Speaking:
             outcome = await self._entered_as_said(sentence)
         except Exception as error:
             raise RelayFailed(error) from None
+        if outcome is None:
+            self._stop_past_deadline()
+            return
         if isinstance(outcome, SpeakRefusal):
             self._report(Event.SPEAK_REFUSED, outcome.value)
             self._silenced = True
         elif not self._silenced:
             await self._clock.sleep(spoken_wait_seconds(outcome.duration_ms))
 
+    def _past_deadline(self) -> bool:
+        return past_deadline(self._clock.now(), self._started, self._max_duration_seconds)
+
     def _stop_past_deadline(self) -> None:
-        if past_deadline(self._clock.now(), self._started, self._max_duration_seconds):
+        if self._past_deadline():
             raise TurnStopped(TurnStopKind.FAILED, FailureCode.LIMIT_EXCEEDED)
 
-    async def _entered_as_said(self, sentence: str) -> Spoken | SpeakRefusal:
-        """Sends the sentence and enters it into the history however its request ends.
+    async def _entered_as_said(self, sentence: str) -> Spoken | SpeakRefusal | None:
+        """Sends the sentence and enters it into the history however its request ends; ``None`` when the token's
+        renewal ran into the deadline or a silence, so that nothing was sent and nothing is entered.
 
         Whether the turn is being cancelled is asked once the request and every scope inside it have exited.
         """
@@ -120,6 +127,8 @@ class Speaking:
         self._idle.clear()
         try:
             await self._renew_token()
+            if self._past_deadline():
+                return None
             answer = await self._session.speak(self._place, sentence)
             ended = answer
             return answer

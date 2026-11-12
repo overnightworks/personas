@@ -84,3 +84,15 @@ async def test_a_final_sentence_whose_wait_crosses_the_deadline_ends_the_turn_li
     assert stopped.value.code is FailureCode.LIMIT_EXCEEDED
     assert scenario.sent == ["One.", "Two."]
     assert len(scenario.entered) == 2
+
+
+async def test_a_sentence_whose_token_renewal_ends_past_the_deadline_is_not_sent_and_ends_the_turn_limit_exceeded():
+    scenario = SpeakingScenario("One.", renewal_seconds=DEADLINE_SECONDS + 1)
+    scenario.renewal_gate.set()
+
+    with pytest.raises(TurnStopped) as stopped:
+        await scenario.speaking.play()
+
+    assert stopped.value.code is FailureCode.LIMIT_EXCEEDED
+    assert scenario.sent == []
+    assert scenario.entered == []
