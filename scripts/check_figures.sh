@@ -23,7 +23,8 @@ if ! diff --recursive --brief --exclude='*.md' "${work}/generated" src/character
     exit 1
 fi
 
-curl --fail --silent --show-error --location --output "${work}/figure.tgz" "${TARBALL_URL}"
+curl --proto '=https' --proto-redir '=https' --fail --silent --show-error --location \
+    --output "${work}/figure.tgz" "${TARBALL_URL}"
 actual="sha512-$(openssl dgst -sha512 -binary "${work}/figure.tgz" | base64 --wrap=0)"
 if [[ "${actual}" != "${INTEGRITY}" ]]; then
     echo "figure ${VERSION}: the tarball's integrity is ${actual}, not the pinned one" >&2
