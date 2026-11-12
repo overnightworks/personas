@@ -314,6 +314,7 @@ async def test_a_line_heard_while_he_speaks_holds_the_call_after_the_sentence_on
     (held,) = (json.loads(each) for each in runner.gateway.tool_results(3) if each.startswith('{"sent": false'))
     arrived = held["arrived"]["entries"]
     assert [each["text"] for each in arrived if each["entry"] == "line" and not each["own"]] == ["Anyone there?"]
+    assert [(each["text"], each["new"]) for each in arrived if each["entry"] == "speech"] == [(ANSWER, False)]
     assert runner.app.said == [(SUBJECT, PLACE_ID, "Written.")]
     assert sentences_spoken(runner) == [ANSWER]
 

@@ -784,7 +784,7 @@ def _told_entry(entry: Entry, at: datetime, *, new: bool) -> dict[str, object]:
             "seconds_ago": int((at - entry.at).total_seconds()),
             "text": entry.text,
             "outcome": _told_speech_outcome(entry.outcome),
-            "new": new,
+            "new": False,
         }
     if isinstance(entry, ActDone):
         return {
@@ -821,8 +821,9 @@ def _told_entry(entry: Entry, at: datetime, *, new: bool) -> dict[str, object]:
 
 
 def held_told(arrived: Arrived, at: datetime) -> str:
-    """The result of a call that was not sent: that it was not, and the entries that arrived, each told as new. When
-    their text would pass ``MAX_EVENT_BYTES`` the oldest are left out, and so is an entry that alone does not fit."""
+    """The result of a call that was not sent: that it was not, and the entries that arrived, each told as new except
+    his own speech. When their text would pass ``MAX_EVENT_BYTES`` the oldest are left out, and so is an entry that
+    alone does not fit."""
     told = [_told_entry(entry, at, new=True) for entry in arrived.entries]
     empty = _held_json([], older_dropped=False)
     separator = len(", ")
