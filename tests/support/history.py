@@ -36,6 +36,12 @@ def told_line_bytes(
     return len(told.encode())
 
 
+def told_day_line_bytes(text: str, *, name: str = SPEAKER, own: bool = False) -> int:
+    """The bytes a line of the day is told as, its text with no escape."""
+    told = f'{{"name": "{name}", "kind": "message", "text": "{text}", "own": {str(own).lower()}}}'
+    return len(told.encode())
+
+
 def url_of(runner, number: int) -> str:
     return runner.config.apps[number].mcp_url
 
