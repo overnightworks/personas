@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 from datetime import UTC, datetime
 
 from agents.member import PlaceRef, PlaceView
@@ -107,3 +108,18 @@ def test_a_place_dropped_while_no_turn_runs_wakes_the_loops_and_one_dropped_duri
     mind.undue(lambda at: at == TABLE_AT_A)
     assert event.is_set()
     assert mind.claim(TABLE_AT_A.app) is None
+
+
+def test_a_mind_holding_lines_views_and_due_places_shows_no_name_no_text_and_no_state_in_its_repr():
+    marker = secrets.token_hex(8)
+    table = PlaceRef(kind="table", id="table-1")
+    mind = Mind(size_bytes=1_000)
+    mind.take(
+        (
+            KeptLine(CALL, 1, READ_AT, marker, "message", marker, own=False),
+            ViewSeen(CALL.app, table, PlaceView(revision=1, awaits_you=True, state={"hand": marker}), READ_AT),
+        )
+    )
+    mind.due(CALL_AT_B, Lines(OTHER_CALL.generation, frozenset({1}), missed=False))
+
+    assert marker not in repr(mind)
