@@ -1,7 +1,0 @@
-claim_id = "eaf48922aedc461bbd49f96b97786dd1"
-agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
-role = "builder"
-base = "7b6e5b575726e0b9973d21131186b5ca9f1c2763"
-branch = "claude/issue-128-the-loop-tests-pin-a-turn-s-whole-call-b"
-scope = ["tests/test_loop_acts.py", "tests/test_loop_held.py", "tests/test_loop_turn_reach.py"]
-opened_commit = "264d216c5bc013a22af6f20dd1e8757e134e0602"
