@@ -1,8 +1,0 @@
-claim_id = "f76b235ed0d948f9a0fdf6fea6fa1caa"
-agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
-role = "builder"
-base = "f1815a24dcbc43997ddff94dfce73561efd7e744"
-branch = "claude/issue-108-the-runner-takes-the-client-library-at-v"
-scope = ["pyproject.toml", "src/personas", "tests", "uv.lock"]
-opened_commit = "218b93292095ea214b89682b117ff5e8f7850172"
-whole_reason = "The bump is two files; src/personas and tests are in scope only for a typed fix the new alias may ask for."
