@@ -1,10 +1,11 @@
-"""What the tests of the voice loop share: a call of a speaking app, and a clock whose waits a test can hold."""
+"""What the tests of a spoken turn share: a call of a speaking app, and a clock whose waits a test can hold."""
 
 from __future__ import annotations
 
 import asyncio
 
 from tests.support.call import PLACE_ID, restarted_in_the_call
+from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
 from tests.support.gateway import Gateway
 from tests.support.history import at_table
 from tests.support.hopin import AGENT_SUBJECT, LIMIT_SECONDS, active
@@ -48,9 +49,9 @@ async def ended_by(task):
     return ended
 
 
-async def a_voice_call(runner, *replies):
+async def a_voice_call(runner, *replies, max_duration_seconds=PERSONA_MAX_DURATION_SECONDS):
     """The runner restarted in a call of a speaking app, for an agent whose persona has a voice section."""
-    runner.give_voice()
+    runner.give_voice(max_duration_seconds)
     runner.gateway = Gateway(*replies)
     await restarted_in_the_call(runner)
 

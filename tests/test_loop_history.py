@@ -313,7 +313,7 @@ async def test_a_new_generation_of_the_call_adds_its_lines_from_the_start_and_ke
     ]
 
 
-async def test_a_line_heard_at_a_voice_place_is_told_to_a_view_turn_of_another_app_and_the_voice_hears_it_as_before(
+async def test_a_line_heard_at_a_voice_place_is_told_to_a_view_turn_of_another_app_and_to_the_spoken_turn(
     runner, other
 ):
     await a_voice_call(runner, completion("Aloud."), completion("done"))

@@ -1,25 +1,36 @@
-"""The whole runner, the voice loop: which places run one, what it hears and how it speaks."""
+"""The whole runner, the spoken turn: which turns are spoken, what they are told and how their text is spoken."""
 
 from __future__ import annotations
 
+import json
+
 import pytest
-from agents.backend.fake_gateway import completion
-from agents.member import SpeakRefusal, SpeakRefused, Spoken
+from agents.backend.fake_gateway import completion, tool_call, tool_round
+from agents.member import SpeakRefusal, SpeakRefused
 from agents.tools import ToolOutcome
 from agents.turn import Principal, person_fingerprint
 
 from personas.decision import SPOKEN_WAIT_BOUND_SECONDS
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
-from tests.support.gateway import BUDGET_SPENT, Gateway, says
+from tests.support.gateway import Gateway, says, speaks_and_says
+from tests.support.history import REMARK, SPEAKER, said_and_taken, waits
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import ISSUER, SPOKEN_DURATION_MS, Line, QuietApp, active
+from tests.support.hopin import ISSUER, SAY_TOOL, SPOKEN_DURATION_MS, Line, QuietApp, active
 from tests.support.realm import LIFETIME_SECONDS
-from tests.support.voice import TWO_SENTENCES, HeldSleeps, a_voice_call, sentences_spoken
+from tests.support.songmaker import CREATE_SONG, GENERATE_SONG, ToolsOnlyApp
+from tests.support.voice import (
+    TWO_SENTENCES,
+    HeldSleeps,
+    a_voice_call,
+    in_a_voice_call_and_at_a_table,
+    sentences_spoken,
+)
 
 pytestmark = pytest.mark.anyio
 
 QUIET_PLACE_ID = "room-8"
 SECOND_AGENT, SECOND_SUBJECT, SECOND_NAME = "agent-bach", "agent-subject-2", "Bach"
+SPEAK = "speak"
 
 
 @pytest.fixture
@@ -32,167 +43,218 @@ async def quiet(runner):
         yield app
 
 
-def scripted_speak(duration_ms: int) -> ToolOutcome:
-    return ToolOutcome(Spoken(duration_ms=duration_ms).model_dump_json(), is_error=False)
+@pytest.fixture
+async def songmaker(runner):
+    app = ToolsOnlyApp()
+    async with app.serving() as url:
+        runner.add_tools_only_app(app, url)
+        yield app
 
 
-async def test_a_place_in_an_app_that_declares_speak_runs_the_voice_loop_and_one_in_an_app_that_does_not_the_turn(
-    runner, quiet
+def refusing(refusal: SpeakRefusal) -> ToolOutcome:
+    return ToolOutcome(SpeakRefused(refused=refusal).model_dump_json(), is_error=True)
+
+
+async def turns_over(runner, count: int) -> None:
+    """Lines are said, one after another, until the turn after the first ``count`` has begun: those have ended."""
+    for number in range(count + 1):
+        say_in_the_call(runner, f"{ADDRESSED} {number}")
+        await runner.gateway.until_turns(number + 1)
+
+
+@pytest.mark.parametrize(
+    ("text", "spoken"),
+    [("Anyone there?", True), (ADDRESSED, False)],
+    ids=["a spoken line that does not name him", "a written line"],
+)
+async def test_a_line_at_a_voice_place_makes_a_turn_told_aloud_that_holds_every_apps_tools_and_never_speak(
+    runner, songmaker, text, spoken
 ):
-    await a_voice_call(runner, *says(QUIET_PLACE_ID, "Written."), completion("Aloud."))
-    await quiet.until_window_read(QUIET_PLACE_ID)
-    quiet.speak(QUIET_PLACE_ID, PERSON, "Ada", ADDRESSED)
-    await quiet.said_count(1)
-    await runner.gateway.until_requested(2)
-    say_in_the_call(runner, ADDRESSED, spoken=True)
-    await runner.app.spoken_count(1)
-
-    assert quiet.said == [(SUBJECT, QUIET_PLACE_ID, "Written.")]
-    assert sentences_spoken(runner) == ["Aloud."]
-    assert runner.app.said == []
-
-
-async def test_an_agent_without_a_voice_section_keeps_the_per_line_turn_in_an_app_that_declares_speak(runner):
-    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
-    await restarted_in_the_call(runner)
-    say_in_the_call(runner, ADDRESSED, spoken=True)
-    await runner.app.said_count(1)
-
-    assert runner.app.said == [(SUBJECT, PLACE_ID, ANSWER)]
-    assert runner.app.spoken == []
-
-
-async def test_a_written_line_naming_him_in_a_voice_place_enters_the_loop_and_the_answer_is_spoken(runner):
     await a_voice_call(runner, completion(ANSWER))
-    say_in_the_call(runner, ADDRESSED)
+    say_in_the_call(runner, text, spoken=spoken)
     await runner.app.spoken_count(1)
 
-    assert sentences_spoken(runner) == [ANSWER]
-    assert runner.app.said == []
-    assert runner.gateway.heard_in(1) == [
-        {"name": "Ada", "kind": "message", "own": False, "spoken": False, "text": ADDRESSED}
-    ]
+    (turn,) = runner.gateway.turns()
+    assert turn.aloud
+    assert turn.new_seqs == [1]
+    assert set(runner.gateway.offered_tools()) == {SAY_TOOL, CREATE_SONG, GENERATE_SONG}
 
 
-async def test_a_spoken_question_that_does_not_name_him_is_answered(runner):
-    await a_voice_call(runner, completion(ANSWER))
-    say_in_the_call(runner, "Anyone there?", spoken=True)
-    await runner.app.spoken_count(1)
-
-    assert sentences_spoken(runner) == [ANSWER]
-
-
-async def test_a_spoken_line_naming_him_is_answered_by_one_speak_per_sentence_in_order_each_after_the_last(runner):
-    sleeps = HeldSleeps(runner)
-    await a_voice_call(runner, completion(TWO_SENTENCES))
+async def test_sentences_released_while_a_reply_is_written_are_spoken_in_order_each_after_the_length_of_the_one_before(
+    runner,
+):
+    await a_voice_call(runner, completion("done"))
+    reply = runner.gateway.pause_request(1, "First sentence. Sec", "ond sentence.")
     say_in_the_call(runner, ADDRESSED, spoken=True)
-    await sleeps.until_began(1)
+    await runner.app.spoken_count(1)
 
-    assert runner.app.spoken == [(SUBJECT, PLACE_ID, "First sentence.")]
-    assert sleeps.began == [SPOKEN_DURATION_MS / 1000]
-    sleeps.release.set()
+    assert not reply.finished
+    assert sentences_spoken(runner) == ["First sentence."]
+    reply.release()
     await runner.app.spoken_count(2)
 
     assert sentences_spoken(runner) == ["First sentence.", "Second sentence."]
+    assert runner.clock.slept[:1] == [SPOKEN_DURATION_MS / 1000]
+
+
+async def test_a_turn_that_calls_say_and_writes_no_text_writes_the_line_and_speaks_nothing(runner):
+    await a_voice_call(runner, *says(PLACE_ID, "Written."))
+    say_in_the_call(runner, ADDRESSED)
+    await runner.app.said_count(1)
+
+    assert runner.app.said == [(SUBJECT, PLACE_ID, "Written.")]
+    assert runner.app.spoken == []
+
+
+async def test_a_turn_that_speaks_a_sentence_and_calls_say_does_both_in_the_order_it_wrote_them(runner):
+    await a_voice_call(runner, *speaks_and_says(PLACE_ID, "Spoken first.", "Written second."))
+    say_in_the_call(runner, ADDRESSED)
+    await runner.app.said_count(1)
+
+    assert runner.app.calls == [SPEAK, SAY_TOOL]
+    assert sentences_spoken(runner) == ["Spoken first."]
+    assert runner.app.said == [(SUBJECT, PLACE_ID, "Written second.")]
+
+
+async def test_a_sentence_a_call_and_a_sentence_go_out_in_that_order_and_the_next_turn_is_told_each_as_it_happened(
+    runner,
+):
+    await a_voice_call(runner, *speaks_and_says(PLACE_ID, "Before.", "Written.", after="After."), completion("done"))
+    say_in_the_call(runner, ADDRESSED)
+    await runner.app.spoken_count(2)
+    say_in_the_call(runner, f"{ADDRESSED} Again.")
+    await runner.gateway.until_turns(2)
+
+    assert runner.app.calls == [SPEAK, SAY_TOOL, SPEAK]
+    assert runner.gateway.tool_results(2) == ["said"]
+    told = runner.gateway.turns()[1].told("speech", "act")
+    assert [(each["entry"], each.get("text") or each["tool"]) for each in told] == [
+        ("speech", "Before."),
+        ("act", SAY_TOOL),
+        ("speech", "After."),
+    ]
+    assert [each["outcome"]["answered"] for each in told] == [True, True, True]
+
+
+@pytest.mark.parametrize(
+    "reply", [completion("[silent]"), completion("[quiet]")], ids=["silent", "a marker the reader does not know"]
+)
+async def test_a_turn_that_stays_silent_says_nothing_relays_nothing_and_logs_nothing(runner, reply):
+    await a_voice_call(runner, reply)
+    await turns_over(runner, 1)
+
+    assert runner.app.spoken == []
+    assert runner.app.said == []
+    assert runner.reports.events() == [("started", None)]
+
+
+async def test_a_line_at_an_app_that_declares_no_speak_makes_a_turn_not_told_aloud_and_its_text_is_not_spoken(
+    runner, quiet
+):
+    await a_voice_call(runner, completion("Not spoken."))
+    await quiet.until_window_read(QUIET_PLACE_ID)
+    quiet.speak(QUIET_PLACE_ID, PERSON, "Ada", ADDRESSED)
+    await runner.gateway.until_turns(1)
+    quiet.speak(QUIET_PLACE_ID, PERSON, "Ada", f"{ADDRESSED} Again.")
+    await runner.gateway.until_turns(2)
+
+    assert not any(turn.aloud for turn in runner.gateway.turns())
+    assert runner.app.spoken == []
+    assert quiet.said == []
+
+
+async def test_a_line_for_a_persona_without_a_voice_section_makes_a_turn_not_told_aloud_and_its_text_is_not_spoken(
+    runner,
+):
+    runner.gateway = Gateway(completion("Not spoken."))
+    await restarted_in_the_call(runner)
+    await turns_over(runner, 1)
+
+    assert not any(turn.aloud for turn in runner.gateway.turns())
+    assert runner.app.spoken == []
+
+
+async def test_a_table_turn_of_a_voice_call_is_not_told_aloud_and_its_text_is_not_spoken(runner):
+    await in_a_voice_call_and_at_a_table(runner, completion("Not spoken."))
+    waits(runner.app, 1)
+    await runner.gateway.until_turns(1, why="view")
+    waits(runner.app, 2)
+    await runner.gateway.until_turns(2, why="view")
+
+    assert not any(turn.aloud for turn in runner.gateway.turns("view"))
+    assert runner.app.spoken == []
 
 
 @pytest.mark.parametrize("refusal", list(SpeakRefusal))
-async def test_a_refused_speak_ends_the_answer_and_its_code_is_logged(runner, refusal):
-    await a_voice_call(runner, completion(TWO_SENTENCES), completion("Later."))
-    runner.app.speak_outcomes.append(ToolOutcome(SpeakRefused(refused=refusal).model_dump_json(), is_error=True))
-    say_in_the_call(runner, ADDRESSED, spoken=True)
+async def test_a_refused_sentence_ends_the_turns_speech_but_not_the_turn_and_the_next_turn_is_told_the_refusal(
+    runner, refusal
+):
+    replies = speaks_and_says(PLACE_ID, TWO_SENTENCES, "Written.", after="Muted.")
+    await a_voice_call(runner, *replies, completion("Later."))
+    runner.app.speak_outcomes.append(refusing(refusal))
+    say_in_the_call(runner, ADDRESSED)
     await runner.reports.until("speak_refused")
-    say_in_the_call(runner, f"{ADDRESSED} Again.", spoken=True)
+    await runner.app.said_count(1)
+    say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.app.spoken_count(1)
 
     assert sentences_spoken(runner) == ["Later."]
     assert runner.reports.events() == [("started", None), ("speak_refused", refusal.value)]
+    assert runner.app.said == [(SUBJECT, PLACE_ID, "Written.")]
+    (refused,) = runner.gateway.turns()[1].told("speech")
+    assert (refused["text"], refused["outcome"]) == ("First sentence.", {"answered": True, "refused": refusal.value})
 
 
-async def test_lines_the_window_no_longer_holds_are_told_to_the_next_decision_as_missed(runner, monkeypatch):
-    monkeypatch.setattr("tests.support.hopin.WINDOW_LINES", 1)
+async def test_a_line_said_while_he_speaks_is_not_in_the_running_turn_and_is_told_new_to_the_next_one(runner):
     sleeps = HeldSleeps(runner)
     await a_voice_call(runner, completion(ANSWER), completion("Second answer."))
-    runner.app.speak_outcomes.append(scripted_speak(SPOKEN_DURATION_MS))
-    say_in_the_call(runner, ADDRESSED, spoken=True)
+    say_in_the_call(runner, ADDRESSED)
     await sleeps.until_began(1)
-    runner.app.lines[PLACE_ID].extend(Line(seq, PERSON, "Ada", f"Line {seq}") for seq in (2, 3))
-    say_in_the_call(runner, f"{ADDRESSED} Again.", spoken=True)
+    await said_and_taken(runner.app, PLACE_ID, REMARK, name=SPEAKER)
+
+    assert runner.gateway.arrivals == 1
     sleeps.release.set()
-    await runner.app.spoken_count(1)
+    await runner.gateway.until_turns(2)
 
-    assert runner.gateway.heard_in(2)[-1]["missed_before"] == 2
-
-
-async def test_a_budget_spent_fails_one_decision_for_each_waking_line_and_none_is_retried(runner):
-    await a_voice_call(runner, BUDGET_SPENT)
-    say_in_the_call(runner, ADDRESSED, spoken=True)
-    await runner.reports.until("turn_ended")
-
-    assert len(runner.gateway.requests) == 1
-    say_in_the_call(runner, f"{ADDRESSED} Again.", spoken=True)
-    await runner.reports.until("turn_ended", count=2)
-
-    assert len(runner.gateway.requests) == 2
-    assert runner.reports.events() == [
-        ("started", None),
-        ("turn_ended", "budget_spent"),
-        ("turn_ended", "budget_spent"),
-    ]
-    assert runner.app.spoken == []
+    first, second = runner.gateway.turns()
+    assert first.new_seqs == [1]
+    assert REMARK in [each["text"] for each in second.room["history"]["entries"] if each["new"]]
 
 
-async def test_two_agents_in_one_place_each_skip_only_their_own_spoken_lines_and_each_answers_on_its_own(runner):
-    runner.add_agent(SECOND_AGENT, SECOND_SUBJECT, SECOND_NAME)
-    runner.app.stand(SECOND_SUBJECT, active(PLACE_ID))
-    await a_voice_call(runner, completion("Mozart answers."), completion("Bach answers."), completion("Mozart again."))
-    mozart, bach = (
-        person_fingerprint(runner.app_principal),
-        person_fingerprint(Principal(iss=ISSUER, sub=SECOND_SUBJECT)),
-    )
-    say_in_the_call(runner, "Mozart, tell us about Vienna.", spoken=True)
-    await runner.app.spoken_count(1)
-    say_in_the_call(runner, "Bach, what do you think.", spoken=True)
-    await runner.app.spoken_count(3)
+async def test_a_call_reaches_the_app_only_after_the_sentence_before_it_was_answered_and_its_length_has_passed(runner):
+    sleeps = HeldSleeps(runner)
+    await a_voice_call(runner, *speaks_and_says(PLACE_ID, ANSWER, "Written."))
+    answer = runner.app.hold_next_speak()
+    say_in_the_call(runner, ADDRESSED)
+    await runner.app.until_called(1)
+    answer.set()
+    await sleeps.until_began(1)
 
-    by_agent = {runner.gateway.user_of(number): number for number in (1, 2, 3)}
-    assert runner.gateway.user_of(1) == mozart
-    assert set(by_agent) == {mozart, bach}
-    bach_heard = runner.gateway.heard_in(by_agent[bach])
-    assert {"name": "Mozart", "kind": "message", "own": False, "spoken": True, "text": "Mozart answers."} in bach_heard
-    assert not [heard for number in (1, 2, 3) for heard in runner.gateway.heard_in(number) if heard["own"]]
+    assert runner.app.calls == [SPEAK]
+    sleeps.release.set()
+    await runner.app.said_count(1)
 
-
-async def test_every_line_that_wakes_the_voice_gets_its_own_decision_and_none_is_refused(runner):
-    await a_voice_call(runner, completion("One answer."), completion("Second answer."), completion("Third answer."))
-    say_in_the_call(runner, f"{ADDRESSED} First.", spoken=True)
-    await runner.app.spoken_count(1)
-    say_in_the_call(runner, f"{ADDRESSED} Second.", spoken=True)
-    await runner.app.spoken_count(2)
-    say_in_the_call(runner, f"{ADDRESSED} Third.", spoken=True)
-    await runner.app.spoken_count(3)
-
-    assert sentences_spoken(runner) == ["One answer.", "Second answer.", "Third answer."]
-    assert len(runner.gateway.requests) == 3
-    assert runner.reports.events() == [("started", None)]
+    assert runner.app.calls == [SPEAK, SAY_TOOL]
+    assert runner.app.most_in_flight == 1
 
 
 async def test_a_sentence_that_plays_longer_than_the_bound_is_waited_for_only_the_bound(runner):
     sleeps = HeldSleeps(runner)
     await a_voice_call(runner, completion(ANSWER))
-    runner.app.speak_outcomes.append(scripted_speak(int(SPOKEN_WAIT_BOUND_SECONDS * 1000 * 10)))
-    say_in_the_call(runner, ADDRESSED, spoken=True)
+    runner.app.speak_duration_ms = int(SPOKEN_WAIT_BOUND_SECONDS * 1000 * 10)
+    say_in_the_call(runner, ADDRESSED)
     await sleeps.until_began(1)
 
     assert sleeps.began == [SPOKEN_WAIT_BOUND_SECONDS]
 
 
-async def test_a_loop_that_outlives_its_token_speaks_its_next_sentence_with_a_renewed_one(runner):
-    await a_voice_call(runner, completion(ANSWER))
-    say_in_the_call(runner, ADDRESSED, spoken=True)
-    await runner.app.spoken_count(1)
+async def test_a_turn_that_outlives_its_token_speaks_its_next_sentence_with_a_renewed_one(runner):
+    sleeps = HeldSleeps(runner)
+    await a_voice_call(runner, completion(TWO_SENTENCES), max_duration_seconds=2 * LIFETIME_SECONDS)
+    say_in_the_call(runner, ADDRESSED)
+    await sleeps.until_began(1)
     runner.clock.time += LIFETIME_SECONDS
-    say_in_the_call(runner, f"{ADDRESSED} Once more.", spoken=True)
+    sleeps.release.set()
     await runner.app.spoken_count(2)
 
     first, second = runner.app.speak_bearers
@@ -200,9 +262,65 @@ async def test_a_loop_that_outlives_its_token_speaks_its_next_sentence_with_a_re
     assert second == runner.realm.issued[-1]
 
 
-async def test_a_voice_loop_logs_its_start_and_no_answered_line(runner, caplog):
+async def test_two_agents_in_one_place_make_no_turn_of_their_own_spoken_lines_and_one_of_the_others(runner):
+    runner.add_agent(SECOND_AGENT, SECOND_SUBJECT, SECOND_NAME)
+    runner.app.stand(SECOND_SUBJECT, active(PLACE_ID))
+    await a_voice_call(runner, completion("[silent]"))
+    mozart = person_fingerprint(runner.app_principal)
+    bach = person_fingerprint(Principal(iss=ISSUER, sub=SECOND_SUBJECT))
+    runner.gateway.script_for(mozart, completion("Mozart answers."), completion("[silent]"))
+    runner.gateway.script_for(bach, completion("Bach answers."), completion("[silent]"))
+    say_in_the_call(runner, "Both of you, hello.")
+    await runner.gateway.until_requested(4)
+    await said_and_taken(runner.app, PLACE_ID, "Goodbye.")
+    await runner.gateway.until_requested(6)
+
+    mozarts, bachs = ([turn for turn in runner.gateway.turns() if turn.user == user] for user in (mozart, bach))
+    assert (len(mozarts), len(bachs)) == (3, 3)
+    assert "Mozart answers." in [each["text"] for each in bachs[1].room["history"]["entries"] if each["new"]]
+    assert "Bach answers." in [each["text"] for each in mozarts[1].room["history"]["entries"] if each["new"]]
+
+
+async def test_a_window_that_lost_older_lines_makes_a_turn_told_it_missed_lines(runner, monkeypatch):
+    monkeypatch.setattr("tests.support.hopin.WINDOW_LINES", 1)
+    sleeps = HeldSleeps(runner)
+    await a_voice_call(runner, completion(ANSWER), completion("Second answer."))
+    say_in_the_call(runner, ADDRESSED)
+    await sleeps.until_began(1)
+    runner.app.lines[PLACE_ID].extend(Line(seq, PERSON, "Ada", f"Line {seq}") for seq in (3, 4))
+    say_in_the_call(runner, f"{ADDRESSED} Again.")
+    sleeps.release.set()
+    await runner.gateway.until_turns(2)
+
+    first, second = runner.gateway.turns()
+    assert first.missed is False
+    assert second.missed is True
+
+
+async def test_a_line_heard_while_he_speaks_holds_the_call_after_the_sentence_once_and_the_model_is_told_the_line(
+    runner,
+):
+    sleeps = HeldSleeps(runner)
+    written = {"place": PLACE_ID, "text": "Written."}
+    first, again = tool_call("call-0", SAY_TOOL, written), tool_call("call-1", SAY_TOOL, written)
+    await a_voice_call(runner, tool_round(first, content=ANSWER), tool_round(again), completion("done"))
+    say_in_the_call(runner, ADDRESSED)
+    await sleeps.until_began(1)
+    await said_and_taken(runner.app, PLACE_ID, "Anyone there?")
+    sleeps.release.set()
+    await runner.app.said_count(1)
+    await runner.gateway.until_answered(3)
+
+    (held,) = (json.loads(each) for each in runner.gateway.tool_results(3) if each.startswith('{"sent": false'))
+    arrived = held["arrived"]["entries"]
+    assert [each["text"] for each in arrived if each["entry"] == "line" and not each["own"]] == ["Anyone there?"]
+    assert runner.app.said == [(SUBJECT, PLACE_ID, "Written.")]
+    assert sentences_spoken(runner) == [ANSWER]
+
+
+async def test_a_spoken_turn_logs_its_start_and_no_sentence(runner, caplog):
     await a_voice_call(runner, completion(ANSWER))
-    say_in_the_call(runner, ADDRESSED, spoken=True)
+    say_in_the_call(runner, ADDRESSED)
     await runner.app.spoken_count(1)
 
     logged = [record.getMessage() for record in caplog.get_records("call") if record.name == "personas"]

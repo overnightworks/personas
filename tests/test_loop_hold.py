@@ -32,7 +32,7 @@ from tests.support.history import (
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, DISCOVER, SAY_TOOL
 from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG, ToolsOnlyApp
-from tests.support.voice import in_a_voice_call_and_at_a_table, sentences_spoken
+from tests.support.voice import in_a_voice_call_and_at_a_table
 
 pytestmark = pytest.mark.anyio
 
@@ -322,26 +322,20 @@ async def test_the_table_state_his_own_card_caused_holds_his_next_call_once_and_
     assert len(held_results(runner, 4)) == 1
 
 
-async def test_a_line_heard_at_a_voice_place_holds_the_call_of_his_turn_and_the_voice_speaks_meanwhile(runner):
-    sentence, call = f"{secrets.token_hex(4)}.", words(1)[0]
+async def test_a_line_heard_at_a_voice_place_holds_the_call_of_his_table_turn(runner):
+    call = words(1)[0]
     heard = "Anyone there?"
     await in_a_voice_call_and_at_a_table(
-        runner,
-        completion(sentence),
-        tool_round(say(call, TABLE.id)),
-        tool_round(say(call, TABLE.id)),
-        completion("done"),
+        runner, tool_round(say(call, TABLE.id)), tool_round(say(call, TABLE.id)), completion("done")
     )
     running = runner.gateway.hold_request(1)
     waits(runner.app, 1)
     await runner.gateway.until_requested(1)
-    say_in_the_call(runner, heard, spoken=True)
-    await runner.app.spoken_count(1)
+    await said_and_taken(runner.app, PLACE_ID, heard)
     running.set()
     await runner.app.said_count(1)
-    await runner.gateway.until_requested(4)
+    await runner.gateway.until_requested(3)
 
-    assert sentences_spoken(runner) == [sentence]
     (held,) = held_results(runner, 3)
     assert [each["text"] for each in held["arrived"]["entries"] if each["entry"] == "line" and not each["own"]] == [
         heard

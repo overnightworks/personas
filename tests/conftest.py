@@ -23,7 +23,7 @@ from personas.readiness import FileReadyMarker
 from personas.reporting import log_state_change
 from personas.secret import Secret
 from personas.tokens import HttpTokenSource
-from tests.support.configfiles import MAX_TOOL_CALLS, Files
+from tests.support.configfiles import MAX_TOOL_CALLS, PERSONA_MAX_DURATION_SECONDS, Files
 from tests.support.fakes import (
     FakeClock,
     FakeReadyMarker,
@@ -168,9 +168,9 @@ class Harness:
         self.realm.add_app(scope, app)
         self.other_apps.append(app)
 
-    def give_voice(self) -> None:
-        """Gives every agent's persona a voice section."""
-        self.files.give_voice()
+    def give_voice(self, max_duration_seconds: int = PERSONA_MAX_DURATION_SECONDS) -> None:
+        """Gives every agent's persona a voice section and this longest duration."""
+        self.files.give_voice(max_duration_seconds)
         persona = load_agent(self.files.persona_path, [])
         self.config = replace(self.config, agents=tuple(replace(each, persona=persona) for each in self.config.agents))
 
