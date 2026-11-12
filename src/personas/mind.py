@@ -21,7 +21,7 @@ class Mind:
 
     def __init__(self, size_bytes: int) -> None:
         self._size_bytes = size_bytes
-        self._history = History((), older_dropped=False)
+        self._history = History((), left_out=0, heard=0)
         self._turns = Turns()
         self._wake_events: list[asyncio.Event] = []
 

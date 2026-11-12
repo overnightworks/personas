@@ -18,10 +18,12 @@ from personas.decision import (
     TURN_ROLE,
     ActDone,
     act_outcome,
+    arrived_since,
     bound_declarations,
     call_within_bound,
     decisive_failure,
     failure_code,
+    held_told,
     turn_call_bound,
     turn_told,
 )
@@ -48,7 +50,7 @@ if TYPE_CHECKING:
     from personas.app_session import AppSession, SessionOpener
     from personas.clock import Clock
     from personas.config import AgentCredentials, AppTarget, ToolBinding
-    from personas.decision import History, Occasion, Token
+    from personas.decision import Arrived, History, Occasion, Token
     from personas.mind import Mind
     from personas.remembering import Remembering
     from personas.task_record import TaskRecord
@@ -83,6 +85,23 @@ class _Calls:
         return True
 
 
+@dataclass
+class _Hold:
+    """Whether a call of the turn is held back: once, when an entry not his own entered his history since the turn's
+    admission."""
+
+    admitted: History = field(repr=False)
+    spent: bool = False
+
+    def holding(self, current: History) -> Arrived | None:
+        """What arrived for the first call that finds news; every later call of the turn is let through."""
+        if self.spent:
+            return None
+        arrived = arrived_since(current, self.admitted)
+        self.spent = arrived is not None
+        return arrived
+
+
 @dataclass(frozen=True)
 class _HeldTools:
     """What a turn holds: the hand tools of every app that answered, and the calls the turn may make in all."""
@@ -115,8 +134,9 @@ class Turning:
     """Runs the turns of one agent in one app, each over a session of its own.
 
     It holds no state across turns beyond what it records into the agent's mind: each relayed call that passed its
-    app's bound, once its request ended. The token, its use on a session and the two reports are the loop's, handed
-    over as callables and read at each call.
+    app's bound, once its request ended. A call is held back, once per turn, when something not his own arrived in
+    his history since the turn's admission: it is not sent and the model is told what arrived. The token, its use on
+    a session and the two reports are the loop's, handed over as callables and read at each call.
     """
 
     def __init__(
@@ -211,7 +231,7 @@ class Turning:
         self, setup: TurnSetup, admitted: Admitted, told: str, session: AppSession, record: TaskRecord
     ) -> None:
         raise_if_cancelled()
-        held = await self._hold_tools(setup, session, record)
+        held = await self._hold_tools(setup, session, record, admitted.history)
         if held is None:
             self._report_turn_end(TOOL_NOT_DECLARED_CODE)
             return
@@ -229,7 +249,9 @@ class Turning:
             async for _ in events:
                 continue
 
-    async def _hold_tools(self, setup: TurnSetup, session: AppSession, record: TaskRecord) -> _HeldTools | None:
+    async def _hold_tools(
+        self, setup: TurnSetup, session: AppSession, record: TaskRecord, admitted: History
+    ) -> _HeldTools | None:
         """The tools of the place's app and of each tools-only app that answers, each app counting its own calls.
 
         ``None`` when the place's app declares a bound tool no more. A tools-only app that fails or declares one
@@ -239,7 +261,8 @@ class Turning:
         if own is None:
             return None
         own_calls = _Calls(setup.binding.max_tool_calls)
-        tools = [HandTool(each, partial(self._relay, session, each.name, own_calls)) for each in own]
+        hold = _Hold(admitted)
+        tools = [HandTool(each, partial(self._relay, session, each.name, own_calls, hold)) for each in own]
         bounds = [own_calls.bound]
         failed_apps: set[str] = set()
         for app, binding in self._tools_only:
@@ -253,15 +276,24 @@ class Turning:
                 continue
             calls = _Calls(binding.max_tool_calls)
             tools.extend(
-                HandTool(each, partial(self._relay_tools_only, app, each.name, calls, failed_apps, record))
+                HandTool(each, partial(self._relay_tools_only, app, each.name, calls, hold, failed_apps, record))
                 for each in listed
             )
             bounds.append(calls.bound)
         return _HeldTools(tuple(tools), turn_call_bound(bounds))
 
+    def _held(self, hold: _Hold) -> ToolOutcome | None:
+        """The result of a call that is not sent, or ``None`` when the call goes on. It is asked before any await."""
+        arrived = hold.holding(self._mind.history)
+        if arrived is None:
+            return None
+        return ToolOutcome(held_told(arrived, self._clock.wall()), is_error=False)
+
     async def _relay(
-        self, session: AppSession, name: str, calls: _Calls, _principal: Principal, arguments: JsonObject
+        self, session: AppSession, name: str, calls: _Calls, hold: _Hold, _principal: Principal, arguments: JsonObject
     ) -> ToolOutcome:
+        if (held := self._held(hold)) is not None:
+            return held
         if not calls.take():
             return ToolOutcome(_CALL_BOUND_TEXT, is_error=True)
         try:
@@ -278,11 +310,14 @@ class Turning:
         app: AppTarget,
         name: str,
         calls: _Calls,
+        hold: _Hold,
         failed_apps: set[str],
         record: TaskRecord,
         _principal: Principal,
         arguments: JsonObject,
     ) -> ToolOutcome:
+        if (held := self._held(hold)) is not None:
+            return held
         if not calls.take():
             return ToolOutcome(_CALL_BOUND_TEXT, is_error=True)
         try:

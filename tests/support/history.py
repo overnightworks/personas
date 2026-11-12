@@ -152,7 +152,7 @@ def history_of(entries: list[dict[str, object]], *, older_dropped: bool = False)
     return {"older_dropped": older_dropped, "entries": entries}
 
 
-async def settled(app: FakeApp) -> None:
+async def settled(app: FakeApp, subject: str = SUBJECT) -> None:
     """Every line said so far in a place of the agent was read and taken by the loop of this app.
 
     A standing the app signals again makes the loop read once more, and its next standing read starts only after the
@@ -160,7 +160,7 @@ async def settled(app: FakeApp) -> None:
     """
     for _ in range(2):
         reads = app.reads[STANDING_URI]
-        app.stand(SUBJECT, *app.standings[SUBJECT])
+        app.stand(subject, *app.standings[subject])
         await app.until_standing_read(reads + 1)
 
 

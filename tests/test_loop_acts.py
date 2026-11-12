@@ -17,7 +17,7 @@ from mcp_types import INVALID_PARAMS, CallToolResult, TextContent
 from personas.app_session import READ_SECONDS, open_mcp_session
 from personas.failures import Unreachable
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
-from tests.support.gateway import Gateway
+from tests.support.gateway import Gateway, says_after_a_hold
 from tests.support.history import (
     OTHER_CALL_ID,
     REMARK,
@@ -374,6 +374,7 @@ async def test_each_agent_is_told_only_his_own_acts(runner):
     await runner.app.until_window_read(PLACE_ID)
     await said_and_taken(runner.app, PLACE_ID, ADDRESSED)
     await runner.app.said_count(1)
+    await settled(runner.app, SECOND_SUBJECT)
     await said_and_taken(runner.app, PLACE_ID, f"{SECOND_NAME}, are you there?")
     await runner.app.said_count(2)
     await said_and_taken(runner.app, PLACE_ID, AGAIN)
@@ -399,9 +400,7 @@ async def test_an_act_is_told_after_the_line_taken_while_its_turn_ran_and_ages_f
         runner.clock.time += 30
         await reply.result(CallToolResult(content=[TextContent(text="said")], is_error=False))
 
-    runner.gateway = Gateway(
-        tool_round(tool_call("call-0", SAY_TOOL, {"place": OTHER_CALL_ID, "text": ANSWER})), completion("done")
-    )
+    runner.gateway = Gateway(*says_after_a_hold(OTHER_CALL_ID, ANSWER))
     running = runner.gateway.hold_request(1)
     other.script(CALL, answers_after_a_while)
     other.stand(SUBJECT, at_table())
@@ -410,7 +409,7 @@ async def test_an_act_is_told_after_the_line_taken_while_its_turn_ran_and_ages_f
     await runner.gateway.until_requested(1)
     await said_and_taken(runner.app, PLACE_ID, REMARK)
     running.set()
-    await runner.gateway.until_requested(2)
+    await runner.gateway.until_requested(3)
     second = waits(other, 2)
     await runner.gateway.until_turns(2, why="view")
 
