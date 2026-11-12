@@ -385,7 +385,7 @@ async def test_a_table_that_moves_during_his_view_turn_enters_at_the_read_during
     first = waits(runner.app, 1)
     runner.start()
     await runner.gateway.until_requested(1)
-    second = waits(runner.app, 2)
+    second = await shows(runner.app, 2, awaits_you=True)
     ending.set()
     await runner.gateway.until_turns(2, why="view")
 
