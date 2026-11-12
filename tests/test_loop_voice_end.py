@@ -15,6 +15,7 @@ from personas import app_session
 from personas.app_session import READ_SECONDS, open_mcp_session
 from personas.decision import TURN_CANCELLED_CODE
 from personas.failures import leaves_of
+from personas.reporting import Event
 from personas.task_record import UnrequestedCancellationError
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PLACE_ID, say_in_the_call
 from tests.support.gateway import Gateway, speaks_and_says
@@ -45,11 +46,11 @@ async def test_a_place_removed_or_paused_while_a_sentence_plays_cancels_the_turn
 
     leaves(runner)
     await sleeps.until_cancelled()
-    await runner.reports.until("turn_ended")
+    await runner.reports.until(Event.TURN_ENDED)
     sleeps.release.set()
 
     assert sentences_spoken(runner) == ["First sentence."]
-    assert runner.reports.events() == [("started", None), ("turn_ended", TURN_CANCELLED_CODE)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
     assert not runner.task.done()
 
 
@@ -102,7 +103,7 @@ async def test_a_stream_the_app_ends_at_its_bound_while_he_speaks_lets_the_turn_
     await runner.app.spoken_count(2)
 
     assert sentences_spoken(runner) == ["First sentence.", "Second sentence."]
-    assert runner.reports.events() == [("started", None)]
+    assert runner.reports.reported() == [(Event.STARTED, None)]
 
 
 async def test_a_lifecycle_connection_lost_while_a_sentence_is_sent_cancels_the_turn_and_enters_the_sentence_unanswered(
@@ -115,9 +116,9 @@ async def test_a_lifecycle_connection_lost_while_a_sentence_is_sent_cancels_the_
     runner.app.refuse_with = HTTPStatus.SERVICE_UNAVAILABLE
     runner.app.refused_method = READ
     runner.app.stand(SUBJECT, active(PLACE_ID))
-    await runner.reports.until("backoff")
+    await runner.reports.until(Event.BACKOFF)
     runner.app.refuse_with = None
-    await runner.reports.until("resumed")
+    await runner.reports.until(Event.RESUMED)
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.gateway.until_turns(2)
     answer.set()
@@ -136,12 +137,12 @@ async def test_a_lifecycle_connection_lost_while_a_sentence_is_sent_cancels_the_
                 setattr(app, "refuse_with", HTTPStatus.SERVICE_UNAVAILABLE) or setattr(app, "refused_method", CALL)
             ),
             lambda app: setattr(app, "refuse_with", None),
-            [("started", None), ("backoff", "http_503"), ("resumed", None)],
+            [(Event.STARTED, None), (Event.BACKOFF, "http_503"), (Event.RESUMED, None)],
         ),
         (
             lambda app: app.speak_outcomes.append(ToolOutcome("not a spoken record", is_error=False)),
             lambda app: None,
-            [("started", None), ("suspended", "invalid_answer"), ("resumed", None)],
+            [(Event.STARTED, None), (Event.SUSPENDED, "invalid_answer"), (Event.RESUMED, None)],
         ),
     ],
     ids=["a call that fails", "an answer that is no Spoken"],
@@ -157,13 +158,13 @@ async def test_a_speak_that_fails_as_a_call_or_answers_no_spoken_ends_the_turn_i
     assert runner.app.spoken == []
     assert runner.gateway.arrivals == 1
     mend_speak(runner.app)
-    await runner.reports.until("resumed")
+    await runner.reports.until(Event.RESUMED)
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.app.spoken_count(1)
 
     assert sentences_spoken(runner) == ["Later."]
     assert runner.app.said == []
-    assert runner.reports.events() == events
+    assert runner.reports.reported() == events
     assert not runner.task.done()
 
 
@@ -175,13 +176,13 @@ async def test_a_call_to_the_own_app_that_fails_after_a_sentence_ends_the_turn_i
     runner.app.refused_method = CALL
     runner.app.refused_tool = SAY_TOOL
     say_in_the_call(runner, ADDRESSED)
-    await runner.reports.until("backoff")
+    await runner.reports.until(Event.BACKOFF)
     runner.app.refuse_with = None
-    await runner.reports.until("resumed")
+    await runner.reports.until(Event.RESUMED)
 
     assert sentences_spoken(runner) == [ANSWER]
     assert runner.gateway.arrivals == 1
-    assert runner.reports.events() == [("started", None), ("backoff", "http_503"), ("resumed", None)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.BACKOFF, "http_503"), (Event.RESUMED, None)]
 
 
 async def test_a_gateway_that_stops_the_turn_while_a_sentence_is_sent_and_one_is_queued_answers_the_sent_one_only(
@@ -194,12 +195,12 @@ async def test_a_gateway_that_stops_the_turn_while_a_sentence_is_sent_and_one_is
     await runner.app.until_called(1)
     reply.cut()
     answer.set()
-    await runner.reports.until("turn_ended")
+    await runner.reports.until(Event.TURN_ENDED)
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.gateway.until_turns(2)
 
     assert sentences_spoken(runner) == ["First sentence."]
-    assert runner.reports.events() == [("started", None), ("turn_ended", FailureCode.PROVIDER_ERROR.value)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, FailureCode.PROVIDER_ERROR.value)]
     (sent,) = runner.gateway.turns()[1].told("speech")
     assert (sent["text"], sent["outcome"]) == ("First sentence.", {"answered": True})
 
@@ -218,13 +219,13 @@ async def test_a_turn_past_its_deadline_sends_no_call_and_no_sentence_and_ends_l
     await a_voice_call(runner, *replies, completion("Later."))
     runner.app.speak_duration_ms = LONG_SENTENCE_MS
     say_in_the_call(runner, ADDRESSED)
-    await runner.reports.until("turn_ended")
+    await runner.reports.until(Event.TURN_ENDED)
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.gateway.until_turns(2)
 
     assert sentences_spoken(runner) == spoken
     assert runner.app.said == []
-    assert runner.reports.events() == [("started", None), ("turn_ended", FailureCode.LIMIT_EXCEEDED.value)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, FailureCode.LIMIT_EXCEEDED.value)]
     assert [each["text"] for each in runner.gateway.turns()[1].told("speech")] == spoken
 
 
@@ -247,7 +248,7 @@ async def test_a_defect_in_speaks_request_ends_the_runner_loud(runner, speak_def
     ended = await ended_by(runner.task)
 
     assert list(leaves_of(ended)) == [speak_defect]
-    assert runner.reports.events() == [("started", None)]
+    assert runner.reports.reported() == [(Event.STARTED, None)]
 
 
 async def test_a_defect_in_speaks_request_whose_place_then_leaves_ends_the_runner_loud_without_a_cancel(
@@ -269,7 +270,7 @@ async def test_a_defect_in_speaks_request_whose_place_then_leaves_ends_the_runne
     ended = await ended_by(runner.task)
 
     assert list(leaves_of(ended)) == [speak_defect]
-    assert runner.reports.events() == [("started", None)]
+    assert runner.reports.reported() == [(Event.STARTED, None)]
 
 
 async def test_a_turn_task_that_ends_cancelled_while_nobody_cancelled_it_ends_the_runner_loud(runner, monkeypatch):
@@ -307,7 +308,7 @@ async def test_a_speak_that_never_answers_is_given_up_at_the_sessions_read_bound
     runner.start(open_session=short_after_the_lifecycle)
     await runner.app.until_window_read(PLACE_ID)
     say_in_the_call(runner, ADDRESSED, spoken=True)
-    await runner.reports.until("resumed")
+    await runner.reports.until(Event.RESUMED)
 
-    assert runner.reports.events() == [("started", None), ("backoff", "network"), ("resumed", None)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.BACKOFF, "network"), (Event.RESUMED, None)]
     assert runner.app.spoken == []

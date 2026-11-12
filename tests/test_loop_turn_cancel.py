@@ -15,6 +15,7 @@ from mcp_types import ListToolsResult
 from personas import app_session
 from personas.decision import TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE
 from personas.failures import Unreachable, leaves_of
+from personas.reporting import Event
 from personas.task_record import UnrequestedCancellationError
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, says
@@ -56,9 +57,9 @@ async def test_a_turn_whose_place_left_the_standing_is_cancelled_with_no_further
     await a_turn_in_its_first_round(runner)
 
     runner.app.stand(SUBJECT)
-    await runner.reports.until("turn_ended")
+    await runner.reports.until(Event.TURN_ENDED)
 
-    assert runner.reports.events() == [("started", None), ("turn_ended", TURN_CANCELLED_CODE)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
     assert runner.gateway.requests == []
     assert runner.app.said == []
     assert not runner.task.done()
@@ -69,7 +70,7 @@ async def test_a_turn_paused_mid_way_is_cancelled_and_after_the_resume_the_old_l
     say_in_the_call(runner, f"{ADDRESSED} While the turn ran.")
 
     runner.app.stand(SUBJECT, paused(PLACE_ID))
-    await runner.reports.until("turn_ended")
+    await runner.reports.until(Event.TURN_ENDED)
     say_in_the_call(runner, f"{ADDRESSED} During the pause.")
     resumed_read = runner.app.hold_next_window_read()
     runner.app.stand(SUBJECT, active(PLACE_ID))
@@ -78,7 +79,7 @@ async def test_a_turn_paused_mid_way_is_cancelled_and_after_the_resume_the_old_l
     resumed_read.set()
     await runner.app.said_count(1)
 
-    assert runner.reports.events() == [("started", None), ("turn_ended", TURN_CANCELLED_CODE)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
     assert [opening.new_seqs for opening in runner.gateway.openings()] == [[4]]
 
 
@@ -92,12 +93,12 @@ async def test_a_cancelled_turn_whose_session_leaves_with_late_answers_alone_giv
     await a_turn_in_its_first_round(runner)
 
     runner.app.stand(SUBJECT)
-    await runner.reports.until("turn_ended")
+    await runner.reports.until(Event.TURN_ENDED)
     later_read = runner.app.hold_next_read()
     runner.app.stand(SUBJECT, active(PLACE_ID))
     await runner.app.until_read_held()
 
-    assert runner.reports.events() == [("started", None), ("turn_ended", TURN_CANCELLED_CODE)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
     assert runner.app.log.count("subscriptions/listen") == 1
     assert not runner.task.done()
     later_read.set()
@@ -137,7 +138,7 @@ async def test_while_a_cancelled_turn_still_unwinds_a_new_addressed_line_starts_
         unwinding.release.set()
 
     assert runner.app.said == [(SUBJECT, OTHER_PLACE_ID, "There.")]
-    assert runner.reports.events() == [("started", None), ("turn_ended", TURN_CANCELLED_CODE)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
 
 
 async def test_a_turn_that_reported_its_end_and_meets_the_cancel_in_its_teardown_reports_no_cancel(runner, monkeypatch):
@@ -162,7 +163,7 @@ async def test_a_turn_that_reported_its_end_and_meets_the_cancel_in_its_teardown
     finally:
         closing.release.set()
 
-    assert runner.reports.events() == [("started", None), ("turn_ended", TOOL_NOT_DECLARED_CODE)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, TOOL_NOT_DECLARED_CODE)]
     assert not runner.task.done()
 
 
@@ -172,7 +173,7 @@ async def test_a_runner_cancelled_during_a_turn_ends_cancelled_and_reports_nothi
     runner.task.cancel()
 
     assert isinstance(await ended_by(runner.task), asyncio.CancelledError)
-    assert runner.reports.events() == [("started", None)]
+    assert runner.reports.reported() == [(Event.STARTED, None)]
 
 
 @LATE_ANSWERS
@@ -232,7 +233,7 @@ async def test_a_defect_in_a_turns_session_body_whose_place_then_leaves_ends_the
     ended = await ended_by(runner.task)
 
     assert list(leaves_of(ended)) == [defect]
-    assert runner.reports.events() == [("started", None)]
+    assert runner.reports.reported() == [(Event.STARTED, None)]
 
 
 @SESSION_SEAMS
@@ -240,12 +241,12 @@ async def test_a_call_failure_in_a_turns_session_body_whose_place_then_leaves_en
     runner, monkeypatch, seam
 ):
     await a_turn_removed_while_its_session_closes(runner, monkeypatch, seam=seam, error=Unreachable("down"))
-    await runner.reports.until("turn_ended")
+    await runner.reports.until(Event.TURN_ENDED)
     later_read = runner.app.hold_next_read()
     runner.app.stand(SUBJECT, active(PLACE_ID))
     await runner.app.until_read_held()
 
-    assert runner.reports.events() == [("started", None), ("turn_ended", TURN_CANCELLED_CODE)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
     assert not runner.task.done()
     later_read.set()
 
@@ -255,12 +256,12 @@ async def test_a_gateway_stop_in_a_turns_session_body_whose_place_then_leaves_en
 ):
     gateway = Gateway(Reply(status=HTTPStatus.SERVICE_UNAVAILABLE))
     await a_turn_removed_while_its_session_closes(runner, monkeypatch, gateway=gateway)
-    await runner.reports.until("turn_ended")
+    await runner.reports.until(Event.TURN_ENDED)
     later_read = runner.app.hold_next_read()
     runner.app.stand(SUBJECT, active(PLACE_ID))
     await runner.app.until_read_held()
 
-    assert runner.reports.events() == [("started", None), ("turn_ended", TURN_CANCELLED_CODE)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
     assert not runner.task.done()
     later_read.set()
 
@@ -296,12 +297,12 @@ async def test_a_removal_that_reaches_a_turn_while_its_session_opens_with_late_a
 ):
     async with a_turn_opening_its_session(runner, monkeypatch, only_close=1, echo=echo):
         runner.app.stand(SUBJECT)
-        await runner.reports.until("turn_ended")
+        await runner.reports.until(Event.TURN_ENDED)
         later_read = runner.app.hold_next_read()
         runner.app.stand(SUBJECT, active(PLACE_ID))
         await runner.app.until_read_held()
 
-        assert runner.reports.events() == [("started", None), ("turn_ended", TURN_CANCELLED_CODE)]
+        assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
         assert not runner.task.done()
         later_read.set()
 
@@ -326,9 +327,9 @@ async def test_a_lifecycle_refusal_that_reaches_a_turn_while_its_session_opens_w
     async with a_turn_opening_its_session(runner, monkeypatch, only_close=2, echo=echo):
         runner.app.script(READ, refused)
         runner.app.stand(SUBJECT, active(PLACE_ID))
-        await runner.reports.until("resumed")
+        await runner.reports.until(Event.RESUMED)
 
-        assert runner.reports.events() == [("started", None), ("backoff", "http_503"), ("resumed", None)]
+        assert runner.reports.reported() == [(Event.STARTED, None), (Event.BACKOFF, "http_503"), (Event.RESUMED, None)]
         assert not runner.task.done()
 
 
@@ -364,4 +365,4 @@ async def test_a_defect_in_a_turns_session_body_whose_close_loses_a_child_ends_t
 
     assert sorted(type(leaf).__name__ for leaf in leaves_of(ended)) == ["Unreachable", "ValueError"]
     assert [leaf for leaf in leaves_of(ended) if leaf is defect] == [defect]
-    assert runner.reports.events() == [("started", None)]
+    assert runner.reports.reported() == [(Event.STARTED, None)]

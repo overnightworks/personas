@@ -6,9 +6,11 @@ import secrets
 
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
+from agents.turn import FailureCode
 
 from personas.config import load_config
 from personas.decision import TURN_CANCELLED_CODE
+from personas.reporting import Event
 from tests.support.call import (
     ADDRESSED,
     ANSWER,
@@ -35,7 +37,7 @@ from tests.support.voice import in_a_voice_call_and_at_a_table
 
 pytestmark = pytest.mark.anyio
 
-STARTED = ("started", None)
+STARTED = (Event.STARTED, None)
 
 
 async def addressed_in_the_call(runner):
@@ -168,7 +170,7 @@ async def test_a_held_call_to_a_tools_only_app_opens_no_session_and_takes_nothin
     assert songmaker.log.count(CALL) == CALLS
     assert len(runner.gateway.held_results(2)) == 1
     assert not any(each.startswith("Error") for each in runner.gateway.tool_results(4))
-    assert runner.reports.events() == [STARTED]
+    assert runner.reports.reported() == [STARTED]
 
 
 async def test_a_held_call_takes_nothing_from_its_apps_bound_so_the_whole_bound_goes_out_after_it(runner):
@@ -183,7 +185,7 @@ async def test_a_held_call_takes_nothing_from_its_apps_bound_so_the_whole_bound_
 
     assert len(runner.app.said) == bound
     assert not any(each.startswith("Error") for each in runner.gateway.tool_results(bound + 2))
-    assert runner.reports.events() == [STARTED]
+    assert runner.reports.reported() == [STARTED]
 
 
 async def test_a_turn_that_spends_every_apps_bound_after_a_hold_ends_normally(runner, songmaker):
@@ -203,7 +205,7 @@ async def test_a_turn_that_spends_every_apps_bound_after_a_hold_ends_normally(ru
 
     assert len(runner.app.said) == bound
     assert len(songmaker.called) == CALLS
-    assert runner.reports.events() == [STARTED]
+    assert runner.reports.reported() == [STARTED]
 
 
 async def test_a_failure_of_the_call_that_follows_a_hold_ends_the_turn_with_one_reaction_and_one_act(runner):
@@ -214,11 +216,11 @@ async def test_a_failure_of_the_call_that_follows_a_hold_ends_the_turn_with_one_
     runner.app.script(CALL, _cuts)
     await said_and_taken(runner.app, PLACE_ID, REMARK)
     running.set()
-    await runner.reports.until("resumed")
+    await runner.reports.until(Event.RESUMED)
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.gateway.until_turns(2, why="lines")
 
-    assert runner.reports.events() == [STARTED, ("backoff", "network"), ("resumed", None)]
+    assert runner.reports.reported() == [STARTED, (Event.BACKOFF, "network"), (Event.RESUMED, None)]
     assert runner.gateway.round_sizes() == [2, 4, 2]
     acts = [each for each in runner.gateway.turns()[1].room["history"]["entries"] if each["entry"] == "act"]
     assert [each["outcome"] for each in acts] == [{"answered": False, "code": "network"}]
@@ -240,9 +242,9 @@ async def test_a_place_that_leaves_while_the_round_after_a_hold_is_pending_cance
     await runner.gateway.until_requested(2)
 
     runner.app.stand(SUBJECT)
-    await runner.reports.until("turn_ended")
+    await runner.reports.until(Event.TURN_ENDED)
 
-    assert runner.reports.events() == [STARTED, ("turn_ended", TURN_CANCELLED_CODE)]
+    assert runner.reports.reported() == [STARTED, (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
     assert runner.app.said == []
     assert runner.app.log.count(CALL) == 0
 
@@ -257,9 +259,9 @@ async def test_a_round_after_a_hold_that_passes_the_deadline_ends_the_turn_as_li
     await runner.gateway.until_requested(1)
     await said_and_taken(runner.app, PLACE_ID, REMARK)
     first.set()
-    await runner.reports.until("turn_ended")
+    await runner.reports.until(Event.TURN_ENDED)
 
-    assert runner.reports.events() == [STARTED, ("turn_ended", "limit_exceeded")]
+    assert runner.reports.reported() == [STARTED, (Event.TURN_ENDED, FailureCode.LIMIT_EXCEEDED.value)]
     assert runner.app.said == []
     assert runner.app.log.count(CALL) == 0
 

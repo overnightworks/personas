@@ -16,6 +16,7 @@ from agents.member import PlaceRef
 from personas.decision import TodayBounds, WindowRead
 from personas.failures import STORE_TIMEOUT_CODE, STORE_UNREACHABLE_CODE, StoreDefect, StoreUnavailable, leaves_of
 from personas.memory import PostgresLineStore
+from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import SweepClock, line, window_of
 from tests.support.gateway import Gateway, says
@@ -91,7 +92,7 @@ async def test_the_first_sweep_removes_the_line_first_read_longer_ago_than_the_k
     await clock.until_waiting(1)
 
     assert kept_lines(database, "text") == [("Younger",)]
-    assert [change.lines for change in runner.reports.changes if change.event.value == "swept"] == [1]
+    assert [change.lines for change in runner.reports.changes if change.event is Event.SWEPT] == [1]
 
 
 async def test_a_line_that_ages_past_the_period_while_the_runner_runs_is_removed_at_the_next_sweep_and_not_before(
@@ -104,7 +105,7 @@ async def test_a_line_that_ages_past_the_period_while_the_runner_runs_is_removed
     clock.time += LATER_DAYS * 24 * 3600
     before_the_next_sweep = kept_lines(database, "text")
     clock.open_gate()
-    await runner.reports.until("swept")
+    await runner.reports.until(Event.SWEPT)
 
     assert before_the_next_sweep == [("Ages",)]
     assert kept_lines(database, "text") == []
@@ -125,13 +126,13 @@ async def test_a_store_that_cannot_be_reached_at_a_sweep_is_reported_once_costs_
     await runner.app.said_count(1)
     store.mended = True
     clock.open_gate()
-    await runner.reports.until("swept")
+    await runner.reports.until(Event.SWEPT)
 
     assert runner.app.said == [(runner.app_principal.sub, PLACE_ID, ANSWER)]
     assert [(change.event.value, change.code) for change in runner.reports.changes if change.client_id is None] == [
-        ("store_failed", STORE_UNREACHABLE_CODE),
-        ("store_resumed", None),
-        ("swept", None),
+        (Event.STORE_FAILED, STORE_UNREACHABLE_CODE),
+        (Event.STORE_RESUMED, None),
+        (Event.SWEPT, None),
     ]
     assert "Older" not in [row[0] for row in kept_lines(database, "text")]
     await store.close()
@@ -163,7 +164,7 @@ async def test_a_sweep_slower_than_the_write_bound_is_cut_as_a_timeout_logged_an
         await store.close()
 
     assert [(change.event.value, change.code) for change in runner.reports.changes if change.client_id is None] == [
-        ("store_failed", STORE_TIMEOUT_CODE)
+        (Event.STORE_FAILED, STORE_TIMEOUT_CODE)
     ]
     assert kept_lines(database, "text") == [("Older",)]
 

@@ -11,6 +11,7 @@ from agents.backend.fake_gateway import completion
 from agents.turn import Principal, person_fingerprint
 
 from personas.failures import STORE_UNREACHABLE_CODE, StoreUnavailable
+from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call
 from tests.support.fakes import memory_target
 from tests.support.gateway import Gateway, says, says_after_a_hold
@@ -246,9 +247,9 @@ async def test_the_history_is_told_with_no_memory_and_with_a_store_that_is_down_
         [entry(url_of(runner, 0), PLACE_ID, REMARK), view_entry(url_of(runner, 0), state, revision=1, new=True)]
     )
     assert "earlier_today" not in opening.room
-    assert [code for event, code in runner.reports.events() if event == "store_failed"] == [STORE_UNREACHABLE_CODE] * (
-        failures
-    )
+    assert [code for event, code in runner.reports.reported() if event is Event.STORE_FAILED] == [
+        STORE_UNREACHABLE_CODE
+    ] * (failures)
 
 
 async def test_a_view_turn_starts_at_once_told_what_the_history_holds_while_a_window_read_of_another_app_is_held(

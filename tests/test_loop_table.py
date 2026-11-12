@@ -9,6 +9,7 @@ import pytest
 from agents.backend.fake_gateway import completion
 from agents.turn import Principal, person_fingerprint
 
+from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, says, says_after_a_hold
 from tests.support.history import (
@@ -292,7 +293,7 @@ async def test_a_view_read_that_fails_enters_nothing_and_the_read_after_the_resu
     runner.app.script(READ, cuts)
     second = a_state()
     runner.app.show_view(TABLE.id, 2, second, awaits_you=False)
-    await runner.reports.until("resumed")
+    await runner.reports.until(Event.RESUMED)
     await runner.app.until_view_read(TABLE, reads + 1)
     await settled(runner.app)
     third = waits(runner.app, 3)

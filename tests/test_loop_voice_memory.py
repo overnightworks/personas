@@ -11,6 +11,7 @@ from agents.backend.fake_gateway import completion
 
 from personas.failures import STORE_TIMEOUT_CODE
 from personas.memory import PostgresLineStore
+from personas.reporting import Event
 from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
@@ -112,4 +113,4 @@ async def test_a_store_that_cannot_be_read_lets_the_turn_speak_without_the_day_a
 
     assert runner.app.spoken == [(SUBJECT, PLACE_ID, ANSWER)]
     assert "earlier_today" not in runner.gateway.turns()[0].room
-    assert runner.reports.events().count(("store_failed", STORE_TIMEOUT_CODE)) == 1
+    assert runner.reports.reported().count((Event.STORE_FAILED, STORE_TIMEOUT_CODE)) == 1

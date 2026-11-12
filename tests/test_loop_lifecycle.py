@@ -33,6 +33,7 @@ from personas.failures import (
     leaves_of,
 )
 from personas.loop import AgentLoop
+from personas.reporting import Event
 from tests.support.call import CALL_PLACE
 from tests.support.hopin import (
     ACKNOWLEDGED,
@@ -62,13 +63,13 @@ async def drain(queue, count):
 async def test_every_read_follows_the_acknowledgement_of_its_stream_and_an_invitation_is_accepted_once(runner):
     runner.app.stand(SUBJECT, invited("room-7", "inv-3", epoch=2))
     runner.start()
-    await runner.reports.until("joined")
+    await runner.reports.until(Event.JOINED)
     runner.app.stand(SUBJECT, active("room-7"))
     await runner.app.log.until(READ, 2)
 
     assert runner.app.log.reads_follow_acknowledgements()
     assert runner.app.accepted == [AcceptInvitationArguments(place=CALL_PLACE, invitation="inv-3", epoch=2)]
-    assert runner.reports.events() == [("started", None), ("joined", None)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.JOINED, None)]
     assert INITIALIZE not in runner.app.log.entries
 
 
@@ -80,7 +81,7 @@ async def test_a_change_during_the_first_read_leads_to_a_read_that_shows_it(runn
 
     runner.app.stand(SUBJECT, invited("room-7", "inv-3"))
     release.set()
-    await runner.reports.until("joined")
+    await runner.reports.until(Event.JOINED)
 
     assert len(runner.app.accepted) == 1
 
@@ -95,7 +96,7 @@ async def test_a_change_made_right_after_the_acknowledgement_leads_to_a_read_tha
 
     runner.app.script(LISTEN, changes_what_stands_after_acknowledging)
     runner.start()
-    await runner.reports.until("joined")
+    await runner.reports.until(Event.JOINED)
 
     assert len(runner.app.accepted) == 1
 
@@ -114,7 +115,7 @@ async def test_a_stream_the_app_ends_is_reopened_at_once_on_the_same_session_and
     assert runner.app.log.count(LISTEN) == 2
     assert runner.app.log.reads_follow_acknowledgements()
     assert runner.clock.slept == []
-    assert runner.reports.events() == [("started", None)]
+    assert runner.reports.reported() == [(Event.STARTED, None)]
 
 
 @pytest.mark.parametrize("acknowledged_first", [True, False], ids=["after the acknowledgement", "before it"])
@@ -127,9 +128,9 @@ async def test_a_stream_lost_backs_off_and_is_reopened_and_read(runner, acknowle
 
     runner.app.script(LISTEN, is_lost)
     runner.start()
-    await runner.reports.until("resumed")
+    await runner.reports.until(Event.RESUMED)
 
-    assert runner.reports.events() == [("started", None), ("backoff", "network"), ("resumed", None)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.BACKOFF, "network"), (Event.RESUMED, None)]
     assert runner.clock.slept == [backoff_delay(1)]
     assert runner.app.log.count(DISCOVER) == 2
     assert runner.app.log.reads_follow_acknowledgements()
@@ -138,10 +139,10 @@ async def test_a_stream_lost_backs_off_and_is_reopened_and_read(runner, acknowle
 async def test_a_stream_that_never_completes_is_cut_at_the_runners_deadline_and_reopened_after_a_backoff(runner):
     runner.app.pulses_on_read = True
     runner.start(stream_seconds=SHORT_STREAM_SECONDS)
-    await runner.reports.until("backoff")
+    await runner.reports.until(Event.BACKOFF)
     await runner.app.log.until(LISTEN, 2)
 
-    assert runner.reports.events()[:2] == [("started", None), ("backoff", "network")]
+    assert runner.reports.reported()[:2] == [(Event.STARTED, None), (Event.BACKOFF, "network")]
     assert backoff_delay(1) in runner.clock.slept
 
 
@@ -155,10 +156,10 @@ async def test_an_answer_that_lands_after_the_session_closed_backs_off_and_does_
     monkeypatch.setattr(app_session, "streamable_http_client", failing)
     runner.app.pulses_on_read = True
     runner.start(stream_seconds=SHORT_STREAM_SECONDS)
-    await runner.reports.until("backoff")
+    await runner.reports.until(Event.BACKOFF)
     await runner.app.log.until(LISTEN, 2)
 
-    assert runner.reports.events()[:2] == [("started", None), ("backoff", "network")]
+    assert runner.reports.reported()[:2] == [(Event.STARTED, None), (Event.BACKOFF, "network")]
 
 
 async def test_a_stream_with_no_acknowledgement_until_past_the_deadline_backs_off_and_is_reopened_and_read(runner):
@@ -171,9 +172,9 @@ async def test_a_stream_with_no_acknowledgement_until_past_the_deadline_backs_of
 
     runner.app.script(LISTEN, talks_without_acknowledging)
     runner.start(stream_seconds=SHORT_STREAM_SECONDS)
-    await runner.reports.until("resumed")
+    await runner.reports.until(Event.RESUMED)
 
-    assert runner.reports.events() == [("started", None), ("backoff", "network"), ("resumed", None)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.BACKOFF, "network"), (Event.RESUMED, None)]
     assert runner.clock.slept == [backoff_delay(1)]
     assert runner.app.log.count(LISTEN) == 2
     assert runner.app.log.reads_follow_acknowledgements()
@@ -191,9 +192,9 @@ async def test_a_stream_that_does_not_honor_the_standing_suspends_the_loop_and_l
     else:
         runner.app.script(LISTEN, completes_unacknowledged)
     runner.start()
-    await runner.reports.until("suspended")
+    await runner.reports.until(Event.SUSPENDED)
 
-    assert runner.reports.events() == [("started", None), ("suspended", LISTEN_NOT_HONORED_CODE)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, LISTEN_NOT_HONORED_CODE)]
     assert set(runner.clock.slept) == {SUSPENDED_RETRY_SECONDS}
     assert not runner.ready_file.exists()
 
@@ -204,9 +205,9 @@ async def test_a_401_is_renewed_once_and_a_second_one_suspends_the_loop(runner, 
     runner.app.refuse_with = HTTPStatus.UNAUTHORIZED
     runner.app.refused_method = method
     runner.start()
-    await runner.reports.until("suspended")
+    await runner.reports.until(Event.SUSPENDED)
 
-    assert runner.reports.events() == [("started", None), ("suspended", status_code(HTTPStatus.UNAUTHORIZED))]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, status_code(HTTPStatus.UNAUTHORIZED))]
     assert len(runner.realm.issued) > 1
 
 
@@ -217,26 +218,30 @@ async def test_a_4xx_suspends_the_loop_with_its_status_and_it_resumes_when_the_a
     runner.app.refuse_with = status
     runner.app.refused_method = method
     runner.start()
-    await runner.reports.until("suspended")
+    await runner.reports.until(Event.SUSPENDED)
     runner.app.refuse_with = None
-    await runner.reports.until("resumed")
+    await runner.reports.until(Event.RESUMED)
 
-    assert runner.reports.events() == [("started", None), ("suspended", status_code(status)), ("resumed", None)]
+    assert runner.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.SUSPENDED, status_code(status)),
+        (Event.RESUMED, None),
+    ]
 
 
 async def test_a_5xx_backs_off_and_is_logged_once_until_a_read_answers(runner):
     runner.app.refuse_with = HTTPStatus.SERVICE_UNAVAILABLE
     runner.app.refused_method = READ
     runner.start()
-    await runner.reports.until("backoff")
+    await runner.reports.until(Event.BACKOFF)
     await drain(runner.app.refusals, REFUSALS_BEFORE_THE_FIX)
     runner.app.refuse_with = None
-    await runner.reports.until("resumed")
+    await runner.reports.until(Event.RESUMED)
 
-    assert runner.reports.events() == [
-        ("started", None),
-        ("backoff", status_code(HTTPStatus.SERVICE_UNAVAILABLE)),
-        ("resumed", None),
+    assert runner.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.BACKOFF, status_code(HTTPStatus.SERVICE_UNAVAILABLE)),
+        (Event.RESUMED, None),
     ]
 
 
@@ -247,9 +252,9 @@ async def test_a_broken_connection_on_a_read_backs_off_and_is_logged_once_until_
 
     runner.app.script(READ, breaks_the_connection, breaks_the_connection)
     runner.start()
-    await runner.reports.until("resumed")
+    await runner.reports.until(Event.RESUMED)
 
-    assert runner.reports.events() == [("started", None), ("backoff", "network"), ("resumed", None)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.BACKOFF, "network"), (Event.RESUMED, None)]
 
 
 @pytest.mark.parametrize(
@@ -268,9 +273,13 @@ async def test_a_read_that_is_no_standing_suspends_the_loop_until_one_answers(ru
 
     runner.app.script(READ, answers_wrongly)
     runner.start()
-    await runner.reports.until("resumed")
+    await runner.reports.until(Event.RESUMED)
 
-    assert runner.reports.events() == [("started", None), ("suspended", INVALID_ANSWER_CODE), ("resumed", None)]
+    assert runner.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.SUSPENDED, INVALID_ANSWER_CODE),
+        (Event.RESUMED, None),
+    ]
 
 
 async def test_a_read_that_asks_for_input_suspends_the_loop_and_does_not_crash_it(runner):
@@ -279,9 +288,9 @@ async def test_a_read_that_asks_for_input_suspends_the_loop_and_does_not_crash_i
 
     runner.app.script(READ, asks_for_input)
     runner.start()
-    await runner.reports.until("suspended")
+    await runner.reports.until(Event.SUSPENDED)
 
-    assert runner.reports.events() == [("started", None), ("suspended", INVALID_ANSWER_CODE)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, INVALID_ANSWER_CODE)]
     assert not runner.task.done()
 
 
@@ -304,9 +313,9 @@ async def test_an_app_without_a_shared_version_suspends_the_loop_with_its_code_a
         runner.app.script(DISCOVER, refuses_the_revision)
         code = f"jsonrpc_{UNSUPPORTED_PROTOCOL_VERSION}"
     runner.start()
-    await runner.reports.until("suspended")
+    await runner.reports.until(Event.SUSPENDED)
 
-    assert runner.reports.events() == [("started", None), ("suspended", code)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, code)]
     assert not runner.task.done()
 
 
@@ -318,7 +327,7 @@ async def test_a_pulse_for_a_place_window_is_a_wake_and_a_read_and_no_failure(ru
     runner.app.changes.changed(runner.app_principal, place_window_uri(CALL_PLACE))
     await runner.app.log.until(READ, 2)
 
-    assert runner.reports.events() == [("started", None)]
+    assert runner.reports.reported() == [(Event.STARTED, None)]
     assert not runner.task.done()
 
 
@@ -328,16 +337,16 @@ async def test_a_disabled_client_suspends_the_loop_before_any_app_call_and_a_gra
     await drain(runner.realm.refusals, REFUSALS_BEFORE_THE_FIX)
 
     assert runner.app.log.entries == []
-    assert runner.reports.events() == [("started", None), ("suspended", "http_401")]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, "http_401")]
     assert set(runner.clock.slept) == {SUSPENDED_RETRY_SECONDS}
 
     runner.realm.refusing = False
-    await runner.reports.until("resumed")
+    await runner.reports.until(Event.RESUMED)
     await runner.app.log.until(READ)
     assert runner.app.accepted == []
 
     runner.app.stand(SUBJECT, invited("room-7", "inv-3"))
-    await runner.reports.until("joined")
+    await runner.reports.until(Event.JOINED)
     assert len(runner.app.accepted) == 1
 
 
@@ -346,7 +355,7 @@ async def test_a_token_the_app_does_not_accept_is_renewed_once_and_then_suspends
     runner.start()
     await drain(runner.app.refusals, 2 * REFUSALS_BEFORE_THE_FIX)
 
-    assert runner.reports.events() == [("started", None), ("suspended", "http_401")]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, "http_401")]
     assert len(runner.realm.issued) > 2
 
 
@@ -357,9 +366,9 @@ async def test_an_app_without_the_accept_tool_suspends_the_loop_with_the_protoco
     runner.app.script(CALL, knows_no_such_tool)
     runner.app.stand(SUBJECT, invited("room-7", "inv-3"))
     runner.start()
-    await runner.reports.until("suspended")
+    await runner.reports.until(Event.SUSPENDED)
 
-    assert runner.reports.events() == [("started", None), ("suspended", f"jsonrpc_{INVALID_PARAMS}")]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, f"jsonrpc_{INVALID_PARAMS}")]
 
 
 @pytest.mark.parametrize("turns_before_stop", range(0, 40, 3))
@@ -396,7 +405,7 @@ class BugError(Exception):
 
 async def test_a_programming_error_in_a_reconciliation_ends_the_runner_loud(runner):
     def fails_when_joined(change):
-        if change.event.value == "joined":
+        if change.event is Event.JOINED:
             raise BugError
 
     runner.on_report = fails_when_joined
@@ -419,7 +428,7 @@ async def test_the_marker_is_absent_after_an_acknowledgement_with_no_read_and_pr
     assert not runner.ready_file.exists()
 
     release.set()
-    await runner.reports.until("joined")
+    await runner.reports.until(Event.JOINED)
 
     assert runner.ready_file.exists()
 
@@ -427,7 +436,7 @@ async def test_the_marker_is_absent_after_an_acknowledgement_with_no_read_and_pr
 async def test_an_app_that_refuses_with_403_leaves_no_marker(runner):
     runner.app.refuse_with = HTTPStatus.FORBIDDEN
     runner.start()
-    await runner.reports.until("suspended")
+    await runner.reports.until(Event.SUSPENDED)
 
     assert not runner.ready_file.exists()
 
@@ -456,4 +465,4 @@ async def test_a_defect_in_the_lifecycle_sessions_body_whose_close_loses_a_child
             await runner.task
 
     assert [leaf for leaf in leaves_of(ended.value) if leaf is defect] == [defect]
-    assert runner.reports.events() == [("started", None)]
+    assert runner.reports.reported() == [(Event.STARTED, None)]
