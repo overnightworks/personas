@@ -1,0 +1,8 @@
+claim_id = "15f5f476ac7e4e14afc981c40e46158f"
+agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
+role = "builder"
+base = "7598dd6146fbcb791a8046e05eee3cdbf442f7ed"
+branch = "claude/issue-104-history-bytes-and-today-bytes-count-the"
+scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/decision.py", "tests"]
+opened_commit = "3e5a1d63fc50237960c816cda7d78d770154c0b7"
+whole_reason = "One production file; the two documents state the same bound and tests is a directory."
