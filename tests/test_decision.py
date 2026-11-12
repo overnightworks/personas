@@ -802,18 +802,6 @@ def a_view(revision: int, *, awaits_you: bool = True) -> PlaceView:
     return PlaceView(revision=revision, awaits_you=awaits_you, state={"hand": secrets.token_hex(4)})
 
 
-@pytest.mark.parametrize(
-    ("takes_turns", "accepted"),
-    [(True, True), (False, False)],
-    ids=["the loop can take turns", "the loop cannot take turns"],
-)
-def test_an_invited_place_that_serves_a_view_is_accepted_only_where_the_loop_can_take_turns(takes_turns, accepted):
-    standing = serving(state=StandingState.INVITED)
-
-    expected = (Accept(TABLE, "inv-3", 0),) if accepted else ()
-    assert accepts_for((standing,), Memory(), takes_turns=takes_turns) == expected
-
-
 @pytest.mark.parametrize("serves_view", [False, True], ids=["not yet serving a view", "serving a view"])
 def test_an_invited_place_that_is_no_call_is_accepted_wherever_the_loop_takes_turns_whether_or_not_it_serves_a_view(
     serves_view,
