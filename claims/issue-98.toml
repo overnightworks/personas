@@ -1,0 +1,8 @@
+claim_id = "c82ec21cf8bf4e4eba2bb205b0a536ca"
+agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
+role = "builder"
+base = "b5a011b3567c423ad4e035408ad1757f920e5426"
+branch = "claude/issue-98-in-his-call-he-knows-the-table-every-vie"
+scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/config.py", "src/personas/decision.py", "src/personas/loop.py", "src/personas/mind.py", "tests"]
+opened_commit = "a9b1933fdb4031823aeb8a3f311435b1ecede030"
+whole_reason = "The entry kind has no caller without its feed, the feed breaks the bound without the bound by kind, and the told shape needs both; tests is a directory."
