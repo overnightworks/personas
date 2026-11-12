@@ -12,7 +12,9 @@ from typing import TYPE_CHECKING
 import httpx2
 from agents.backend.fake_gateway import FakeGateway, Reply, completion, tool_call, tool_round
 
-from tests.support.hopin import LIMIT_SECONDS, SAY_TOOL
+from tests.support.call import PLACE_ID
+from tests.support.history import TABLE
+from tests.support.hopin import LIMIT_SECONDS, PLAY_TOOL, SAY_TOOL
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -42,6 +44,16 @@ def speaks_and_says(place_id: str, spoken: str, written: str, *, after: str = ""
     the text after, when there is one."""
     call = tool_call("call-0", SAY_TOOL, {"place": place_id, "text": written})
     return [tool_round(call, content=spoken), completion(*([after] if after else []))]
+
+
+def say(text: str, place_id: str = PLACE_ID, tool: str = SAY_TOOL):
+    """A call of the line tool that says the text, in the call place unless another is named."""
+    return tool_call(secrets.token_hex(4), tool, {"place": place_id, "text": text})
+
+
+def play(text: str):
+    """A call of the line tool of the table, at his table."""
+    return say(text, TABLE.id, PLAY_TOOL)
 
 
 def says_after_a_hold(place_id: str, text: str, *, tool: str = SAY_TOOL) -> list[Reply]:

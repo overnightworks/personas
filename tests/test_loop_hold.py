@@ -16,7 +16,7 @@ from tests.support.call import (
     restarted_in_the_call,
     say_in_the_call,
 )
-from tests.support.gateway import Gateway, says_after_a_hold, words
+from tests.support.gateway import Gateway, play, say, says_after_a_hold, words
 from tests.support.history import (
     REMARK,
     SPEAKER,
@@ -29,7 +29,7 @@ from tests.support.history import (
     waits,
 )
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import CALL, DISCOVER, PLAY_TOOL, SAY_TOOL
+from tests.support.hopin import CALL, DISCOVER
 from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG
 from tests.support.voice import in_a_voice_call_and_at_a_table
 
@@ -41,14 +41,6 @@ STARTED = ("started", None)
 async def addressed_in_the_call(runner):
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
-
-
-def say(text: str, place_id: str = PLACE_ID, tool: str = SAY_TOOL):
-    return tool_call(secrets.token_hex(4), tool, {"place": place_id, "text": text})
-
-
-def play(text: str):
-    return say(text, TABLE.id, PLAY_TOOL)
 
 
 def song(name: str):

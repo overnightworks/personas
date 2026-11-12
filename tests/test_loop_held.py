@@ -18,7 +18,7 @@ from mcp_types import ListToolsResult
 from personas.decision import TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
-from tests.support.gateway import Gateway, words
+from tests.support.gateway import Gateway, play, say, words
 from tests.support.history import (
     REMARK,
     TABLE,
@@ -49,14 +49,6 @@ def reported(runner) -> list[tuple[Event, str | None, str | None]]:
 def fingerprints(tokens) -> set[str]:
     """A token never enters an assertion: bearers are compared by the digest of each, the empty one left out."""
     return {hashlib.sha256(each.encode()).hexdigest()[:12] for each in set(tokens) - {""}}
-
-
-def say(text: str):
-    return tool_call(secrets.token_hex(4), SAY_TOOL, {"place": PLACE_ID, "text": text})
-
-
-def play(text: str):
-    return tool_call(secrets.token_hex(4), PLAY_TOOL, {"place": TABLE.id, "text": text})
 
 
 def said_act(runner, text: str, outcome=None):
