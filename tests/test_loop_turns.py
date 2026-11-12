@@ -125,6 +125,32 @@ async def test_a_line_said_in_his_call_while_his_table_turn_runs_is_taken_at_onc
     assert [each["entry"] for each in call_turn.room["history"]["entries"]] == ["view", "line"]
 
 
+async def test_a_table_that_starts_waiting_at_another_app_during_his_call_turn_goes_before_a_line_said_after_it(
+    runner, other
+):
+    running = await a_call_turn_that_waits_for_the_model(runner, other)
+    waits(other, 1)
+    await settled(other)
+    await said_and_taken(runner.app, PLACE_ID, AGAIN)
+
+    running.set()
+    await runner.gateway.until_turns(3)
+
+    assert turn_order(runner) == [(0, "lines"), (1, "view"), (0, "lines")]
+    _, table_turn, call_turn = runner.gateway.openings()
+    assert [(each["entry"], each["new"]) for each in table_turn.room["history"]["entries"]] == [
+        ("line", False),
+        ("view", True),
+        ("line", False),
+    ]
+    assert call_turn.new_seqs == [2]
+    assert [(each["entry"], each["new"]) for each in call_turn.room["history"]["entries"]] == [
+        ("line", False),
+        ("view", False),
+        ("line", True),
+    ]
+
+
 async def test_lines_said_in_three_reads_during_another_apps_turn_are_told_together_in_one_turn_after_it(runner, other):
     running = await at_a_table_turn_that_waits_for_the_model(runner, other)
     for number in (1, 2, 3):
