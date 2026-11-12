@@ -275,15 +275,18 @@ class Turning:
         """
         async with asyncio.TaskGroup() as group:
             group.create_task(speaking.play())
-            try:
-                async for event in events:
-                    speaking.hear(event)
-                    if isinstance(event, ToolCallEvent):
-                        await speaking.spoken()
-            except Exception:
-                await speaking.settle()
-                raise
-            speaking.end()
+            group.create_task(self._hear_events(events, speaking))
+
+    async def _hear_events(self, events: AsyncIterator[TurnEvent], speaking: Speaking) -> None:
+        try:
+            async for event in events:
+                speaking.hear(event)
+                if isinstance(event, ToolCallEvent):
+                    await speaking.spoken()
+        except Exception:
+            await speaking.settle()
+            raise
+        speaking.end()
 
     async def _hold_tools(
         self, setup: TurnSetup, session: AppSession, record: TaskRecord, admitted: History
