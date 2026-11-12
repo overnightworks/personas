@@ -36,7 +36,7 @@ from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, ISSUER, LIST_TOOLS, PLAY_TOOL, READ, SAY_TOOL, active
 from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG
 from tests.support.voice import HeldSleeps, a_voice_call
-from tests.support.wire import answers_with, cuts, hangs, refuses_with_a_server_error
+from tests.support.wire import answers_with, cuts, hangs, hangs_once_entered, refuses_with_a_server_error
 
 pytestmark = pytest.mark.anyio
 
@@ -284,11 +284,7 @@ async def test_a_turn_whose_place_leaves_while_a_held_apps_call_is_in_flight_end
     entered = asyncio.Event()
     played = words(1)[0]
 
-    async def hangs_once_entered(reply):
-        entered.set()
-        await asyncio.Event().wait()
-
-    other.script(CALL, hangs_once_entered)
+    other.script(CALL, hangs_once_entered(entered))
     await seated_in_the_call(runner, other, tool_round(play(played)), completion("done"))
     say_in_the_call(runner, ADDRESSED)
     await entered.wait()

@@ -141,6 +141,14 @@ async def hangs(reply: Reply) -> None:
     await asyncio.Event().wait()
 
 
+def hangs_once_entered(entered: asyncio.Event) -> Handler:
+    async def hang(reply: Reply) -> None:
+        entered.set()
+        await asyncio.Event().wait()
+
+    return hang
+
+
 async def cuts(reply: Reply) -> None:
     await reply.open_stream()
     reply.cut()

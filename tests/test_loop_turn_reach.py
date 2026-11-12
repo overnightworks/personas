@@ -31,7 +31,7 @@ from tests.support.transport import (
     transport_whose_close_loses_a_child,
     transport_whose_session_loses_a_child,
 )
-from tests.support.wire import cuts, hangs, refuses_with_a_server_error
+from tests.support.wire import cuts, hangs, hangs_once_entered, refuses_with_a_server_error
 
 pytestmark = pytest.mark.anyio
 
@@ -65,14 +65,6 @@ async def addressed_in_the_call(runner):
 
 def failed_apps(runner):
     return [change.code for change in runner.reports.changes if change.event.value == FAILED]
-
-
-def hangs_once_entered(entered):
-    async def hang(reply):
-        entered.set()
-        await asyncio.Event().wait()
-
-    return hang
 
 
 async def a_song_is_made_and_announced(runner, songmaker):

@@ -41,7 +41,7 @@ from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, ISSUER, LISTEN, PLAY_TOOL, READ, SAY_TOOL, active
 from tests.support.realm import AGENT_NAME
 from tests.support.songmaker import CALLS, CREATE_SONG
-from tests.support.wire import cuts, hangs, refuses_with_a_server_error
+from tests.support.wire import cuts, hangs, hangs_once_entered, refuses_with_a_server_error
 
 pytestmark = pytest.mark.anyio
 
@@ -87,14 +87,6 @@ async def refuses_the_token(reply):
 
 async def answers_wrongly(reply):
     await reply.error(INVALID_PARAMS, status=HTTPStatus.OK)
-
-
-def hangs_once_entered(entered):
-    async def hang(reply):
-        entered.set()
-        await asyncio.Event().wait()
-
-    return hang
 
 
 async def test_a_say_the_app_answered_is_told_to_his_next_turn_before_his_own_line_read_back_and_no_closing_text(
