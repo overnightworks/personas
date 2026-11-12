@@ -92,7 +92,7 @@ async def test_a_store_that_is_down_is_reported_once_and_costs_no_answer_and_the
     assert store.seqs_kept()[-3:] == [1, 2, 3]
 
 
-async def test_a_write_that_ends_in_a_timeout_is_reported_by_its_code_and_does_not_delay_the_turn_it_followed(runner):
+async def test_a_write_that_ends_in_a_timeout_is_reported_by_its_code_and_the_turn_it_held_up_follows(runner):
     store = ScriptedStore()
     store.release = asyncio.Event()
     store.failure = StoreUnavailable(STORE_TIMEOUT_CODE)
@@ -101,8 +101,9 @@ async def test_a_write_that_ends_in_a_timeout_is_reported_by_its_code_and_does_n
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
     await store.until_waiting()
-    await runner.app.said_count(1)
+    assert runner.gateway.requests == []
     store.release.set()
+    await runner.app.said_count(1)
     await runner.reports.until("store_failed")
 
     assert ("store_failed", STORE_TIMEOUT_CODE) in runner.reports.events()

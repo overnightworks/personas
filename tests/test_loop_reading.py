@@ -8,6 +8,7 @@ from agents.member import STANDING_URI
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, says
+from tests.support.history import settled
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import WINDOW_LINES, active, invited, paused
 
@@ -77,9 +78,14 @@ async def test_when_the_window_moved_past_his_position_the_turn_is_told_lines_we
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
     await runner.gateway.until_requested(1)
+    held_read = runner.app.hold_next_window_read()
+    say_in_the_call(runner, "Chatter before the burst")
+    await runner.app.until_window_read_held()
     for number in range(WINDOW_LINES + 1):
         say_in_the_call(runner, f"Chatter {number}")
     say_in_the_call(runner, f"{ADDRESSED} Again.")
+    held_read.set()
+    await settled(runner.app)
     first_round.set()
     await runner.app.said_count(2)
 

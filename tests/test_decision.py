@@ -35,6 +35,7 @@ from personas.decision import (
     Accept,
     ActDone,
     Answered,
+    AppPlace,
     EarlierToday,
     History,
     Joined,
@@ -49,6 +50,7 @@ from personas.decision import (
     Suspend,
     TodayBounds,
     Token,
+    Turns,
     Unanswered,
     UnrecognisedRefusal,
     ViewSeen,
@@ -58,19 +60,21 @@ from personas.decision import (
     act_outcome,
     active_call_places,
     active_view_places,
-    addressed,
     after_refusal,
     backoff_delay,
     bound_declarations,
     call_within_bound,
+    claimed,
     decisive_failure,
     earlier_today,
     failure_code,
     forget_gone,
     history_after,
     is_voice_app,
+    left_standing,
     perceive,
     reaction_to,
+    released,
     renewal_due,
     sets_where_reading_starts,
     spoken_wait_seconds,
@@ -84,6 +88,9 @@ from personas.decision import (
     turn_told,
     view_turn_due,
     voice_context,
+    wakes_him,
+    with_due,
+    without_due,
 )
 from personas.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer
 from personas.secret import Secret
@@ -397,40 +404,96 @@ def test_a_window_is_perceived_from_its_checkpoint(checkpoint, window, expected)
 
 
 @pytest.mark.parametrize(
-    ("text", "name", "expected"),
-    [
-        ("Mozart, are you there?", "Mozart", True),
-        ("hey MOZART", "Mozart", True),
-        ("what do you think, mozart?!", "Mozart", True),
-        ("@Mozart", "Mozart", True),
-        ("Mozart's view", "Mozart", True),
-        ("Mozartian music", "Mozart", False),
-        ("Amozart", "Mozart", False),
-        ("Wolfgang", "Mozart", False),
-        ("Mozart", "Mo.art", False),
-        ("a Mo.art here", "Mo.art", True),
-        ("STRASSE", "Straße", True),
-    ],
-    ids=[
-        "named",
-        "other case",
-        "lower case",
-        "mention",
-        "possessive",
-        "longer word",
-        "inside a word",
-        "not named",
-        "the name is no pattern",
-        "a name with a dot",
-        "case folding",
-    ],
+    ("own", "expected"),
+    [((False,), True), ((True,), False), ((True, False), True), ((), False)],
+    ids=["someone else's line", "his own line", "one of them someone else's", "no line"],
 )
-def test_a_line_is_addressed_when_it_names_the_agent_as_a_whole_word_whatever_the_case(text, name, expected):
-    assert addressed(line(1, text), name) is expected
+def test_a_line_wakes_him_unless_every_line_taken_is_his_own(own, expected):
+    assert wakes_him([line(seq, "Hello everyone", own=each) for seq, each in enumerate(own, 1)]) is expected
 
 
-def test_a_line_of_his_own_is_never_addressed_to_him():
-    assert not addressed(line(1, "Mozart answers", own=True), "Mozart")
+CALL_AT_A = AppPlace("https://a.test/mcp", PlaceRef(kind="call", id="room-1"))
+CALL_AT_B = AppPlace("https://b.test/mcp", PlaceRef(kind="call", id="room-2"))
+TABLE_AT_A = AppPlace("https://a.test/mcp", PlaceRef(kind="table", id="table-1"))
+
+
+def _due_in_order(*due: tuple[AppPlace, Lines | Waiting]) -> Turns:
+    turns = Turns()
+    for at, occasion in due:
+        turns = with_due(turns, at, occasion)
+    return turns
+
+
+def test_lines_due_at_a_place_in_one_generation_join_and_keep_the_place_where_it_was_in_the_order():
+    turns = _due_in_order(
+        (CALL_AT_A, Lines("g1", frozenset({1}), missed=False)), (CALL_AT_B, Lines("g1", frozenset({4}), missed=False))
+    )
+
+    turns = with_due(turns, CALL_AT_A, Lines("g1", frozenset({2, 3}), missed=True))
+
+    assert turns.due == {
+        CALL_AT_A: Lines("g1", frozenset({1, 2, 3}), missed=True),
+        CALL_AT_B: Lines("g1", frozenset({4}), missed=False),
+    }
+    assert list(turns.due) == [CALL_AT_A, CALL_AT_B]
+
+
+def test_lines_of_another_generation_and_a_newer_revision_replace_what_was_due_at_the_place_in_its_position():
+    turns = _due_in_order(
+        (CALL_AT_A, Lines("g1", frozenset({1}), missed=True)), (TABLE_AT_A, Waiting(1)), (CALL_AT_B, Waiting(5))
+    )
+
+    turns = with_due(turns, CALL_AT_A, Lines("g2", frozenset({1}), missed=False))
+    turns = with_due(turns, TABLE_AT_A, Waiting(2))
+
+    assert turns.due == {
+        CALL_AT_A: Lines("g2", frozenset({1}), missed=False),
+        TABLE_AT_A: Waiting(2),
+        CALL_AT_B: Waiting(5),
+    }
+    assert list(turns.due) == [CALL_AT_A, TABLE_AT_A, CALL_AT_B]
+
+
+def test_the_turn_goes_to_the_place_that_waited_longest_and_only_in_its_app():
+    turns = _due_in_order((CALL_AT_B, Waiting(1)), (CALL_AT_A, Waiting(2)))
+
+    assert claimed(turns, CALL_AT_A.app) is None
+    after, at, occasion = claimed(turns, CALL_AT_B.app) or pytest.fail("the oldest place is at its app")
+    assert (after.running, at, occasion) == (True, CALL_AT_B, Waiting(1))
+    assert after.due == {CALL_AT_A: Waiting(2)}
+
+
+def test_no_turn_starts_while_one_runs_or_when_nothing_is_due():
+    assert claimed(replace(_due_in_order((CALL_AT_A, Waiting(1))), running=True), CALL_AT_A.app) is None
+    assert claimed(Turns(), CALL_AT_A.app) is None
+
+
+def test_a_released_turn_leaves_what_is_due_and_lets_the_next_one_start():
+    running = replace(_due_in_order((CALL_AT_A, Waiting(1))), running=True)
+
+    after = released(running)
+
+    assert after.running is False
+    assert after.due == running.due
+    assert claimed(after, CALL_AT_A.app) is not None
+
+
+def test_the_places_that_leave_are_no_longer_due_and_the_rest_keep_their_order():
+    turns = _due_in_order((CALL_AT_A, Waiting(1)), (CALL_AT_B, Waiting(1)), (TABLE_AT_A, Waiting(1)))
+
+    after = without_due(turns, lambda at: at.app == CALL_AT_A.app)
+
+    assert list(after.due) == [CALL_AT_B]
+
+
+def test_a_due_place_of_an_app_leaves_with_its_call_or_table_and_stays_while_it_is_active():
+    standings = (active("room-1"), active("table-1", "table", serves_view=True), paused("room-9"))
+    app = CALL_AT_A.app
+    due = [CALL_AT_A, TABLE_AT_A, AppPlace(app, PlaceRef(kind="call", id="room-9")), CALL_AT_B]
+
+    leaving = left_standing(app, standings)
+
+    assert [leaving(at) for at in due] == [False, False, True, False]
 
 
 def _declaration(name: str) -> ToolDeclaration:
@@ -893,6 +956,18 @@ def test_a_history_its_lines_and_its_views_show_no_name_no_text_and_no_state_in_
     assert marker not in repr(History((line, view), older_dropped=False))
     assert marker not in repr(line)
     assert marker not in repr(view)
+
+
+def test_the_places_and_lines_a_turn_is_due_for_show_no_name_no_text_and_no_state_in_their_repr():
+    marker = secrets.token_hex(8)
+    taken = said(1, marker, name=marker)
+    at = AppPlace(taken.visit.app, taken.visit.place)
+    lines = Lines(taken.visit.generation, frozenset({taken.seq}), missed=False)
+    turns = with_due(with_due(Turns(), at, lines), AppPlace(APP, TABLE), Waiting(revision=1))
+
+    assert marker not in repr(at)
+    assert marker not in repr(lines)
+    assert marker not in repr(turns)
 
 
 def test_new_lines_join_the_history_after_the_lines_it_holds():

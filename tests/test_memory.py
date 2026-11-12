@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 import secrets
 import time
@@ -12,6 +13,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 import pytest
+from agents.backend.fake_gateway import completion
 from agents.member import PlaceEntry, PlaceRef, PlaceWindow
 from sqlalchemy.exc import IntegrityError
 
@@ -39,6 +41,7 @@ from tests.support.history import (
     told_line_bytes,
     url_of,
     view_entry,
+    view_turns,
     waits,
     woke_at_table,
 )
@@ -548,9 +551,9 @@ async def test_lines_past_the_history_bound_leave_it_oldest_first_and_are_told_i
         await said_and_taken(runner.app, PLACE_ID, f"line-{number}")
     runner.app.stand(SUBJECT, active(PLACE_ID), at_table())
     state = waits(runner.app, 1)
-    await runner.gateway.until_turns(1)
+    await runner.gateway.until_turns(1, why="view")
 
-    (opening,) = runner.gateway.openings()
+    (opening,) = view_turns(runner)
     assert opening.room["history"] == history_of(
         [
             entry(url_of(runner, 0), PLACE_ID, "line-2", seq=2),
@@ -579,12 +582,12 @@ async def test_a_line_another_app_took_after_a_turn_was_admitted_is_in_neither_i
     runner.clock.time += 60
     await said_and_taken(other, OTHER_CALL_ID, REMARK)
     reading.set()
-    await runner.gateway.until_turns(1)
+    await runner.gateway.until_turns(1, why="view")
     third_state = waits(runner.app, 3)
-    await runner.gateway.until_turns(2)
+    await runner.gateway.until_turns(2, why="view")
 
     app = url_of(runner, 0)
-    first, second = runner.gateway.openings()
+    first, second = view_turns(runner)
     assert first.room["history"] == history_of(
         [
             view_entry(app, first_state, revision=1, awaits_you=False),
@@ -625,7 +628,7 @@ async def test_the_table_displaces_the_early_call_lines_from_his_history_and_the
     runner.config = replace(
         runner.config, history_bytes=told_line_bytes(url_of(runner, 0), PLACE_ID, ADDRESSED, seq=2) + 2 * STATE_BYTES
     )
-    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    runner.gateway = Gateway(completion("done"), *says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
     await said_and_taken(runner.app, PLACE_ID, "early-call-line")
     runner.app.stand(SUBJECT, active(PLACE_ID), at_table())
@@ -633,9 +636,8 @@ async def test_the_table_displaces_the_early_call_lines_from_his_history_and_the
     second = await shows(runner.app, 2)
     third = await shows(runner.app, 3)
     say_in_the_call(runner, ADDRESSED)
-    await runner.gateway.until_turns(1)
+    written = await runner.gateway.until_written_turn(PLACE_ID, 2)
 
-    (written,) = runner.gateway.openings()
     app = url_of(runner, 0)
     assert written.room["history"] == history_of(
         [
@@ -662,7 +664,7 @@ async def test_every_line_kept_over_two_restarts_is_told_exactly_once_in_the_his
     await said_and_taken(runner.app, PLACE_ID, "third-kept")
     other.stand(SUBJECT, at_table())
     state = waits(other, 1)
-    await runner.gateway.until_turns(1)
+    await runner.gateway.until_turns(1, why="view")
 
-    told = runner.gateway.told_in(1)
+    told = json.dumps(view_turns(runner)[0].room, ensure_ascii=False)
     assert [told.count(text) for text in ("first-kept", "second-kept", "third-kept", state["hand"])] == [1, 1, 1, 1]

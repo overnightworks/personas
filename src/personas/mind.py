@@ -1,24 +1,29 @@
 """One agent's mind: the history of the lines he took in, the views he read and the calls relayed for him at any of his
-apps, which his loops and turns feed and every turn reads."""
+apps, and the one turn he takes at a time, with the places that have one due. His loops and turns feed it and every
+turn reads it."""
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
-from personas.decision import History, history_after
+from personas.decision import History, Turns, claimed, history_after, released, with_due, without_due
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
-    from personas.decision import Entry
+    from personas.decision import AppPlace, Entry, Occasion
 
 
 class Mind:
-    """Holds one agent's history in memory for the life of the runner; the rule that bounds it is ``decision``'s."""
+    """Holds one agent's history and turns in memory for the life of the runner; the rules that bound the history and
+    move the turns are ``decision``'s. Each method is synchronous, so a loop changes it between its awaits."""
 
     def __init__(self, size_bytes: int) -> None:
         self._size_bytes = size_bytes
         self._history = History((), older_dropped=False)
+        self._turns = Turns()
+        self._wake_events: list[asyncio.Event] = []
 
     @property
     def history(self) -> History:
@@ -30,3 +35,37 @@ class Mind:
         if not taken:
             return
         self._history = history_after(self._history, taken, self._size_bytes)
+
+    def wake_event(self) -> asyncio.Event:
+        """A new event a loop waits on; the end of a turn, and a place dropped while no turn runs, set it."""
+        event = asyncio.Event()
+        self._wake_events.append(event)
+        return event
+
+    def due(self, at: AppPlace, occasion: Occasion) -> None:
+        self._turns = with_due(self._turns, at, occasion)
+
+    def undue(self, leaving: Callable[[AppPlace], bool]) -> None:
+        """Drops the due places for which ``leaving`` holds; with no turn running a younger place may then go first."""
+        remaining = without_due(self._turns, leaving)
+        dropped = len(remaining.due) < len(self._turns.due)
+        self._turns = remaining
+        if dropped and not remaining.running:
+            self._wake()
+
+    def claim(self, app: str) -> tuple[AppPlace, Occasion] | None:
+        """Takes the one turn for the place that has waited longest when it is at ``app``."""
+        taken = claimed(self._turns, app)
+        if taken is None:
+            return None
+        self._turns, at, occasion = taken
+        return at, occasion
+
+    def release(self) -> None:
+        """The running turn ended: every loop of his may claim now."""
+        self._turns = released(self._turns)
+        self._wake()
+
+    def _wake(self) -> None:
+        for event in self._wake_events:
+            event.set()

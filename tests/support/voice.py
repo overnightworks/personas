@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 
-from tests.support.call import restarted_in_the_call
+from tests.support.call import PLACE_ID, restarted_in_the_call
 from tests.support.gateway import Gateway
-from tests.support.hopin import LIMIT_SECONDS
+from tests.support.history import at_table
+from tests.support.hopin import AGENT_SUBJECT, LIMIT_SECONDS, active
 
 TWO_SENTENCES = "First sentence. Second sentence."
 
@@ -52,6 +53,16 @@ async def a_voice_call(runner, *replies):
     runner.give_voice()
     runner.gateway = Gateway(*replies)
     await restarted_in_the_call(runner)
+
+
+async def in_a_voice_call_and_at_a_table(runner, *replies):
+    """The runner started for an agent with a voice section, standing in a call and at a table of the same app, and
+    has read the call's window once."""
+    runner.give_voice()
+    runner.gateway = Gateway(*replies)
+    runner.app.stand(AGENT_SUBJECT, active(PLACE_ID), at_table())
+    runner.start()
+    await runner.app.until_window_read(PLACE_ID)
 
 
 def sentences_spoken(runner) -> list[str]:
