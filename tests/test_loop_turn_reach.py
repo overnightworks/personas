@@ -16,6 +16,7 @@ from personas import app_session
 from personas.config import load_config
 from personas.decision import TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE
 from personas.failures import Unreachable, leaves_of
+from personas.reporting import Event
 from personas.tokens import HttpTokenSource
 from personas.turning import Turning
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
@@ -35,7 +36,6 @@ from tests.support.wire import cuts, hangs, hangs_once_entered, refuses_with_a_s
 
 pytestmark = pytest.mark.anyio
 
-FAILED = "tools_only_app_failed"
 SHORT_CALL_SECONDS = 0.3
 
 
@@ -63,8 +63,17 @@ async def addressed_in_the_call(runner):
     say_in_the_call(runner, ADDRESSED)
 
 
+def reported(runner) -> list[tuple[Event, str | None, str | None]]:
+    """What the loops reported but their start, each as its event, its code and the address of the app it names."""
+    return [
+        (each.event, each.code, each.app)
+        for each in runner.reports.without_completed_turns
+        if each.event is not Event.STARTED
+    ]
+
+
 def failed_apps(runner):
-    return [change.code for change in runner.reports.changes if change.event.value == FAILED]
+    return [change.code for change in runner.reports.changes if change.event is Event.TOOLS_ONLY_APP_FAILED]
 
 
 async def a_song_is_made_and_announced(runner, songmaker):
@@ -121,7 +130,7 @@ async def test_a_tools_only_app_whose_listing_fails_at_turn_start_is_absent_and_
 
     assert runner.gateway.offered_tools() == [SAY_TOOL]
     assert runner.app.said == [(SUBJECT, PLACE_ID, ANSWER)]
-    assert runner.reports.events() == [("started", None), (FAILED, code)]
+    assert reported(runner) == [(Event.TOOLS_ONLY_APP_FAILED, code, songmaker_url(runner))]
     assert runner.clock.slept == []
     assert runner.app.log.count(LISTEN) == 1
     assert not runner.task.done()
@@ -142,7 +151,7 @@ async def test_a_tools_only_app_that_declares_one_bound_tool_no_more_is_absent_a
     await runner.app.said_count(1)
 
     assert runner.gateway.offered_tools() == [SAY_TOOL]
-    assert runner.reports.events() == [("started", None), (FAILED, TOOL_NOT_DECLARED_CODE)]
+    assert reported(runner) == [(Event.TOOLS_ONLY_APP_FAILED, TOOL_NOT_DECLARED_CODE, songmaker_url(runner))]
 
 
 async def a_call_that_fails_and_a_turn_that_goes_on(runner, songmaker, code, *, call_seconds=None):
@@ -161,7 +170,7 @@ async def a_call_that_fails_and_a_turn_that_goes_on(runner, songmaker, code, *, 
     (shown,) = runner.gateway.tool_results(2)
     assert shown.startswith("Error")
     assert runner.app.said == [(SUBJECT, PLACE_ID, ANSWER)]
-    assert runner.reports.events() == [("started", None), (FAILED, code)]
+    assert reported(runner) == [(Event.TOOLS_ONLY_APP_FAILED, code, songmaker_url(runner))]
     assert runner.clock.slept == []
     assert runner.app.log.count(LISTEN) == 1
     assert not runner.task.done()
@@ -217,7 +226,7 @@ async def test_a_tools_only_app_whose_call_failed_takes_no_more_calls_in_the_tur
     assert closed.startswith("Error")
     assert closed != failed
     assert songmaker.log.count(CALL) == 1
-    assert runner.reports.events() == [("started", None), (FAILED, "http_500")]
+    assert reported(runner) == [(Event.TOOLS_ONLY_APP_FAILED, "http_500", songmaker_url(runner))]
 
 
 async def a_loss_while_the_app_session_opens_and_a_turn_that_answers(runner, songmaker, monkeypatch, transport):
@@ -228,7 +237,7 @@ async def a_loss_while_the_app_session_opens_and_a_turn_that_answers(runner, son
     await runner.app.said_count(1)
 
     assert runner.gateway.offered_tools() == [SAY_TOOL]
-    assert runner.reports.events() == [("started", None), (FAILED, "network")]
+    assert reported(runner) == [(Event.TOOLS_ONLY_APP_FAILED, "network", songmaker_url(runner))]
     assert not runner.task.done()
 
 
@@ -270,7 +279,7 @@ async def test_a_child_lost_while_a_calls_session_discovers_shows_the_model_an_e
     await runner.app.said_count(1)
 
     assert runner.gateway.tool_results(2)[0].startswith("Error")
-    assert runner.reports.events() == [("started", None), (FAILED, "network")]
+    assert reported(runner) == [(Event.TOOLS_ONLY_APP_FAILED, "network", songmaker_url(runner))]
     assert not runner.task.done()
 
 
@@ -295,7 +304,7 @@ async def test_a_token_the_realm_refuses_for_the_tools_only_scope_leaves_the_app
     await runner.app.said_count(1)
 
     assert runner.gateway.offered_tools() == [SAY_TOOL]
-    assert runner.reports.events() == [("started", None), (FAILED, "http_401")]
+    assert reported(runner) == [(Event.TOOLS_ONLY_APP_FAILED, "http_401", songmaker_url(runner))]
     assert runner.clock.slept == []
     assert runner.app.log.count(LISTEN) == 1
 
@@ -313,7 +322,7 @@ async def test_a_token_the_realm_refuses_in_mid_turn_for_the_tools_only_scope_is
 
     assert songmaker.called == []
     assert runner.gateway.tool_results(2)[0].startswith("Error")
-    assert runner.reports.events() == [("started", None), (FAILED, "http_401")]
+    assert reported(runner) == [(Event.TOOLS_ONLY_APP_FAILED, "http_401", songmaker_url(runner))]
     assert runner.clock.slept == []
     assert runner.app.log.count(LISTEN) == 1
 

@@ -16,6 +16,7 @@ from mcp_types import INVALID_PARAMS, CallToolResult, TextContent
 
 from personas.app_session import READ_SECONDS, open_mcp_session
 from personas.failures import Unreachable
+from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, says_after_a_hold
 from tests.support.history import (
@@ -212,7 +213,11 @@ async def test_a_tools_only_call_that_fails_is_told_as_not_answered_with_the_fai
 
     acts = [each for each in second.room["history"]["entries"] if each["entry"] == "act"]
     assert acts[0] == a_song(runner, songmaker_url(runner), unanswered(code))
-    assert runner.reports.events() == [("started", None), ("tools_only_app_failed", code)]
+    assert [
+        (each.event, each.code, each.app)
+        for each in runner.reports.without_completed_turns
+        if each.event is not Event.STARTED
+    ] == [(Event.TOOLS_ONLY_APP_FAILED, code, songmaker_url(runner))]
     assert runner.gateway.tool_results(2)[0].startswith("Error")
 
 
