@@ -1,8 +1,0 @@
-claim_id = "1d5e68343eb44915907d0f7ef2c0f9a9"
-agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
-role = "builder"
-base = "40f2c067b07f003dbcb850173624057840ae02cc"
-branch = "claude/issue-133-called-to-his-table-he-joins-a-table-inv"
-scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/decision.py", "src/personas/loop.py", "src/personas/reporting.py", "tests"]
-opened_commit = "e4991c0e353c57914849a7b5113342482fd2a520"
-whole_reason = "The accept rule, its log line, its event and the documents that name the rule change together"
