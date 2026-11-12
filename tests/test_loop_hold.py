@@ -30,7 +30,7 @@ from tests.support.history import (
     waits,
 )
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import CALL, DISCOVER, SAY_TOOL
+from tests.support.hopin import CALL, DISCOVER, PLAY_TOOL, SAY_TOOL
 from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG, ToolsOnlyApp
 from tests.support.voice import in_a_voice_call_and_at_a_table
 
@@ -56,8 +56,12 @@ def words(count: int) -> list[str]:
     return [secrets.token_hex(4) for _ in range(count)]
 
 
-def say(text: str, place_id: str = PLACE_ID):
-    return tool_call(secrets.token_hex(4), SAY_TOOL, {"place": place_id, "text": text})
+def say(text: str, place_id: str = PLACE_ID, tool: str = SAY_TOOL):
+    return tool_call(secrets.token_hex(4), tool, {"place": place_id, "text": text})
+
+
+def play(text: str):
+    return say(text, TABLE.id, PLAY_TOOL)
 
 
 def song(name: str):
@@ -85,7 +89,7 @@ async def at_the_table_with_news_to_come(runner, other, *replies, holds=(1,)):
 
 async def test_a_turn_that_meets_nothing_new_has_every_call_relayed_in_as_many_rounds(runner, other):
     texts = words(3)
-    runner.gateway = Gateway(*(tool_round(say(text, TABLE.id)) for text in texts), completion("done"))
+    runner.gateway = Gateway(*(tool_round(play(text)) for text in texts), completion("done"))
     other.stand(SUBJECT, at_table())
     await restarted_in_the_call(runner)
     waits(other, 1)
@@ -142,7 +146,7 @@ async def test_a_call_after_a_line_of_someone_else_is_held_with_every_arrival_to
 async def test_news_before_each_of_three_calls_holds_only_the_first(runner, other):
     texts = words(3)
     _, (first, second, third) = await at_the_table_with_news_to_come(
-        runner, other, *(tool_round(say(text, TABLE.id)) for text in texts), completion("done"), holds=(1, 2, 3)
+        runner, other, *(tool_round(play(text)) for text in texts), completion("done"), holds=(1, 2, 3)
     )
     for number, released in enumerate((first, second, third), 1):
         await runner.gateway.until_requested(number)
@@ -158,7 +162,7 @@ async def test_news_before_each_of_three_calls_holds_only_the_first(runner, othe
 async def test_two_calls_of_one_reply_after_news_hold_the_first_and_send_the_second(runner, other):
     held_text, sent_text = words(2)
     _, (running,) = await at_the_table_with_news_to_come(
-        runner, other, tool_round(say(held_text, TABLE.id), say(sent_text, TABLE.id)), completion("done")
+        runner, other, tool_round(play(held_text), play(sent_text)), completion("done")
     )
     await said_and_taken(runner.app, PLACE_ID, REMARK)
     running.set()
@@ -300,9 +304,9 @@ async def test_the_table_state_his_own_card_caused_holds_his_next_call_once_and_
     _, (first, second) = await at_the_table_with_news_to_come(
         runner,
         other,
-        tool_round(say(card, TABLE.id)),
-        tool_round(say(remark, TABLE.id)),
-        tool_round(say(remark, TABLE.id)),
+        tool_round(play(card)),
+        tool_round(play(remark)),
+        tool_round(play(remark)),
         completion("done"),
         holds=(1, 2),
     )

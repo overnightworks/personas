@@ -62,6 +62,7 @@ INITIALIZE = "initialize"
 ACKNOWLEDGED = "acknowledged"
 
 SAY_TOOL = "say"
+PLAY_TOOL = "play"
 GENERATION = "generation-1"
 WINDOW_LINES = 100
 """How many of a place's newest lines its window holds, as hopin's chat window does."""
@@ -216,6 +217,8 @@ class FakeApp:
     presented: set[str] = field(default_factory=set[str])
     content: set[str] = field(default_factory=lambda: {ACCEPTED_NAME})
     says_move_the_view: bool = False
+    line_tool: str = SAY_TOOL
+    """The name of the tool that takes a line or a move at a place of this app; ``say`` as hopin declares it."""
 
     def __post_init__(self) -> None:
         self._front = McpPersonFront(
@@ -228,9 +231,12 @@ class FakeApp:
     def _tools(self) -> list[PersonTool]:
         return [
             PersonTool(_ACCEPT_DECLARATION, self._accept),
-            PersonTool(_SAY_DECLARATION, self._say),
+            PersonTool(self._line_declaration(), self._say),
             PersonTool(_SPEAK_DECLARATION, self._speak),
         ]
+
+    def _line_declaration(self) -> ToolDeclaration:
+        return _SAY_DECLARATION.model_copy(update={"name": self.line_tool})
 
     def let_in(self, bearer: str, subject: str) -> None:
         self.bearers[bearer] = subject
@@ -537,7 +543,7 @@ class QuietApp(FakeApp):
     """An app that lets its members say lines in a call but declares no ``speak``."""
 
     def _tools(self) -> list[PersonTool]:
-        return [PersonTool(_ACCEPT_DECLARATION, self._accept), PersonTool(_SAY_DECLARATION, self._say)]
+        return [PersonTool(_ACCEPT_DECLARATION, self._accept), PersonTool(self._line_declaration(), self._say)]
 
 
 async def _body_of(receive: Callable[..., Any]) -> bytes:

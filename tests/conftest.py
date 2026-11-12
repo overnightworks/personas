@@ -35,7 +35,7 @@ from tests.support.fakes import (
     grant,
 )
 from tests.support.gateway import Gateway
-from tests.support.hopin import AGENT_SUBJECT, ISSUER, FakeApp, formatted
+from tests.support.hopin import AGENT_SUBJECT, ISSUER, PLAY_TOOL, FakeApp, formatted
 from tests.support.realm import TOKEN_ENDPOINT, FakeRealm
 from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG
 from tests.support.songmaker import SCOPE as TOOLS_ONLY_SCOPE
@@ -157,12 +157,13 @@ class Harness:
         self.tools_only_apps.append(app)
 
     def add_listening_app(self, app: FakeApp, url: str, scope: str) -> None:
-        """Binds ``say`` in one more app the agents listen to, and lets their tokens for its scope into it.
+        """Binds the line tool of one more app the agents listen to, and lets their tokens for its scope into it.
 
         It reloads the configuration, so it comes before the other changes of a scenario.
         """
         self.files.text += (
-            f'[[apps]]\nmcp_url = "{url}"\nscope = "{scope}"\ntools = ["say"]\nmax_tool_calls = {MAX_TOOL_CALLS}\n'
+            f'[[apps]]\nmcp_url = "{url}"\nscope = "{scope}"\ntools = ["{app.line_tool}"]\n'
+            f"max_tool_calls = {MAX_TOOL_CALLS}\n"
         )
         self.config = load_config(self.files.write())
         self.realm.add_app(scope, app)
@@ -295,7 +296,7 @@ def unmigrated_database() -> Iterator[MemoryTarget]:
 @pytest.fixture
 async def other(runner):
     """A second app the agent listens to."""
-    app = FakeApp()
+    app = FakeApp(line_tool=PLAY_TOOL)
     async with app.serving() as url:
         runner.add_listening_app(app, url, "mcp-other")
         yield app

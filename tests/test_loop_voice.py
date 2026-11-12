@@ -15,7 +15,7 @@ from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in
 from tests.support.gateway import Gateway, says, speaks_and_says
 from tests.support.history import REMARK, SPEAKER, said_and_taken, waits
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import ISSUER, SAY_TOOL, SPOKEN_DURATION_MS, Line, QuietApp, active
+from tests.support.hopin import ISSUER, PLAY_TOOL, SAY_TOOL, SPOKEN_DURATION_MS, Line, QuietApp, active
 from tests.support.realm import LIFETIME_SECONDS
 from tests.support.songmaker import CREATE_SONG, GENERATE_SONG, ToolsOnlyApp
 from tests.support.voice import (
@@ -36,7 +36,7 @@ SPEAK = "speak"
 @pytest.fixture
 async def quiet(runner):
     """A second app the agent listens to, in which it is in a call, that declares no ``speak``."""
-    app = QuietApp()
+    app = QuietApp(line_tool=PLAY_TOOL)
     async with app.serving() as url:
         runner.add_listening_app(app, url, "mcp-quiet")
         app.stand(SUBJECT, active(QUIET_PLACE_ID))

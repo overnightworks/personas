@@ -38,7 +38,7 @@ from tests.support.history import (
     written_turns,
 )
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import CALL, ISSUER, LISTEN, READ, SAY_TOOL, active
+from tests.support.hopin import CALL, ISSUER, LISTEN, PLAY_TOOL, READ, SAY_TOOL, active
 from tests.support.realm import AGENT_NAME
 from tests.support.songmaker import CALLS, CREATE_SONG, ToolsOnlyApp
 
@@ -400,7 +400,7 @@ async def test_an_act_is_told_after_the_line_taken_while_its_turn_ran_and_ages_f
         runner.clock.time += 30
         await reply.result(CallToolResult(content=[TextContent(text="said")], is_error=False))
 
-    runner.gateway = Gateway(*says_after_a_hold(OTHER_CALL_ID, ANSWER))
+    runner.gateway = Gateway(*says_after_a_hold(OTHER_CALL_ID, ANSWER, tool=PLAY_TOOL))
     running = runner.gateway.hold_request(1)
     other.script(CALL, answers_after_a_while)
     other.stand(SUBJECT, at_table())
@@ -418,7 +418,7 @@ async def test_an_act_is_told_after_the_line_taken_while_its_turn_ran_and_ages_f
         [
             view_entry(table, first, revision=1, seconds_ago=30),
             entry(url_of(runner, 0), PLACE_ID, REMARK, seconds_ago=30),
-            act_entry(table, SAY_TOOL, {"place": OTHER_CALL_ID, "text": ANSWER}, answered("said")),
+            act_entry(table, PLAY_TOOL, {"place": OTHER_CALL_ID, "text": ANSWER}, answered("said")),
             view_entry(table, second, revision=2, new=True),
         ]
     )

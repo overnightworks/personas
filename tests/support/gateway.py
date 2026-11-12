@@ -27,11 +27,11 @@ BUDGET_SPENT = Reply(
 """The gateway's refusal once the agent's budget is spent."""
 
 
-def says(place_id: str, *texts: str) -> list[Reply]:
-    """A model that answers each turn with one ``say`` of the next text and then a closing word."""
+def says(place_id: str, *texts: str, tool: str = SAY_TOOL) -> list[Reply]:
+    """A model that answers each turn with one call of the tool with the next text and then a closing word."""
     replies: list[Reply] = []
     for text in texts:
-        replies.append(tool_round(tool_call(f"call-{len(replies)}", SAY_TOOL, {"place": place_id, "text": text})))
+        replies.append(tool_round(tool_call(f"call-{len(replies)}", tool, {"place": place_id, "text": text})))
         replies.append(completion("done"))
     return replies
 
@@ -43,13 +43,13 @@ def speaks_and_says(place_id: str, spoken: str, written: str, *, after: str = ""
     return [tool_round(call, content=spoken), completion(*([after] if after else []))]
 
 
-def says_after_a_hold(place_id: str, text: str) -> list[Reply]:
-    """A model that answers a turn with one ``say`` of the text, says it again when the first was not sent, and then
-    closes."""
+def says_after_a_hold(place_id: str, text: str, *, tool: str = SAY_TOOL) -> list[Reply]:
+    """A model that answers a turn with one call of the tool with the text, calls it again when the first was not sent,
+    and then closes."""
     arguments = {"place": place_id, "text": text}
     return [
-        tool_round(tool_call("call-0", SAY_TOOL, arguments)),
-        tool_round(tool_call("call-1", SAY_TOOL, arguments)),
+        tool_round(tool_call("call-0", tool, arguments)),
+        tool_round(tool_call("call-1", tool, arguments)),
         completion("done"),
     ]
 
