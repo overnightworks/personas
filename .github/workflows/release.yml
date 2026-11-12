@@ -42,12 +42,68 @@ jobs:
       version: ${{ inputs.version }}
       push: true
 
+  figures:
+    name: Figures
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ inputs.version }}
+      COMMIT: ${{ needs.gate.outputs.commit }}
+    outputs:
+      notes: ${{ steps.notes.outputs.notes }}
+    steps:
+      - name: Check out the dispatch's commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Refuse unless the checkout is the commit the gate judged
+        run: |
+          head=$(git rev-parse HEAD)
+          if [ "$head" != "$COMMIT" ]; then
+            echo "Refused: the checkout is $head, not the gated commit $COMMIT." >&2
+            exit 1
+          fi
+
+      - name: Write the notes' figure lines from the files the release carries
+        id: notes
+        run: |
+          scripts/figure_release_notes.sh "$VERSION" > figure-notes.md
+          # A random delimiter cannot occur in the notes.
+          delimiter="notes_$(openssl rand -hex 16)"
+          {
+            echo "notes<<${delimiter}"
+            cat figure-notes.md
+            echo "${delimiter}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Gather the figure files
+        run: |
+          mkdir release-figures
+          cp src/characters/*.vrm release-figures/
+
+      - name: Upload the figure files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: figures
+          path: release-figures/
+          if-no-files-found: error
+          retention-days: 1
+
   tag:
     name: Tag
-    needs: [gate, image]
+    needs: [gate, image, figures]
     permissions:
       contents: write
     uses: overnightworks/quality/.github/workflows/release-tag.yml@f7723bafb716c987013d40b5e0eaba18e58f311c # v0.11.0
     with:
       version: ${{ inputs.version }}
       commit: ${{ needs.gate.outputs.commit }}
+      artifact: figures
+      notes: ${{ needs.figures.outputs.notes }}
