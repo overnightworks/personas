@@ -18,7 +18,7 @@ from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, say_in_the_call
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
 from tests.support.history import history_of, view_entry, woke_at_table
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import CALL, READ, SAY_TOOL, active, invited, paused
+from tests.support.hopin import CALL, READ, SAY_TOOL, active, formatted, invited, paused
 from tests.support.realm import AGENT_NAME
 from tests.support.songmaker import CREATE_SONG, GENERATE_SONG
 from tests.support.wire import cuts
@@ -88,12 +88,16 @@ async def test_an_invitation_to_a_view_place_at_an_app_that_binds_no_tools_is_no
 
 
 async def test_an_invitation_the_loop_leaves_out_is_reported_once_with_its_place_kind_and_a_reason_and_no_content(
-    runner,
+    runner, caplog
 ):
     await an_invited_table_at_an_app_that_binds_no_tools_read_twice(runner)
 
     [left_out] = [change for change in runner.reports.changes if change.event is Event.INVITATION_LEFT_OUT]
     assert (left_out.place_kind, left_out.code) == (TABLE.kind, NO_TURNS_CODE)
+    logged = [line for line in formatted(caplog.get_records("call")).splitlines() if Event.INVITATION_LEFT_OUT in line]
+    assert len(logged) == 1
+    assert logged[0].endswith(f" code={NO_TURNS_CODE} place_kind={TABLE.kind}")
+    assert not [value for value in (TABLE.id, "inv-3") if value in logged[0]]
 
 
 async def test_a_table_that_serves_no_view_yet_is_accepted_with_figure_and_voice_and_his_turn_runs_once_it_is_active(
