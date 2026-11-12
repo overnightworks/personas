@@ -81,7 +81,7 @@ jobs:
       - name: Lint
         run: |
           ruff check .
-          ruff format --check src tests
+          ruff format --check src tests scripts
           pyright
 
       - name: Find dead code
@@ -162,9 +162,34 @@ jobs:
           test "$(docker inspect --format '{{.State.ExitCode}}' stopped-runner)" = 0
           test "$(( $(date +%s) - started ))" -lt 10
 
+  figures:
+    name: Figures
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.14"
+
+      # The release's figure check runs on Node 24 or newer.
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      # The generator's output must equal the tracked figures, and figure's pinned release must pass each of them.
+      - name: Check the figures
+        run: scripts/check_figures.sh
+
   quality:
     name: quality
-    needs: [docs, ci, image]
+    needs: [docs, ci, image, figures]
     if: always()
     permissions:
       contents: read

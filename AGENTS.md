@@ -3,11 +3,13 @@
 ## Commands
 
 - `uv sync`: installs the locked dependencies; run once in a new worktree, then use `uv run --no-sync`.
-- `uv run ruff check .` and `uv run ruff format --check src tests`: lint and format.
+- `uv run ruff check .` and `uv run ruff format --check src tests scripts`: lint and format.
 - `uv run pyright`: strict types.
 - `uv run vulture`: dead code.
 - `uv run pytest tests/<module>.py --no-cov`: one test module; never the whole suite.
 - `scripts/test_postgres.sh uv run --no-sync pytest -m postgres -n auto --no-cov`: the tests that need Postgres, against a throwaway container; a marked test fails without `PERSONAS_TEST_POSTGRES_URL`.
+- `uv run --no-sync python scripts/write_figures.py src/characters`: rewrites `src/characters/*.vrm`, which are the generator's output and never edited by hand.
+- `scripts/check_figures.sh`: what the `Figures` job runs, the generator's output against the tracked figures and figure's pinned release on each; needs `node` 24 or newer and the network.
 - `uvx --python 3.14 --from "overnightworks-quality @ git+https://github.com/overnightworks/quality@<sha>" quality check`: the shared gate's rules, at the sha `.github/workflows/ci.yml` pins on `uses: overnightworks/quality/...`; run after committing, because it reads tracked files only.
 
 ## Rules

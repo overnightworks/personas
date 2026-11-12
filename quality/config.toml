@@ -1,5 +1,5 @@
 [gate]
-mandatory_jobs = ["Documents", "Lint and test", "Image"]
+mandatory_jobs = ["Documents", "Lint and test", "Image", "Figures"]
 
 [[root.allow]]
 entry = "scripts/"
