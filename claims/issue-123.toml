@@ -1,0 +1,8 @@
+claim_id = "f3059badb84c412b96d418b62c28cd8d"
+agent = "Claude 13526c33-49ce-4dc6-a3d2-1b8fef53d057"
+role = "builder"
+base = "dd6e34211a7d80c14c9357640a5a72fd66d63256"
+branch = "claude/issue-123-the-runner-takes-the-client-library-at-v"
+scope = ["pyproject.toml", "src/personas", "tests", "uv.lock"]
+opened_commit = "e7c1c40b755225965c96394dc73a81a061255bc0"
+whole_reason = "The bump is two files; src/personas and tests are in scope only for a typed fix the release may ask for."
