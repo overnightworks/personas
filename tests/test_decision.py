@@ -76,8 +76,10 @@ from personas.decision import (
     earlier_today,
     failure_code,
     forget_gone,
+    held_apps,
     held_told,
     history_after,
+    holds_a_place,
     is_voice_app,
     left_standing,
     past_deadline,
@@ -513,6 +515,28 @@ def test_a_due_place_of_an_app_leaves_with_its_call_or_table_and_stays_while_it_
     leaving = left_standing(app, standings)
 
     assert [leaving(at) for at in due] == [False, False, True, False]
+
+
+@pytest.mark.parametrize(
+    ("standings", "holds"),
+    [
+        ((), False),
+        ((paused("room-1"), invited("room-2", "invitation-1")), False),
+        ((paused("room-1"), active("room-2")), True),
+        ((active("table-1", "table", serves_view=True),), True),
+    ],
+    ids=["none", "paused and invited only", "an active call", "an active table"],
+)
+def test_he_holds_a_place_at_an_app_while_any_of_his_standings_there_is_active(standings, holds):
+    assert holds_a_place(standings) is holds
+
+
+def test_the_apps_a_turn_holds_are_those_he_holds_a_place_at_other_than_its_own():
+    placed = frozenset({"https://a.test/mcp", "https://b.test/mcp", "https://c.test/mcp"})
+
+    assert held_apps("https://a.test/mcp", placed) == {"https://b.test/mcp", "https://c.test/mcp"}
+    assert held_apps("https://d.test/mcp", placed) == placed
+    assert held_apps("https://a.test/mcp", frozenset({"https://a.test/mcp"})) == frozenset()
 
 
 def _declaration(name: str) -> ToolDeclaration:

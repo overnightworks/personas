@@ -190,7 +190,7 @@ def test_a_marker_that_cannot_be_created_ends_the_runner_with_its_exit_code_thou
     files, world, capsys
 ):
     first_app = files.text[files.text.index("[[apps]]") : files.text.index("[[agents]]")]
-    second_app = first_app.replace("hopin.test", "second.hopin.test")
+    second_app = first_app.replace("hopin.test", "second.hopin.test").replace('tools = ["say"]', 'tools = ["play"]')
     files.text = files.text.replace(str(files.ready_path), str(files.ready_path / "missing-directory" / "ready"))
     files.text = files.text.replace("[[agents]]", f"{second_app}[[agents]]")
     files.write()

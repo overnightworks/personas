@@ -231,14 +231,20 @@ async def test_a_session_of_a_tools_only_call_whose_sdk_child_is_lost_shows_the_
     await a_call_that_fails_and_a_turn_that_goes_on(runner, songmaker, "network")
 
 
-async def test_a_tools_only_call_that_fails_twice_in_one_turn_is_reported_once(runner, songmaker):
-    songmaker.script(CALL, refuses_with_a_server_error, refuses_with_a_server_error)
+async def test_a_tools_only_app_whose_call_failed_takes_no_more_calls_in_the_turn_and_is_reported_once(
+    runner, songmaker
+):
+    songmaker.script(CALL, refuses_with_a_server_error)
     runner.gateway = Gateway(calling(CREATE_SONG, GENERATE_SONG), saying(ANSWER), completion("done"))
 
     await addressed_in_the_call(runner)
     await runner.app.said_count(1)
 
-    assert [each.startswith("Error") for each in runner.gateway.tool_results(2)] == [True, True]
+    failed, closed = runner.gateway.tool_results(2)
+    assert failed.startswith("Error")
+    assert closed.startswith("Error")
+    assert closed != failed
+    assert songmaker.log.count(CALL) == 1
     assert runner.reports.events() == [("started", None), (FAILED, "http_500")]
 
 

@@ -76,7 +76,7 @@ class Scenario:
         self.reports = reports
         self.ready = FakeReadyMarker()
         boundaries = Boundaries(tokens, session.open, clock, reports, self.ready)
-        self.loop = AgentLoop(credentials(), app_target(), boundaries, Mind(DEFAULT_HISTORY_BYTES))
+        self.loop = AgentLoop(credentials(), app_target(), boundaries, Mind(DEFAULT_HISTORY_BYTES), (app_target(),))
 
     async def play(self) -> None:
         """Runs the loop until the script is spent, which is when a boundary blocks, then stops it."""

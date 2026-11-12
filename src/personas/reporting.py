@@ -21,6 +21,7 @@ class Event(StrEnum):
     TURN_ENDED = "turn_ended"
     SPEAK_REFUSED = "speak_refused"
     TOOLS_ONLY_APP_FAILED = "tools_only_app_failed"
+    HELD_APP_FAILED = "held_app_failed"
     STORE_FAILED = "store_failed"
     STORE_RESUMED = "store_resumed"
     SWEPT = "swept"

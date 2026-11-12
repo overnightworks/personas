@@ -31,6 +31,7 @@ from personas.decision import (
     decisive_failure,
     failure_code,
     forget_gone,
+    holds_a_place,
     is_defect,
     is_voice_app,
     left_standing,
@@ -117,9 +118,10 @@ class AgentLoop:
     not his own and a view that waits for him make a turn due in the agent's mind, and after each read the loop starts
     the turn of the place that has waited longest when it is in this app; at most one turn of the agent runs across all
     his loops, over its own session, and a failure of the turn's calls to this app goes into the one reaction of the
-    loop. The turn also holds the bound tools of the tools-only apps: each request to one runs
-    in a session of its own under the token for its own scope, and its failure never reaches the reaction. Each call
-    the turn relays, to this app or a tools-only one, enters the agent's history when its request ends. In an app
+    loop. The turn also holds the bound tools of the tools-only apps and of the other apps where the agent holds an
+    active place when it is admitted, which the loops of those apps record in his mind: each request to one runs in a
+    session of its own under the token for its own scope, and its failure never reaches the reaction. Each call the
+    turn relays, to this app or another, enters the agent's history when its request ends. In an app
     that declares ``speak``, for an agent whose persona has a voice section, a turn at a call place is spoken: its text
     is said sentence by sentence through ``speak``.
     """
@@ -130,7 +132,7 @@ class AgentLoop:
         app: AppTarget,
         boundaries: Boundaries,
         mind: Mind,
-        tools_only: tuple[AppTarget, ...] = (),
+        apps: tuple[AppTarget, ...],
         today: TodayBounds | None = None,
     ) -> None:
         self._agent = agent
@@ -141,7 +143,7 @@ class AgentLoop:
         self._turning = Turning(
             agent,
             app,
-            tools_only,
+            apps,
             boundaries.tokens,
             boundaries.open_session,
             self._remembering,
@@ -244,6 +246,9 @@ class AgentLoop:
         self._checkpoints = sync_checkpoints(self._checkpoints, standing.standings)
         self._turned_revisions = sync_turned_revisions(self._turned_revisions, standing.standings)
         self._mind.undue(left_standing(self._app.mcp_url, standing.standings))
+        self._mind.stand_at(
+            self._app.mcp_url, holds=self._app.binding is not None and holds_a_place(standing.standings)
+        )
         self._cancel_turn_if_its_place_left(standing.standings)
         await self._accept_invitations(session, standing.standings)
         return standing.standings
@@ -346,7 +351,8 @@ class AgentLoop:
         if isinstance(occasion, Waiting):
             self._turned_revisions[at.place] = occasion.revision
         aloud = speaks_aloud(self._voice_app, occasion)
-        admitted = Admitted(facts, at.place, occasion, self._mind.history, self._boundaries.clock.wall(), aloud)
+        apps = self._mind.held_apps(self._app.mcp_url)
+        admitted = Admitted(facts, at.place, occasion, self._mind.history, self._boundaries.clock.wall(), aloud, apps)
         self._start_turn(turns, setup, at.place, admitted)
 
     def _take_lines(self, place: PlaceRef, window: PlaceWindow, read_at: datetime) -> None:
@@ -389,7 +395,7 @@ class AgentLoop:
                 await self._back_off(failure)
 
     async def _suspend(self, code: str) -> None:
-        self._drop_due_places()
+        self._park()
         if self._suspension != code:
             self._suspension = code
             self._report(Event.SUSPENDED, code)
@@ -398,16 +404,18 @@ class AgentLoop:
         await self._boundaries.clock.sleep(SUSPENDED_RETRY_SECONDS)
 
     async def _back_off(self, failure: CallFailure) -> None:
-        self._drop_due_places()
+        self._park()
         if not self._backing_off:
             self._backing_off = True
             self._report(Event.BACKOFF, failure_code(failure))
         self._failures += 1
         await self._boundaries.clock.sleep(backoff_delay(self._failures))
 
-    def _drop_due_places(self) -> None:
-        """A parked app holds up no place of his other apps: its due places are dropped; it reads them again after."""
+    def _park(self) -> None:
+        """A parked app holds up no place of his other apps and lends no tools to their turns: its due places are
+        dropped and its place unrecorded; it reads them again after."""
         self._mind.undue(lambda at: at.app == self._app.mcp_url)
+        self._mind.stand_at(self._app.mcp_url, holds=False)
 
     def _report(self, event: Event, code: str | None = None, app: AppTarget | None = None) -> None:
         self._boundaries.report(StateChange(event, self._agent.client_id, (app or self._app).mcp_url, code))
@@ -427,12 +435,11 @@ async def run_all(config: Config, boundaries: Boundaries) -> NoReturn:
     runner = asyncio.current_task()
     assert runner is not None  # noqa: S101 - run_all runs inside a task
     async with asyncio.TaskGroup() as group:
-        tools_only = tuple(app for app in config.apps if not app.listens)
         today = None if config.memory is None else config.memory.today
         for agent in config.agents:
             mind = Mind(config.history_bytes)
             for app in config.apps:
                 if app.listens:
-                    loop = AgentLoop(agent, app, boundaries, mind, tools_only, today)
+                    loop = AgentLoop(agent, app, boundaries, mind, config.apps, today)
                     group.create_task(_run_loop(loop, runner))
     raise AssertionError("a loop ended")  # pragma: no cover

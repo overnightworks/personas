@@ -306,6 +306,16 @@ def view_turn_due(turned_revision: int | None, view: PlaceView) -> bool:
     return view.awaits_you and turned_revision != view.revision
 
 
+def holds_a_place(standings: tuple[Standing, ...]) -> bool:
+    """Whether any of his standings at an app is active."""
+    return any(standing.state is StandingState.ACTIVE for standing in standings)
+
+
+def held_apps(own: str, placed: frozenset[str]) -> frozenset[str]:
+    """The apps a turn at ``own`` also holds the tools of: every other app where he holds an active place."""
+    return placed - {own}
+
+
 def turn_invalid(place: PlaceRef, standings: tuple[Standing, ...]) -> bool:
     """A turn ends with its place: it is invalid once the place is gone, invited again or paused."""
     return not any(standing.place == place and standing.state is StandingState.ACTIVE for standing in standings)
