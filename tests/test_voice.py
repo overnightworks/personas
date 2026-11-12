@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import secrets
 
+import anyio
 import pytest
 from agents.backend import TurnStopped
 from agents.member import PlaceRef, Spoken
@@ -43,7 +44,7 @@ def test_a_speaking_shows_no_sentence_in_its_repr():
 
 class SpeakingScenario:
     """A speaking whose sentences are answered as played for ``SENTENCE_MS``, and whose token renewal takes
-    ``renewal_seconds`` and ends once ``renewal_gate`` is set."""
+    ``renewal_seconds`` and ends once ``renewal_gate`` is set; ``renewal_started`` is set when a renewal begins."""
 
     def __init__(self, text: str, renewal_seconds: float = 0) -> None:
         self.clock = FakeClock()
@@ -51,6 +52,7 @@ class SpeakingScenario:
         self.entered: list[object] = []
         self.renewal_seconds = renewal_seconds
         self.renewal_gate = asyncio.Event()
+        self.renewal_started = asyncio.Event()
         self.speaking = Speaking(
             self,
             "https://app.test/mcp",
@@ -66,6 +68,7 @@ class SpeakingScenario:
         self.speaking.end()
 
     async def _renew(self) -> None:
+        self.renewal_started.set()
         await self.renewal_gate.wait()
         self.clock.time += self.renewal_seconds
 
@@ -101,9 +104,9 @@ async def test_a_sentence_whose_token_renewal_ends_past_the_deadline_is_not_sent
 async def test_a_sentence_whose_token_renewal_ends_after_the_events_failed_is_not_sent_and_is_not_entered():
     scenario = SpeakingScenario("One.")
     playing = asyncio.create_task(scenario.speaking.play())
-    await asyncio.sleep(0)
+    await scenario.renewal_started.wait()
     settling = asyncio.create_task(scenario.speaking.settle())
-    await asyncio.sleep(0)
+    await anyio.wait_all_tasks_blocked()
 
     scenario.renewal_gate.set()
     await asyncio.gather(playing, settling)
