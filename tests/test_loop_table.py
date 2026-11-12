@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 
 import pytest
@@ -9,7 +10,7 @@ from agents.backend.fake_gateway import completion
 from agents.turn import Principal, person_fingerprint
 
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
-from tests.support.gateway import Gateway, says
+from tests.support.gateway import Gateway, says, says_after_a_hold
 from tests.support.history import (
     REMARK,
     SPEAKER,
@@ -232,7 +233,7 @@ async def test_a_table_that_serves_no_view_for_a_while_is_not_read_and_its_earli
     reads = runner.app.view_reads(TABLE)
     runner.clock.time += 20
     say_in_the_call(runner, ADDRESSED)
-    await runner.gateway.until_turns(1, why="lines")
+    await runner.app.said_count(1)
     assert runner.app.view_reads(TABLE) == reads
     runner.app.stand(SUBJECT, active(PLACE_ID), at_table())
     third = waits(runner.app, 2)
@@ -396,8 +397,10 @@ async def test_a_table_that_moves_during_his_view_turn_enters_at_the_read_during
     ]
 
 
-async def test_a_table_that_moves_during_a_call_turn_is_not_in_that_turns_input_and_is_in_the_next(runner, other):
-    runner.gateway = Gateway(*says(PLACE_ID, ANSWER, ANSWER))
+async def test_a_table_that_moves_during_a_call_turn_is_not_in_that_turns_input_holds_its_call_once_and_is_in_the_next(
+    runner, other
+):
+    runner.gateway = Gateway(*says_after_a_hold(PLACE_ID, ANSWER), *says(PLACE_ID, ANSWER))
     running = runner.gateway.hold_request(1)
     other.stand(SUBJECT, at_table())
     other.show_view(TABLE.id, 1, first := a_state(), awaits_you=False)
@@ -413,6 +416,8 @@ async def test_a_table_that_moves_during_a_call_turn_is_not_in_that_turns_input_
     await runner.gateway.until_turns(2, why="lines")
 
     table = url_of(runner, 1)
+    (held,) = json.loads(runner.gateway.tool_results(2)[0])["arrived"]["entries"]
+    assert (held["entry"], held["state"], held["new"]) == ("view", second, True)
     during, after = (opening.room["history"]["entries"] for opening in written_turns(runner))
     assert [each["state"] for each in during if each["entry"] == "view"] == [first]
     assert [each["state"] for each in after if each["entry"] == "view"] == [first, second]

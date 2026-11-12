@@ -34,6 +34,17 @@ def says(place_id: str, *texts: str) -> list[Reply]:
     return replies
 
 
+def says_after_a_hold(place_id: str, text: str) -> list[Reply]:
+    """A model that answers a turn with one ``say`` of the text, says it again when the first was not sent, and then
+    closes."""
+    arguments = {"place": place_id, "text": text}
+    return [
+        tool_round(tool_call("call-0", SAY_TOOL, arguments)),
+        tool_round(tool_call("call-1", SAY_TOOL, arguments)),
+        completion("done"),
+    ]
+
+
 @dataclass(frozen=True)
 class TurnOpening:
     """What a turn's first request told the gateway: the persona, the message it was told and whom it is for."""
@@ -66,6 +77,8 @@ class Gateway(FakeGateway):
         self._answered = asyncio.Event()
         self.cancelling_at_arrival: list[int] = []
         """The cancel requests pending on the task that made each request, in arrival order: a turn's own task."""
+        self.users_at_arrival: list[str] = []
+        """The ``user`` of each request in arrival order, a held request included."""
         self._scripts: dict[str, list[Reply]] = {}
 
     @property
@@ -87,6 +100,8 @@ class Gateway(FakeGateway):
         self._arrivals += 1
         task = asyncio.current_task()
         self.cancelling_at_arrival.append(task.cancelling() if task is not None else 0)
+        await request.aread()
+        self.users_at_arrival.append(json.loads(request.content)["user"])
         held = self._holds.pop(self._arrivals, None)
         self._arrived.set()
         if held is not None:

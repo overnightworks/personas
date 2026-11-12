@@ -206,6 +206,7 @@ class FakeApp:
     views: dict[str, PlaceView] = field(default_factory=dict[str, PlaceView])
     presented: set[str] = field(default_factory=set[str])
     content: set[str] = field(default_factory=lambda: {ACCEPTED_NAME})
+    says_move_the_view: bool = False
 
     def __post_init__(self) -> None:
         self._front = McpPersonFront(
@@ -349,6 +350,9 @@ class FakeApp:
         self.said.append((request.principal.sub, place_id, text))
         self.said_added.set()
         self.speak(place_id, request.principal.sub, ACCEPTED_NAME, text)
+        if self.says_move_the_view and place_id in self.views:
+            moved = self.views[place_id]
+            self.show_view(place_id, moved.revision + 1, {"hand": secrets.token_hex(8)}, awaits_you=False)
         return ToolOutcome("said", is_error=False)
 
     async def _speak(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:

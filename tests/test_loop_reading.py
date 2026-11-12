@@ -7,7 +7,7 @@ from agents.member import STANDING_URI
 
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
-from tests.support.gateway import Gateway, says
+from tests.support.gateway import Gateway, says, says_after_a_hold
 from tests.support.history import settled
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import WINDOW_LINES, active, invited, paused
@@ -60,8 +60,9 @@ async def test_a_pause_and_a_resume_seen_while_a_turn_runs_elsewhere_leave_the_l
     runner.app.speak(other, PERSON, "Ada", f"{ADDRESSED} During the pause.")
     runner.app.stand(SUBJECT, active(PLACE_ID), active(other))
     await runner.app.until_window_read(other, runner.app.window_reads(other) + 1)
-    runner.app.speak(other, PERSON, "Ada", f"{ADDRESSED} After the resume.")
     held_turn.set()
+    await runner.app.said_count(1)
+    runner.app.speak(other, PERSON, "Ada", f"{ADDRESSED} After the resume.")
     await runner.app.said_count(2)
 
     assert [(opening.room["woke"]["place"]["id"], opening.new_seqs) for opening in runner.gateway.openings()] == [
@@ -73,7 +74,7 @@ async def test_a_pause_and_a_resume_seen_while_a_turn_runs_elsewhere_leave_the_l
 async def test_when_the_window_moved_past_his_position_the_turn_is_told_lines_were_missed_and_none_is_answered_twice(
     runner,
 ):
-    runner.gateway = Gateway(*says(PLACE_ID, ANSWER, "Once more."))
+    runner.gateway = Gateway(*says_after_a_hold(PLACE_ID, ANSWER), *says(PLACE_ID, "Once more."))
     first_round = runner.gateway.hold_request(1)
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)

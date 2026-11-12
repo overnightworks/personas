@@ -24,6 +24,7 @@ from agents.member import (
     Standing,
     StandingState,
 )
+from agents.turn import MAX_EVENT_BYTES
 
 from personas.failures import CallFailure, StatusFailure, TokenStatusFailure, UnusableAnswer
 
@@ -493,11 +494,26 @@ def _first_read(lines: Sequence[KeptLine]) -> datetime:
 @dataclass(frozen=True)
 class History:
     """Every line one agent took in, every view revision he read and every call relayed for him at any of his places
-    since the runner started, in the order they came, and whether older entries were left out to keep it within its
-    bound."""
+    since the runner started, in the order they came, within the bound of the history.
+
+    ``left_out`` counts the entries that ever left it by the bound and ``heard`` the entries not his own that were ever
+    appended. ``entries`` are the entries ever appended with the ordinals ``left_out`` up to ``taken - 1``, without a
+    gap: ``history_after`` is the only writer, appends only at the newest end and removes only a prefix. A change
+    that removes entries from elsewhere gives each entry its ordinal first.
+    """
 
     entries: tuple[Entry, ...] = field(repr=False)
-    older_dropped: bool
+    left_out: int
+    heard: int
+
+    @property
+    def older_dropped(self) -> bool:
+        return self.left_out > 0
+
+    @property
+    def taken(self) -> int:
+        """How many entries were ever appended."""
+        return self.left_out + len(self.entries)
 
 
 def taken_lines(visit: Visit, new: Iterable[PlaceEntry], read_at: datetime) -> tuple[KeptLine, ...]:
@@ -513,15 +529,38 @@ def _holds_revision(entries: Iterable[Entry], view: ViewSeen) -> bool:
     return any(isinstance(entry, ViewSeen) and _revision_key(entry) == _revision_key(view) for entry in entries)
 
 
+def _not_his_own(entry: Entry) -> bool:
+    return not isinstance(entry, ActDone) and not (isinstance(entry, KeptLine) and entry.own)
+
+
 def history_after(history: History, new: Iterable[Entry], size_bytes: int) -> History:
     """The history with ``new`` appended, a view revision it already holds adding nothing and an act always added; past
     ``size_bytes`` the oldest entries are left out, but the newest always stays."""
     entries = history.entries
+    heard = history.heard
     for entry in new:
         if not (isinstance(entry, ViewSeen) and _holds_revision(entries, entry)):
             entries = (*entries, entry)
-    left_out = max(0, len(entries) - max(1, _newest_that_fit(map(_size, reversed(entries)), size_bytes)))
-    return History(entries[left_out:], history.older_dropped or left_out > 0)
+            heard += _not_his_own(entry)
+    leaving = max(0, len(entries) - max(1, _newest_that_fit(map(_size, reversed(entries)), size_bytes)))
+    return History(entries[leaving:], history.left_out + leaving, heard)
+
+
+@dataclass(frozen=True)
+class Arrived:
+    """The entries that entered a history since an earlier value of it, and whether any of them left again by the
+    bound."""
+
+    entries: tuple[Entry, ...] = field(repr=False)
+    older_dropped: bool
+
+
+def arrived_since(current: History, admitted: History) -> Arrived | None:
+    """What entered ``current`` since ``admitted``, an earlier value of the same history, when any of it is not his own;
+    otherwise ``None``. His own lines and his acts alone arrive as nothing."""
+    if current.heard == admitted.heard:
+        return None
+    return Arrived(current.entries[max(0, admitted.taken - current.left_out) :], current.left_out > admitted.taken)
 
 
 @dataclass(frozen=True)
@@ -567,8 +606,9 @@ def bound_declarations(declared: Sequence[ToolDeclaration], names: Sequence[str]
 
 
 def turn_call_bound(bounds: Iterable[int]) -> int:
-    """The calls one turn may make: the sum of the bounds of the apps whose tools it holds."""
-    return sum(bounds)
+    """The calls one turn may make: the sum of the bounds of the apps whose tools it holds, plus one. The library counts
+    every call of a model reply, so the call a turn holds back counts beside the calls it makes."""
+    return sum(bounds) + 1
 
 
 def call_within_bound(made: int, bound: int) -> bool:
@@ -700,7 +740,7 @@ def _told_entry(entry: Entry, at: datetime, *, new: bool) -> dict[str, object]:
             "tool": entry.tool,
             "arguments": entry.arguments,
             "outcome": _told_outcome(entry.outcome),
-            "new": False,
+            "new": new,
         }
     if isinstance(entry, ViewSeen):
         return {
@@ -723,6 +763,24 @@ def _told_entry(entry: Entry, at: datetime, *, new: bool) -> dict[str, object]:
         }
         | _told_line(entry)
         | {"new": new}
+    )
+
+
+def held_told(arrived: Arrived, at: datetime) -> str:
+    """The result of a call that was not sent: that it was not, and the entries that arrived, each told as new. When
+    their text would pass ``MAX_EVENT_BYTES`` the oldest are left out, and so is an entry that alone does not fit."""
+    told = [_told_entry(entry, at, new=True) for entry in arrived.entries]
+    empty = _held_json([], older_dropped=False)
+    separator = len(", ")
+    sizes = reversed([_told_bytes(each) + separator for each in told])
+    fitting = _newest_that_fit(sizes, MAX_EVENT_BYTES - len(empty.encode()) + separator)
+    kept = told[len(told) - fitting :]
+    return _held_json(kept, older_dropped=arrived.older_dropped or fitting < len(told))
+
+
+def _held_json(entries: list[dict[str, object]], *, older_dropped: bool) -> str:
+    return json.dumps(
+        {"sent": False, "arrived": {"older_dropped": older_dropped, "entries": entries}}, ensure_ascii=False
     )
 
 

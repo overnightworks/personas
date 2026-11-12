@@ -28,7 +28,7 @@ from personas.failures import (
 )
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
-from tests.support.gateway import BUDGET_SPENT, Gateway, says
+from tests.support.gateway import BUDGET_SPENT, Gateway, says, says_after_a_hold
 from tests.support.history import act_entry, unanswered, url_of
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import (
@@ -167,7 +167,7 @@ async def test_a_line_said_while_a_turn_ran_is_answered_once_that_turn_ends_thou
 
 
 async def test_a_line_said_while_a_turn_ran_is_read_at_once_and_answered_after_a_turn_that_spoke(runner):
-    runner.gateway = Gateway(*says(PLACE_ID, ANSWER, "Another answer."))
+    runner.gateway = Gateway(*says_after_a_hold(PLACE_ID, ANSWER), *says(PLACE_ID, "Another answer."))
     first_round = runner.gateway.hold_request(1)
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
@@ -182,9 +182,9 @@ async def test_a_line_said_while_a_turn_ran_is_read_at_once_and_answered_after_a
     later_wake.set()
     first_round.set()
     await runner.app.said_count(2)
-    await runner.gateway.until_requested(4)
+    await runner.gateway.until_requested(5)
 
-    assert runner.gateway.round_sizes() == [2, 4, 2, 4]
+    assert runner.gateway.round_sizes() == [2, 4, 6, 2, 4]
     assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [2]]
 
 

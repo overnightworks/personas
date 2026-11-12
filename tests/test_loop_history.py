@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import secrets
 from dataclasses import replace
 
@@ -12,7 +13,7 @@ from agents.turn import Principal, person_fingerprint
 from personas.failures import STORE_UNREACHABLE_CODE, StoreUnavailable
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call
 from tests.support.fakes import memory_target
-from tests.support.gateway import Gateway, says
+from tests.support.gateway import Gateway, says, says_after_a_hold
 from tests.support.history import (
     OTHER_CALL_ID,
     REMARK,
@@ -345,10 +346,10 @@ async def test_a_window_read_again_with_the_same_lines_tells_each_line_once(runn
     ]
 
 
-async def test_a_line_said_while_a_view_turn_runs_is_told_to_the_next_one_and_the_running_turns_call_is_relayed(
+async def test_a_line_said_while_a_view_turn_runs_holds_its_call_once_and_is_told_to_the_next_turn_with_the_recall(
     runner, other
 ):
-    runner.gateway = Gateway(*says(TABLE.id, ANSWER))
+    runner.gateway = Gateway(*says_after_a_hold(TABLE.id, ANSWER))
     running = runner.gateway.hold_request(1)
     other.stand(SUBJECT, at_table())
     await restarted_in_the_call(runner)
@@ -357,10 +358,13 @@ async def test_a_line_said_while_a_view_turn_runs_is_told_to_the_next_one_and_th
     await said_and_taken(runner.app, PLACE_ID, REMARK)
     running.set()
     await other.said_count(1)
+    await runner.gateway.until_requested(3)
     second = waits(other, 2)
     await runner.gateway.until_turns(2, why="view")
 
     table = url_of(runner, 1)
+    (held,) = json.loads(runner.gateway.tool_results(2)[0])["arrived"]["entries"]
+    assert held == entry(url_of(runner, 0), PLACE_ID, REMARK, new=True)
     assert histories(runner) == [
         history_of([view_entry(table, first, revision=1, new=True)]),
         history_of(

@@ -12,7 +12,7 @@ from agents.turn import Principal, person_fingerprint
 
 from personas.decision import TURN_CANCELLED_CODE
 from tests.support.call import ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
-from tests.support.gateway import BUDGET_SPENT, Gateway, says
+from tests.support.gateway import BUDGET_SPENT, Gateway, says, says_after_a_hold
 from tests.support.history import (
     OTHER_CALL_ID,
     REMARK,
@@ -273,13 +273,21 @@ async def test_his_turn_does_not_wait_for_another_agents_turn(runner):
 async def test_two_agents_in_one_call_each_say_once_and_then_every_turn_ends_silent_and_no_more_start(runner):
     runner.add_agent(SECOND_AGENT, SECOND_SUBJECT, SECOND_NAME)
     runner.gateway = Gateway(completion("done"))
-    runner.gateway.script_for(person_of(SUBJECT), *says(PLACE_ID, ANSWER))
-    runner.gateway.script_for(person_of(SECOND_SUBJECT), *says(PLACE_ID, ANSWER))
+    first_round, second_round = runner.gateway.hold_request(1), runner.gateway.hold_request(2)
     runner.app.stand(SUBJECT, active(PLACE_ID))
     runner.app.stand(SECOND_SUBJECT, active(PLACE_ID))
     runner.start()
     await runner.app.until_window_read(PLACE_ID)
     say_in_the_call(runner, REMARK)
+    await runner.gateway.until_requested(2)
+    earlier, later = runner.gateway.users_at_arrival[:2]
+    runner.gateway.script_for(earlier, *says(PLACE_ID, ANSWER))
+    runner.gateway.script_for(later, *says_after_a_hold(PLACE_ID, ANSWER))
+    first_round.set()
+    await runner.app.said_count(1)
+    await settled(runner.app)
+    await settled(runner.app, SECOND_SUBJECT)
+    second_round.set()
     await runner.app.said_count(2)
     seq_of = {line.author: line.seq for line in runner.app.lines[PLACE_ID]}
     await runner.gateway.until_written_turn(PLACE_ID, seq_of[SUBJECT], user=person_of(SECOND_SUBJECT))
@@ -313,7 +321,7 @@ async def answers_with(status):
 async def test_a_relayed_call_that_fails_at_one_app_ends_its_turn_and_the_turn_due_at_another_app_follows(
     runner, other
 ):
-    runner.gateway = Gateway(*says(PLACE_ID, ANSWER)[:1], completion("done"))
+    runner.gateway = Gateway(*says_after_a_hold(PLACE_ID, ANSWER)[:2], completion("done"))
     running = runner.gateway.hold_request(1)
     other.stand(SUBJECT, active(OTHER_CALL_ID))
     await restarted_in_the_call(runner)
@@ -329,7 +337,7 @@ async def test_a_relayed_call_that_fails_at_one_app_ends_its_turn_and_the_turn_d
     assert turn_order(runner) == [(0, "lines"), (1, "lines")]
     await runner.reports.until("resumed")
     assert reported(runner) == [("backoff", "network"), ("resumed", None)]
-    assert runner.gateway.round_sizes() == [2, 2]
+    assert runner.gateway.round_sizes() == [2, 4, 2]
 
 
 async def test_while_a_cancelled_turn_still_unwinds_no_turn_of_his_starts_at_another_app_until_it_ended(runner, other):
