@@ -182,6 +182,7 @@ class FakeApp:
     pulses_on_read: bool = False
     accept_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
     accepted: list[AcceptInvitationArguments] = field(default_factory=list[AcceptInvitationArguments])
+    accepted_on_the_wire: list[tuple[str, JsonObject]] = field(default_factory=list[tuple[str, JsonObject]])
     lines: dict[str, list[Line]] = field(default_factory=dict[str, list[Line]])
     generations: dict[str, str] = field(default_factory=dict[str, str])
     reads: dict[str, int] = field(default_factory=dict[str, int])
@@ -408,6 +409,7 @@ class FakeApp:
     async def _accept(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
         taken = AcceptInvitationArguments.model_validate(arguments)
         self.accepted.append(taken)
+        self.accepted_on_the_wire.append((request.principal.sub, arguments))
         if self.accept_outcomes:
             return self.accept_outcomes.pop(0)
         self.join(taken.place.id)

@@ -30,6 +30,7 @@ from personas.failures import CallFailure, StatusFailure, TokenStatusFailure, Un
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
 
+    from agents.member import FigureRef
     from agents.tools import ToolDeclaration, ToolOutcome
     from agents.turn import AgentRole, JsonObject
 
@@ -85,6 +86,7 @@ class Accept:
     place: PlaceRef
     invitation_id: str
     epoch: int
+    figure: FigureRef | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -106,11 +108,14 @@ def _is_call(standing: Standing) -> bool:
     return standing.place.kind == CALL_PLACE_KIND and not standing.serves_view
 
 
-def accepts_for(standings: tuple[Standing, ...], memory: Memory, *, takes_turns: bool) -> tuple[Accept, ...]:
+def accepts_for(
+    standings: tuple[Standing, ...], memory: Memory, *, takes_turns: bool, figure: FigureRef | None = None
+) -> tuple[Accept, ...]:
     """One accept for each invited call standing whose invitation was not refused as stale, and, where the loop can
-    take turns, for each invited place that serves a view: a seated agent that cannot act leaves the place waiting."""
+    take turns, for each invited place that serves a view: a seated agent that cannot act leaves the place waiting.
+    Every accept brings the agent's figure, if he has one."""
     return tuple(
-        Accept(standing.place, standing.invitation.id, standing.invitation.epoch)
+        Accept(standing.place, standing.invitation.id, standing.invitation.epoch, figure)
         for standing in standings
         if standing.state is StandingState.INVITED
         and standing.invitation is not None

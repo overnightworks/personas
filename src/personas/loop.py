@@ -289,7 +289,9 @@ class AgentLoop:
             self._report(Event.RESUMED)
 
     async def _accept_invitations(self, session: AppSession, standings: tuple[Standing, ...]) -> None:
-        for accept in accepts_for(standings, self._memory, takes_turns=self._turn_setup is not None):
+        for accept in accepts_for(
+            standings, self._memory, takes_turns=self._turn_setup is not None, figure=self._agent.figure
+        ):
             await self._use_current_token(session)
             refusal = await session.accept(accept)
             if refusal is None:

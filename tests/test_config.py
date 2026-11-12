@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import secrets
 from typing import TYPE_CHECKING, NoReturn
 
 import pytest
@@ -178,6 +179,47 @@ def test_a_valid_file_gives_the_agent_its_persona_the_app_its_tools_and_the_runn
     assert app.binding == ToolBinding(("say",), MAX_TOOL_CALLS)
     assert config.gateway is not None
     assert (config.gateway.api_group, config.gateway.gateway.key_file) == (API_GROUP, files.key_path)
+
+
+def figure_table(url: str | None = None, sha256: str | None = None, extra: str = "") -> str:
+    url = f"https://figures.test/{secrets.token_hex(6)}.glb" if url is None else url
+    sha256 = secrets.token_hex(32) if sha256 is None else sha256
+    return f'[agents.figure]\nurl = "{url}"\nsha256 = "{sha256}"\n{extra}'
+
+
+def test_an_agent_entry_may_name_the_figure_he_brings_and_none_otherwise(files):
+    assert load_config(files.write()).agents[0].figure is None
+    url, digest = f"https://figures.test/{secrets.token_hex(6)}.glb", secrets.token_hex(32)
+    files.text += figure_table(url, digest)
+
+    [agent] = load_config(files.write()).agents
+
+    assert agent.figure is not None
+    assert (agent.figure.url, agent.figure.sha256) == (url, digest)
+    assert url not in repr(agent)
+    assert digest not in repr(agent)
+
+
+@pytest.mark.parametrize(
+    ("table", "named"),
+    [
+        (figure_table(url="http://figures.test/figure.glb"), "agents.0.figure.url"),
+        (figure_table(url="https://figures.test/figure.glb?size=big"), "agents.0.figure.url"),
+        (figure_table(url="/figure.glb"), "agents.0.figure.url"),
+        (figure_table(sha256="ab" * 31), "agents.0.figure.sha256"),
+        (figure_table(sha256="AB" * 32), "agents.0.figure.sha256"),
+        (figure_table(extra='size = "big"\n'), "agents.0.figure.size"),
+        ('[agents.figure]\nurl = "https://figures.test/figure.glb"\n', "agents.0.figure.sha256"),
+    ],
+    ids=["not https", "query", "not absolute", "digest short", "digest uppercase", "unknown key", "digest missing"],
+)
+def test_a_malformed_figure_stops_the_start_and_names_the_field(files, monkeypatch, capsys, table, named):
+    files.text += table
+
+    error = fails_at_start(files.write(), monkeypatch, capsys)
+
+    assert named in error
+    assert "figures.test" not in error
 
 
 def test_a_configuration_without_tools_in_any_app_needs_no_gateway_and_no_persona(files):
