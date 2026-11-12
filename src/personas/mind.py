@@ -1,5 +1,5 @@
-"""One agent's mind: the history of the lines he took in and the views he read at any of his apps, which his loops feed
-and his turns read."""
+"""One agent's mind: the history of the lines he took in, the views he read and the calls relayed for him at any of his
+apps, which his loops and turns feed and every turn reads."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ class Mind:
         return self._history
 
     def take(self, entries: Iterable[Entry]) -> None:
-        """Appends the lines and views a read took, in order; a read that took nothing leaves the history as it is."""
+        """Appends the lines, views and acts taken, in order; taking nothing leaves the history as it is."""
         taken = tuple(entries)
         if not taken:
             return
