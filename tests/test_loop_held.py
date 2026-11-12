@@ -4,6 +4,7 @@ answer and act in one turn."""
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import secrets
 from dataclasses import replace
 from http import HTTPStatus
@@ -42,6 +43,11 @@ pytestmark = pytest.mark.anyio
 def reported(runner) -> list[tuple[Event, str | None, str | None]]:
     """What the loops reported but their start, each as its event, its code and the address of the app it names."""
     return [(each.event, each.code, each.app) for each in runner.reports.changes if each.event is not Event.STARTED]
+
+
+def fingerprints(tokens) -> set[str]:
+    """A token never enters an assertion: bearers are compared by the digest of each, the empty one left out."""
+    return {hashlib.sha256(each.encode()).hexdigest()[:12] for each in set(tokens) - {""}}
 
 
 def words(count: int) -> list[str]:
@@ -137,9 +143,9 @@ async def test_a_call_turn_answers_in_the_call_and_plays_at_the_table_in_one_tur
     (_, following) = runner.gateway.turns("view")
     assert following.told("act") == [said_act(runner, written), played_act(runner, played)]
     scope_of_other = runner.config.apps[1].scope
-    assert other.presented - {""} <= set(runner.realm.issued_for[scope_of_other])
-    assert len(other.presented - {""}) >= 3
-    assert (other.presented - {""}).isdisjoint(runner.app.presented - {""})
+    assert fingerprints(other.presented) <= fingerprints(runner.realm.issued_for[scope_of_other])
+    assert len(fingerprints(other.presented)) >= 3
+    assert fingerprints(other.presented).isdisjoint(fingerprints(runner.app.presented))
     assert reported(runner) == []
 
 
@@ -207,9 +213,9 @@ async def test_a_table_turn_holds_the_tools_of_his_call_and_writes_in_it(runner,
     await runner.app.said_count(1)
 
     assert runner.app.said == [(SUBJECT, PLACE_ID, written)]
-    assert runner.app.presented - {""} <= set(runner.realm.issued_for[runner.config.apps[0].scope])
-    assert runner.app.presented - {""}
-    assert (other.presented - {""}).isdisjoint(runner.app.presented - {""})
+    assert fingerprints(runner.app.presented) <= fingerprints(runner.realm.issued_for[runner.config.apps[0].scope])
+    assert fingerprints(runner.app.presented)
+    assert fingerprints(other.presented).isdisjoint(fingerprints(runner.app.presented))
     assert runner.gateway.offered_tools() == [SAY_TOOL, PLAY_TOOL]
 
 
@@ -410,7 +416,7 @@ async def test_a_call_of_a_table_turn_held_by_a_line_in_the_call_is_followed_by_
     assert held["sent"] is False
     assert other.said == [(SUBJECT, TABLE.id, jack)]
     assert runner.app.said == [(SUBJECT, PLACE_ID, written)]
-    assert (other.presented - {""}).isdisjoint(runner.app.presented - {""})
+    assert fingerprints(other.presented).isdisjoint(fingerprints(runner.app.presented))
 
 
 async def test_a_line_in_the_call_while_the_table_already_had_its_turn_lets_the_call_turn_play(runner, other):
