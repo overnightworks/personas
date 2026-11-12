@@ -503,19 +503,18 @@ async def test_a_table_whose_view_the_app_no_longer_gives_loses_its_due_and_a_yo
     assert turn_order(runner) == [(0, "lines"), (0, "lines")]
 
 
-async def test_a_line_heard_at_a_voice_place_is_heard_while_his_table_turn_of_that_app_runs_and_makes_no_turn_due(
+async def test_a_line_heard_at_a_voice_place_while_his_table_turn_of_that_app_runs_makes_a_spoken_turn_due_after_it(
     runner,
 ):
     await in_a_voice_call_and_at_a_table(runner, completion("table"), completion(ANSWER))
     running = runner.gateway.hold_request(1)
     waits(runner.app, 1)
     await runner.gateway.until_requested(1)
-    say_in_the_call(runner, "Anyone there?", spoken=True)
+    await said_and_taken(runner.app, PLACE_ID, "Anyone there?")
+
+    assert runner.gateway.arrivals == 1
+    running.set()
     await runner.app.spoken_count(1)
 
-    assert runner.gateway.arrivals == 2
-    running.set()
-    await runner.gateway.until_turns(1, why="view")
-    await settled(runner.app)
-    await settled(runner.app)
-    assert written_turns(runner) == []
+    assert turn_order(runner) == [(0, "view"), (0, "lines")]
+    assert runner.app.spoken == [(SUBJECT, PLACE_ID, ANSWER)]

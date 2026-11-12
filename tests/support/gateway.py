@@ -14,6 +14,8 @@ from agents.backend.fake_gateway import FakeGateway, Reply, completion, tool_cal
 from tests.support.hopin import LIMIT_SECONDS, SAY_TOOL
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from agents.tools import JsonObject
 
 TURN_OPENING_MESSAGES = 2
@@ -34,6 +36,13 @@ def says(place_id: str, *texts: str) -> list[Reply]:
     return replies
 
 
+def speaks_and_says(place_id: str, spoken: str, written: str, *, after: str = "") -> list[Reply]:
+    """A model that writes the spoken text and calls ``say`` with the written one in the same round, and closes with
+    the text after, when there is one."""
+    call = tool_call("call-0", SAY_TOOL, {"place": place_id, "text": written})
+    return [tool_round(call, content=spoken), completion(*([after] if after else []))]
+
+
 def says_after_a_hold(place_id: str, text: str) -> list[Reply]:
     """A model that answers a turn with one ``say`` of the text, says it again when the first was not sent, and then
     closes."""
@@ -43,6 +52,48 @@ def says_after_a_hold(place_id: str, text: str) -> list[Reply]:
         tool_round(tool_call("call-1", SAY_TOOL, arguments)),
         completion("done"),
     ]
+
+
+class PausedReply:
+    """A model reply written in pieces: the first piece arrives at once, each later one when the test releases it."""
+
+    def __init__(self, *pieces: str) -> None:
+        events = [each + b"\n\n" for each in completion(*pieces).body.split(b"\n\n") if each]
+        self._pieces = events[: len(pieces)]
+        self._ending = b"".join(events[len(pieces) :])
+        self._gates = [asyncio.Event() for _ in pieces]
+        self._gates[0].set()
+        self._cut = False
+        self.finished = False
+        """Whether the reply was written to its end."""
+
+    def release(self) -> None:
+        """Lets the next piece arrive."""
+        next(gate for gate in self._gates if not gate.is_set()).set()
+
+    def cut(self) -> None:
+        """Ends the reply with a piece the gateway cannot read, once the pieces released so far are written."""
+        self._cut = True
+        for gate in self._gates:
+            gate.set()
+
+    async def stream(self) -> AsyncIterator[bytes]:
+        for gate, piece in zip(self._gates, self._pieces, strict=True):
+            await gate.wait()
+            if self._cut:
+                yield b"data: {\n\n"
+                return
+            yield piece
+        self.finished = True
+        yield self._ending
+
+
+class _Written(httpx2.AsyncByteStream):
+    def __init__(self, reply: PausedReply) -> None:
+        self._reply = reply
+
+    def __aiter__(self) -> AsyncIterator[bytes]:
+        return self._reply.stream()
 
 
 @dataclass(frozen=True)
@@ -57,6 +108,15 @@ class TurnOpening:
     def missed(self) -> bool:
         """Whether the turn was told that lines older than the ones it saw were missed."""
         return bool(self.room["woke"]["missed"])
+
+    @property
+    def aloud(self) -> bool:
+        """Whether the turn was told that its answer is heard aloud."""
+        return bool(self.room["woke"].get("aloud", False))
+
+    def told(self, *kinds: str) -> list[JsonObject]:
+        """The entries of the history the turn was told, those of these kinds, in the order told."""
+        return [each for each in self.room["history"]["entries"] if each["entry"] in kinds]
 
     @property
     def new_seqs(self) -> list[int]:
@@ -80,6 +140,7 @@ class Gateway(FakeGateway):
         self.users_at_arrival: list[str] = []
         """The ``user`` of each request in arrival order, a held request included."""
         self._scripts: dict[str, list[Reply]] = {}
+        self._pauses: dict[int, PausedReply] = {}
 
     @property
     def arrivals(self) -> int:
@@ -91,6 +152,12 @@ class Gateway(FakeGateway):
         whatever the other users are answered."""
         self._scripts[user] = list(replies)
 
+    def pause_request(self, number: int, *pieces: str) -> PausedReply:
+        """The request that arrives as this number (from one) is answered with a reply of these pieces, which takes none
+        of the scripted replies."""
+        self._pauses[number] = PausedReply(*pieces)
+        return self._pauses[number]
+
     def hold_request(self, number: int) -> asyncio.Event:
         """The request that arrives as this number (from one) waits, once it arrived, until the event is set."""
         self._holds[number] = asyncio.Event()
@@ -98,6 +165,7 @@ class Gateway(FakeGateway):
 
     async def handle_async_request(self, request):
         self._arrivals += 1
+        number = self._arrivals
         task = asyncio.current_task()
         self.cancelling_at_arrival.append(task.cancelling() if task is not None else 0)
         await request.aread()
@@ -107,8 +175,14 @@ class Gateway(FakeGateway):
         if held is not None:
             await held.wait()
         await request.aread()
+        paused = self._pauses.pop(number, None)
         script = self._scripts.get(json.loads(request.content)["user"])
-        if script is None:
+        if paused is not None:
+            self.requests.append(request)
+            response = httpx2.Response(
+                HTTPStatus.OK, headers={"content-type": "text/event-stream"}, stream=_Written(paused)
+            )
+        elif script is None:
             response = await super().handle_async_request(request)
         else:
             self.requests.append(request)
@@ -123,6 +197,13 @@ class Gateway(FakeGateway):
             while self._arrivals < count:
                 self._arrived.clear()
                 await self._arrived.wait()
+
+    async def until_answered(self, count: int) -> None:
+        """Returns once this many requests were answered; fails after the limit."""
+        async with asyncio.timeout(LIMIT_SECONDS):
+            while len(self.requests) < count:
+                self._answered.clear()
+                await self._answered.wait()
 
     async def until_turns(self, count: int, why: str | None = None) -> None:
         """Returns once this many turns (of this kind, when told: ``lines`` or ``view``) have been answered their first

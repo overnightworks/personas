@@ -11,7 +11,7 @@ import json
 import logging
 import secrets
 from collections import defaultdict
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from http import HTTPStatus
@@ -46,7 +46,7 @@ from tests.support.loopback import serving
 from tests.support.wire import ConnectionCut, Handler, Reply, Rpc
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncIterator, Callable, Iterator
 
 AGENT_SUBJECT = "agent-subject"
 ISSUER = "https://realm.test/realms/test"
@@ -193,6 +193,15 @@ class FakeApp:
     spoken: list[tuple[str, str, str]] = field(default_factory=list[tuple[str, str, str]])
     spoken_added: asyncio.Event = field(default_factory=asyncio.Event)
     speak_bearers: list[str] = field(default_factory=list[str])
+    speak_duration_ms: int = SPOKEN_DURATION_MS
+    held_speak: asyncio.Event | None = None
+    refused_tool: str | None = None
+    calls: list[str] = field(default_factory=list[str])
+    """The tools called, in the order the calls arrived."""
+    call_added: asyncio.Event = field(default_factory=asyncio.Event)
+    in_flight: int = 0
+    most_in_flight: int = 0
+    """The most calls that were being answered at once."""
     said: list[tuple[str, str, str]] = field(default_factory=list[tuple[str, str, str]])
     said_added: asyncio.Event = field(default_factory=asyncio.Event)
     held_window_read: asyncio.Event | None = None
@@ -267,6 +276,11 @@ class FakeApp:
         self.held_window_read = asyncio.Event()
         self.window_read_held.clear()
         return self.held_window_read
+
+    def hold_next_speak(self) -> asyncio.Event:
+        """The next ``speak`` that arrives is answered once the event is set."""
+        self.held_speak = asyncio.Event()
+        return self.held_speak
 
     def kept_out_of_logs(self) -> set[str]:
         """Every bearer this app let in or was shown, and every piece of content it served or took."""
@@ -359,12 +373,15 @@ class FakeApp:
         """Takes a sentence, appends it as the member's own spoken line and answers how long it plays."""
         taken = SpeakArguments.model_validate(arguments)
         self.content.add(taken.text)
+        if (held := self.held_speak) is not None:
+            self.held_speak = None
+            await held.wait()
         if self.speak_outcomes:
             return self.speak_outcomes.pop(0)
         self.spoken.append((request.principal.sub, taken.place.id, taken.text))
         self.spoken_added.set()
         self.speak(taken.place.id, request.principal.sub, ACCEPTED_NAME, taken.text, spoken=True)
-        return ToolOutcome(Spoken(duration_ms=SPOKEN_DURATION_MS).model_dump_json(), is_error=False)
+        return ToolOutcome(Spoken(duration_ms=self.speak_duration_ms).model_dump_json(), is_error=False)
 
     async def until_window_read_held(self) -> None:
         async with asyncio.timeout(LIMIT_SECONDS):
@@ -403,6 +420,13 @@ class FakeApp:
                 self.said_added.clear()
                 await self.said_added.wait()
 
+    async def until_called(self, count: int) -> None:
+        """Returns once this many calls of tools arrived; fails after the limit."""
+        async with asyncio.timeout(LIMIT_SECONDS):
+            while len(self.calls) < count:
+                self.call_added.clear()
+                await self.call_added.wait()
+
     async def spoken_count(self, count: int) -> None:
         """Returns once this many sentences were spoken through the tool; fails after the limit."""
         async with asyncio.timeout(LIMIT_SECONDS):
@@ -431,9 +455,35 @@ class FakeApp:
                 raise
             raise group.exceptions[0] from None
 
+    @contextmanager
+    def _counting_calls(self, document: dict[str, Any]) -> Iterator[None]:
+        """A call of a tool counts from its arrival to its answer."""
+        if document.get("method") != CALL:
+            yield
+            return
+        self.calls.append((document.get("params") or {}).get("name", ""))
+        self.call_added.set()
+        self.in_flight += 1
+        self.most_in_flight = max(self.most_in_flight, self.in_flight)
+        try:
+            yield
+        finally:
+            self.in_flight -= 1
+
     async def _gate(self, scope: dict[str, Any], receive: Callable[..., Any], send: Callable[..., Any]) -> None:
         body = await _body_of(receive)
         document = json.loads(body) if body else {}
+        with self._counting_calls(document):
+            await self._answer(scope, receive, send, body, document)
+
+    async def _answer(
+        self,
+        scope: dict[str, Any],
+        receive: Callable[..., Any],
+        send: Callable[..., Any],
+        body: bytes,
+        document: dict[str, Any],
+    ) -> None:
         method = document.get("method", "")
         self.log.add(method)
         if method == CALL:
@@ -448,7 +498,11 @@ class FakeApp:
         if bearer not in self.bearers:
             self.refusals.put_nowait(HTTPStatus.UNAUTHORIZED)
             await reply.status(HTTPStatus.UNAUTHORIZED)
-        elif self.refuse_with is not None and self.refused_method in (None, method):
+        elif (
+            self.refuse_with is not None
+            and self.refused_method in (None, method)
+            and self.refused_tool in (None, (document.get("params") or {}).get("name"))
+        ):
             self.refusals.put_nowait(self.refuse_with)
             await reply.status(self.refuse_with)
         elif self.scripted[method]:

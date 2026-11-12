@@ -21,6 +21,8 @@ from agents.member import (
     PlaceRef,
     PlaceView,
     PlaceWindow,
+    SpeakRefusal,
+    Spoken,
     Standing,
     StandingState,
 )
@@ -50,6 +52,7 @@ from personas.decision import (
     Reaction,
     Reading,
     Restarted,
+    SaidAloud,
     Suspend,
     TodayBounds,
     Token,
@@ -77,11 +80,14 @@ from personas.decision import (
     history_after,
     is_voice_app,
     left_standing,
+    past_deadline,
     perceive,
     reaction_to,
     released,
     renewal_due,
     sets_where_reading_starts,
+    speaks_aloud,
+    speech_outcome,
     spoken_wait_seconds,
     swept_before,
     sync_checkpoints,
@@ -92,7 +98,6 @@ from personas.decision import (
     turn_invalid,
     turn_told,
     view_turn_due,
-    voice_context,
     wakes_him,
     with_due,
     without_due,
@@ -641,10 +646,19 @@ def test_a_keep_period_that_reaches_before_the_calendar_sweeps_nothing():
     assert swept_before(LATER, 1e12) is None
 
 
-def told_a_written_turn(earlier: EarlierToday | None, history: History = EMPTY_HISTORY, *, missed: bool = False) -> str:
-    """The message of a written turn at ``LATER`` in the place of the morning visit, for lines that are none yet."""
+def told_a_written_turn(
+    earlier: EarlierToday | None, history: History = EMPTY_HISTORY, *, missed: bool = False, aloud: bool = False
+) -> str:
+    """The message of a turn at ``LATER`` in the place of the morning visit, for lines that are none yet."""
     return turn_told(
-        "Mozart", APP, MORNING.place, Lines(MORNING.generation, frozenset(), missed), history, earlier, LATER
+        "Mozart",
+        APP,
+        MORNING.place,
+        Lines(MORNING.generation, frozenset(), missed),
+        history,
+        earlier,
+        LATER,
+        aloud=aloud,
     )
 
 
@@ -685,21 +699,9 @@ def test_a_turn_is_told_his_name_then_the_day_then_his_history_and_last_what_wok
     assert list(json.loads(told_a_written_turn(earlier))) == keys
 
 
-def test_a_voice_context_is_the_day_a_turn_is_told_under_the_same_key():
-    earlier = earlier_today([kept(NOON, 1, "Good morning", hours_before=4)], LATER, ROOMY, EMPTY_HISTORY)
-
-    told_to_a_turn = json.loads(told_a_written_turn(earlier))
-
-    assert json.loads(voice_context(earlier)) == {"earlier_today": told_to_a_turn["earlier_today"]}
-
-
-def test_a_voice_loop_is_told_nothing_of_the_day_without_a_memory():
-    assert voice_context(None) == ""
-
-
 @pytest.mark.parametrize("has_voice_section", [True, False])
 @pytest.mark.parametrize("declared_names", [[SPEAK_TOOL, "say"], ["say"]], ids=["declares speak", "declares none"])
-def test_the_places_of_an_app_run_a_voice_loop_only_for_a_persona_with_a_voice_section_and_an_app_that_declares_speak(
+def test_the_places_of_an_app_are_spoken_only_for_a_persona_with_a_voice_section_and_an_app_that_declares_speak(
     has_voice_section, declared_names
 ):
     declared = [_declaration(name) for name in declared_names]
@@ -851,7 +853,7 @@ def test_a_view_turn_is_told_its_revision_as_the_one_entry_marked_new_and_woke_n
         ROOMY.size_bytes,
     )
 
-    told = turn_told("Mozart", APP, TABLE, Waiting(3), history, None, LATER)
+    told = turn_told("Mozart", APP, TABLE, Waiting(3), history, None, LATER, aloud=False)
 
     assert json.loads(told) == {
         "you": "Mozart",
@@ -897,7 +899,9 @@ def test_a_view_turn_marks_new_only_the_entry_of_its_app_place_and_revision(app,
     held = ViewSeen(app, place, a_view(revision), LATER)
     admitted = ViewSeen(APP, TABLE, a_view(3), LATER)
 
-    told = json.loads(turn_told("Mozart", APP, TABLE, Waiting(3), history_holding((held, admitted)), None, LATER))
+    told = json.loads(
+        turn_told("Mozart", APP, TABLE, Waiting(3), history_holding((held, admitted)), None, LATER, aloud=False)
+    )
 
     assert [each["new"] for each in told["history"]["entries"]] == [False, True]
 
@@ -917,6 +921,32 @@ def test_a_written_turn_is_told_in_which_place_it_woke_and_whether_older_lines_w
     assert woke == {"why": "lines", "app": APP, "place": {"kind": "call", "id": "room-7"}, "missed": missed}
 
 
+def test_a_turn_that_is_spoken_is_told_so_in_what_woke_him_and_any_other_turn_is_told_no_such_key():
+    spoken = json.loads(told_a_written_turn(None, aloud=True))["woke"]
+
+    assert spoken == {
+        "why": "lines",
+        "app": APP,
+        "place": {"kind": "call", "id": "room-7"},
+        "missed": False,
+        "aloud": True,
+    }
+    assert "aloud" not in json.loads(told_a_written_turn(None))["woke"]
+
+
+@pytest.mark.parametrize(
+    ("voice_app", "occasion", "aloud"),
+    [
+        pytest.param(True, Lines(MORNING.generation, frozenset({1}), missed=False), True, id="lines at a voice app"),
+        pytest.param(False, Lines(MORNING.generation, frozenset({1}), missed=False), False, id="lines elsewhere"),
+        pytest.param(True, Waiting(3), False, id="a view revision at a voice app"),
+        pytest.param(False, Waiting(3), False, id="a view revision elsewhere"),
+    ],
+)
+def test_only_a_turn_for_lines_at_a_voice_app_is_spoken(voice_app, occasion, aloud):
+    assert speaks_aloud(voice_app, occasion) is aloud
+
+
 def test_a_turn_told_an_empty_history_is_told_no_entries_and_none_dropped():
     assert json.loads(told_a_written_turn(None))["history"] == {"older_dropped": False, "entries": []}
 
@@ -933,7 +963,7 @@ def test_a_history_line_is_new_only_when_the_turn_is_for_that_line_of_that_visit
     )
     occasion = Lines(MORNING.generation, frozenset({1}), missed=False)
 
-    told = json.loads(turn_told("Mozart", APP, MORNING.place, occasion, history, None, LATER))
+    told = json.loads(turn_told("Mozart", APP, MORNING.place, occasion, history, None, LATER, aloud=False))
 
     assert [
         (each["place"]["id"], each["seq"], each["text"], each["own"], each["new"])
@@ -1181,7 +1211,9 @@ def test_an_unanswered_act_is_told_with_the_code_and_no_text():
 def test_a_view_turn_marks_no_act_new():
     history = history_holding((an_act(), ViewSeen(APP, TABLE, a_view(3), LATER)))
 
-    told_entries = json.loads(turn_told("Mozart", APP, TABLE, Waiting(3), history, None, LATER))["history"]["entries"]
+    told_entries = json.loads(turn_told("Mozart", APP, TABLE, Waiting(3), history, None, LATER, aloud=False))[
+        "history"
+    ]["entries"]
 
     assert [each["new"] for each in told_entries] == [False, True]
 
@@ -1226,6 +1258,101 @@ def test_an_act_shows_no_arguments_and_no_answer_in_its_repr_nor_in_the_history_
     assert marker not in repr(history_holding((act,)))
 
 
+def a_sentence(*, text="Guten Tag.", outcome=None, at=LATER - timedelta(seconds=9)) -> SaidAloud:
+    return SaidAloud(APP, MORNING.place, text, Spoken(duration_ms=1500) if outcome is None else outcome, at)
+
+
+@pytest.mark.parametrize(
+    ("outcome", "told_outcome"),
+    [
+        pytest.param(Spoken(duration_ms=1500), {"answered": True}, id="spoken"),
+        pytest.param(SpeakRefusal.TOO_LONG, {"answered": True, "refused": "too_long"}, id="refused"),
+        pytest.param(Unanswered("network"), {"answered": False, "code": "network"}, id="no answer"),
+    ],
+)
+def test_a_spoken_sentence_is_told_as_a_speech_entry_with_its_text_age_and_how_the_app_took_it(outcome, told_outcome):
+    sentence = a_sentence(text="Grüß dich.", outcome=outcome)
+
+    told_entries = json.loads(told_a_written_turn(None, history_holding((sentence,))))["history"]["entries"]
+
+    assert told_entries == [
+        {
+            "entry": "speech",
+            "app": APP,
+            "place": {"kind": "call", "id": "room-7"},
+            "seconds_ago": 9,
+            "text": "Grüß dich.",
+            "outcome": told_outcome,
+            "new": False,
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("bound_over_the_two", "kept_kinds", "older_dropped"),
+    [
+        pytest.param(1, ["line", "speech"], False, id="the bound lies above a line and a sentence"),
+        pytest.param(0, ["line", "speech"], False, id="the bound is a line's and a sentence's size"),
+        pytest.param(-1, ["speech"], True, id="the bound lies one byte below them"),
+    ],
+)
+def test_the_bound_counts_a_spoken_sentence_by_the_utf8_bytes_of_its_told_json_with_its_age_as_zero(
+    bound_over_the_two, kept_kinds, older_dropped, told_one_bytes
+):
+    sentence = a_sentence(text="ä♠")
+    told_sentence = json.dumps(
+        {
+            "entry": "speech",
+            "app": APP,
+            "place": {"kind": "call", "id": "room-7"},
+            "seconds_ago": 0,
+            "text": "ä♠",
+            "outcome": {"answered": True},
+            "new": False,
+        },
+        ensure_ascii=False,
+    )
+
+    size = told_one_bytes + len(told_sentence.encode()) + bound_over_the_two
+    history = history_after(EMPTY_HISTORY, (said(1, "one"), sentence), size)
+
+    assert ["line" if isinstance(each, KeptLine) else "speech" for each in history.entries] == kept_kinds
+    assert history.older_dropped is older_dropped
+
+
+@pytest.mark.parametrize(
+    ("ended", "cancelling", "expected"),
+    [
+        pytest.param(Spoken(duration_ms=900), True, Spoken(duration_ms=900), id="a spoken sentence while cancelled"),
+        pytest.param(SpeakRefusal.NOT_ACTIVE, False, SpeakRefusal.NOT_ACTIVE, id="a refusal"),
+        pytest.param(StatusFailure(502), True, Unanswered(TURN_CANCELLED_CODE), id="a failure while cancelled"),
+        pytest.param(StatusFailure(502), False, Unanswered("http_502"), id="a failure"),
+        pytest.param(asyncio.CancelledError(), True, Unanswered(TURN_CANCELLED_CODE), id="a cancellation"),
+        pytest.param(RuntimeError("defect"), True, Unanswered(TURN_CANCELLED_CODE), id="another error while cancelled"),
+        pytest.param(RuntimeError("defect"), False, None, id="another error"),
+    ],
+)
+def test_how_a_speak_request_ended_decides_the_outcome_of_the_sentence_it_sent(ended, cancelling, expected):
+    assert speech_outcome(ended, cancelling=cancelling) == expected
+
+
+def test_a_spoken_sentence_shows_no_text_in_its_repr_nor_in_the_history_that_holds_it():
+    marker = secrets.token_hex(8)
+    sentence = a_sentence(text=marker)
+
+    assert marker not in repr(sentence)
+    assert marker not in repr(history_holding((sentence,)))
+
+
+@pytest.mark.parametrize(
+    ("started", "now", "past"),
+    [(1000.0, 1000.0, False), (1000.0, 1029.9, False), (1000.0, 1030.0, True), (1000.0, 1100.0, True)],
+    ids=["at the start", "just before the bound", "at the bound", "long past it"],
+)
+def test_a_turn_is_past_its_deadline_once_its_longest_duration_has_gone_by(started, now, past):
+    assert past_deadline(now, started, 30) is past
+
+
 def test_the_history_stays_marked_once_it_dropped_older_lines_though_the_next_lines_fit():
     assert history_after(ONCE_DROPPED, (said(1, "one"),), 10_000).older_dropped is True
 
@@ -1258,12 +1385,7 @@ def test_the_day_is_the_same_whether_or_not_the_history_holds_views_and_holds_no
     assert told(with_views) == [[(1, "not held")]]
 
 
-@pytest.mark.parametrize(
-    "leaving_out",
-    [history_holding((said(1, "held"), said(2, "held"))), MORNING],
-    ids=["the lines a turn's history holds", "the visit a voice loop is in"],
-)
-def test_what_is_left_out_of_the_day_counts_nothing_toward_its_size_bound(leaving_out):
+def test_what_is_left_out_of_the_day_counts_nothing_toward_its_size_bound():
     two_lines = TodayBounds(hours=24.0, size_bytes=2 * told_day_line_bytes("middle", name="Bo"))
     kept_lines = [
         kept(MORNING, 1, "held" * 20, hours_before=5, name="Bo"),
@@ -1272,7 +1394,7 @@ def test_what_is_left_out_of_the_day_counts_nothing_toward_its_size_bound(leavin
         kept(NOON, 2, "second", hours_before=4, name="Bo"),
     ]
 
-    earlier = earlier_today(kept_lines, LATER, two_lines, leaving_out)
+    earlier = earlier_today(kept_lines, LATER, two_lines, history_holding((said(1, "held"), said(2, "held"))))
 
     assert told(earlier) == [[(1, "middle"), (2, "second")]]
     assert earlier.older_dropped is False
@@ -1296,7 +1418,11 @@ def taking(history: History, *entries, size_bytes: int = ROOMY.size_bytes) -> Hi
     [
         pytest.param((said(1, "a"), said(2, "b")), 2, id="lines of others count as heard"),
         pytest.param((a_view_seen(1),), 1, id="a view revision counts as heard"),
-        pytest.param((an_own_line(1), an_act()), 0, id="his own line and his act are not heard"),
+        pytest.param(
+            (an_own_line(1), an_act(), a_sentence()),
+            0,
+            id="his own line, his act and his spoken sentence are not heard",
+        ),
     ],
 )
 def test_the_history_counts_the_entries_not_his_own_it_took_in(entries, heard):
@@ -1325,7 +1451,11 @@ def test_the_history_counts_what_the_bound_removed_and_every_entry_ever_taken(to
     ("held", "taken"),
     [
         pytest.param((said(1, "one"),), (), id="nothing was taken"),
-        pytest.param((said(1, "one"),), (an_own_line(2), an_act()), id="only his own line and his act were taken"),
+        pytest.param(
+            (said(1, "one"),),
+            (an_own_line(2), an_act(), a_sentence()),
+            id="only his own line, his act and his spoken sentence were taken",
+        ),
         pytest.param((a_view_seen(3),), (a_view_seen(3),), id="a revision the history already held was taken again"),
     ],
 )
