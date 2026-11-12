@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import secrets
 
 from agents.member import STANDING_URI, PlaceRef
@@ -16,6 +17,14 @@ SPEAKER = "Ada"
 REMARK = "Play the jack."
 
 
+def a_state() -> dict[str, str]:
+    return {"hand": secrets.token_hex(8)}
+
+
+STATE_BYTES = len(json.dumps(a_state()))
+"""The size of every state ``waits`` shows, as a history counts it."""
+
+
 def url_of(runner, number: int) -> str:
     return runner.config.apps[number].mcp_url
 
@@ -25,7 +34,7 @@ def at_table():
 
 
 def waits(app: FakeApp, revision: int) -> dict[str, str]:
-    state = {"hand": secrets.token_hex(8)}
+    state = a_state()
     app.show_view(TABLE.id, revision, state)
     return state
 
@@ -53,6 +62,31 @@ def entry(
         "own": own,
         "new": new,
     }
+
+
+def view_entry(
+    app_url: str,
+    state: dict[str, str],
+    *,
+    revision: int,
+    awaits_you: bool = True,
+    seconds_ago: int = 0,
+    new: bool = False,
+) -> dict[str, object]:
+    return {
+        "entry": "view",
+        "app": app_url,
+        "place": {"kind": TABLE.kind, "id": TABLE.id},
+        "seconds_ago": seconds_ago,
+        "revision": revision,
+        "awaits_you": awaits_you,
+        "state": state,
+        "new": new,
+    }
+
+
+def woke_at_table(app_url: str) -> dict[str, object]:
+    return {"why": "view", "app": app_url, "place": {"kind": TABLE.kind, "id": TABLE.id}}
 
 
 def woke_at_lines(app_url: str, place_id: str, *, missed: bool = False) -> dict[str, object]:
@@ -97,3 +131,13 @@ async def said_and_taken(app: FakeApp, place_id: str, text: str, *, author: str 
     app.speak(place_id, author, name, text)
     await app.until_window_read(place_id, reads + 1)
     await settled(app)
+
+
+async def shows(app, revision: int, state=None, *, awaits_you: bool = False) -> dict[str, str]:
+    """The place's view shows this revision and the loop of the app has read it and taken it."""
+    state = state or a_state()
+    reads = app.view_reads(TABLE)
+    app.show_view(TABLE.id, revision, state, awaits_you=awaits_you)
+    await app.until_view_read(TABLE, reads + 1)
+    await settled(app)
+    return state

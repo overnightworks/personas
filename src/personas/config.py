@@ -7,8 +7,8 @@ names them with their call bound, and then the model gateway and each agent's pe
 An app with ``listens = false`` serves tools only: it starts no turn, its bound tools reach the turns of the apps that
 listen, and ``call_seconds`` bounds each request to it. No tool name is shared with a tools-only app, and no app names
 ``speak``, the voice's own tool, which is never offered to a turn.
-The top-level ``history_bytes`` bounds the history each agent keeps in memory of the lines he took in at any of his
-apps and tells every turn.
+The top-level ``history_bytes`` bounds the history each agent keeps in memory of the lines he took in and the views he
+read at any of his apps and tells every turn.
 The optional ``[memory]`` table names the Postgres database that keeps every line the agents read: its host, port,
 database, user, the file holding the password, ``write_seconds``, the bound on one write or read, and how far back
 (``today_hours``) and how much (``today_bytes``) a turn is told of the lines he kept that his history does not hold,

@@ -48,7 +48,10 @@ class TurnOpening:
 
     @property
     def new_seqs(self) -> list[int]:
-        return [line["seq"] for line in self.room["history"]["entries"] if line["new"]]
+        """The seqs of the lines the turn is for; an entry of another kind marked new fails, never filtered out."""
+        new = [each for each in self.room["history"]["entries"] if each["new"]]
+        assert all(each["entry"] == "line" for each in new), "a view entry is marked new in a turn told as lines"
+        return [line["seq"] for line in new]
 
 
 class Gateway(FakeGateway):

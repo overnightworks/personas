@@ -46,6 +46,7 @@ from personas.decision import (
     TodayBounds,
     Token,
     UnrecognisedRefusal,
+    ViewSeen,
     Visit,
     Waiting,
     accepts_for,
@@ -713,11 +714,14 @@ def said(seq: int, text: str, *, name: str = "Bo", visit: Visit = MORNING) -> Ke
     return KeptLine(visit, seq, LATER, name, "message", text, own=False)
 
 
-def test_a_view_turn_is_told_that_the_place_waits_for_him_and_the_state_as_the_app_sent_it_and_no_line_is_new():
+def test_a_view_turn_is_told_its_revision_as_the_one_entry_marked_new_and_woke_names_only_why_app_and_place():
     view = PlaceView(revision=3, awaits_you=True, state={"hand": ["x", {"seen": True}], "umläut": "ä"})
-    history = History((said(1, "Spiel den Buben", name="Ada", visit=NOON),), older_dropped=True)
+    history = History(
+        (said(1, "Spiel den Buben", name="Ada", visit=NOON), ViewSeen(APP, TABLE, view, LATER - timedelta(seconds=7))),
+        older_dropped=True,
+    )
 
-    told = turn_told("Mozart", APP, TABLE, Waiting(view), history, None, LATER)
+    told = turn_told("Mozart", APP, TABLE, Waiting(3), history, None, LATER)
 
     assert json.loads(told) == {
         "you": "Mozart",
@@ -735,18 +739,47 @@ def test_a_view_turn_is_told_that_the_place_waits_for_him_and_the_state_as_the_a
                     "text": "Spiel den Buben",
                     "own": False,
                     "new": False,
-                }
+                },
+                {
+                    "entry": "view",
+                    "app": APP,
+                    "place": {"kind": "table", "id": "table-1"},
+                    "seconds_ago": 7,
+                    "revision": 3,
+                    "awaits_you": True,
+                    "state": view.state,
+                    "new": True,
+                },
             ],
         },
-        "woke": {
-            "why": "view",
-            "app": APP,
-            "place": {"kind": "table", "id": "table-1"},
-            "awaits_you": True,
-            "state": view.state,
-        },
+        "woke": {"why": "view", "app": APP, "place": {"kind": "table", "id": "table-1"}},
     }
     assert "ä" in told
+    assert told.count(json.dumps(view.state, ensure_ascii=False)) == 1
+
+
+@pytest.mark.parametrize(
+    ("app", "place", "revision"),
+    [(APP, TABLE, 4), (APP, OTHER_TABLE, 3), ("https://other.test/mcp", TABLE, 3)],
+    ids=["another revision", "another place", "another app"],
+)
+def test_a_view_turn_marks_new_only_the_entry_of_its_app_place_and_revision(app, place, revision):
+    held = ViewSeen(app, place, a_view(revision), LATER)
+    admitted = ViewSeen(APP, TABLE, a_view(3), LATER)
+
+    told = json.loads(
+        turn_told("Mozart", APP, TABLE, Waiting(3), History((held, admitted), older_dropped=False), None, LATER)
+    )
+
+    assert [each["new"] for each in told["history"]["entries"]] == [False, True]
+
+
+def test_a_written_turn_marks_no_view_new():
+    history = History((ViewSeen(APP, MORNING.place, a_view(1), LATER), said(1, "hello")), older_dropped=False)
+
+    told = json.loads(told_a_written_turn(None, history))
+
+    assert [(each["entry"], each["new"]) for each in told["history"]["entries"]] == [("view", False), ("line", False)]
 
 
 @pytest.mark.parametrize("missed", [False, True])
@@ -760,7 +793,7 @@ def test_a_turn_told_an_empty_history_is_told_no_entries_and_none_dropped():
     assert json.loads(told_a_written_turn(None))["history"] == {"older_dropped": False, "entries": []}
 
 
-def test_a_history_line_is_told_with_its_age_and_is_new_only_when_the_turn_is_for_that_line_of_that_visit():
+def test_a_history_line_is_new_only_when_the_turn_is_for_that_line_of_that_visit():
     evening = replace(MORNING, generation="evening")
     history = History(
         (
@@ -776,13 +809,13 @@ def test_a_history_line_is_told_with_its_age_and_is_new_only_when_the_turn_is_fo
     told = json.loads(turn_told("Mozart", APP, MORNING.place, occasion, history, None, LATER))
 
     assert [
-        (each["place"]["id"], each["seq"], each["seconds_ago"], each["text"], each["own"], each["new"])
+        (each["place"]["id"], each["seq"], each["text"], each["own"], each["new"])
         for each in told["history"]["entries"]
     ] == [
-        ("room-8", 1, 300, "elsewhere", False, False),
-        ("room-7", 1, 200, "an earlier run", False, False),
-        ("room-7", 1, 90, "woke him", False, True),
-        ("room-7", 2, 1, "his own", True, False),
+        ("room-8", 1, "elsewhere", False, False),
+        ("room-7", 1, "an earlier run", False, False),
+        ("room-7", 1, "woke him", False, True),
+        ("room-7", 2, "his own", True, False),
     ]
 
 
@@ -806,12 +839,14 @@ def test_taken_lines_are_the_visits_lines_as_kept_with_the_time_of_the_read():
     )
 
 
-def test_a_history_and_its_lines_show_no_name_and_no_text_in_their_repr():
+def test_a_history_its_lines_and_its_views_show_no_name_no_text_and_no_state_in_their_repr():
     marker = secrets.token_hex(8)
     line = said(1, marker, name=marker)
+    view = ViewSeen(APP, TABLE, PlaceView(revision=1, awaits_you=True, state={"hand": marker}), LATER)
 
-    assert marker not in repr(History((line,), older_dropped=False))
+    assert marker not in repr(History((line, view), older_dropped=False))
     assert marker not in repr(line)
+    assert marker not in repr(view)
 
 
 def test_new_lines_join_the_history_after_the_lines_it_holds():
@@ -840,10 +875,76 @@ def test_the_history_keeps_the_newest_lines_that_fit_the_bound_and_says_when_it_
     assert history.older_dropped is older_dropped
 
 
-def test_a_line_longer_than_the_bound_empties_the_history_and_leaves_it_marked():
-    history = history_after(History((said(1, "one"),), older_dropped=False), (said(2, "x" * 50),), 10)
+@pytest.mark.parametrize(
+    ("history", "expected_dropped"),
+    [
+        pytest.param(History((said(1, "one"),), older_dropped=False), True, id="an earlier entry leaves"),
+        pytest.param(EMPTY_HISTORY, False, id="no earlier entry"),
+    ],
+)
+def test_the_newest_entry_stays_even_when_it_alone_is_past_the_bound_and_the_history_says_when_an_older_one_left(
+    history, expected_dropped
+):
+    kept_history = history_after(history, (said(2, "x" * 50),), 10)
 
-    assert history == History((), older_dropped=True)
+    assert [line.text for line in kept_history.entries] == ["x" * 50]
+    assert kept_history.older_dropped is expected_dropped
+
+
+def test_a_view_the_history_holds_by_app_place_and_revision_adds_nothing_whatever_its_state():
+    held = ViewSeen(APP, TABLE, a_view(3), LATER)
+    again = ViewSeen(APP, TABLE, a_view(3), LATER + timedelta(seconds=5))
+
+    history = history_after(History((held,), older_dropped=False), (again,), 10_000)
+
+    assert history.entries == (held,)
+
+
+def test_a_view_that_differs_in_app_place_or_revision_from_every_held_one_is_appended_in_the_order_read():
+    views = [
+        ViewSeen(APP, TABLE, a_view(3), LATER),
+        ViewSeen(APP, TABLE, a_view(4), LATER),
+        ViewSeen(APP, OTHER_TABLE, a_view(3), LATER),
+        ViewSeen("https://other.test/mcp", TABLE, a_view(3), LATER),
+    ]
+
+    history = history_after(EMPTY_HISTORY, views, 10_000)
+
+    assert history.entries == tuple(views)
+
+
+def test_a_revision_whose_entry_left_by_the_bound_is_appended_again_when_read_again():
+    state_bytes = len(json.dumps(a_view(1).state))
+    first = ViewSeen(APP, TABLE, a_view(1), LATER)
+    second = ViewSeen(APP, TABLE, a_view(2), LATER)
+    again = ViewSeen(APP, TABLE, a_view(1), LATER + timedelta(seconds=5))
+
+    history = history_after(EMPTY_HISTORY, (first, second), state_bytes)
+    history = history_after(history, (again,), state_bytes)
+
+    assert history.entries == (again,)
+    assert history.older_dropped is True
+
+
+@pytest.mark.parametrize(
+    ("bound_over_the_two", "kept_kinds", "older_dropped"),
+    [
+        pytest.param(1, ["line", "view"], False, id="the bound lies above a line and a state"),
+        pytest.param(0, ["line", "view"], False, id="the bound is a line's and a state's size"),
+        pytest.param(-1, ["view"], True, id="the bound lies one byte below them"),
+    ],
+)
+def test_the_bound_counts_a_line_by_speaker_and_text_and_a_view_by_the_utf8_json_bytes_of_its_state(
+    bound_over_the_two, kept_kinds, older_dropped
+):
+    view = ViewSeen(APP, TABLE, PlaceView(revision=1, awaits_you=True, state={"hand": "ä♠"}), LATER)
+    state_bytes = len('{"hand": "ä♠"}'.encode())
+    size = len("Bo" + "one") + state_bytes + bound_over_the_two
+
+    history = history_after(EMPTY_HISTORY, (said(1, "one"), view), size)
+
+    assert ["line" if isinstance(each, KeptLine) else "view" for each in history.entries] == kept_kinds
+    assert history.older_dropped is older_dropped
 
 
 def test_the_history_stays_marked_once_it_dropped_older_lines_though_the_next_lines_fit():
@@ -867,6 +968,17 @@ def test_the_day_leaves_out_the_lines_the_history_holds_by_visit_and_seq_and_tho
         [(2, "not held")],
         [(1, "same seq of another visit"), (2, "read as the turn was admitted")],
     ]
+
+
+def test_the_day_is_the_same_whether_or_not_the_history_holds_views_and_holds_no_view():
+    kept_lines = [kept(MORNING, 1, "held", hours_before=5), kept(NOON, 1, "not held", hours_before=4)]
+    views = (ViewSeen(APP, TABLE, a_view(1), LATER),)
+
+    without = earlier_today(kept_lines, LATER, ROOMY, History((said(1, "held"),), older_dropped=False))
+    with_views = earlier_today(kept_lines, LATER, ROOMY, History((said(1, "held"), *views), older_dropped=False))
+
+    assert with_views == without
+    assert told(with_views) == [[(1, "not held")]]
 
 
 @pytest.mark.parametrize(

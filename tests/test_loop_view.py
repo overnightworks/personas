@@ -14,6 +14,7 @@ from personas.config import load_config
 from personas.decision import TURN_CANCELLED_CODE
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, say_in_the_call
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
+from tests.support.history import history_of, view_entry, woke_at_table
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, READ, SAY_TOOL, active, invited, paused
 from tests.support.realm import AGENT_NAME
@@ -41,7 +42,13 @@ def waits(runner, revision: int, place: PlaceRef = TABLE) -> dict[str, str]:
 
 
 def told_states(runner) -> list[object]:
-    return [opening.room["woke"]["state"] for opening in runner.gateway.openings()]
+    """The state of the view entry each turn is told as new, in the order of the turns."""
+    return [
+        each["state"]
+        for opening in runner.gateway.openings()
+        for each in opening.room["history"]["entries"]
+        if each["entry"] == "view" and each["new"]
+    ]
 
 
 async def seated_at_a_table_whose_view_waits(runner, revision: int = 1) -> dict[str, str]:
@@ -137,23 +144,24 @@ async def test_a_view_that_moves_to_a_revision_waiting_for_him_gets_one_turn_tol
     runner, songmaker
 ):
     runner.app.stand(SUBJECT, at_table())
-    runner.app.show_view(TABLE.id, 1, a_state(), awaits_you=False)
+    first_state = a_state()
+    runner.app.show_view(TABLE.id, 1, first_state, awaits_you=False)
     runner.start()
     await runner.app.until_view_read(TABLE, 1)
     state = waits(runner, 2)
     await runner.gateway.until_turns(1)
 
+    app_url = runner.config.apps[0].mcp_url
     opening = runner.gateway.openings()[0]
     assert opening.room == {
         "you": AGENT_NAME,
-        "history": {"older_dropped": False, "entries": []},
-        "woke": {
-            "why": "view",
-            "app": runner.config.apps[0].mcp_url,
-            "place": {"kind": TABLE.kind, "id": TABLE.id},
-            "awaits_you": True,
-            "state": state,
-        },
+        "history": history_of(
+            [
+                view_entry(app_url, first_state, revision=1, awaits_you=False),
+                view_entry(app_url, state, revision=2, new=True),
+            ]
+        ),
+        "woke": woke_at_table(app_url),
     }
     assert opening.system == runner.files.persona_prompt
     assert sorted(runner.gateway.offered_tools()) == sorted([SAY_TOOL, CREATE_SONG, GENERATE_SONG])
@@ -297,7 +305,7 @@ async def test_a_line_that_addresses_him_while_a_view_turn_runs_gets_its_turn_on
     view_turn.set()
     await runner.app.said_count(1)
 
-    assert [opening.room["woke"].get("state") is not None for opening in runner.gateway.openings()] == [True, False]
+    assert [opening.room["woke"]["why"] for opening in runner.gateway.openings()] == ["view", "lines"]
     assert runner.app.said == [(SUBJECT, PLACE_ID, ANSWER)]
     assert len(runner.gateway.openings()) == 2
 

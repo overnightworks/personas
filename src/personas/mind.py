@@ -1,4 +1,5 @@
-"""One agent's mind: the history of the lines he took in at any of his apps, which his loops feed and his turns read."""
+"""One agent's mind: the history of the lines he took in and the views he read at any of his apps, which his loops feed
+and his turns read."""
 
 from __future__ import annotations
 
@@ -9,7 +10,7 @@ from personas.decision import History, history_after
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from personas.decision import KeptLine
+    from personas.decision import Entry
 
 
 class Mind:
@@ -23,6 +24,9 @@ class Mind:
     def history(self) -> History:
         return self._history
 
-    def take(self, lines: Iterable[KeptLine]) -> None:
-        """Appends the lines a read took, in order."""
-        self._history = history_after(self._history, lines, self._size_bytes)
+    def take(self, entries: Iterable[Entry]) -> None:
+        """Appends the lines and views a read took, in order; a read that took nothing leaves the history as it is."""
+        taken = tuple(entries)
+        if not taken:
+            return
+        self._history = history_after(self._history, taken, self._size_bytes)

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from agents.member import PlaceRef
+from agents.member import PlaceRef, PlaceView
 
-from personas.decision import KeptLine, Visit
+from personas.decision import KeptLine, ViewSeen, Visit
 from personas.mind import Mind
 
 READ_AT = datetime(2026, 11, 11, 20, 0, tzinfo=UTC)
@@ -46,3 +46,16 @@ def test_a_history_read_earlier_does_not_change_when_more_lines_are_taken():
     mind.take((said(CALL, 2, "second"),))
 
     assert [line.text for line in before.entries] == ["first"]
+
+
+def test_the_views_he_read_join_his_lines_in_the_order_read_and_a_revision_he_holds_adds_nothing():
+    table = PlaceRef(kind="table", id="table-1")
+    mind = Mind(size_bytes=1_000)
+
+    mind.take(
+        (said(CALL, 1, "first"), ViewSeen(CALL.app, table, PlaceView(revision=1, awaits_you=False, state={}), READ_AT))
+    )
+    mind.take((ViewSeen(CALL.app, table, PlaceView(revision=1, awaits_you=False, state={}), READ_AT),))
+    mind.take(())
+
+    assert [type(each) for each in mind.history.entries] == [KeptLine, ViewSeen]

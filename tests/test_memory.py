@@ -26,14 +26,18 @@ from tests.support.history import (
     OTHER_CALL_ID,
     REMARK,
     SPEAKER,
+    STATE_BYTES,
     TABLE,
     at_table,
     entry,
     history_of,
     said_and_taken,
     settled,
+    shows,
     url_of,
+    view_entry,
     waits,
+    woke_at_table,
 )
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import LIMIT_SECONDS, active, formatted, invited, paused
@@ -506,7 +510,9 @@ async def test_after_a_restart_his_first_turn_is_told_the_lines_his_call_held_on
     assert written.room["history"] == history_of([entry(url_of(runner, 0), PLACE_ID, ADDRESSED, seq=2, new=True)])
 
 
-async def test_a_view_turn_is_told_the_same_message_as_a_written_turn_with_the_day_and_no_line_new(runner, remembered):
+async def test_a_view_turn_is_told_the_same_message_as_a_written_turn_with_the_day_and_its_view_entry_new(
+    runner, remembered
+):
     await restarted_with_a_line_kept(runner, remembered, BEFORE_THE_RESTART)
     runner.app.stand(SUBJECT, active(PLACE_ID), at_table())
     state = waits(runner.app, 1)
@@ -516,26 +522,20 @@ async def test_a_view_turn_is_told_the_same_message_as_a_written_turn_with_the_d
     assert opening.room == {
         "you": AGENT_NAME,
         "earlier_today": day_of(BEFORE_THE_RESTART),
-        "history": history_of([]),
-        "woke": {
-            "why": "view",
-            "app": url_of(runner, 0),
-            "place": {"kind": TABLE.kind, "id": TABLE.id},
-            "awaits_you": True,
-            "state": state,
-        },
+        "history": history_of([view_entry(url_of(runner, 0), state, revision=1, new=True)]),
+        "woke": woke_at_table(url_of(runner, 0)),
     }
 
 
 async def test_lines_past_the_history_bound_leave_it_oldest_first_and_are_told_in_the_day_and_in_no_both(
     runner, remembered
 ):
-    runner.config = replace(runner.config, history_bytes=2 * len(SPEAKER + "line-1"))
+    runner.config = replace(runner.config, history_bytes=2 * len(SPEAKER + "line-1") + STATE_BYTES)
     await restarted_in_the_call(runner)
     for number in (1, 2, 3):
         await said_and_taken(runner.app, PLACE_ID, f"line-{number}")
     runner.app.stand(SUBJECT, active(PLACE_ID), at_table())
-    waits(runner.app, 1)
+    state = waits(runner.app, 1)
     await runner.gateway.until_turns(1)
 
     (opening,) = runner.gateway.openings()
@@ -543,6 +543,7 @@ async def test_lines_past_the_history_bound_leave_it_oldest_first_and_are_told_i
         [
             entry(url_of(runner, 0), PLACE_ID, "line-2", seq=2),
             entry(url_of(runner, 0), PLACE_ID, "line-3", seq=3),
+            view_entry(url_of(runner, 0), state, revision=1, new=True),
         ],
         older_dropped=True,
     )
@@ -553,26 +554,40 @@ async def test_a_line_another_app_took_after_a_turn_was_admitted_is_in_neither_i
     runner, other, remembered
 ):
     runner.app.stand(SUBJECT, at_table())
-    runner.app.show_view(TABLE.id, 1, {"hand": "none"}, awaits_you=False)
+    first_state = {"hand": "none"}
+    runner.app.show_view(TABLE.id, 1, first_state, awaits_you=False)
     other.stand(SUBJECT, active(OTHER_CALL_ID))
     runner.start()
     await runner.app.until_view_read(TABLE)
     await other.until_window_read(OTHER_CALL_ID)
     reading = remembered.hold_next_read()
-    waits(runner.app, 2)
+    second_state = waits(runner.app, 2)
     async with asyncio.timeout(LIMIT_SECONDS):
         await remembered.asked.wait()
     runner.clock.time += 60
     await said_and_taken(other, OTHER_CALL_ID, REMARK)
     reading.set()
     await runner.gateway.until_turns(1)
-    waits(runner.app, 3)
+    third_state = waits(runner.app, 3)
     await runner.gateway.until_turns(2)
 
+    app = url_of(runner, 0)
     first, second = runner.gateway.openings()
-    assert first.room["history"] == history_of([])
+    assert first.room["history"] == history_of(
+        [
+            view_entry(app, first_state, revision=1, awaits_you=False),
+            view_entry(app, second_state, revision=2, new=True),
+        ]
+    )
     assert first.room["earlier_today"] == {"older_dropped": False, "visits": []}
-    assert second.room["history"] == history_of([entry(url_of(runner, 1), OTHER_CALL_ID, REMARK)])
+    assert second.room["history"] == history_of(
+        [
+            view_entry(app, first_state, revision=1, awaits_you=False, seconds_ago=60),
+            view_entry(app, second_state, revision=2, seconds_ago=60),
+            entry(url_of(runner, 1), OTHER_CALL_ID, REMARK),
+            view_entry(app, third_state, revision=3, new=True),
+        ]
+    )
     assert second.room["earlier_today"] == {"older_dropped": False, "visits": []}
 
 
@@ -584,9 +599,56 @@ async def test_a_line_said_during_a_pause_is_never_in_the_history_and_told_in_th
     runner.app.speak(PLACE_ID, PERSON, SPEAKER, REMARK)
     await settled(runner.app)
     runner.app.stand(SUBJECT, active(PLACE_ID), at_table())
-    waits(runner.app, 1)
+    state = waits(runner.app, 1)
     await runner.gateway.until_turns(1)
 
     (opening,) = runner.gateway.openings()
-    assert opening.room["history"] == history_of([])
+    assert opening.room["history"] == history_of([view_entry(url_of(runner, 0), state, revision=1, new=True)])
     assert opening.room["earlier_today"] == day_of(REMARK)
+
+
+async def test_the_table_displaces_the_early_call_lines_from_his_history_and_they_are_told_in_the_day_in_no_both(
+    runner, remembered
+):
+    runner.config = replace(runner.config, history_bytes=len(SPEAKER + ADDRESSED) + 2 * STATE_BYTES)
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    await restarted_in_the_call(runner)
+    await said_and_taken(runner.app, PLACE_ID, "early-call-line")
+    runner.app.stand(SUBJECT, active(PLACE_ID), at_table())
+    await shows(runner.app, 1)
+    second = await shows(runner.app, 2)
+    third = await shows(runner.app, 3)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.gateway.until_turns(1)
+
+    (written,) = runner.gateway.openings()
+    app = url_of(runner, 0)
+    assert written.room["history"] == history_of(
+        [
+            view_entry(app, second, revision=2, awaits_you=False),
+            view_entry(app, third, revision=3, awaits_you=False),
+            entry(app, PLACE_ID, ADDRESSED, seq=2, new=True),
+        ],
+        older_dropped=True,
+    )
+    assert written.room["earlier_today"] == day_of("early-call-line")
+
+
+async def test_every_line_kept_over_two_restarts_is_told_exactly_once_in_the_history_or_the_day_and_the_state_once(
+    runner, other, remembered
+):
+    runner.config = replace(runner.config, history_bytes=STATE_BYTES - 1)
+    await restarted_with_a_line_kept(runner, remembered, "first-kept")
+    say_in_the_call(runner, "second-kept")
+    await remembered.until_finished(3)
+    runner.task.cancel()
+    await ended_by(runner.task)
+    runner.start()
+    await remembered.until_finished(4)
+    await said_and_taken(runner.app, PLACE_ID, "third-kept")
+    other.stand(SUBJECT, at_table())
+    state = waits(other, 1)
+    await runner.gateway.until_turns(1)
+
+    told = runner.gateway.told_in(1)
+    assert [told.count(text) for text in ("first-kept", "second-kept", "third-kept", state["hand"])] == [1, 1, 1, 1]
