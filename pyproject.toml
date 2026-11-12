@@ -53,7 +53,7 @@ dev = [
 # --- Ruff ---
 
 [tool.ruff]
-src = [".", "src"]
+src = [".", "src", "scripts"]
 target-version = "py314"
 line-length = 120
 
@@ -97,7 +97,10 @@ indent-style = "space"
 # --- Pyright ---
 
 [tool.pyright]
-include = ["src"]
+include = ["src", "scripts"]
+# A module under scripts/figures resolves its siblings as `figures.<module>`, as the script does when it runs; naming
+# extraPaths ends the implicit `src` root, so it is named here too.
+extraPaths = ["src", "scripts"]
 typeCheckingMode = "strict"
 pythonVersion = "3.14"
 
@@ -105,7 +108,7 @@ pythonVersion = "3.14"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = [".", "src"]
+pythonpath = [".", "src", "scripts"]
 addopts = [
     "--import-mode=importlib",
     "--strict-markers",
@@ -121,7 +124,7 @@ markers = ["postgres: tests that need the throwaway Postgres named by PERSONAS_T
 # The measured set has one owner, here: `--cov` in addopts turns measurement
 # on and takes its sources from this key, so every way of running the suite
 # measures the same files.
-source = ["src"]
+source = ["src", "scripts"]
 branch = true
 # Sonar resolves the report's paths against the checkout.
 relative_files = true
@@ -137,11 +140,13 @@ exclude_lines = [
 exclude_also = [
     'class .*\bProtocol\):',
 ]
+# scripts/figures has no __init__.py: without this a module nothing imports would be left out of the report.
+include_namespace_packages = true
 fail_under = 100
 show_missing = true
 
 # --- Vulture ---
 
 [tool.vulture]
-paths = ["src/personas"]
+paths = ["src/personas", "scripts"]
 min_confidence = 80

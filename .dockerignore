@@ -8,6 +8,9 @@
 
 **/__pycache__
 
+# The figures are for the apps that draw them; the runner never reads them.
+**/*.vrm
+
 # The tree above is admitted whole, so what must never be in an image is named
 # again here: a secret or a key nested inside it would otherwise ride in on its
 # parent directory.
