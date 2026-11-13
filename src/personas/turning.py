@@ -27,7 +27,7 @@ from personas.decision import (
     turn_call_bound,
     turn_told,
 )
-from personas.entries import ActDone
+from personas.entries import ActDone, InputSizes, message_bytes, told_bytes
 from personas.failures import CallFailure, Unreachable, leaves_of, raise_if_cancelled, task_is_being_cancelled
 from personas.reporting import Event
 from personas.task_record import (
@@ -63,6 +63,8 @@ type BackendFactory = Callable[[Iterable[HandTool]], AgentBackend]
 
 _CALL_BOUND_TEXT: Final = "this app takes no more calls in this turn"
 _APP_FAILED_TEXT: Final = "the app did not answer"
+_MODEL_FACING: Final = {"name", "description", "parameters"}
+_RESULT_ROLE: Final = "tool"
 
 
 def _failure_event(app: AppTarget) -> Event:
@@ -85,6 +87,35 @@ class TurnSetup:
     persona: AgentDefinition
     binding: ToolBinding
     backend: BackendFactory
+
+
+class _Sizing:
+    """What the turn's input weighs: the request's tools and told message once it is built, and every tool result
+    relayed back to the model, held and refused calls included. Only bytes are kept."""
+
+    def __init__(self) -> None:
+        self._request: tuple[int, int] | None = None
+        self._results = 0
+
+    def request_built(self, declarations: Iterable[ToolDeclaration], told: str) -> None:
+        tools = sum(told_bytes(each.model_dump(mode="json", include=_MODEL_FACING)) for each in declarations)
+        self._request = (tools, message_bytes(TurnRole.USER.value, told))
+
+    def measuring(self, tool: HandTool) -> HandTool:
+        """The tool with a handler that counts the result it returns."""
+
+        async def handler(principal: Principal, arguments: JsonObject) -> ToolOutcome:
+            outcome = await tool.handler(principal, arguments)
+            self._results += message_bytes(_RESULT_ROLE, outcome.content)
+            return outcome
+
+        return HandTool(tool.declaration, handler)
+
+    def sizes(self) -> InputSizes | None:
+        """``None`` while no request was built."""
+        if self._request is None:
+            return None
+        return InputSizes(self._request[0], self._request[1], self._results)
 
 
 @dataclass
@@ -175,7 +206,7 @@ class Turning:
         current_token: Callable[[], Awaitable[Token]],
         use_current_token: Callable[[AppSession], Awaitable[None]],
         report: Callable[[Event, str | None, AppTarget | None], None],
-        report_turn_end: Callable[[str | None, TurnUsage | None], None],
+        report_turn_end: Callable[[str | None, TurnUsage | None, InputSizes | None], None],
     ) -> None:
         self._agent = agent
         self._app = app
@@ -206,8 +237,9 @@ class Turning:
         A turn the gateway ends short is reported unless a defect was met; a failed relayed call and any other
         error go to the group. Every error of a cancelled turn ends as the cancellation.
         """
+        sizing = _Sizing()
         try:
-            await self._run_turn(setup, admitted, record)
+            await self._run_turn(setup, admitted, record, sizing)
         except Exception as error:
             raise_if_cancelled()
             leaves = list(leaves_of(error))
@@ -218,7 +250,7 @@ class Turning:
             # The stop only carries the failure out of the backend; the failure goes to the group, never the stop.
             held = failure_held_by(stopped)
             if held is None and record.defect is None:
-                self._report_turn_end(stopped.code.value, None)
+                self._report_turn_end(stopped.code.value, None, sizing.sizes())
             # What left the session beside the stop (a late answer) still goes to the group, to be judged there.
             rest: list[BaseException] = [held] if held is not None else []
             rest.extend(leaf for leaf in leaves if leaf is not stopped)
@@ -227,12 +259,12 @@ class Turning:
             if rest:
                 raise BaseExceptionGroup("the turn's session failed", rest) from None
 
-    async def _run_turn(self, setup: TurnSetup, admitted: Admitted, record: TaskRecord) -> None:
+    async def _run_turn(self, setup: TurnSetup, admitted: Admitted, record: TaskRecord, sizing: _Sizing) -> None:
         told = await self._told(admitted)
         token = await self._current_token()
         async with self._open_session(self._app, token.value) as session:
             try:
-                await self._run_session_body(setup, admitted, told, session, record)
+                await self._run_session_body(setup, admitted, told, session, record, sizing)
             except Exception as error:
                 record.note(error)
                 raise
@@ -252,12 +284,18 @@ class Turning:
         )
 
     async def _run_session_body(
-        self, setup: TurnSetup, admitted: Admitted, told: str, session: AppSession, record: TaskRecord
+        self,
+        setup: TurnSetup,
+        admitted: Admitted,
+        told: str,
+        session: AppSession,
+        record: TaskRecord,
+        sizing: _Sizing,
     ) -> None:
         raise_if_cancelled()
         held = await self._hold_tools(setup, session, record, admitted)
         if held is None:
-            self._report_turn_end(TOOL_NOT_DECLARED_CODE, None)
+            self._report_turn_end(TOOL_NOT_DECLARED_CODE, None, None)
             return
         request = TurnRequest(
             agent=setup.persona.name,
@@ -268,8 +306,11 @@ class Turning:
             max_duration_seconds=setup.persona.max_duration_seconds,
             max_tool_calls=held.max_tool_calls,
         )
+        sizing.request_built(held.declarations, told)
         person = TurnPerson(admitted.facts.principal, TURN_ROLE, admitted.groups)
-        async with aclosing(setup.backend(held.tools).run(request, person)) as events:
+        async with aclosing(
+            setup.backend(tuple(sizing.measuring(each) for each in held.tools)).run(request, person)
+        ) as events:
             if admitted.aloud:
                 speaking = Speaking(
                     session,
@@ -285,7 +326,7 @@ class Turning:
             else:
                 final = await _final_event_of(events)
         if final is not None:
-            self._report_turn_end(None, final.usage)
+            self._report_turn_end(None, final.usage, sizing.sizes())
 
     async def _speak_along(self, events: AsyncIterator[TurnEvent], speaking: Speaking) -> FinalEvent | None:
         """Reads the turn's events while the sentences they release are spoken beside them.
