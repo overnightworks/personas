@@ -247,6 +247,10 @@ def test_each_failure_makes_the_loop_renew_suspend_or_back_off(failure, already_
     assert reaction_to(failure, already_renewed=already_renewed) == reaction
 
 
+def test_a_json_rpc_code_is_logged_as_the_word_and_the_signed_number():
+    assert jsonrpc_code(INVALID_PARAMS) == "jsonrpc_-32602"
+
+
 def test_a_secret_shows_nothing_of_itself():
     value = secrets.token_hex(8)
     secret = Secret(value)
