@@ -11,8 +11,9 @@ from agents.tools import ToolOutcome
 from mcp_types import ListToolsResult
 
 from personas.reporting import Event
-from tests.support.call import ADDRESSED, ANSWER, restarted_in_the_call, say_in_the_call
-from tests.support.gateway import Gateway, say
+from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
+from tests.support.gateway import Gateway, say, words
+from tests.support.history import REMARK, said_and_taken
 from tests.support.hopin import LIST_TOOLS, formatted
 from tests.support.voice import a_voice_call
 
@@ -110,6 +111,22 @@ async def test_a_turn_logs_the_sum_of_its_call_results(runner, caplog, calls):
     assert results % calls == 0
     assert results // calls >= len(answer)
     assert results // calls < 2 * len(answer)
+
+
+async def test_a_turn_counts_the_result_of_a_held_call_among_its_results(runner, caplog):
+    first, held_text = words(2)
+    runner.gateway = Gateway(tool_round(say(first)), tool_round(say(held_text)), completion("done"))
+    second = runner.gateway.hold_request(2)
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.app.said_count(1)
+    await said_and_taken(runner.app, PLACE_ID, REMARK)
+    second.set()
+    await runner.reports.until_a_turn_completed()
+
+    (held,) = (each for each in runner.gateway.tool_results(3) if each.startswith('{"sent": false'))
+    _, _, results = (int(each) for each in the_turn_ended_line(caplog).groups()[1:4])
+    assert results >= len(held)
 
 
 async def test_a_turn_that_fails_after_its_request_logs_its_sizes_and_no_usage(runner, caplog):
