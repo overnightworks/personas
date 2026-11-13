@@ -38,8 +38,8 @@ from tests.support.history import (
     woke_at_table,
     written_turns,
 )
+from tests.support.hopin import ACCEPTED_NAME, ISSUER, PLAY_TOOL, active, paused
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import ISSUER, PLAY_TOOL, active, paused
 from tests.support.realm import AGENT_NAME
 from tests.support.voice import a_voice_call
 
@@ -373,6 +373,7 @@ async def test_a_line_said_while_a_view_turn_runs_holds_its_call_once_and_is_tol
                 view_entry(table, first, revision=1),
                 entry(url_of(runner, 0), PLACE_ID, REMARK),
                 act_entry(table, PLAY_TOOL, {"place": TABLE.id, "text": ANSWER}, answered("said")),
+                entry(table, TABLE.id, ANSWER, seq=1, name=ACCEPTED_NAME, own=True, place_kind=TABLE.kind),
                 view_entry(table, second, revision=2, new=True),
             ]
         ),

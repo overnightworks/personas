@@ -128,13 +128,19 @@ class Memory:
 
 
 def _is_call(standing: Standing) -> bool:
-    """A call place is read through its window; a place that serves a view is read through that, whatever its kind."""
+    """A call place serves no view, so it is accepted whether the loop takes turns or not."""
     return standing.place.kind == CALL_PLACE_KIND and not standing.serves_view
 
 
+def _has_window(standing: Standing) -> bool:
+    """A place is read through its window when it is a call or serves a view, whose window holds what happened there."""
+    return standing.place.kind == CALL_PLACE_KIND or standing.serves_view
+
+
 def _accepted(standing: Standing, *, takes_turns: bool) -> bool:
-    """A call place is accepted as it is read through its window; any other place, and a call place that serves a view,
-    only where the loop takes turns, since an app marks an invited standing as serving no view before it is active."""
+    """A call place that serves no view is accepted whether the loop takes turns or not; any other place, and a call
+    place that serves a view, only where it does, since an app marks an invited standing as serving no view before it
+    is active."""
     if _is_call(standing):
         return True
     return takes_turns and (standing.serves_view or standing.place.kind != CALL_PLACE_KIND)
@@ -325,18 +331,23 @@ type Checkpoint = Restarted | Joined | Paused | Reading
 
 
 def sync_checkpoints(
-    checkpoints: Mapping[PlaceRef, Checkpoint], standings: tuple[Standing, ...]
+    checkpoints: Mapping[PlaceRef, Checkpoint], standings: tuple[Standing, ...], before: tuple[Standing, ...]
 ) -> dict[PlaceRef, Checkpoint]:
-    """The checkpoints after a standing read: a call place paused is paused, one active keeps its entry or starts as
-    restarted, and a place that is gone or invited again has none."""
+    """The checkpoints after a standing read, given the standing read before it: a window place paused is paused, one
+    active keeps its entry or starts as restarted, one that serves a view again after an active read without one starts
+    as restarted, and a place that is gone, invited again or no window place any more has none."""
+    viewless = frozenset(
+        standing.place for standing in before if standing.state is StandingState.ACTIVE and not standing.serves_view
+    )
     synced: dict[PlaceRef, Checkpoint] = {}
     for standing in standings:
-        if not _is_call(standing):
+        if not _has_window(standing):
             continue
         if standing.state is StandingState.PAUSED:
             synced[standing.place] = Paused()
         elif standing.state is StandingState.ACTIVE:
-            synced[standing.place] = checkpoints.get(standing.place, Restarted())
+            returning = standing.serves_view and standing.place in viewless
+            synced[standing.place] = Restarted() if returning else checkpoints.get(standing.place, Restarted())
     return synced
 
 
@@ -345,9 +356,9 @@ def sets_where_reading_starts(checkpoint: Checkpoint) -> bool:
     return isinstance(checkpoint, Restarted | Paused)
 
 
-def active_call_places(standings: tuple[Standing, ...]) -> tuple[PlaceRef, ...]:
+def active_window_places(standings: tuple[Standing, ...]) -> tuple[PlaceRef, ...]:
     return tuple(
-        standing.place for standing in standings if standing.state is StandingState.ACTIVE and _is_call(standing)
+        standing.place for standing in standings if standing.state is StandingState.ACTIVE and _has_window(standing)
     )
 
 
@@ -493,9 +504,10 @@ def _take_after(window: PlaceWindow, last_seq: int) -> Perception:
     )
 
 
-def wakes_him(new: Iterable[PlaceEntry]) -> bool:
-    """Whether a line taken at a written place makes a turn due: any line that is not his own."""
-    return any(not line.own for line in new)
+def wakes_him(new: Iterable[PlaceEntry], *, serves_view: bool) -> bool:
+    """Whether the lines taken at a place make a turn due: at a place with a view none does, since its view alone calls
+    him; at any other place a line that is neither his own nor an act does."""
+    return not serves_view and any(not (line.own or line.act) for line in new)
 
 
 def bound_declarations(declared: Sequence[ToolDeclaration], names: Sequence[str]) -> tuple[ToolDeclaration, ...] | None:
@@ -588,8 +600,8 @@ def released(turns: Turns) -> Turns:
 
 
 def left_standing(app: str, standings: tuple[Standing, ...]) -> Callable[[AppPlace], bool]:
-    """Whether a due place is one of ``app`` that is no active call or view place any more."""
-    active = {AppPlace(app, place) for place in (*active_call_places(standings), *active_view_places(standings))}
+    """Whether a due place is one of ``app`` that is no active window place any more; a view place is one."""
+    active = {AppPlace(app, place) for place in active_window_places(standings)}
     return lambda at: at.app == app and at not in active
 
 

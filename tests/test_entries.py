@@ -9,7 +9,7 @@ from agents.member import (
     PlaceView,
 )
 
-from personas.entries import Answered, KeptLine, ViewSeen, taken_lines
+from personas.entries import Answered, KeptLine, ViewSeen, taken_lines, told_entry, told_line
 from tests.support.history import (
     APP,
     LATER,
@@ -29,9 +29,21 @@ def test_taken_lines_are_the_visits_lines_as_kept_with_the_time_of_the_read():
     )
 
     assert taken_lines(MORNING, entries, LATER) == (
-        KeptLine(MORNING, 4, LATER, "Ada", "message", "four", own=False, spoken=False, cut=False),
-        KeptLine(MORNING, 5, LATER, "Mozart", "message", "five", own=True, spoken=True, cut=False),
+        KeptLine(MORNING, 4, LATER, "Ada", "message", "four", own=False, spoken=False, cut=False, act=False),
+        KeptLine(MORNING, 5, LATER, "Mozart", "message", "five", own=True, spoken=True, cut=False, act=False),
     )
+
+
+def test_a_line_that_is_an_act_is_kept_as_one_and_told_with_the_mark_while_any_other_line_is_told_without_the_key():
+    acting = PlaceEntry(seq=1, kind="message", name="Ada", text="took a card", own=False, act=True)
+    talking = PlaceEntry(seq=2, kind="message", name="Ada", text="good luck", own=False)
+
+    kept_act, kept_talk = taken_lines(MORNING, (acting, talking), LATER)
+
+    assert kept_act.act is True
+    assert told_line(kept_act)["act"] is True
+    assert "act" not in told_line(kept_talk)
+    assert told_entry(kept_act, LATER, new=True)["act"] is True
 
 
 def test_a_history_its_lines_and_its_views_show_no_name_no_text_and_no_state_in_their_repr():

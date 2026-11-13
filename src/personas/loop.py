@@ -22,8 +22,8 @@ from personas.decision import (
     Token,
     Waiting,
     accepts_for,
-    active_call_places,
     active_view_places,
+    active_window_places,
     after_refusal,
     backoff_delay,
     decisive_failure,
@@ -162,6 +162,7 @@ class AgentLoop:
         self._renewed_after_401 = False
         self._suspension: str | None = None
         self._backing_off = False
+        self._standings: tuple[Standing, ...] = ()
         self._checkpoints: dict[PlaceRef, Checkpoint] = {}
         self._turned_revisions: dict[PlaceRef, int] = {}
         self._turn: ActiveTurn | None = None
@@ -229,12 +230,18 @@ class AgentLoop:
                 raise defect
 
     async def _reconcile(self, session: AppSession, turns: asyncio.TaskGroup) -> None:
-        """Reads the standing as it is now and acts on it; a wake says only that it may have changed."""
+        """Reads the standing as it is now and acts on it; a wake says only that it may have changed.
+
+        The views are read before the windows, so a window holds every line up to its view's revision; the lines enter
+        the history before the views do.
+        """
         standings = await self._take_standing(session)
-        if await self._read_call_places(session, standings):
+        views = await self._read_views(session, standings)
+        window_lost = await self._read_windows(session, standings)
+        self._take_views(views)
+        if window_lost:
             # A window the app lost dropped its place's checkpoint: the standing says where the place stands now.
-            standings = await self._take_standing(session)
-        await self._read_views(session, standings)
+            await self._take_standing(session)
         await self._start_due_turn(turns)
         self._served()
 
@@ -245,7 +252,8 @@ class AgentLoop:
         self._resume_if_unwell()
         self._boundaries.ready.announce()
         self._memory = forget_gone(self._memory, standing.standings)
-        self._checkpoints = sync_checkpoints(self._checkpoints, standing.standings)
+        self._checkpoints = sync_checkpoints(self._checkpoints, standing.standings, self._standings)
+        self._standings = standing.standings
         self._turned_revisions = sync_turned_revisions(self._turned_revisions, standing.standings)
         self._mind.undue(left_standing(self._app.mcp_url, standing.standings))
         self._mind.stand_at(self._app.mcp_url, holds=lends_tools(self._app.binding is not None, standing.standings))
@@ -305,15 +313,16 @@ class AgentLoop:
             if is_news:
                 self._report(Event.REFUSED, refusal.value)
 
-    async def _read_call_places(self, session: AppSession, standings: tuple[Standing, ...]) -> bool:
-        """Reads the active call places' windows, a turn of his running or not, and takes their lines in.
+    async def _read_windows(self, session: AppSession, standings: tuple[Standing, ...]) -> bool:
+        """Reads the active window places' windows, a turn of his running or not, and takes their lines in.
 
         It says whether a window was lost, which dropped its place's checkpoint.
         """
         if self._turn_setup is None:
             return False
+        serving_view = frozenset(active_view_places(standings))
         lost = False
-        for place in active_call_places(standings):
+        for place in active_window_places(standings):
             await self._use_current_token(session)
             window = await session.read_place(place)
             if window is None:
@@ -321,28 +330,38 @@ class AgentLoop:
                 lost = True
                 continue
             read_at = self._boundaries.clock.wall()
-            self._take_lines(place, window, read_at)
+            self._take_lines(place, window, read_at, serves_view=place in serving_view)
             await self._remembering.keep(WindowRead(self._agent.client_id, self._app.mcp_url, place, window, read_at))
         return lost
 
-    async def _read_views(self, session: AppSession, standings: tuple[Standing, ...]) -> None:
-        """Reads the views of the active view places in the standing's order and takes each into the agent's history.
-
-        A revision that waits for him and has no turn yet makes a turn due at its place; one that does not wait, and a
-        view the app gives none of, take the place's due away. A revision gets one turn, whatever that turn did.
-        """
+    async def _read_views(
+        self, session: AppSession, standings: tuple[Standing, ...]
+    ) -> dict[PlaceRef, ViewSeen | None]:
+        """Reads the views of the active view places in the standing's order, each stamped with the time of its read; a
+        place the app gives no view of maps to none."""
         if self._turn_setup is None:
-            return
+            return {}
+        read: dict[PlaceRef, ViewSeen | None] = {}
         for place in active_view_places(standings):
             await self._use_current_token(session)
             view = await session.read_view(place)
+            read[place] = (
+                None if view is None else ViewSeen(self._app.mcp_url, place, view, self._boundaries.clock.wall())
+            )
+        return read
+
+    def _take_views(self, read: dict[PlaceRef, ViewSeen | None]) -> None:
+        """Takes each view read into the agent's history. A revision that waits for him and has no turn yet makes a turn
+        due at its place; one that does not wait, and a view the app gives none of, take the place's due away. A
+        revision gets one turn, whatever that turn did. No await stands in it."""
+        for place, seen in read.items():
             at = AppPlace(self._app.mcp_url, place)
-            if view is None:
+            if seen is None:
                 self._mind.undue(partial(eq, at))
                 continue
-            self._mind.take((ViewSeen(at.app, place, view, self._boundaries.clock.wall()),))
-            if view_turn_due(self._turned_revisions.get(place), view):
-                self._mind.due(at, Waiting(view.revision))
+            self._mind.take((seen,))
+            if view_turn_due(self._turned_revisions.get(place), seen.view):
+                self._mind.due(at, Waiting(seen.view.revision))
             else:
                 self._mind.undue(partial(eq, at))
 
@@ -364,13 +383,13 @@ class AgentLoop:
         admitted = Admitted(facts, at.place, occasion, self._mind.history, self._boundaries.clock.wall(), aloud, apps)
         self._start_turn(turns, setup, at.place, admitted)
 
-    def _take_lines(self, place: PlaceRef, window: PlaceWindow, read_at: datetime) -> None:
-        """Moves the place's checkpoint and takes the new lines into the agent's history; a line that is not his own
-        makes a turn due. No await stands in it."""
+    def _take_lines(self, place: PlaceRef, window: PlaceWindow, read_at: datetime, *, serves_view: bool) -> None:
+        """Moves the place's checkpoint and takes the new lines into the agent's history; ``wakes_him`` decides whether
+        they make a turn due. No await stands in it."""
         perception = perceive(window, self._checkpoints[place])
         self._checkpoints[place] = perception.checkpoint
         self._mind.take(taken_lines(Visit(self._app.mcp_url, place, window.generation), perception.new, read_at))
-        if wakes_him(perception.new):
+        if wakes_him(perception.new, serves_view=serves_view):
             lines = Lines(window.generation, frozenset(line.seq for line in perception.new), perception.missed)
             self._mind.due(AppPlace(self._app.mcp_url, place), lines)
 

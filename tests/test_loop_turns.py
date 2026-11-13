@@ -20,6 +20,7 @@ from tests.support.history import (
     SPEAKER,
     TABLE,
     at_table,
+    entry,
     said_and_taken,
     settled,
     url_of,
@@ -90,6 +91,32 @@ async def test_a_line_that_does_not_name_him_gives_one_turn_told_it_as_new_at_it
     (turn,) = runner.gateway.openings()
     assert turn.new_seqs == [1]
     assert turn.room["woke"]["place"] == {"kind": "call", "id": PLACE_ID}
+
+
+async def test_an_act_line_of_someone_else_gives_no_turn_and_is_told_marked_with_the_next_line_that_does(runner):
+    await restarted_in_the_call(runner)
+    await said_and_taken(runner.app, PLACE_ID, "took a card", act=True)
+    assert runner.gateway.openings() == []
+    say_in_the_call(runner, "Hello everyone", author=PERSON)
+    await runner.gateway.until_turns(1, why="lines")
+
+    (turn,) = runner.gateway.openings()
+    assert turn.new_seqs == [2]
+    assert turn.told("line") == [
+        entry(url_of(runner, 0), PLACE_ID, "took a card", seq=1, act=True),
+        entry(url_of(runner, 0), PLACE_ID, "Hello everyone", seq=2, new=True),
+    ]
+
+
+async def test_an_act_line_said_beside_a_line_in_one_read_gives_one_turn_told_both_as_new(runner):
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, "took a card", act=True)
+    say_in_the_call(runner, "Hello everyone")
+    await runner.gateway.until_turns(1, why="lines")
+
+    (turn,) = runner.gateway.openings()
+    assert turn.new_seqs == [1, 2]
+    assert [(each["seq"], each.get("act", False)) for each in turn.told("line")] == [(1, True), (2, False)]
 
 
 async def test_a_turn_that_calls_nothing_says_nothing_reports_nothing_and_gives_no_further_turn(runner):

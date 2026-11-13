@@ -50,6 +50,7 @@ class KeptLine:
     own: bool
     spoken: bool
     cut: bool
+    act: bool
 
 
 @dataclass(frozen=True)
@@ -174,7 +175,7 @@ class History:
 def taken_lines(visit: Visit, new: Iterable[PlaceEntry], read_at: datetime) -> tuple[KeptLine, ...]:
     """The lines a read of the visit's window took, as the history keeps them."""
     return tuple(
-        KeptLine(visit, line.seq, read_at, line.name, line.kind, line.text, line.own, line.spoken, line.cut)
+        KeptLine(visit, line.seq, read_at, line.name, line.kind, line.text, line.own, line.spoken, line.cut, line.act)
         for line in new
     )
 
@@ -189,6 +190,8 @@ def told_line(line: KeptLine) -> dict[str, object]:
     }
     if line.cut:
         told["cut"] = True
+    if line.act:
+        told["act"] = True
     return told
 
 

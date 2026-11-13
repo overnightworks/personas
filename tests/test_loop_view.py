@@ -9,14 +9,14 @@ from http import HTTPStatus
 
 import pytest
 from agents.backend.fake_gateway import Reply, completion, tool_call, tool_round
-from agents.member import STANDING_URI, FigureRef, PlaceRef
+from agents.member import STANDING_URI, FigureRef, PlaceRef, place_view_uri, place_window_uri
 
 from personas.config import Voice, load_config
 from personas.decision import NO_TURNS_CODE, TURN_CANCELLED_CODE
 from personas.reporting import Event
-from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, say_in_the_call
+from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, say_in_the_call
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
-from tests.support.history import history_of, view_entry, woke_at_table
+from tests.support.history import entry, history_of, said_and_taken, settled, view_entry, woke_at_table
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, READ, SAY_TOOL, active, formatted, invited, paused
 from tests.support.realm import AGENT_NAME
@@ -119,7 +119,7 @@ async def test_a_table_that_serves_no_view_yet_is_accepted_with_figure_and_voice
     assert wire["figure"] == {"url": figure.url, "sha256": figure.sha256}
     assert wire["voice"] == voice_name
     assert told_states(runner) == [told]
-    assert runner.app.window_reads(TABLE.id) == 0
+    assert runner.app.window_reads(TABLE.id, TABLE.kind) > 0
 
 
 async def test_an_invitation_to_a_place_that_serves_a_view_is_accepted_once_and_the_place_is_then_served(runner):
@@ -137,7 +137,7 @@ async def test_an_invitation_to_a_place_that_serves_a_view_is_accepted_once_and_
 
     assert [accept.invitation for accept in runner.app.accepted] == ["inv-3"]
     assert told_states(runner) == told
-    assert runner.app.window_reads(TABLE.id) == 0
+    assert runner.app.window_reads(TABLE.id, TABLE.kind) > 0
 
 
 async def test_an_active_place_of_another_kind_that_serves_no_view_is_ignored_and_unread(runner):
@@ -335,3 +335,118 @@ async def test_the_state_of_a_view_reaches_no_report_and_no_log_line(runner, cap
     assert not [value for value in first.values() if value in logged]
     assert TABLE.id not in logged
     assert all(record.levelno < logging.ERROR for record in caplog.records)
+
+
+def joined_at(runner, place: PlaceRef, *, said: tuple[str, ...] = (), revision: int = 1, awaits_you: bool = False):
+    """The runner accepts the invitation to the place, which then serves a view at this revision, with the lines said
+    before it is read; the states shown are collected in the list returned."""
+    shown: list[dict[str, str]] = []
+
+    def seated_once_joined(change):
+        if change.event is Event.JOINED:
+            for text in said:
+                runner.app.speak(place.id, PERSON, "Ada", text)
+            runner.app.stand(SUBJECT, at_table(place))
+            state = a_state()
+            runner.app.show_view(place.id, revision, state, awaits_you=awaits_you)
+            shown.append(state)
+
+    runner.on_report = seated_once_joined
+    runner.app.stand(SUBJECT, invited(place.id, "inv-3", kind=place.kind, serves_view=True))
+    runner.start()
+    return shown
+
+
+CALL_WITH_A_VIEW = PlaceRef(kind="call", id="room-3")
+PLACES_WITH_A_VIEW = [
+    pytest.param(TABLE, id="a table"),
+    pytest.param(CALL_WITH_A_VIEW, id="a call that serves a view"),
+]
+
+
+@pytest.mark.parametrize("place", PLACES_WITH_A_VIEW)
+async def test_the_lines_of_a_place_enter_his_history_before_the_view_of_that_wake_and_only_the_view_is_new(
+    runner, place
+):
+    said = ("first", "second")
+    shown = joined_at(runner, place, said=said, awaits_you=True)
+    await runner.gateway.until_turns(1, why="view")
+    await settled(runner.app)
+    [state] = shown
+
+    (opening,) = runner.gateway.openings()
+    app = runner.config.apps[0].mcp_url
+    assert opening.room["history"] == history_of(
+        [
+            *(entry(app, place.id, text, seq=seq, place_kind=place.kind) for seq, text in enumerate(said, 1)),
+            {**view_entry(app, state, revision=1, new=True), "place": {"kind": place.kind, "id": place.id}},
+        ]
+    )
+    assert opening.room["woke"]["why"] == "view"
+
+
+@pytest.mark.parametrize("act", [False, True], ids=["a line said", "an act line"])
+async def test_a_line_of_someone_else_at_a_place_with_a_view_starts_no_turn_and_is_told_with_the_next_one(runner, act):
+    joined_at(runner, TABLE)
+    await runner.app.until_view_read(TABLE)
+    await said_and_taken(runner.app, TABLE.id, "a remark", act=act, place_kind=TABLE.kind)
+    assert runner.gateway.openings() == []
+    waits(runner, 2)
+    await runner.gateway.until_turns(1, why="view")
+
+    (opening,) = runner.gateway.openings()
+    [told] = [each for each in opening.room["history"]["entries"] if each["entry"] == "line"]
+    assert (told["text"], told.get("act", False), told["new"]) == ("a remark", act, False)
+    assert [each["new"] for each in opening.room["history"]["entries"]] == [False, False, True]
+
+
+async def test_a_view_place_with_an_empty_window_is_read_view_first_then_window_with_no_extra_standing_read(runner):
+    state = await seated_at_a_table_whose_view_waits(runner)
+    await runner.gateway.until_turns(1, why="view")
+
+    assert told_states(runner) == [state]
+    assert runner.app.read_order[:3] == [STANDING_URI, place_view_uri(TABLE), place_window_uri(TABLE)]
+
+
+async def test_an_app_that_lists_the_window_and_answers_its_read_as_unknown_costs_no_extra_turn_and_no_failure(runner):
+    runner.app.without_window.add(TABLE.id)
+    first = await seated_at_a_table_whose_view_waits(runner)
+    await runner.gateway.until_turns(1, why="view")
+    await wakes_at_the_same_revision(runner, first)
+    second = waits(runner, 2)
+    await runner.gateway.until_turns(2, why="view")
+
+    assert told_states(runner) == [first, second]
+    assert runner.app.read_order[:4] == [STANDING_URI, place_view_uri(TABLE), place_window_uri(TABLE), STANDING_URI]
+    assert runner.reports.changes_of(Event.BACKOFF) == []
+
+
+async def test_a_window_that_fails_at_a_view_place_backs_off_and_the_resume_gives_one_view_entry_and_one_turn(runner):
+    runner.app.failing_windows.add(TABLE.id)
+    state = await seated_at_a_table_whose_view_waits(runner)
+    await runner.reports.until(Event.BACKOFF)
+    assert runner.gateway.openings() == []
+    runner.app.failing_windows.discard(TABLE.id)
+    await runner.gateway.until_turns(1, why="view")
+    await settled(runner.app)
+
+    (opening,) = runner.gateway.openings()
+    app = runner.config.apps[0].mcp_url
+    assert opening.room["history"] == history_of([view_entry(app, state, revision=1, new=True)])
+
+
+async def test_the_lines_a_view_place_held_before_a_restart_are_never_taken_and_the_ones_said_after_it_are(runner):
+    runner.app.stand(SUBJECT, at_table())
+    runner.app.speak(TABLE.id, PERSON, "Ada", "before the restart")
+    runner.app.show_view(TABLE.id, 1, a_state(), awaits_you=False)
+    runner.start()
+    await runner.app.until_window_read(TABLE.id, kind=TABLE.kind)
+    await settled(runner.app)
+    await said_and_taken(runner.app, TABLE.id, "after the restart", place_kind=TABLE.kind)
+    waits(runner, 2)
+    await runner.gateway.until_turns(1, why="view")
+
+    (opening,) = runner.gateway.openings()
+    assert [each["text"] for each in opening.room["history"]["entries"] if each["entry"] == "line"] == [
+        "after the restart"
+    ]

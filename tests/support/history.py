@@ -81,11 +81,13 @@ def entry(
     own: bool = False,
     spoken: bool = False,
     new: bool = False,
+    place_kind: str = "call",
+    act: bool = False,
 ) -> dict[str, object]:
-    return {
+    told: dict[str, object] = {
         "entry": "line",
         "app": app_url,
-        "place": {"kind": "call", "id": place_id},
+        "place": {"kind": place_kind, "id": place_id},
         "seconds_ago": seconds_ago,
         "seq": seq,
         "name": name,
@@ -95,6 +97,7 @@ def entry(
         "spoken": spoken,
         "new": new,
     }
+    return told | {"act": True} if act else told
 
 
 def view_entry(
@@ -181,11 +184,19 @@ async def settled(app: FakeApp, subject: str = SUBJECT) -> None:
 
 
 async def said_and_taken(
-    app: FakeApp, place_id: str, text: str, *, author: str = PERSON, name: str = SPEAKER, spoken: bool = False
+    app: FakeApp,
+    place_id: str,
+    text: str,
+    *,
+    author: str = PERSON,
+    name: str = SPEAKER,
+    spoken: bool = False,
+    act: bool = False,
+    place_kind: str = "call",
 ) -> None:
-    reads = app.window_reads(place_id)
-    app.speak(place_id, author, name, text, spoken=spoken)
-    await app.until_window_read(place_id, reads + 1)
+    reads = app.window_reads(place_id, place_kind)
+    app.speak(place_id, author, name, text, spoken=spoken, act=act)
+    await app.until_window_read(place_id, reads + 1, place_kind)
     await settled(app)
 
 
@@ -219,9 +230,9 @@ def history_holding(entries):
     return history_after(EMPTY_HISTORY, entries, ROOMY.size_bytes)
 
 
-def kept(visit, seq, text, *, hours_before, own=False, spoken=False, name="Ada"):
+def kept(visit, seq, text, *, hours_before, own=False, spoken=False, act=False, name="Ada"):
     """A kept line of a visit, first read this many hours before ``LATER``."""
-    return KeptLine(visit, seq, LATER - timedelta(hours=hours_before), name, "message", text, own, spoken, False)
+    return KeptLine(visit, seq, LATER - timedelta(hours=hours_before), name, "message", text, own, spoken, False, act)
 
 
 def a_view(revision: int, *, awaits_you: bool = True) -> PlaceView:
@@ -231,8 +242,10 @@ def a_view(revision: int, *, awaits_you: bool = True) -> PlaceView:
 APP = "https://app.test/mcp"
 
 
-def said(seq: int, text: str, *, name: str = "Bo", visit: Visit = MORNING, spoken: bool = False) -> KeptLine:
-    return KeptLine(visit, seq, LATER, name, "message", text, own=False, spoken=spoken, cut=False)
+def said(
+    seq: int, text: str, *, name: str = "Bo", visit: Visit = MORNING, spoken: bool = False, act: bool = False
+) -> KeptLine:
+    return KeptLine(visit, seq, LATER, name, "message", text, own=False, spoken=spoken, cut=False, act=act)
 
 
 def an_act(*, arguments=None, outcome=None, tool="say", app=APP, at=LATER - timedelta(seconds=9)) -> ActDone:

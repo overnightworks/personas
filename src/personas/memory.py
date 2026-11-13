@@ -87,6 +87,7 @@ _LINES: Final = Table(
     Column("own", Boolean),
     Column("spoken", Boolean),
     Column("cut", Boolean),
+    Column("act", Boolean),
     PrimaryKeyConstraint("client_id", "app", "place_kind", "place_id", "generation", "seq"),
 )
 
@@ -197,6 +198,7 @@ def _rows_of(read: WindowRead) -> list[dict[str, object]]:
             "own": line.own,
             "spoken": line.spoken,
             "cut": line.cut,
+            "act": line.act,
         }
         for line in read.window.entries
     ]
@@ -214,6 +216,7 @@ def _kept_line(row: Row[tuple[object, ...]]) -> KeptLine:
         row.own,
         row.spoken,
         row.cut,
+        row.act,
     )
 
 
