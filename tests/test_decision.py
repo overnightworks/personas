@@ -28,6 +28,7 @@ from agents.member import (
 )
 from agents.tools import ToolDeclaration, ToolOutcome
 from agents.turn import MAX_EVENT_BYTES
+from mcp_types import INVALID_PARAMS
 
 from personas.app_session import READ_SECONDS
 from personas.decision import (
@@ -81,6 +82,7 @@ from personas.decision import (
     history_after,
     holds_a_place,
     is_voice_app,
+    jsonrpc_code,
     left_out_for,
     left_standing,
     lends_tools,
@@ -237,12 +239,16 @@ def test_the_backoff_grows_never_beyond_its_cap_and_is_never_zero():
         (StatusFailure(500), False, Reaction.BACKOFF),
         (StatusFailure(502), True, Reaction.BACKOFF),
         (Unreachable("down"), False, Reaction.BACKOFF),
-        (UnusableAnswer("jsonrpc_-32602"), False, Suspend("jsonrpc_-32602")),
+        (UnusableAnswer(jsonrpc_code(INVALID_PARAMS)), False, Suspend(jsonrpc_code(INVALID_PARAMS))),
         (UnusableAnswer("http_307"), True, Suspend("http_307")),
     ],
 )
 def test_each_failure_makes_the_loop_renew_suspend_or_back_off(failure, already_renewed, reaction):
     assert reaction_to(failure, already_renewed=already_renewed) == reaction
+
+
+def test_a_json_rpc_code_is_logged_as_the_word_and_the_signed_number():
+    assert jsonrpc_code(INVALID_PARAMS) == "jsonrpc_-32602"
 
 
 def test_a_secret_shows_nothing_of_itself():
@@ -260,7 +266,7 @@ def test_the_runner_cuts_a_stream_before_the_lease_of_its_member_would_have_ende
     assert READ_SECONDS < LEASE_SECONDS
 
 
-REFUSAL = UnusableAnswer("jsonrpc_-32602")
+REFUSAL = UnusableAnswer(jsonrpc_code(INVALID_PARAMS))
 RENEWABLE = StatusFailure(401)
 SERVER_ERROR = StatusFailure(503)
 NETWORK = Unreachable("down")

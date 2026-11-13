@@ -15,7 +15,7 @@ from agents.turn import Principal, person_fingerprint
 from mcp_types import INVALID_PARAMS, CallToolResult, TextContent
 
 from personas.app_session import READ_SECONDS, open_mcp_session
-from personas.decision import TURN_CANCELLED_CODE
+from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE, jsonrpc_code, status_code
 from personas.failures import Unreachable
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
@@ -129,7 +129,11 @@ async def test_an_error_result_the_app_answers_is_told_as_an_answer_that_is_an_e
 
 @pytest.mark.parametrize(
     ("fails", "code"),
-    [(cuts, "network"), (refuses_the_token, "http_401"), (answers_wrongly, f"jsonrpc_{INVALID_PARAMS}")],
+    [
+        (cuts, NETWORK_FAILURE_CODE),
+        (refuses_the_token, status_code(401)),
+        (answers_wrongly, jsonrpc_code(INVALID_PARAMS)),
+    ],
     ids=["transport", "401", "protocol error"],
 )
 async def test_a_relayed_say_that_fails_is_told_as_not_answered_with_the_failures_code_and_the_turn_ends_as_before(
@@ -197,7 +201,7 @@ async def test_calls_past_a_tools_only_apps_own_bound_enter_no_act(runner, songm
 
 @pytest.mark.parametrize(
     ("handler", "code", "call_seconds"),
-    [(refuses_with_a_server_error, "http_500", None), (hangs, "network", 0.3)],
+    [(refuses_with_a_server_error, status_code(500), None), (hangs, NETWORK_FAILURE_CODE, 0.3)],
     ids=["an error of the app", "a hang past the call time"],
 )
 async def test_a_tools_only_call_that_fails_is_told_as_not_answered_with_the_failures_code_never_cancelled(

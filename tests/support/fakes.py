@@ -277,6 +277,26 @@ class Reports:
         ]
         return reports if apps else [(each.event, each.code) for each in reports]
 
+    def of_the_sweep(self) -> list[tuple[Event, str | None]]:
+        """The changes that name no agent, the sweep's own, as their event and code."""
+        return [(change.event, change.code) for change in self.without_completed_turns if change.client_id is None]
+
+    def lines_removed(self) -> list[int | None]:
+        """The line count of each sweep that finished."""
+        return [change.lines for change in self.changes if change.event is Event.SWEPT]
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.changes
+
+    def changes_of(self, event: Event) -> list[StateChange]:
+        """Each change of this event."""
+        return [change for change in self.changes if change.event is event]
+
+    def codes_of(self, event: Event) -> list[str | None]:
+        """The code of each change of this event."""
+        return [change.code for change in self.changes if change.event is event]
+
     async def until(self, event: Event, *, count: int = 1, limit_seconds: float = 10.0) -> None:
         """Returns once this many changes of this event have been reported; fails after the limit."""
         async with asyncio.timeout(limit_seconds):

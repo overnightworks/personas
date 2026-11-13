@@ -196,6 +196,10 @@ def status_code(status: int) -> str:
     return f"http_{status}"
 
 
+def jsonrpc_code(code: int) -> str:
+    return f"jsonrpc_{code}"
+
+
 def failure_code(failure: CallFailure) -> str:
     """The code a failure logs: the HTTP status of a server error, the code of an unusable answer, else a fixed word
     for the network."""

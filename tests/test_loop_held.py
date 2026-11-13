@@ -15,7 +15,7 @@ from agents.tools import ToolOutcome
 from agents.turn import FailureCode, Principal, person_fingerprint
 from mcp_types import ListToolsResult
 
-from personas.decision import TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE
+from personas.decision import NETWORK_FAILURE_CODE, TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE, status_code
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, play, say, words
@@ -192,9 +192,9 @@ async def test_a_table_turn_holds_the_tools_of_his_call_and_writes_in_it(runner,
 @pytest.mark.parametrize(
     ("handler", "code", "call_seconds"),
     [
-        (refuses_with_a_server_error, "http_500", None),
-        (cuts, "network", None),
-        (hangs, "network", 0.3),
+        (refuses_with_a_server_error, status_code(500), None),
+        (cuts, NETWORK_FAILURE_CODE, None),
+        (hangs, NETWORK_FAILURE_CODE, 0.3),
     ],
     ids=["a server error", "a cut connection", "a hang past the call time"],
 )
@@ -221,7 +221,7 @@ async def test_a_failed_call_to_a_held_app_is_an_error_that_spends_its_bound_and
 @pytest.mark.parametrize(
     ("arrange", "code"),
     [
-        (lambda app: app.script(LIST_TOOLS, cuts), "network"),
+        (lambda app: app.script(LIST_TOOLS, cuts), NETWORK_FAILURE_CODE),
         (lambda app: app.script(LIST_TOOLS, lists_nothing), TOOL_NOT_DECLARED_CODE),
     ],
     ids=["a listing that fails", "a bound tool declared no more"],
@@ -246,7 +246,7 @@ async def test_a_failed_call_to_his_own_apps_tool_ends_the_turn_into_that_loops_
     await runner.reports.until(Event.RESUMED)
 
     assert runner.reports.reported(apps=True, started=False) == [
-        (Event.BACKOFF, "network", url_of(runner, 0)),
+        (Event.BACKOFF, NETWORK_FAILURE_CODE, url_of(runner, 0)),
         (Event.RESUMED, None, url_of(runner, 0)),
     ]
     assert runner.gateway.arrivals == 1
@@ -451,8 +451,8 @@ async def test_a_held_app_that_refuses_after_the_turn_began_is_an_error_takes_no
     assert len(other.log.entries) == requests_after_the_refusal
     assert all(each.startswith("Error") for each in runner.gateway.tool_results(3))
     assert runner.reports.reported(apps=True, started=False) == [
-        (Event.SUSPENDED, "http_403", url_of(runner, 1)),
-        (Event.HELD_APP_FAILED, "http_403", url_of(runner, 1)),
+        (Event.SUSPENDED, status_code(HTTPStatus.FORBIDDEN), url_of(runner, 1)),
+        (Event.HELD_APP_FAILED, status_code(HTTPStatus.FORBIDDEN), url_of(runner, 1)),
     ]
     assert runner.gateway.offered_tools(4) == [SAY_TOOL]
 

@@ -12,14 +12,18 @@ from agents.backend.gateway import GatewayBackend
 from agents.member import AcceptInvitationRefusal, PlaceRef
 from agents.tools import ToolDeclaration, ToolEffect
 from agents.turn import RejectionCode
+from mcp_types import INVALID_PARAMS
 
 from personas.config import DEFAULT_HISTORY_BYTES, load_config
 from personas.decision import (
     BACKOFF_CAP_SECONDS,
+    NETWORK_FAILURE_CODE,
     RENEW_BEFORE_EXPIRY_SECONDS,
     SUSPENDED_RETRY_SECONDS,
     Accept,
     backoff_delay,
+    jsonrpc_code,
+    status_code,
 )
 from personas.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer, leaves_of
 from personas.loop import AgentLoop, Boundaries
@@ -112,16 +116,16 @@ async def test_a_refused_token_suspends_the_loop_without_an_app_call_and_logs_it
 
     assert run.session.opened == 0
     assert run.clock.slept == [SUSPENDED_RETRY_SECONDS] * 3
-    assert run.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, "http_401")]
+    assert run.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, status_code(401))]
 
 
 @pytest.mark.parametrize(
     ("failure", "code"),
     [
-        (StatusFailure(403), "http_403"),
-        (StatusFailure(400), "http_400"),
-        (UnusableAnswer("jsonrpc_-32602"), "jsonrpc_-32602"),
-        (UnusableAnswer("http_307"), "http_307"),
+        (StatusFailure(403), status_code(403)),
+        (StatusFailure(400), status_code(400)),
+        (UnusableAnswer(jsonrpc_code(INVALID_PARAMS)), jsonrpc_code(INVALID_PARAMS)),
+        (UnusableAnswer(status_code(307)), status_code(307)),
     ],
     ids=["403", "400", "protocol error", "redirect"],
 )
@@ -142,7 +146,7 @@ async def test_a_401_renews_the_token_once_and_a_second_one_suspends_the_loop(sc
 
     assert run.tokens.fetched == 3
     assert run.clock.slept == [SUSPENDED_RETRY_SECONDS]
-    assert run.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, "http_401"), (Event.RESUMED, None)]
+    assert run.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, status_code(401)), (Event.RESUMED, None)]
 
 
 async def test_a_401_the_renewed_token_cures_suspends_nothing(scenario):
@@ -163,7 +167,7 @@ async def test_a_loop_resumed_after_a_suspension_joins_only_when_invited_anew(sc
 
     assert run.reports.reported() == [
         (Event.STARTED, None),
-        (Event.SUSPENDED, "http_403"),
+        (Event.SUSPENDED, status_code(403)),
         (Event.RESUMED, None),
         (Event.JOINED, None),
     ]
@@ -172,7 +176,7 @@ async def test_a_loop_resumed_after_a_suspension_joins_only_when_invited_anew(sc
 
 @pytest.mark.parametrize(
     ("failure", "code"),
-    [(Unreachable("down"), "network"), (StatusFailure(503), "http_503")],
+    [(Unreachable("down"), NETWORK_FAILURE_CODE), (StatusFailure(503), status_code(503))],
     ids=["network", "5xx from the app"],
 )
 async def test_an_app_failure_that_is_not_a_refusal_backs_off_with_a_capped_growing_interval_and_logs_it_once(
@@ -196,7 +200,7 @@ async def test_a_realm_that_does_not_answer_or_fails_backs_off_without_suspendin
     await run.play()
 
     assert run.clock.slept == [backoff_delay(1), backoff_delay(2), backoff_delay(3)]
-    assert run.reports.reported() == [(Event.STARTED, None), (Event.BACKOFF, "network")]
+    assert run.reports.reported() == [(Event.STARTED, None), (Event.BACKOFF, NETWORK_FAILURE_CODE)]
 
 
 async def test_the_backoff_starts_over_after_an_answer(scenario):
@@ -209,7 +213,7 @@ async def test_the_backoff_starts_over_after_an_answer(scenario):
 
 async def test_an_accept_the_app_cannot_answer_suspends_the_loop_with_its_code_and_does_not_retry_at_once(scenario):
     standing = invited("room-7", "inv-3")
-    failure = UnusableAnswer("jsonrpc_-32602")
+    failure = UnusableAnswer(jsonrpc_code(INVALID_PARAMS))
     run = scenario([read_of(standing) for n in range(3)], accepts=[failure, failure, None])
 
     await run.play()
@@ -217,9 +221,9 @@ async def test_an_accept_the_app_cannot_answer_suspends_the_loop_with_its_code_a
     assert run.clock.slept == [SUSPENDED_RETRY_SECONDS] * 2
     assert run.reports.reported() == [
         (Event.STARTED, None),
-        (Event.SUSPENDED, "jsonrpc_-32602"),
+        (Event.SUSPENDED, jsonrpc_code(INVALID_PARAMS)),
         (Event.RESUMED, None),
-        (Event.SUSPENDED, "jsonrpc_-32602"),
+        (Event.SUSPENDED, jsonrpc_code(INVALID_PARAMS)),
         (Event.RESUMED, None),
         (Event.JOINED, None),
     ]
@@ -228,7 +232,7 @@ async def test_an_accept_the_app_cannot_answer_suspends_the_loop_with_its_code_a
 async def test_a_loop_resumes_once_a_read_answers_though_the_accept_after_it_fails(scenario):
     standing = invited("room-7", "inv-3")
     run = scenario(
-        [UnusableAnswer("jsonrpc_-32602"), read_of(standing), read_of(standing)],
+        [UnusableAnswer(jsonrpc_code(INVALID_PARAMS)), read_of(standing), read_of(standing)],
         accepts=[StatusFailure(503), None],
     )
 
@@ -236,9 +240,9 @@ async def test_a_loop_resumes_once_a_read_answers_though_the_accept_after_it_fai
 
     assert run.reports.reported() == [
         (Event.STARTED, None),
-        (Event.SUSPENDED, "jsonrpc_-32602"),
+        (Event.SUSPENDED, jsonrpc_code(INVALID_PARAMS)),
         (Event.RESUMED, None),
-        (Event.BACKOFF, "http_503"),
+        (Event.BACKOFF, status_code(503)),
         (Event.RESUMED, None),
         (Event.JOINED, None),
     ]
@@ -254,7 +258,7 @@ async def test_an_accept_that_answers_401_again_after_a_renewal_suspends_the_loo
     await run.play()
 
     assert run.clock.slept == [SUSPENDED_RETRY_SECONDS]
-    assert run.reports.reported()[:2] == [(Event.STARTED, None), (Event.SUSPENDED, "http_401")]
+    assert run.reports.reported()[:2] == [(Event.STARTED, None), (Event.SUSPENDED, status_code(401))]
 
 
 async def test_an_accept_that_fails_on_the_network_backs_off_and_does_not_retry_every_second(scenario):
@@ -305,9 +309,9 @@ async def test_a_backoff_is_logged_once_for_its_retries_and_again_after_the_loop
 
     assert run.reports.reported() == [
         (Event.STARTED, None),
-        (Event.BACKOFF, "network"),
+        (Event.BACKOFF, NETWORK_FAILURE_CODE),
         (Event.RESUMED, None),
-        (Event.BACKOFF, "http_503"),
+        (Event.BACKOFF, status_code(503)),
         (Event.RESUMED, None),
     ]
 
@@ -319,8 +323,8 @@ async def test_a_backoff_after_a_suspension_is_logged_and_one_answer_resumes_bot
 
     assert run.reports.reported() == [
         (Event.STARTED, None),
-        (Event.SUSPENDED, "http_403"),
-        (Event.BACKOFF, "network"),
+        (Event.SUSPENDED, status_code(403)),
+        (Event.BACKOFF, NETWORK_FAILURE_CODE),
         (Event.RESUMED, None),
     ]
 
@@ -366,7 +370,7 @@ async def test_a_refusal_and_a_network_failure_leaving_one_session_together_susp
     await run.play()
 
     assert run.clock.slept == [SUSPENDED_RETRY_SECONDS]
-    assert run.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, "http_403"), (Event.RESUMED, None)]
+    assert run.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, status_code(403)), (Event.RESUMED, None)]
 
 
 async def test_a_failure_together_with_a_programming_error_ends_the_runner_with_both_and_no_reaction(scenario):
@@ -495,7 +499,11 @@ async def test_a_lifecycle_and_a_turn_failing_together_give_one_reaction_and_a_r
         await asyncio.gather(task, return_exceptions=True)
 
     assert together.clock.slept == [SUSPENDED_RETRY_SECONDS]
-    assert together.reports.reported() == [(Event.STARTED, None), (Event.JOINED, None), (Event.SUSPENDED, "http_403")]
+    assert together.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.JOINED, None),
+        (Event.SUSPENDED, status_code(403)),
+    ]
 
 
 async def test_a_failure_of_a_call_and_a_defect_together_give_no_reaction_and_every_leaf_ends_the_runner(files):
@@ -771,7 +779,7 @@ async def test_a_failure_of_the_wake_stream_that_loses_the_race_to_a_failing_rea
         await asyncio.gather(task, return_exceptions=True)
 
     assert failing.clock.slept == [SUSPENDED_RETRY_SECONDS]
-    assert failing.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, "http_403")]
+    assert failing.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, status_code(403))]
 
 
 class DefectInARelayedCall(ScriptedSessions):

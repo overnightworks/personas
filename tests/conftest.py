@@ -265,7 +265,7 @@ async def runner(caplog: pytest.LogCaptureFixture, library_loggers: None, files:
             await asyncio.gather(harness.task, return_exceptions=True)
     await harness.token_client.aclose()
     logged = formatted(caplog.get_records("call"))
-    assert not harness.reports.changes or "client_id=" in logged
+    assert harness.reports.is_empty or "client_id=" in logged
     for held in harness.secrets_and_content():
         assert held not in logged
 

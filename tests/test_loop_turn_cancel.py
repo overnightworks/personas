@@ -13,7 +13,7 @@ from agents.member import STANDING_URI
 from mcp_types import ListToolsResult
 
 from personas import app_session
-from personas.decision import TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE
+from personas.decision import TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE, status_code
 from personas.failures import Unreachable, leaves_of
 from personas.reporting import Event
 from personas.task_record import UnrequestedCancellationError
@@ -329,7 +329,11 @@ async def test_a_lifecycle_refusal_that_reaches_a_turn_while_its_session_opens_w
         runner.app.stand(SUBJECT, active(PLACE_ID))
         await runner.reports.until(Event.RESUMED)
 
-        assert runner.reports.reported() == [(Event.STARTED, None), (Event.BACKOFF, "http_503"), (Event.RESUMED, None)]
+        assert runner.reports.reported() == [
+            (Event.STARTED, None),
+            (Event.BACKOFF, status_code(503)),
+            (Event.RESUMED, None),
+        ]
         assert not runner.task.done()
 
 

@@ -14,7 +14,7 @@ from mcp_types import ListToolsResult, Tool
 
 from personas import app_session
 from personas.config import load_config
-from personas.decision import TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE
+from personas.decision import NETWORK_FAILURE_CODE, TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE, status_code
 from personas.failures import Unreachable, leaves_of
 from personas.reporting import Event
 from personas.tokens import HttpTokenSource
@@ -63,10 +63,6 @@ async def addressed_in_the_call(runner):
     say_in_the_call(runner, ADDRESSED)
 
 
-def failed_apps(runner):
-    return [change.code for change in runner.reports.changes if change.event is Event.TOOLS_ONLY_APP_FAILED]
-
-
 async def a_song_is_made_and_announced(runner, songmaker):
     last = songmaker.results[GENERATE_SONG]
     runner.gateway = Gateway(calling(CREATE_SONG, GENERATE_SONG), saying(last), completion("done"))
@@ -100,10 +96,14 @@ async def test_each_app_sees_only_the_bearers_issued_for_its_own_scope(runner, s
 @pytest.mark.parametrize(
     ("arrange", "code", "call_seconds"),
     [
-        (lambda app: setattr(app, "refuse_with", HTTPStatus.FORBIDDEN), "http_403", None),
-        (lambda app: setattr(app, "refuse_with", HTTPStatus.INTERNAL_SERVER_ERROR), "http_500", None),
-        (lambda app: app.script(LIST_TOOLS, cuts), "network", None),
-        (lambda app: app.script(LIST_TOOLS, hangs), "network", SHORT_CALL_SECONDS),
+        (lambda app: setattr(app, "refuse_with", HTTPStatus.FORBIDDEN), status_code(HTTPStatus.FORBIDDEN), None),
+        (
+            lambda app: setattr(app, "refuse_with", HTTPStatus.INTERNAL_SERVER_ERROR),
+            status_code(HTTPStatus.INTERNAL_SERVER_ERROR),
+            None,
+        ),
+        (lambda app: app.script(LIST_TOOLS, cuts), NETWORK_FAILURE_CODE, None),
+        (lambda app: app.script(LIST_TOOLS, hangs), NETWORK_FAILURE_CODE, SHORT_CALL_SECONDS),
     ],
     ids=["refused", "failing", "cut", "hanging"],
 )
@@ -176,9 +176,9 @@ async def a_call_that_fails_and_a_turn_that_goes_on(runner, songmaker, code, *, 
 @pytest.mark.parametrize(
     ("handler", "code", "call_seconds"),
     [
-        (refuses_with_a_server_error, "http_500", None),
-        (cuts, "network", None),
-        (hangs, "network", SHORT_CALL_SECONDS),
+        (refuses_with_a_server_error, status_code(500), None),
+        (cuts, NETWORK_FAILURE_CODE, None),
+        (hangs, NETWORK_FAILURE_CODE, SHORT_CALL_SECONDS),
     ],
     ids=["a server error", "a cut connection", "a hang past the call time"],
 )
@@ -206,7 +206,7 @@ async def test_a_session_of_a_tools_only_call_whose_sdk_child_is_lost_shows_the_
 
     songmaker.script(CALL, loses_its_child)
 
-    await a_call_that_fails_and_a_turn_that_goes_on(runner, songmaker, "network")
+    await a_call_that_fails_and_a_turn_that_goes_on(runner, songmaker, NETWORK_FAILURE_CODE)
 
 
 async def test_a_tools_only_app_whose_call_failed_takes_no_more_calls_in_the_turn_and_is_reported_once(
@@ -224,7 +224,7 @@ async def test_a_tools_only_app_whose_call_failed_takes_no_more_calls_in_the_tur
     assert closed != failed
     assert songmaker.log.count(CALL) == 1
     assert runner.reports.reported(apps=True, started=False) == [
-        (Event.TOOLS_ONLY_APP_FAILED, "http_500", songmaker_url(runner))
+        (Event.TOOLS_ONLY_APP_FAILED, status_code(500), songmaker_url(runner))
     ]
 
 
@@ -237,7 +237,7 @@ async def a_loss_while_the_app_session_opens_and_a_turn_that_answers(runner, son
 
     assert runner.gateway.offered_tools() == [SAY_TOOL]
     assert runner.reports.reported(apps=True, started=False) == [
-        (Event.TOOLS_ONLY_APP_FAILED, "network", songmaker_url(runner))
+        (Event.TOOLS_ONLY_APP_FAILED, NETWORK_FAILURE_CODE, songmaker_url(runner))
     ]
     assert not runner.task.done()
 
@@ -281,7 +281,7 @@ async def test_a_child_lost_while_a_calls_session_discovers_shows_the_model_an_e
 
     assert runner.gateway.tool_results(2)[0].startswith("Error")
     assert runner.reports.reported(apps=True, started=False) == [
-        (Event.TOOLS_ONLY_APP_FAILED, "network", songmaker_url(runner))
+        (Event.TOOLS_ONLY_APP_FAILED, NETWORK_FAILURE_CODE, songmaker_url(runner))
     ]
     assert not runner.task.done()
 
@@ -308,7 +308,7 @@ async def test_a_token_the_realm_refuses_for_the_tools_only_scope_leaves_the_app
 
     assert runner.gateway.offered_tools() == [SAY_TOOL]
     assert runner.reports.reported(apps=True, started=False) == [
-        (Event.TOOLS_ONLY_APP_FAILED, "http_401", songmaker_url(runner))
+        (Event.TOOLS_ONLY_APP_FAILED, status_code(401), songmaker_url(runner))
     ]
     assert runner.clock.slept == []
     assert runner.app.log.count(LISTEN) == 1
@@ -328,7 +328,7 @@ async def test_a_token_the_realm_refuses_in_mid_turn_for_the_tools_only_scope_is
     assert songmaker.called == []
     assert runner.gateway.tool_results(2)[0].startswith("Error")
     assert runner.reports.reported(apps=True, started=False) == [
-        (Event.TOOLS_ONLY_APP_FAILED, "http_401", songmaker_url(runner))
+        (Event.TOOLS_ONLY_APP_FAILED, status_code(401), songmaker_url(runner))
     ]
     assert runner.clock.slept == []
     assert runner.app.log.count(LISTEN) == 1
@@ -462,7 +462,7 @@ async def test_a_timeout_the_token_source_raises_itself_before_the_call_time_is_
 
     assert defect in list(leaves_of(ended))
     assert not any(isinstance(leaf, Unreachable) for leaf in leaves_of(ended))
-    assert failed_apps(runner) == []
+    assert runner.reports.codes_of(Event.TOOLS_ONLY_APP_FAILED) == []
 
 
 async def test_a_defect_in_a_tools_only_call_whose_close_outlasts_the_turns_duration_ends_the_runner_loud(
@@ -698,5 +698,5 @@ async def test_a_defect_in_a_tools_only_request_whose_own_close_loses_a_child_en
 
     await ends_with_the_defect_beside(runner, defect, Unreachable)
 
-    assert failed_apps(runner) == []
+    assert runner.reports.codes_of(Event.TOOLS_ONLY_APP_FAILED) == []
     assert runner.app.said == []
