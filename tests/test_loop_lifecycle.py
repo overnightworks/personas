@@ -24,7 +24,7 @@ from mcp_types import (
 )
 
 from personas import app_session
-from personas.decision import SUSPENDED_RETRY_SECONDS, backoff_delay, status_code
+from personas.decision import NETWORK_FAILURE_CODE, SUSPENDED_RETRY_SECONDS, backoff_delay, status_code
 from personas.failures import (
     INVALID_ANSWER_CODE,
     LISTEN_NOT_HONORED_CODE,
@@ -130,7 +130,11 @@ async def test_a_stream_lost_backs_off_and_is_reopened_and_read(runner, acknowle
     runner.start()
     await runner.reports.until(Event.RESUMED)
 
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.BACKOFF, "network"), (Event.RESUMED, None)]
+    assert runner.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.BACKOFF, NETWORK_FAILURE_CODE),
+        (Event.RESUMED, None),
+    ]
     assert runner.clock.slept == [backoff_delay(1)]
     assert runner.app.log.count(DISCOVER) == 2
     assert runner.app.log.reads_follow_acknowledgements()
@@ -142,7 +146,7 @@ async def test_a_stream_that_never_completes_is_cut_at_the_runners_deadline_and_
     await runner.reports.until(Event.BACKOFF)
     await runner.app.log.until(LISTEN, 2)
 
-    assert runner.reports.reported()[:2] == [(Event.STARTED, None), (Event.BACKOFF, "network")]
+    assert runner.reports.reported()[:2] == [(Event.STARTED, None), (Event.BACKOFF, NETWORK_FAILURE_CODE)]
     assert backoff_delay(1) in runner.clock.slept
 
 
@@ -159,7 +163,7 @@ async def test_an_answer_that_lands_after_the_session_closed_backs_off_and_does_
     await runner.reports.until(Event.BACKOFF)
     await runner.app.log.until(LISTEN, 2)
 
-    assert runner.reports.reported()[:2] == [(Event.STARTED, None), (Event.BACKOFF, "network")]
+    assert runner.reports.reported()[:2] == [(Event.STARTED, None), (Event.BACKOFF, NETWORK_FAILURE_CODE)]
 
 
 async def test_a_stream_with_no_acknowledgement_until_past_the_deadline_backs_off_and_is_reopened_and_read(runner):
@@ -174,7 +178,11 @@ async def test_a_stream_with_no_acknowledgement_until_past_the_deadline_backs_of
     runner.start(stream_seconds=SHORT_STREAM_SECONDS)
     await runner.reports.until(Event.RESUMED)
 
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.BACKOFF, "network"), (Event.RESUMED, None)]
+    assert runner.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.BACKOFF, NETWORK_FAILURE_CODE),
+        (Event.RESUMED, None),
+    ]
     assert runner.clock.slept == [backoff_delay(1)]
     assert runner.app.log.count(LISTEN) == 2
     assert runner.app.log.reads_follow_acknowledgements()
@@ -254,7 +262,11 @@ async def test_a_broken_connection_on_a_read_backs_off_and_is_logged_once_until_
     runner.start()
     await runner.reports.until(Event.RESUMED)
 
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.BACKOFF, "network"), (Event.RESUMED, None)]
+    assert runner.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.BACKOFF, NETWORK_FAILURE_CODE),
+        (Event.RESUMED, None),
+    ]
 
 
 @pytest.mark.parametrize(
@@ -337,7 +349,7 @@ async def test_a_disabled_client_suspends_the_loop_before_any_app_call_and_a_gra
     await drain(runner.realm.refusals, REFUSALS_BEFORE_THE_FIX)
 
     assert runner.app.log.entries == []
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, "http_401")]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, status_code(401))]
     assert set(runner.clock.slept) == {SUSPENDED_RETRY_SECONDS}
 
     runner.realm.refusing = False
@@ -355,7 +367,7 @@ async def test_a_token_the_app_does_not_accept_is_renewed_once_and_then_suspends
     runner.start()
     await drain(runner.app.refusals, 2 * REFUSALS_BEFORE_THE_FIX)
 
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, "http_401")]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, status_code(401))]
     assert len(runner.realm.issued) > 2
 
 

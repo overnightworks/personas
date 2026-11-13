@@ -9,7 +9,7 @@ from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.turn import FailureCode
 
 from personas.config import load_config
-from personas.decision import TURN_CANCELLED_CODE
+from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE
 from personas.reporting import Event
 from tests.support.call import (
     ADDRESSED,
@@ -220,10 +220,10 @@ async def test_a_failure_of_the_call_that_follows_a_hold_ends_the_turn_with_one_
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.gateway.until_turns(2, why="lines")
 
-    assert runner.reports.reported() == [STARTED, (Event.BACKOFF, "network"), (Event.RESUMED, None)]
+    assert runner.reports.reported() == [STARTED, (Event.BACKOFF, NETWORK_FAILURE_CODE), (Event.RESUMED, None)]
     assert runner.gateway.round_sizes() == [2, 4, 2]
     acts = [each for each in runner.gateway.turns()[1].room["history"]["entries"] if each["entry"] == "act"]
-    assert [each["outcome"] for each in acts] == [{"answered": False, "code": "network"}]
+    assert [each["outcome"] for each in acts] == [{"answered": False, "code": NETWORK_FAILURE_CODE}]
 
 
 async def _cuts(reply):

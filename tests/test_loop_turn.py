@@ -21,7 +21,7 @@ from mcp_types import (
 
 from personas import app_session
 from personas.config import load_config
-from personas.decision import TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE
+from personas.decision import NETWORK_FAILURE_CODE, TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE
 from personas.failures import (
     Unreachable,
     leaves_of,
@@ -294,8 +294,8 @@ async def answers_wrongly(reply):
 @pytest.mark.parametrize(
     ("method", "fails", "events"),
     [
-        (DISCOVER, cuts, [(Event.STARTED, None), (Event.BACKOFF, "network"), (Event.RESUMED, None)]),
-        (LIST_TOOLS, cuts, [(Event.STARTED, None), (Event.BACKOFF, "network"), (Event.RESUMED, None)]),
+        (DISCOVER, cuts, [(Event.STARTED, None), (Event.BACKOFF, NETWORK_FAILURE_CODE), (Event.RESUMED, None)]),
+        (LIST_TOOLS, cuts, [(Event.STARTED, None), (Event.BACKOFF, NETWORK_FAILURE_CODE), (Event.RESUMED, None)]),
         (DISCOVER, refuses_the_token, [(Event.STARTED, None)]),
         (LIST_TOOLS, refuses_the_token, [(Event.STARTED, None)]),
     ],
@@ -335,7 +335,7 @@ async def test_a_turn_ended_short_beside_a_late_answer_is_reported_and_costs_one
     assert runner.reports.reported() == [
         (Event.STARTED, None),
         (Event.TURN_ENDED, RejectionCode.BUSY.value),
-        (Event.BACKOFF, "network"),
+        (Event.BACKOFF, NETWORK_FAILURE_CODE),
         (Event.RESUMED, None),
     ]
     assert not runner.task.done()
@@ -359,7 +359,11 @@ async def test_a_turn_failure_cancelling_a_lifecycle_that_unwinds_with_a_late_an
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.app.said_count(1)
 
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.BACKOFF, "network"), (Event.RESUMED, None)]
+    assert runner.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.BACKOFF, NETWORK_FAILURE_CODE),
+        (Event.RESUMED, None),
+    ]
     assert [opening.new_seqs for opening in runner.gateway.openings()] == [[2]]
 
 
@@ -374,7 +378,7 @@ async def relayed_say_fails(runner, fails):
 @pytest.mark.parametrize(
     ("fails", "events", "issued"),
     [
-        (cuts, [(Event.STARTED, None), (Event.BACKOFF, "network"), (Event.RESUMED, None)], 1),
+        (cuts, [(Event.STARTED, None), (Event.BACKOFF, NETWORK_FAILURE_CODE), (Event.RESUMED, None)], 1),
         (refuses_the_token, [(Event.STARTED, None)], 2),
         (
             answers_wrongly,
@@ -405,7 +409,11 @@ async def test_a_relayed_call_beside_a_late_answer_gives_one_reaction_and_no_tur
     await relayed_say_fails(runner, cuts)
     await runner.reports.until(Event.RESUMED)
 
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.BACKOFF, "network"), (Event.RESUMED, None)]
+    assert runner.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.BACKOFF, NETWORK_FAILURE_CODE),
+        (Event.RESUMED, None),
+    ]
     assert len(runner.gateway.requests) == 1
     assert not runner.task.done()
 

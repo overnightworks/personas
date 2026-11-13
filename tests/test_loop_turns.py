@@ -10,7 +10,7 @@ import pytest
 from agents.backend.fake_gateway import Reply, completion
 from agents.turn import Principal, person_fingerprint
 
-from personas.decision import TURN_CANCELLED_CODE
+from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE
 from personas.reporting import Event
 from tests.support.call import ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import BUDGET_SPENT, Gateway, says, says_after_a_hold
@@ -321,7 +321,7 @@ async def test_a_relayed_call_that_fails_at_one_app_ends_its_turn_and_the_turn_d
 
     assert turn_order(runner) == [(0, "lines"), (1, "lines")]
     await runner.reports.until(Event.RESUMED)
-    assert runner.reports.reported(started=False) == [(Event.BACKOFF, "network"), (Event.RESUMED, None)]
+    assert runner.reports.reported(started=False) == [(Event.BACKOFF, NETWORK_FAILURE_CODE), (Event.RESUMED, None)]
     assert runner.gateway.round_sizes() == [2, 4, 2]
 
 
