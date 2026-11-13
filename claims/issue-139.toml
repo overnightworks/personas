@@ -1,8 +1,0 @@
-claim_id = "ab1ad19d867c413e81a9fd51f1d8289f"
-agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
-role = "builder"
-base = "b33a5d615b7a45e3ad0046ba00a1e3d533206b90"
-branch = "claude/issue-139-the-pure-rules-split-into-entries-recall"
-scope = ["AGENTS.md", "docs/ARCHITECTURE.md", "src/personas", "tests"]
-opened_commit = "0b25b7b24644b29f3c5314e0206d439c23626375"
-whole_reason = "one move of the pure rules into three modules, read together"
