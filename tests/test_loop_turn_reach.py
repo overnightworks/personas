@@ -96,8 +96,12 @@ async def test_each_app_sees_only_the_bearers_issued_for_its_own_scope(runner, s
 @pytest.mark.parametrize(
     ("arrange", "code", "call_seconds"),
     [
-        (lambda app: setattr(app, "refuse_with", HTTPStatus.FORBIDDEN), status_code(403), None),
-        (lambda app: setattr(app, "refuse_with", HTTPStatus.INTERNAL_SERVER_ERROR), status_code(500), None),
+        (lambda app: setattr(app, "refuse_with", HTTPStatus.FORBIDDEN), status_code(HTTPStatus.FORBIDDEN), None),
+        (
+            lambda app: setattr(app, "refuse_with", HTTPStatus.INTERNAL_SERVER_ERROR),
+            status_code(HTTPStatus.INTERNAL_SERVER_ERROR),
+            None,
+        ),
         (lambda app: app.script(LIST_TOOLS, cuts), NETWORK_FAILURE_CODE, None),
         (lambda app: app.script(LIST_TOOLS, hangs), NETWORK_FAILURE_CODE, SHORT_CALL_SECONDS),
     ],
