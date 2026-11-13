@@ -1,0 +1,8 @@
+claim_id = "6553851bc6e6487082f4ac59be4599d0"
+agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
+role = "builder"
+base = "62b2159272ba609a3d6cbbfb729bdb6cdf899a82"
+branch = "claude/issue-148-a-card-move-costs-one-short-model-round"
+scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas", "tests"]
+opened_commit = "25b7c414ef57c220d39f00d01f162c2dc68a5e4a"
+whole_reason = "the sizes are measured in turning.py, logged by loop.py and reporting.py, tested together and named in both documents"
