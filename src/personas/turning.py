@@ -309,7 +309,7 @@ class Turning:
         sizing.request_built(held.declarations, told)
         person = TurnPerson(admitted.facts.principal, TURN_ROLE, admitted.groups)
         async with aclosing(
-            setup.backend(sizing.measuring(each) for each in held.tools).run(request, person)
+            setup.backend(tuple(sizing.measuring(each) for each in held.tools)).run(request, person)
         ) as events:
             if admitted.aloud:
                 speaking = Speaking(
