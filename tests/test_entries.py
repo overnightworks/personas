@@ -29,8 +29,8 @@ def test_taken_lines_are_the_visits_lines_as_kept_with_the_time_of_the_read():
     )
 
     assert taken_lines(MORNING, entries, LATER) == (
-        KeptLine(MORNING, 4, LATER, "Ada", "message", "four", own=False, spoken=False),
-        KeptLine(MORNING, 5, LATER, "Mozart", "message", "five", own=True, spoken=True),
+        KeptLine(MORNING, 4, LATER, "Ada", "message", "four", own=False, spoken=False, cut=False),
+        KeptLine(MORNING, 5, LATER, "Mozart", "message", "five", own=True, spoken=True, cut=False),
     )
 
 

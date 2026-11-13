@@ -359,7 +359,7 @@ class AgentLoop:
         at, occasion = claim
         if isinstance(occasion, Waiting):
             self._turned_revisions[at.place] = occasion.revision
-        aloud = speaks_aloud(self._voice_app, occasion)
+        aloud = speaks_aloud(self._voice_app, occasion, self._checkpoints.get(at.place))
         apps = self._mind.held_apps(self._app.mcp_url)
         admitted = Admitted(facts, at.place, occasion, self._mind.history, self._boundaries.clock.wall(), aloud, apps)
         self._start_turn(turns, setup, at.place, admitted)

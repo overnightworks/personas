@@ -6,7 +6,7 @@ import json
 
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
-from agents.member import SpeakRefusal, SpeakRefused
+from agents.member import SpeakRefusal, SpeakRefused, VoiceState
 from agents.tools import ToolOutcome
 from agents.turn import Principal, person_fingerprint
 
@@ -178,7 +178,9 @@ async def test_a_table_turn_of_a_voice_call_is_not_told_aloud_and_its_text_is_no
     assert runner.app.spoken == []
 
 
-@pytest.mark.parametrize("refusal", list(SpeakRefusal))
+@pytest.mark.parametrize(
+    "refusal", [refusal for refusal in SpeakRefusal if refusal is not SpeakRefusal.STOPPED], ids=lambda each: each.value
+)
 async def test_a_refused_sentence_ends_the_turns_speech_but_not_the_turn_and_the_next_turn_is_told_the_refusal(
     runner, refusal
 ):
@@ -196,6 +198,74 @@ async def test_a_refused_sentence_ends_the_turns_speech_but_not_the_turn_and_the
     assert runner.app.said == [(SUBJECT, PLACE_ID, "Written.")]
     (refused,) = runner.gateway.turns()[1].told("speech")
     assert (refused["text"], refused["outcome"]) == ("First sentence.", {"answered": True, "refused": refusal.value})
+
+
+async def test_a_turn_at_a_place_whose_window_says_his_voice_is_unavailable_is_written_and_a_say_call_goes_through(
+    runner,
+):
+    runner.app.state_voice(PLACE_ID, VoiceState.UNAVAILABLE)
+    await a_voice_call(runner, *says(PLACE_ID, "Written."))
+    say_in_the_call(runner, ADDRESSED)
+    await runner.app.said_count(1)
+
+    (turn,) = runner.gateway.turns()
+    assert not turn.aloud
+    assert runner.app.said == [(SUBJECT, PLACE_ID, "Written.")]
+    assert runner.app.spoken == []
+
+
+async def test_a_voice_that_turns_unavailable_during_a_spoken_turn_leaves_that_turn_spoken_and_makes_the_next_written(
+    runner,
+):
+    sleeps = HeldSleeps(runner)
+    await a_voice_call(runner, completion(ANSWER), completion("Second answer."))
+    say_in_the_call(runner, ADDRESSED)
+    await sleeps.until_began(1)
+    runner.app.voice_states[PLACE_ID] = VoiceState.UNAVAILABLE
+    await said_and_taken(runner.app, PLACE_ID, REMARK, name=SPEAKER)
+    sleeps.release.set()
+    await runner.gateway.until_turns(2)
+
+    first, second = runner.gateway.turns()
+    assert (first.aloud, second.aloud) == (True, False)
+    assert sentences_spoken(runner) == [ANSWER]
+
+
+async def test_a_voice_down_at_one_call_writes_only_the_turn_at_that_place(runner):
+    other = "room-9"
+    runner.app.state_voice(other, VoiceState.UNAVAILABLE)
+    await a_voice_call(runner, completion("Hello."), completion("Written."))
+    runner.app.stand(SUBJECT, active(PLACE_ID), active(other))
+    await runner.app.until_window_read(other)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.app.spoken_count(1)
+    runner.app.speak(other, PERSON, "Ada", ADDRESSED)
+    await runner.gateway.until_turns(2)
+
+    spoken, written = runner.gateway.turns()
+    assert (spoken.aloud, written.aloud) == (True, False)
+    assert sentences_spoken(runner) == ["Hello."]
+
+
+async def test_a_sentence_the_app_wrote_to_the_place_instead_is_told_as_written_and_his_speech_goes_on(runner):
+    await a_voice_call(runner, completion(TWO_SENTENCES), completion("done"))
+    runner.app.written_speaks = 1
+    say_in_the_call(runner, ADDRESSED)
+    await runner.app.spoken_count(2)
+    say_in_the_call(runner, f"{ADDRESSED} Again.")
+    await runner.gateway.until_turns(2)
+
+    assert sentences_spoken(runner) == ["First sentence.", "Second sentence."]
+    assert runner.reports.reported() == [(Event.STARTED, None)]
+    second = runner.gateway.turns()[1]
+    assert [(each["text"], each["outcome"]) for each in second.told("speech")] == [
+        ("First sentence.", {"answered": True, "written": True}),
+        ("Second sentence.", {"answered": True}),
+    ]
+    assert [(each["text"], each["own"], each["spoken"]) for each in second.told("line") if each["own"]] == [
+        ("First sentence.", True, False),
+        ("Second sentence.", True, True),
+    ]
 
 
 async def test_a_line_said_while_he_speaks_is_not_in_the_running_turn_and_is_told_new_to_the_next_one(runner):
@@ -328,6 +398,20 @@ async def test_the_next_turn_is_told_which_lines_were_said_aloud_and_that_his_ow
         (ADDRESSED, False, False),
     ]
     assert [(each["text"], each["new"]) for each in second.told("speech")] == [(ANSWER, False)]
+
+
+async def test_the_next_turn_is_told_a_line_the_app_marked_as_cut_as_cut_with_the_part_heard(runner):
+    await a_voice_call(runner, completion("[silent]"), completion("done"))
+    say_in_the_call(runner, "Anyone th", spoken=True, cut=True)
+    await runner.gateway.until_turns(1)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.gateway.until_turns(2)
+
+    lines = [each for each in runner.gateway.turns()[1].told("line") if not each["own"]]
+    assert [(each["text"], each["spoken"], each.get("cut")) for each in lines] == [
+        ("Anyone th", True, True),
+        (ADDRESSED, False, None),
+    ]
 
 
 async def test_a_spoken_turn_logs_its_start_and_no_sentence(runner, caplog):

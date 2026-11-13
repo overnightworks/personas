@@ -23,6 +23,8 @@ from agents.member import (
     Spoken,
     Standing,
     StandingState,
+    VoiceState,
+    Written,
 )
 from agents.tools import ToolDeclaration, ToolOutcome
 from agents.turn import MAX_EVENT_BYTES
@@ -378,6 +380,18 @@ def test_a_place_of_another_kind_gets_no_checkpoint():
 )
 def test_only_a_restarted_or_paused_checkpoint_waits_for_a_read_to_set_where_reading_starts(checkpoint, sets_start):
     assert sets_where_reading_starts(checkpoint) is sets_start
+
+
+@pytest.mark.parametrize(
+    "checkpoint",
+    [Restarted(), Paused(), Joined(), Reading(GENERATION, 1), Reading(GENERATION, 1, VoiceState.UNAVAILABLE)],
+    ids=["restarted", "paused", "joined", "reading", "reading that stated unavailable"],
+)
+@pytest.mark.parametrize("stated", [VoiceState.UNAVAILABLE, VoiceState.AVAILABLE, None])
+def test_a_read_keeps_the_voice_state_its_window_states_even_when_it_takes_no_line(checkpoint, stated):
+    window = PlaceWindow(generation=GENERATION, starts_at=1, entries=(line(1, "a"),), voice_state=stated)
+
+    assert perceive(window, checkpoint).checkpoint.voice_state is stated
 
 
 @pytest.mark.parametrize(
@@ -899,17 +913,31 @@ def test_a_turn_that_is_spoken_is_told_so_in_what_woke_him_and_any_other_turn_is
     assert "aloud" not in json.loads(told_a_written_turn(None))["woke"]
 
 
+LINES = Lines(MORNING.generation, frozenset({1}), missed=False)
+
+
 @pytest.mark.parametrize(
-    ("voice_app", "occasion", "aloud"),
+    ("voice_app", "occasion", "checkpoint", "aloud"),
     [
-        pytest.param(True, Lines(MORNING.generation, frozenset({1}), missed=False), True, id="lines at a voice app"),
-        pytest.param(False, Lines(MORNING.generation, frozenset({1}), missed=False), False, id="lines elsewhere"),
-        pytest.param(True, Waiting(3), False, id="a view revision at a voice app"),
-        pytest.param(False, Waiting(3), False, id="a view revision elsewhere"),
+        pytest.param(True, LINES, None, True, id="lines at a voice app"),
+        pytest.param(False, LINES, None, False, id="lines elsewhere"),
+        pytest.param(True, Waiting(3), None, False, id="a view revision at a voice app"),
+        pytest.param(False, Waiting(3), None, False, id="a view revision elsewhere"),
+        pytest.param(True, LINES, Reading(GENERATION, 1, VoiceState.AVAILABLE), True, id="a voice stated available"),
+        pytest.param(True, LINES, Reading(GENERATION, 1), True, id="a voice stated nothing"),
+        pytest.param(
+            True, LINES, Reading(GENERATION, 1, VoiceState.UNAVAILABLE), False, id="a voice stated unavailable"
+        ),
+        pytest.param(False, LINES, Reading(GENERATION, 1, VoiceState.AVAILABLE), False, id="available, no voice app"),
+        pytest.param(True, LINES, Restarted(), True, id="a place restarted states nothing"),
+        pytest.param(True, LINES, Paused(), True, id="a place paused states nothing"),
+        pytest.param(True, LINES, Joined(), True, id="a place just joined states nothing"),
     ],
 )
-def test_only_a_turn_for_lines_at_a_voice_app_is_spoken(voice_app, occasion, aloud):
-    assert speaks_aloud(voice_app, occasion) is aloud
+def test_a_turn_for_lines_at_a_voice_app_is_spoken_unless_the_last_window_states_his_voice_unavailable(
+    voice_app, occasion, checkpoint, aloud
+):
+    assert speaks_aloud(voice_app, occasion, checkpoint) is aloud
 
 
 def test_a_turn_told_an_empty_history_is_told_no_entries_and_none_dropped():
@@ -920,12 +948,50 @@ def test_a_history_line_is_new_only_when_the_turn_is_for_that_line_of_that_visit
     evening = replace(MORNING, generation="evening")
     history = history_holding(
         (
-            KeptLine(NOON, 1, LATER - timedelta(seconds=300), "Bo", "message", "elsewhere", own=False, spoken=False),
             KeptLine(
-                evening, 1, LATER - timedelta(seconds=200), "Bo", "message", "an earlier run", own=False, spoken=False
+                NOON,
+                1,
+                LATER - timedelta(seconds=300),
+                "Bo",
+                "message",
+                "elsewhere",
+                own=False,
+                spoken=False,
+                cut=False,
             ),
-            KeptLine(MORNING, 1, LATER - timedelta(seconds=90), "Ada", "message", "woke him", own=False, spoken=False),
-            KeptLine(MORNING, 2, LATER - timedelta(seconds=1), "Mozart", "message", "his own", own=True, spoken=False),
+            KeptLine(
+                evening,
+                1,
+                LATER - timedelta(seconds=200),
+                "Bo",
+                "message",
+                "an earlier run",
+                own=False,
+                spoken=False,
+                cut=False,
+            ),
+            KeptLine(
+                MORNING,
+                1,
+                LATER - timedelta(seconds=90),
+                "Ada",
+                "message",
+                "woke him",
+                own=False,
+                spoken=False,
+                cut=False,
+            ),
+            KeptLine(
+                MORNING,
+                2,
+                LATER - timedelta(seconds=1),
+                "Mozart",
+                "message",
+                "his own",
+                own=True,
+                spoken=False,
+                cut=False,
+            ),
         )
     )
     occasion = Lines(MORNING.generation, frozenset({1}), missed=False)
@@ -1194,6 +1260,7 @@ def test_how_a_request_ended_decides_the_outcome_of_the_act_it_made(ended, cance
     ("outcome", "told_outcome"),
     [
         pytest.param(Spoken(duration_ms=1500), {"answered": True}, id="spoken"),
+        pytest.param(Written(written=True), {"answered": True, "written": True}, id="written to the place instead"),
         pytest.param(SpeakRefusal.TOO_LONG, {"answered": True, "refused": "too_long"}, id="refused"),
         pytest.param(Unanswered("network"), {"answered": False, "code": "network"}, id="no answer"),
     ],
@@ -1252,6 +1319,7 @@ def test_the_bound_counts_a_spoken_sentence_by_the_utf8_bytes_of_its_told_json_w
     ("ended", "cancelling", "expected"),
     [
         pytest.param(Spoken(duration_ms=900), True, Spoken(duration_ms=900), id="a spoken sentence while cancelled"),
+        pytest.param(Written(written=True), True, Written(written=True), id="a written sentence while cancelled"),
         pytest.param(SpeakRefusal.NOT_ACTIVE, False, SpeakRefusal.NOT_ACTIVE, id="a refusal"),
         pytest.param(StatusFailure(502), True, Unanswered(TURN_CANCELLED_CODE), id="a failure while cancelled"),
         pytest.param(StatusFailure(502), False, Unanswered("http_502"), id="a failure"),
@@ -1278,7 +1346,7 @@ def test_the_history_stays_marked_once_it_dropped_older_lines_though_the_next_li
 
 
 def an_own_line(seq: int, text: str = "mine") -> KeptLine:
-    return KeptLine(MORNING, seq, LATER, "Mozart", "message", text, own=True, spoken=False)
+    return KeptLine(MORNING, seq, LATER, "Mozart", "message", text, own=True, spoken=False, cut=False)
 
 
 def a_view_seen(revision: int, *, size: int | None = None) -> ViewSeen:

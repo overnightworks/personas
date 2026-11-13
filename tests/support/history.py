@@ -221,7 +221,7 @@ def history_holding(entries):
 
 def kept(visit, seq, text, *, hours_before, own=False, spoken=False, name="Ada"):
     """A kept line of a visit, first read this many hours before ``LATER``."""
-    return KeptLine(visit, seq, LATER - timedelta(hours=hours_before), name, "message", text, own, spoken)
+    return KeptLine(visit, seq, LATER - timedelta(hours=hours_before), name, "message", text, own, spoken, False)
 
 
 def a_view(revision: int, *, awaits_you: bool = True) -> PlaceView:
@@ -232,7 +232,7 @@ APP = "https://app.test/mcp"
 
 
 def said(seq: int, text: str, *, name: str = "Bo", visit: Visit = MORNING, spoken: bool = False) -> KeptLine:
-    return KeptLine(visit, seq, LATER, name, "message", text, own=False, spoken=spoken)
+    return KeptLine(visit, seq, LATER, name, "message", text, own=False, spoken=spoken, cut=False)
 
 
 def an_act(*, arguments=None, outcome=None, tool="say", app=APP, at=LATER - timedelta(seconds=9)) -> ActDone:

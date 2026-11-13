@@ -35,6 +35,8 @@ from agents.member import (
     Spoken,
     Standing,
     StandingState,
+    VoiceState,
+    Written,
     place_ref_from_view_uri,
     place_ref_from_window_uri,
     place_view_uri,
@@ -125,6 +127,7 @@ class Line:
     name: str
     text: str
     spoken: bool = False
+    cut: bool = False
 
 
 def active(place_id: str, kind: str = "call", *, serves_view: bool = False) -> Standing:
@@ -203,6 +206,9 @@ class FakeApp:
     spoken_added: asyncio.Event = field(default_factory=asyncio.Event)
     speak_bearers: list[str] = field(default_factory=list[str])
     speak_duration_ms: int = SPOKEN_DURATION_MS
+    written_speaks: int = 0
+    """How many of the next ``speak`` calls the app answers as written to the place instead of voiced."""
+    voice_states: dict[str, VoiceState] = field(default_factory=dict[str, VoiceState])
     held_speak: asyncio.Event | None = None
     refused_tool: str | None = None
     calls: list[str] = field(default_factory=list[str])
@@ -257,11 +263,13 @@ class FakeApp:
             self.content.update([each.place.id, *([each.invitation.id] if each.invitation else [])])
         self.changes.changed(Principal(iss=ISSUER, sub=subject), STANDING_URI)
 
-    def speak(self, place_id: str, author: str, name: str, text: str, *, spoken: bool = False) -> int:
+    def speak(
+        self, place_id: str, author: str, name: str, text: str, *, spoken: bool = False, cut: bool = False
+    ) -> int:
         """Adds a line to a place and signals its window to every member standing there, once it is visible."""
         place_lines = self.lines.setdefault(place_id, [])
         seq = place_lines[-1].seq + 1 if place_lines else 1
-        place_lines.append(Line(seq, author, name, text, spoken))
+        place_lines.append(Line(seq, author, name, text, spoken, cut))
         del place_lines[:-WINDOW_LINES]
         self.content.add(text)
         window = place_window_uri(PlaceRef(kind="call", id=place_id))
@@ -269,6 +277,17 @@ class FakeApp:
             if any(standing.place.id == place_id for standing in standings):
                 self.changes.changed(Principal(iss=ISSUER, sub=subject), window)
         return seq
+
+    def state_voice(self, place_id: str, state: VoiceState | None) -> None:
+        """Sets what every window of the place states of his voice, none when ``state`` is ``None``, and signals it."""
+        if state is None:
+            self.voice_states.pop(place_id, None)
+        else:
+            self.voice_states[place_id] = state
+        window = place_window_uri(PlaceRef(kind="call", id=place_id))
+        for subject, standings in self.standings.items():
+            if any(standing.place.id == place_id for standing in standings):
+                self.changes.changed(Principal(iss=ISSUER, sub=subject), window)
 
     def show_view(self, place_id: str, revision: int, state: dict[str, Any], *, awaits_you: bool = True) -> None:
         """Sets a place's view for every member standing there and signals it, as an app does once it is visible."""
@@ -362,6 +381,7 @@ class FakeApp:
                 text=line.text,
                 own=line.author == principal.sub,
                 spoken=line.spoken,
+                cut=line.cut,
             )
             for line in self.lines.get(place.id, [])
         )
@@ -369,6 +389,7 @@ class FakeApp:
             generation=self.generations.get(place.id, GENERATION),
             starts_at=entries[0].seq if entries else 1,
             entries=entries,
+            voice_state=self.voice_states.get(place.id),
         )
 
     async def _say(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
@@ -384,7 +405,7 @@ class FakeApp:
         return ToolOutcome("said", is_error=False)
 
     async def _speak(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
-        """Takes a sentence, appends it as the member's own spoken line and answers how long it plays."""
+        """Takes a sentence, appends it as the member's own line and answers its length or that it was written."""
         taken = SpeakArguments.model_validate(arguments)
         self.content.add(taken.text)
         if (held := self.held_speak) is not None:
@@ -394,6 +415,10 @@ class FakeApp:
             return self.speak_outcomes.pop(0)
         self.spoken.append((request.principal.sub, taken.place.id, taken.text))
         self.spoken_added.set()
+        if self.written_speaks:
+            self.written_speaks -= 1
+            self.speak(taken.place.id, request.principal.sub, ACCEPTED_NAME, taken.text)
+            return ToolOutcome(Written(written=True).model_dump_json(), is_error=False)
         self.speak(taken.place.id, request.principal.sub, ACCEPTED_NAME, taken.text, spoken=True)
         return ToolOutcome(Spoken(duration_ms=self.speak_duration_ms).model_dump_json(), is_error=False)
 

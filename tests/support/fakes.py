@@ -97,7 +97,7 @@ def read_of(*standings: Standing) -> MemberStanding:
 
 
 def line(seq: int, text: str, *, own: bool = False, spoken: bool = False, name: str = "Ada") -> PlaceEntry:
-    return PlaceEntry(seq=seq, kind="message", name=name, text=text, own=own, spoken=spoken)
+    return PlaceEntry(seq=seq, kind="message", name=name, text=text, own=own, spoken=spoken, cut=False)
 
 
 def window_of(*lines: PlaceEntry, generation: str = GENERATION) -> PlaceWindow:

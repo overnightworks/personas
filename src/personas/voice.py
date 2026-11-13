@@ -6,7 +6,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from agents.backend import TurnStopKind, TurnStopped
-from agents.member import SpeakRefusal
+from agents.member import SpeakRefusal, Spoken
 from agents.turn import FailureCode
 from agents.voice.reply import ReplyReader
 
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterable
 
     from agents.backend import TurnEvent
-    from agents.member import PlaceRef, Spoken
+    from agents.member import PlaceRef, SpeakAnswer
 
     from personas.app_session import AppSession
     from personas.clock import Clock
@@ -109,7 +109,7 @@ class Speaking:
         if isinstance(outcome, SpeakRefusal):
             self._report(Event.SPEAK_REFUSED, outcome.value)
             self._silenced = True
-        elif not self._silenced:
+        elif isinstance(outcome, Spoken) and not self._silenced:
             await self._clock.sleep(spoken_wait_seconds(outcome.duration_ms))
 
     def _past_deadline(self) -> bool:
@@ -119,13 +119,13 @@ class Speaking:
         if self._past_deadline():
             raise TurnStopped(TurnStopKind.FAILED, FailureCode.LIMIT_EXCEEDED)
 
-    async def _entered_as_said(self, sentence: str) -> Spoken | SpeakRefusal | None:
+    async def _entered_as_said(self, sentence: str) -> SpeakAnswer | SpeakRefusal | None:
         """Sends the sentence and enters it into the history however its request ends; ``None`` when the token's
         renewal ran into the deadline or a silence, so that nothing was sent and nothing is entered.
 
         Whether the turn is being cancelled is asked once the request and every scope inside it have exited.
         """
-        ended: Spoken | SpeakRefusal | BaseException | None = None
+        ended: SpeakAnswer | SpeakRefusal | BaseException | None = None
         self._idle.clear()
         try:
             await self._renew_token()

@@ -10,7 +10,7 @@ import pytest
 from personas.config import CONFIG_ENVIRONMENT_VARIABLE
 from personas.failures import STORE_UNREACHABLE_CODE
 from personas.main import CONFIGURATION_ERROR_EXIT_CODE, MIGRATE_COMMAND, STORE_ERROR_EXIT_CODE, command_line, main
-from tests.support.postgres import kept_lines, run_sql, tables_of
+from tests.support.postgres import kept_lines, migrated_to, run_sql, tables_of
 
 if TYPE_CHECKING:
     from tests.support.configfiles import Files
@@ -32,15 +32,34 @@ def test_migrating_an_empty_database_creates_the_schema_and_migrating_again_chan
         host=f'"{target.host}"', port=str(target.port), dbname=f'"{target.dbname}"', user=f'"{target.user}"'
     )
     migrate(files, monkeypatch)
-    run_sql(unmigrated_database, "INSERT INTO lines VALUES ('a','b','c','d','e',1,now(),'f','g','h',false,false)")
+    run_sql(unmigrated_database, "INSERT INTO lines VALUES ('a','b','c','d','e',1,now(),'f','g','h',false,false,false)")
     after_the_first = (tables_of(unmigrated_database), kept_lines(unmigrated_database, "client_id, seq, first_read_at"))
 
     migrate(files, monkeypatch)
 
-    assert "lines" in after_the_first[0]
-    assert (tables_of(unmigrated_database), kept_lines(unmigrated_database, "client_id, seq, first_read_at")) == (
-        after_the_first
+    after_the_second = (
+        tables_of(unmigrated_database),
+        kept_lines(unmigrated_database, "client_id, seq, first_read_at"),
     )
+
+    assert "lines" in after_the_first[0]
+    assert after_the_second == after_the_first
+
+
+@pytest.mark.postgres
+def test_migrating_a_database_at_the_first_revision_keeps_its_lines_and_reads_them_back_as_not_cut(
+    files, unmigrated_database, monkeypatch, library_loggers
+):
+    target = unmigrated_database
+    files.text += files.memory_table(
+        host=f'"{target.host}"', port=str(target.port), dbname=f'"{target.dbname}"', user=f'"{target.user}"'
+    )
+    migrated_to(target, "0001")
+    run_sql(target, "INSERT INTO lines VALUES ('a','b','c','d','e',1,now(),'f','g','h',false,true)")
+
+    migrate(files, monkeypatch)
+
+    assert kept_lines(target, "client_id, spoken, cut") == [("a", True, False)]
 
 
 def test_migrating_without_a_memory_table_stops_and_names_the_field(files, monkeypatch, capsys, library_loggers):

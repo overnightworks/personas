@@ -20,9 +20,9 @@ from agents.member import (
     PlaceRef,
     PlaceView,
     PlaceWindow,
+    SpeakAnswer,
     SpeakRefusal,
     SpeakRefused,
-    Spoken,
     place_view_uri,
     place_window_uri,
 )
@@ -43,7 +43,7 @@ from mcp_types import (
     TextResourceContents,
     Tool,
 )
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from personas.config import AppTarget
 from personas.decision import Accept, Refusal, UnrecognisedRefusal, jsonrpc_code, status_code
@@ -64,6 +64,7 @@ from personas.secret import Secret
 CONNECT_SECONDS: Final = 30.0
 READ_SECONDS: Final = 2 * LISTEN_BOUND_SECONDS
 """Twice the bound an app puts on a stream: the runner cuts a stream that outlasts it."""
+_SPEAK_ANSWER: Final = TypeAdapter(SpeakAnswer)
 _TRANSPORT_ERROR_CODES: Final = frozenset({CONNECTION_CLOSED, REQUEST_TIMEOUT})
 """What the SDK answers for a connection that broke or a request that timed out."""
 
@@ -104,9 +105,10 @@ class AppSession(Protocol):
         """
         ...
 
-    async def speak(self, place: PlaceRef, sentence: str) -> Spoken | SpeakRefusal:
-        """How long the app says the sentence plays, or why it does not speak it; raises ``StatusFailure``,
-        ``Unreachable`` or ``UnusableAnswer``, the last for an answer that is neither."""
+    async def speak(self, place: PlaceRef, sentence: str) -> SpeakAnswer | SpeakRefusal:
+        """How long the app says the sentence plays, that it wrote it at the place instead, or why it does not
+        speak it; raises ``StatusFailure``, ``Unreachable`` or ``UnusableAnswer``, the last for an answer that is none
+        of these."""
         ...
 
     async def declared_tools(self) -> tuple[ToolDeclaration, ...]:
@@ -235,11 +237,11 @@ class _McpAppSession:
         result = await self._called(ACCEPT_INVITATION_TOOL, arguments)
         return _refusal_of(_text_of(result)) if result.is_error else None
 
-    async def speak(self, place: PlaceRef, sentence: str) -> Spoken | SpeakRefusal:
+    async def speak(self, place: PlaceRef, sentence: str) -> SpeakAnswer | SpeakRefusal:
         # The arguments are the wire shape of ``SpeakArguments``, built unvalidated: a refusal of a sentence is
         # the app's, and a validation error would carry the sentence.
         result = await self._called(SPEAK_TOOL, {"place": place.model_dump(mode="json"), "text": sentence})
-        return _spoken_of(result)
+        return _answer_of(result)
 
     async def invoke(self, name: str, arguments: JsonObject) -> ToolOutcome:
         result = await self._called(name, arguments)
@@ -308,10 +310,10 @@ def _refusal_of(text: str) -> Refusal:
         return UnrecognisedRefusal.UNRECOGNISED
 
 
-def _spoken_of(result: CallToolResult) -> Spoken | SpeakRefusal:
+def _answer_of(result: CallToolResult) -> SpeakAnswer | SpeakRefusal:
     text = _text_of(result)
     try:
-        return SpeakRefused.model_validate_json(text).refused if result.is_error else Spoken.model_validate_json(text)
+        return SpeakRefused.model_validate_json(text).refused if result.is_error else _SPEAK_ANSWER.validate_json(text)
     except ValidationError:
         raise UnusableAnswer(INVALID_ANSWER_CODE) from None
 
