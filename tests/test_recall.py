@@ -45,7 +45,7 @@ def test_two_earlier_visits_are_told_in_the_order_they_happened_each_as_its_own_
     assert earlier.older_dropped is False
 
 
-def test_an_act_line_of_an_earlier_visit_is_told_with_the_mark_and_a_spoken_line_without_it():
+def test_an_act_line_of_an_earlier_visit_is_told_with_the_mark_and_any_other_line_without_it():
     lines = [kept(MORNING, 1, "took a card", hours_before=9, act=True), kept(MORNING, 2, "hello", hours_before=9)]
 
     [visit] = told_earlier_today(earlier_today(lines, LATER, ROOMY, EMPTY_HISTORY))["visits"]
