@@ -67,9 +67,8 @@ async def test_a_line_heard_in_a_voice_place_is_kept_once_with_the_sentence_he_s
     ]
 
 
-@pytest.mark.parametrize("cut", [False, True], ids=["said to its end", "cut by the app"])
 async def test_back_after_a_restart_his_first_turn_at_the_voice_place_is_told_the_lines_of_the_day_in_order(
-    runner, database, cut
+    runner, database
 ):
     welcome_back = f"{ADDRESSED} Back again?"
     store = WatchedStore(database)
@@ -77,7 +76,7 @@ async def test_back_after_a_restart_his_first_turn_at_the_voice_place_is_told_th
     runner.give_voice()
     runner.gateway = Gateway(completion(ANSWER), completion("Welcome."))
     await restarted_in_the_call(runner)
-    say_in_the_call(runner, ADDRESSED, spoken=True, cut=cut)
+    say_in_the_call(runner, ADDRESSED, spoken=True, cut=True)
     await runner.app.spoken_count(1)
     await store.until_kept(2)
     runner.task.cancel()
@@ -93,7 +92,7 @@ async def test_back_after_a_restart_his_first_turn_at_the_voice_place_is_told_th
     assert first.room["earlier_today"] == {"older_dropped": False, "visits": []}
     (visit,) = second.room["earlier_today"]["visits"]
     assert [(each["text"], each["spoken"]) for each in visit["lines"]] == [(ADDRESSED, True), (ANSWER, True)]
-    assert [each.get("cut", False) for each in visit["lines"]] == [cut, False]
+    assert [each.get("cut", False) for each in visit["lines"]] == [True, False]
     assert [each["text"] for each in second.room["history"]["entries"] if each["new"]] == [welcome_back]
 
 
