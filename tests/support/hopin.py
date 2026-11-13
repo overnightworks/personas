@@ -26,6 +26,7 @@ from agents.member import (
     AcceptInvitationArguments,
     Invitation,
     MemberStanding,
+    ParentPlace,
     PlaceEntry,
     PlaceRef,
     PlaceView,
@@ -97,7 +98,13 @@ _ACCEPT_DECLARATION = ToolDeclaration(
 
 
 def invited(
-    place_id: str, invitation_id: str, epoch: int = 0, kind: str = "call", *, serves_view: bool = False
+    place_id: str,
+    invitation_id: str,
+    epoch: int = 0,
+    kind: str = "call",
+    *,
+    serves_view: bool = False,
+    parent: ParentPlace | None = None,
 ) -> Standing:
     invitation = Invitation(id=invitation_id, epoch=epoch, expires_at=datetime(2099, 1, 1, tzinfo=UTC))
     return Standing(
@@ -105,6 +112,7 @@ def invited(
         state=StandingState.INVITED,
         invitation=invitation,
         serves_view=serves_view,
+        parent=parent,
     )
 
 
