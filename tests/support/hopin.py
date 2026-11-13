@@ -128,6 +128,7 @@ class Line:
     text: str
     spoken: bool = False
     cut: bool = False
+    act: bool = False
 
 
 def active(place_id: str, kind: str = "call", *, serves_view: bool = False) -> Standing:
@@ -200,6 +201,8 @@ class FakeApp:
     reads: dict[str, int] = field(default_factory=dict[str, int])
     read_added: asyncio.Event = field(default_factory=asyncio.Event)
     vanished: set[str] = field(default_factory=set[str])
+    without_window: set[str] = field(default_factory=set[str])
+    """Places whose window is listed and answers a read as unknown, as an app that serves none yet does."""
     say_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
     speak_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
     spoken: list[tuple[str, str, str]] = field(default_factory=list[tuple[str, str, str]])
@@ -264,19 +267,30 @@ class FakeApp:
         self.changes.changed(Principal(iss=ISSUER, sub=subject), STANDING_URI)
 
     def speak(
-        self, place_id: str, author: str, name: str, text: str, *, spoken: bool = False, cut: bool = False
+        self,
+        place_id: str,
+        author: str,
+        name: str,
+        text: str,
+        *,
+        spoken: bool = False,
+        cut: bool = False,
+        act: bool = False,
     ) -> int:
         """Adds a line to a place and signals its window to every member standing there, once it is visible."""
         place_lines = self.lines.setdefault(place_id, [])
         seq = place_lines[-1].seq + 1 if place_lines else 1
-        place_lines.append(Line(seq, author, name, text, spoken, cut))
+        place_lines.append(Line(seq, author, name, text, spoken, cut, act))
         del place_lines[:-WINDOW_LINES]
         self.content.add(text)
-        window = place_window_uri(PlaceRef(kind="call", id=place_id))
-        for subject, standings in self.standings.items():
-            if any(standing.place.id == place_id for standing in standings):
-                self.changes.changed(Principal(iss=ISSUER, sub=subject), window)
+        self._signal_window(place_id)
         return seq
+
+    def _signal_window(self, place_id: str) -> None:
+        for subject, standings in self.standings.items():
+            for each in standings:
+                if each.place.id == place_id:
+                    self.changes.changed(Principal(iss=ISSUER, sub=subject), place_window_uri(each.place))
 
     def state_voice(self, place_id: str, state: VoiceState | None) -> None:
         """Sets what every window of the place states of his voice, none when ``state`` is ``None``, and signals it."""
@@ -284,10 +298,7 @@ class FakeApp:
             self.voice_states.pop(place_id, None)
         else:
             self.voice_states[place_id] = state
-        window = place_window_uri(PlaceRef(kind="call", id=place_id))
-        for subject, standings in self.standings.items():
-            if any(standing.place.id == place_id for standing in standings):
-                self.changes.changed(Principal(iss=ISSUER, sub=subject), window)
+        self._signal_window(place_id)
 
     def show_view(self, place_id: str, revision: int, state: dict[str, Any], *, awaits_you: bool = True) -> None:
         """Sets a place's view for every member standing there and signals it, as an app does once it is visible."""
@@ -335,8 +346,14 @@ class FakeApp:
         held = self.standings.get(principal.sub, [])
         return [
             STANDING_URI,
-            *(place_view_uri(each.place) if each.serves_view else place_window_uri(each.place) for each in held),
+            *(uri for each in held for uri in self._uris_of(each)),
         ]
+
+    @staticmethod
+    def _uris_of(standing: Standing) -> list[str]:
+        """Every place lists its window, and the view beside it where it serves one."""
+        window = place_window_uri(standing.place)
+        return [place_view_uri(standing.place), window] if standing.serves_view else [window]
 
     async def read(self, principal: Principal, uri: str) -> MemberStanding | PlaceWindow | PlaceView | None:
         self.reads[uri] = self.reads.get(uri, 0) + 1
@@ -371,7 +388,9 @@ class FakeApp:
         return self.views.get(place.id) if serving and place.id not in self.vanished else None
 
     def _snapshot(self, principal: Principal, place: PlaceRef) -> PlaceWindow | None:
-        if place.id in self.vanished or not any(each.place == place for each in self.standings.get(principal.sub, [])):
+        if place.id in self.vanished | self.without_window or not any(
+            each.place == place for each in self.standings.get(principal.sub, [])
+        ):
             return None
         entries = tuple(
             PlaceEntry(
@@ -382,6 +401,7 @@ class FakeApp:
                 own=line.author == principal.sub,
                 spoken=line.spoken,
                 cut=line.cut,
+                act=line.act,
             )
             for line in self.lines.get(place.id, [])
         )
@@ -433,8 +453,8 @@ class FakeApp:
                 self.read_added.clear()
                 await self.read_added.wait()
 
-    async def until_window_read(self, place_id: str, count: int = 1) -> None:
-        await self.until_read(place_window_uri(PlaceRef(kind="call", id=place_id)), count)
+    async def until_window_read(self, place_id: str, count: int = 1, kind: str = "call") -> None:
+        await self.until_read(place_window_uri(PlaceRef(kind=kind, id=place_id)), count)
 
     async def until_standing_read(self, count: int = 1) -> None:
         await self.until_read(STANDING_URI, count)
@@ -445,8 +465,8 @@ class FakeApp:
     def view_reads(self, place: PlaceRef) -> int:
         return self.reads.get(place_view_uri(place), 0)
 
-    def window_reads(self, place_id: str) -> int:
-        return self.reads.get(place_window_uri(PlaceRef(kind="call", id=place_id)), 0)
+    def window_reads(self, place_id: str, kind: str = "call") -> int:
+        return self.reads.get(place_window_uri(PlaceRef(kind=kind, id=place_id)), 0)
 
     async def until_read_held(self) -> None:
         async with asyncio.timeout(LIMIT_SECONDS):

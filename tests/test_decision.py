@@ -55,8 +55,8 @@ from personas.decision import (
     Waiting,
     accepts_for,
     act_outcome,
-    active_call_places,
     active_view_places,
+    active_window_places,
     after_refusal,
     arrived_since,
     backoff_delay,
@@ -307,11 +307,20 @@ def test_no_failure_decides_when_any_leaf_is_no_call_failure(leaves):
 PLACE = PlaceRef(kind="call", id="room-7")
 
 
-def test_only_the_active_call_places_are_read():
+def test_only_the_active_places_that_are_a_call_or_serve_a_view_are_read_through_a_window():
     paused = Standing(place=PlaceRef(kind="call", id="room-8"), state=StandingState.PAUSED)
     other = Standing(place=PlaceRef(kind="table", id="table-1"), state=StandingState.ACTIVE)
+    table = PlaceRef(kind="table", id="table-2")
 
-    assert active_call_places((active("room-7"), paused, other, invited("room-9", "inv-3"))) == (PLACE,)
+    standings = (
+        active("room-7"),
+        paused,
+        other,
+        invited("room-9", "inv-3"),
+        active("table-2", "table", serves_view=True),
+    )
+
+    assert active_window_places(standings) == (PLACE, table)
 
 
 @pytest.mark.parametrize(
@@ -330,6 +339,7 @@ def test_a_turn_is_invalid_once_its_place_is_not_active_in_the_standing(standing
     assert turn_invalid(PLACE, standings) is invalid
 
 
+A_TABLE = PlaceRef(kind="table", id="table-1")
 OTHER_GENERATION = "generation-2"
 OTHER_PLACE = PlaceRef(kind="call", id="room-8")
 
@@ -348,6 +358,17 @@ OTHER_PLACE = PlaceRef(kind="call", id="room-8")
         ({PLACE: Joined()}, (invited("room-7", "inv-3"),), {}),
         ({PLACE: Reading(GENERATION, 4)}, (), {}),
         ({OTHER_PLACE: Reading(GENERATION, 2)}, (active("room-7"),), {PLACE: Restarted()}),
+        ({}, (active("room-7", serves_view=True),), {PLACE: Restarted()}),
+        ({}, (active("table-1", "table", serves_view=True),), {A_TABLE: Restarted()}),
+        (
+            {A_TABLE: Reading(GENERATION, 4)},
+            (active("table-1", "table", serves_view=True),),
+            {A_TABLE: Reading(GENERATION, 4)},
+        ),
+        ({A_TABLE: Joined()}, (active("table-1", "table", serves_view=True),), {A_TABLE: Joined()}),
+        ({}, (paused("table-1", "table", serves_view=True),), {A_TABLE: Paused()}),
+        ({A_TABLE: Reading(GENERATION, 4)}, (active("table-1", "table"),), {}),
+        ({A_TABLE: Reading(GENERATION, 4)}, (invited("table-1", "inv-3", kind="table", serves_view=True),), {}),
     ],
     ids=[
         "an active place this process did not join starts as restarted",
@@ -361,16 +382,30 @@ OTHER_PLACE = PlaceRef(kind="call", id="room-8")
         "a place invited again drops its join",
         "a place gone from the standing drops its entry",
         "an entry of a place gone is dropped beside a new one",
+        "a call place that serves a view is read through its window",
+        "an active place that serves a view starts as restarted",
+        "an active place that serves a view keeps its reading",
+        "an active place that serves a view keeps its join",
+        "a paused place that serves a view is paused",
+        "a place that stops serving a view drops its reading",
+        "a place that serves a view and is invited again drops its reading",
     ],
 )
 def test_the_standing_decides_which_checkpoints_exist(checkpoints, standings, expected):
     assert sync_checkpoints(checkpoints, standings) == expected
 
 
-def test_a_place_of_another_kind_gets_no_checkpoint():
+def test_a_place_of_another_kind_that_serves_no_view_gets_no_checkpoint():
     table = Standing(place=PlaceRef(kind="table", id="table-1"), state=StandingState.ACTIVE)
 
     assert sync_checkpoints({}, (table,)) == {}
+
+
+def test_a_place_that_stops_serving_a_view_and_serves_one_again_starts_as_restarted():
+    serving_view = (active("table-1", "table", serves_view=True),)
+    gone = sync_checkpoints({A_TABLE: Reading(GENERATION, 4)}, (active("table-1", "table"),))
+
+    assert sync_checkpoints(gone, serving_view) == {A_TABLE: Restarted()}
 
 
 @pytest.mark.parametrize(
@@ -448,12 +483,36 @@ def test_a_window_is_perceived_from_its_checkpoint(checkpoint, window, expected)
 
 
 @pytest.mark.parametrize(
-    ("own", "expected"),
-    [((False,), True), ((True,), False), ((True, False), True), ((), False)],
-    ids=["someone else's line", "his own line", "one of them someone else's", "no line"],
+    ("taken", "serves_view", "expected"),
+    [
+        (({},), False, True),
+        (({"own": True},), False, False),
+        (({"own": True}, {}), False, True),
+        ((), False, False),
+        (({"act": True},), False, False),
+        (({"act": True}, {}), False, True),
+        (({"own": True, "act": True},), False, False),
+        (({},), True, False),
+        (({"act": True},), True, False),
+        (({"own": True}, {}, {"act": True}), True, False),
+    ],
+    ids=[
+        "someone else's line",
+        "his own line",
+        "one of them someone else's",
+        "no line",
+        "an act line",
+        "an act line beside a line said",
+        "his own act line",
+        "a line at a place with a view",
+        "an act line at a place with a view",
+        "lines of every kind at a place with a view",
+    ],
 )
-def test_a_line_wakes_him_unless_every_line_taken_is_his_own(own, expected):
-    assert wakes_him([line(seq, "Hello everyone", own=each) for seq, each in enumerate(own, 1)]) is expected
+def test_a_line_wakes_him_unless_it_is_his_own_or_an_act_or_the_place_serves_a_view(taken, serves_view, expected):
+    lines = [line(seq, "Hello everyone", **marks) for seq, marks in enumerate(taken, 1)]
+
+    assert wakes_him(lines, serves_view=serves_view) is expected
 
 
 CALL_AT_A = AppPlace("https://a.test/mcp", PlaceRef(kind="call", id="room-1"))
@@ -762,11 +821,11 @@ def test_an_invited_view_place_whose_invitation_was_refused_as_stale_is_not_acce
     assert accepts_for((standing,), memory, takes_turns=True) == ()
 
 
-def test_a_call_place_that_serves_a_view_is_a_view_place_and_no_window_is_kept_or_read_for_it():
+def test_a_call_place_that_serves_a_view_is_a_view_place_and_its_window_is_kept_and_read():
     standing = Standing(place=PLACE, state=StandingState.ACTIVE, serves_view=True)
 
-    assert active_call_places((standing,)) == ()
-    assert sync_checkpoints({}, (standing,)) == {}
+    assert active_window_places((standing,)) == (PLACE,)
+    assert sync_checkpoints({}, (standing,)) == {PLACE: Restarted()}
     assert active_view_places((standing,)) == (PLACE,)
     assert accepts_for((invited("room-7", "inv-3", serves_view=True),), Memory(), takes_turns=False) == ()
 
@@ -958,6 +1017,7 @@ def test_a_history_line_is_new_only_when_the_turn_is_for_that_line_of_that_visit
                 own=False,
                 spoken=False,
                 cut=False,
+                act=False,
             ),
             KeptLine(
                 evening,
@@ -969,6 +1029,7 @@ def test_a_history_line_is_new_only_when_the_turn_is_for_that_line_of_that_visit
                 own=False,
                 spoken=False,
                 cut=False,
+                act=False,
             ),
             KeptLine(
                 MORNING,
@@ -980,6 +1041,7 @@ def test_a_history_line_is_new_only_when_the_turn_is_for_that_line_of_that_visit
                 own=False,
                 spoken=False,
                 cut=False,
+                act=False,
             ),
             KeptLine(
                 MORNING,
@@ -991,6 +1053,7 @@ def test_a_history_line_is_new_only_when_the_turn_is_for_that_line_of_that_visit
                 own=True,
                 spoken=False,
                 cut=False,
+                act=False,
             ),
         )
     )
@@ -1346,7 +1409,7 @@ def test_the_history_stays_marked_once_it_dropped_older_lines_though_the_next_li
 
 
 def an_own_line(seq: int, text: str = "mine") -> KeptLine:
-    return KeptLine(MORNING, seq, LATER, "Mozart", "message", text, own=True, spoken=False, cut=False)
+    return KeptLine(MORNING, seq, LATER, "Mozart", "message", text, own=True, spoken=False, cut=False, act=False)
 
 
 def a_view_seen(revision: int, *, size: int | None = None) -> ViewSeen:

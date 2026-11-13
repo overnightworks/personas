@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from personas.entries import ViewSeen
-from personas.recall import EarlierToday, TodayBounds, earlier_today, swept_before, today_since
+from personas.recall import EarlierToday, TodayBounds, earlier_today, swept_before, today_since, told_earlier_today
 from tests.support.history import (
     APP,
     EMPTY_HISTORY,
@@ -43,6 +43,14 @@ def test_two_earlier_visits_are_told_in_the_order_they_happened_each_as_its_own_
     assert told(earlier) == [[(1, "morning one"), (2, "morning two")], [(1, "noon one"), (2, "noon two")]]
     assert [visit.minutes_ago for visit in earlier.visits] == [9 * 60, 6 * 60]
     assert earlier.older_dropped is False
+
+
+def test_an_act_line_of_an_earlier_visit_is_told_with_the_mark_and_a_spoken_line_without_it():
+    lines = [kept(MORNING, 1, "took a card", hours_before=9, act=True), kept(MORNING, 2, "hello", hours_before=9)]
+
+    [visit] = told_earlier_today(earlier_today(lines, LATER, ROOMY, EMPTY_HISTORY))["visits"]
+
+    assert [each.get("act", False) for each in visit["lines"]] == [True, False]
 
 
 @pytest.mark.parametrize(

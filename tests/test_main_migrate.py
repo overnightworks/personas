@@ -6,6 +6,7 @@ import sys
 from typing import TYPE_CHECKING
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from personas.config import CONFIG_ENVIRONMENT_VARIABLE
 from personas.failures import STORE_UNREACHABLE_CODE
@@ -32,7 +33,10 @@ def test_migrating_an_empty_database_creates_the_schema_and_migrating_again_chan
         host=f'"{target.host}"', port=str(target.port), dbname=f'"{target.dbname}"', user=f'"{target.user}"'
     )
     migrate(files, monkeypatch)
-    run_sql(unmigrated_database, "INSERT INTO lines VALUES ('a','b','c','d','e',1,now(),'f','g','h',false,false,false)")
+    run_sql(
+        unmigrated_database,
+        "INSERT INTO lines VALUES ('a','b','c','d','e',1,now(),'f','g','h',false,false,false,false)",
+    )
     after_the_first = (tables_of(unmigrated_database), kept_lines(unmigrated_database, "client_id, seq, first_read_at"))
 
     migrate(files, monkeypatch)
@@ -60,6 +64,30 @@ def test_migrating_a_database_at_the_first_revision_keeps_its_lines_and_reads_th
     migrate(files, monkeypatch)
 
     assert kept_lines(target, "client_id, spoken, cut") == [("a", True, False)]
+
+
+@pytest.mark.postgres
+def test_migrating_a_database_at_the_second_revision_keeps_its_lines_and_reads_them_back_as_no_act(
+    files, unmigrated_database, monkeypatch, library_loggers
+):
+    target = unmigrated_database
+    files.text += files.memory_table(
+        host=f'"{target.host}"', port=str(target.port), dbname=f'"{target.dbname}"', user=f'"{target.user}"'
+    )
+    migrated_to(target, "0002")
+    run_sql(target, "INSERT INTO lines VALUES ('a','b','c','d','e',1,now(),'f','g','h',false,true,true)")
+
+    migrate(files, monkeypatch)
+
+    assert kept_lines(target, "client_id, cut, act") == [("a", True, False)]
+    with pytest.raises(IntegrityError):
+        run_sql(target, "INSERT INTO lines VALUES ('a','b','c','d','e',2,now(),'f','g','h',false,true,true,NULL)")
+    with pytest.raises(IntegrityError):
+        run_sql(
+            target,
+            "INSERT INTO lines (client_id, app, place_kind, place_id, generation, seq, first_read_at, speaker, kind,"
+            " text, own, spoken, cut) VALUES ('a','b','c','d','e',3,now(),'f','g','h',false,true,true)",
+        )
 
 
 def test_migrating_without_a_memory_table_stops_and_names_the_field(files, monkeypatch, capsys, library_loggers):

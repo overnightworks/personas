@@ -17,7 +17,7 @@ OTHER_CALL = Visit("https://other.test/mcp", PlaceRef(kind="call", id="room-8"),
 
 
 def said(visit: Visit, seq: int, text: str) -> KeptLine:
-    return KeptLine(visit, seq, READ_AT, "Ada", "message", text, own=False, spoken=False, cut=False)
+    return KeptLine(visit, seq, READ_AT, "Ada", "message", text, own=False, spoken=False, cut=False, act=False)
 
 
 def test_a_mind_starts_with_an_empty_history_that_dropped_nothing():
@@ -118,7 +118,7 @@ def test_a_mind_holding_lines_views_and_due_places_shows_no_name_no_text_and_no_
     mind = Mind(size_bytes=1_000)
     mind.take(
         (
-            KeptLine(CALL, 1, READ_AT, marker, "message", marker, own=False, spoken=False, cut=False),
+            KeptLine(CALL, 1, READ_AT, marker, "message", marker, own=False, spoken=False, cut=False, act=False),
             ViewSeen(CALL.app, table, PlaceView(revision=1, awaits_you=True, state={"hand": marker}), READ_AT),
         )
     )

@@ -295,7 +295,7 @@ async def test_the_table_state_his_own_card_caused_holds_his_next_call_once_and_
     assert [text for _, _, text in other.said] == [card, remark]
     (held,) = runner.gateway.held_results(3)
     kinds = sorted(each["entry"] for each in held["arrived"]["entries"])
-    assert kinds == ["act", "view"]
+    assert kinds == ["act", "line", "view"]
     assert all(each["new"] for each in held["arrived"]["entries"])
     assert len(runner.gateway.held_results(4)) == 1
 
