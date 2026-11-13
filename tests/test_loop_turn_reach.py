@@ -63,10 +63,6 @@ async def addressed_in_the_call(runner):
     say_in_the_call(runner, ADDRESSED)
 
 
-def failed_apps(runner):
-    return [change.code for change in runner.reports.changes if change.event is Event.TOOLS_ONLY_APP_FAILED]
-
-
 async def a_song_is_made_and_announced(runner, songmaker):
     last = songmaker.results[GENERATE_SONG]
     runner.gateway = Gateway(calling(CREATE_SONG, GENERATE_SONG), saying(last), completion("done"))
@@ -462,7 +458,7 @@ async def test_a_timeout_the_token_source_raises_itself_before_the_call_time_is_
 
     assert defect in list(leaves_of(ended))
     assert not any(isinstance(leaf, Unreachable) for leaf in leaves_of(ended))
-    assert failed_apps(runner) == []
+    assert runner.reports.codes_of(Event.TOOLS_ONLY_APP_FAILED) == []
 
 
 async def test_a_defect_in_a_tools_only_call_whose_close_outlasts_the_turns_duration_ends_the_runner_loud(
@@ -698,5 +694,5 @@ async def test_a_defect_in_a_tools_only_request_whose_own_close_loses_a_child_en
 
     await ends_with_the_defect_beside(runner, defect, Unreachable)
 
-    assert failed_apps(runner) == []
+    assert runner.reports.codes_of(Event.TOOLS_ONLY_APP_FAILED) == []
     assert runner.app.said == []
