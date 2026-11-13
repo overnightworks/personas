@@ -116,6 +116,21 @@ def told_bytes(told: dict[str, object]) -> int:
     return len(json.dumps(told, ensure_ascii=False).encode())
 
 
+@dataclass(frozen=True)
+class InputSizes:
+    """The bytes a turn's input is made of: the tool declarations each model request carries, the told message and
+    the tool results relayed back to the model."""
+
+    tools_bytes: int
+    told_bytes: int
+    results_bytes: int
+
+
+def message_bytes(role: str, text: str) -> int:
+    """The bytes of one chat message of the given role, counted as ``told_bytes`` counts."""
+    return told_bytes({"role": role, "content": text})
+
+
 def entry_size(entry: Entry) -> int:
     """A view counts the bytes of its state's JSON; a line, an act and a spoken sentence count the bytes of the JSON
     they are told as, with their age as 0 and no mark as new, so a size does not change while the entry stays in the
