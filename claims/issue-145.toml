@@ -1,0 +1,8 @@
+claim_id = "942e85ef819840baab9738c70a53a7e6"
+agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
+role = "builder"
+base = "ff163cd727e9e3ea69691f043d6b99059c388ffd"
+branch = "claude/issue-145-read-the-v0-38-0-voice-wire-his-voice-do"
+scope = ["README.md", "docs/ARCHITECTURE.md", "pyproject.toml", "src/personas", "tests", "uv.lock"]
+opened_commit = "64e104413034a0871ddf972ec573bd16790facf9"
+whole_reason = "the voice wire reader, the cut mark and its store column are one fact released together"
