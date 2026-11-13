@@ -1,7 +1,0 @@
-claim_id = "7d8bdb97010d415a837ccf992f1662e4"
-agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
-role = "builder"
-base = "497c68abb08cc35142b00d13b28e4bd0061ca360"
-branch = "docs/gateway-owner"
-scope = ["AGENTS.md"]
-opened_commit = "f3d90ccf3ae996072a17c63ec0ecd292662857b6"
