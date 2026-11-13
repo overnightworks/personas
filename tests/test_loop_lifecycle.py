@@ -24,7 +24,7 @@ from mcp_types import (
 )
 
 from personas import app_session
-from personas.decision import NETWORK_FAILURE_CODE, SUSPENDED_RETRY_SECONDS, backoff_delay, status_code
+from personas.decision import NETWORK_FAILURE_CODE, SUSPENDED_RETRY_SECONDS, backoff_delay, jsonrpc_code, status_code
 from personas.failures import (
     INVALID_ANSWER_CODE,
     LISTEN_NOT_HONORED_CODE,
@@ -323,7 +323,7 @@ async def test_an_app_without_a_shared_version_suspends_the_loop_with_its_code_a
         code = UNSUPPORTED_VERSION_CODE
     else:
         runner.app.script(DISCOVER, refuses_the_revision)
-        code = f"jsonrpc_{UNSUPPORTED_PROTOCOL_VERSION}"
+        code = jsonrpc_code(UNSUPPORTED_PROTOCOL_VERSION)
     runner.start()
     await runner.reports.until(Event.SUSPENDED)
 
@@ -380,7 +380,7 @@ async def test_an_app_without_the_accept_tool_suspends_the_loop_with_the_protoco
     runner.start()
     await runner.reports.until(Event.SUSPENDED)
 
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, f"jsonrpc_{INVALID_PARAMS}")]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, jsonrpc_code(INVALID_PARAMS))]
 
 
 @pytest.mark.parametrize("turns_before_stop", range(0, 40, 3))

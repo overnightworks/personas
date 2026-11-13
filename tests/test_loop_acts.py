@@ -15,7 +15,7 @@ from agents.turn import Principal, person_fingerprint
 from mcp_types import INVALID_PARAMS, CallToolResult, TextContent
 
 from personas.app_session import READ_SECONDS, open_mcp_session
-from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE, status_code
+from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE, jsonrpc_code, status_code
 from personas.failures import Unreachable
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
@@ -132,7 +132,7 @@ async def test_an_error_result_the_app_answers_is_told_as_an_answer_that_is_an_e
     [
         (cuts, NETWORK_FAILURE_CODE),
         (refuses_the_token, status_code(401)),
-        (answers_wrongly, f"jsonrpc_{INVALID_PARAMS}"),
+        (answers_wrongly, jsonrpc_code(INVALID_PARAMS)),
     ],
     ids=["transport", "401", "protocol error"],
 )

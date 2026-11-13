@@ -39,7 +39,7 @@ from pydantic import ValidationError
 from personas import app_session
 from personas.app_session import open_mcp_session
 from personas.config import AppTarget
-from personas.decision import Accept, UnrecognisedRefusal, status_code
+from personas.decision import Accept, UnrecognisedRefusal, jsonrpc_code, status_code
 from personas.failures import (
     INVALID_ANSWER_CODE,
     LISTEN_NOT_HONORED_CODE,
@@ -584,7 +584,7 @@ async def test_an_accept_without_the_tool_is_a_protocol_error_that_is_an_unusabl
     with pytest.raises(UnusableAnswer) as failure:
         await accepts_a_place(app, bearer)
 
-    assert failure.value.code == f"jsonrpc_{INVALID_PARAMS}"
+    assert failure.value.code == jsonrpc_code(INVALID_PARAMS)
 
 
 @pytest.mark.parametrize(

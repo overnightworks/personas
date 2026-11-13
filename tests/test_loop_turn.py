@@ -21,7 +21,7 @@ from mcp_types import (
 
 from personas import app_session
 from personas.config import load_config
-from personas.decision import NETWORK_FAILURE_CODE, TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE
+from personas.decision import NETWORK_FAILURE_CODE, TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE, jsonrpc_code
 from personas.failures import (
     Unreachable,
     leaves_of,
@@ -382,7 +382,7 @@ async def relayed_say_fails(runner, fails):
         (refuses_the_token, [(Event.STARTED, None)], 2),
         (
             answers_wrongly,
-            [(Event.STARTED, None), (Event.SUSPENDED, f"jsonrpc_{INVALID_PARAMS}"), (Event.RESUMED, None)],
+            [(Event.STARTED, None), (Event.SUSPENDED, jsonrpc_code(INVALID_PARAMS)), (Event.RESUMED, None)],
             2,
         ),
     ],

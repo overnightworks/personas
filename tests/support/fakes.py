@@ -285,6 +285,14 @@ class Reports:
         """The line count of each sweep that finished."""
         return [change.lines for change in self.changes if change.event is Event.SWEPT]
 
+    @property
+    def is_empty(self) -> bool:
+        return not self.changes
+
+    def changes_of(self, event: Event) -> list[StateChange]:
+        """Each change of this event."""
+        return [change for change in self.changes if change.event is event]
+
     def codes_of(self, event: Event) -> list[str | None]:
         """The code of each change of this event."""
         return [change.code for change in self.changes if change.event is event]

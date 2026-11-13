@@ -46,7 +46,7 @@ from mcp_types import (
 from pydantic import BaseModel, ValidationError
 
 from personas.config import AppTarget
-from personas.decision import Accept, Refusal, UnrecognisedRefusal, status_code
+from personas.decision import Accept, Refusal, UnrecognisedRefusal, jsonrpc_code, status_code
 from personas.failures import (
     INVALID_ANSWER_CODE,
     LATE_ANSWER_ERRORS,
@@ -324,7 +324,7 @@ def _failure_of(error: BaseException, auth: _BearerAuth) -> CallFailure:
     those, never for a late answer's error, which no call raised.
     """
     if isinstance(error, MCPError) and error.code == UNSUPPORTED_PROTOCOL_VERSION:
-        return UnusableAnswer(f"jsonrpc_{error.code}")
+        return UnusableAnswer(jsonrpc_code(error.code))
     status = auth.last_status
     if status is not None and status >= 400:
         return StatusFailure(status)
@@ -333,7 +333,7 @@ def _failure_of(error: BaseException, auth: _BearerAuth) -> CallFailure:
     if isinstance(error, MCPError):
         if error.code in _TRANSPORT_ERROR_CODES:
             return Unreachable("the app did not answer")
-        return UnusableAnswer(f"jsonrpc_{error.code}")
+        return UnusableAnswer(jsonrpc_code(error.code))
     if isinstance(error, SubscriptionLost):
         return Unreachable("the stream was lost")
     if isinstance(error, ValidationError | _InvalidToolResult):

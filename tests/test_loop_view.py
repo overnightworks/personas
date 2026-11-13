@@ -92,7 +92,7 @@ async def test_an_invitation_the_loop_leaves_out_is_reported_once_with_its_place
 ):
     await an_invited_table_at_an_app_that_binds_no_tools_read_twice(runner)
 
-    [left_out] = [change for change in runner.reports.changes if change.event is Event.INVITATION_LEFT_OUT]
+    [left_out] = runner.reports.changes_of(Event.INVITATION_LEFT_OUT)
     assert (left_out.place_kind, left_out.code) == (TABLE.kind, NO_TURNS_CODE)
     logged = [line for line in formatted(caplog.get_records("call")).splitlines() if Event.INVITATION_LEFT_OUT in line]
     assert len(logged) == 1

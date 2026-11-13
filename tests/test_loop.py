@@ -12,6 +12,7 @@ from agents.backend.gateway import GatewayBackend
 from agents.member import AcceptInvitationRefusal, PlaceRef
 from agents.tools import ToolDeclaration, ToolEffect
 from agents.turn import RejectionCode
+from mcp_types import INVALID_PARAMS
 
 from personas.config import DEFAULT_HISTORY_BYTES, load_config
 from personas.decision import (
@@ -21,6 +22,7 @@ from personas.decision import (
     SUSPENDED_RETRY_SECONDS,
     Accept,
     backoff_delay,
+    jsonrpc_code,
     status_code,
 )
 from personas.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer, leaves_of
@@ -122,7 +124,7 @@ async def test_a_refused_token_suspends_the_loop_without_an_app_call_and_logs_it
     [
         (StatusFailure(403), status_code(403)),
         (StatusFailure(400), status_code(400)),
-        (UnusableAnswer("jsonrpc_-32602"), "jsonrpc_-32602"),
+        (UnusableAnswer(jsonrpc_code(INVALID_PARAMS)), jsonrpc_code(INVALID_PARAMS)),
         (UnusableAnswer(status_code(307)), status_code(307)),
     ],
     ids=["403", "400", "protocol error", "redirect"],
@@ -211,7 +213,7 @@ async def test_the_backoff_starts_over_after_an_answer(scenario):
 
 async def test_an_accept_the_app_cannot_answer_suspends_the_loop_with_its_code_and_does_not_retry_at_once(scenario):
     standing = invited("room-7", "inv-3")
-    failure = UnusableAnswer("jsonrpc_-32602")
+    failure = UnusableAnswer(jsonrpc_code(INVALID_PARAMS))
     run = scenario([read_of(standing) for n in range(3)], accepts=[failure, failure, None])
 
     await run.play()
@@ -219,9 +221,9 @@ async def test_an_accept_the_app_cannot_answer_suspends_the_loop_with_its_code_a
     assert run.clock.slept == [SUSPENDED_RETRY_SECONDS] * 2
     assert run.reports.reported() == [
         (Event.STARTED, None),
-        (Event.SUSPENDED, "jsonrpc_-32602"),
+        (Event.SUSPENDED, jsonrpc_code(INVALID_PARAMS)),
         (Event.RESUMED, None),
-        (Event.SUSPENDED, "jsonrpc_-32602"),
+        (Event.SUSPENDED, jsonrpc_code(INVALID_PARAMS)),
         (Event.RESUMED, None),
         (Event.JOINED, None),
     ]
@@ -230,7 +232,7 @@ async def test_an_accept_the_app_cannot_answer_suspends_the_loop_with_its_code_a
 async def test_a_loop_resumes_once_a_read_answers_though_the_accept_after_it_fails(scenario):
     standing = invited("room-7", "inv-3")
     run = scenario(
-        [UnusableAnswer("jsonrpc_-32602"), read_of(standing), read_of(standing)],
+        [UnusableAnswer(jsonrpc_code(INVALID_PARAMS)), read_of(standing), read_of(standing)],
         accepts=[StatusFailure(503), None],
     )
 
@@ -238,7 +240,7 @@ async def test_a_loop_resumes_once_a_read_answers_though_the_accept_after_it_fai
 
     assert run.reports.reported() == [
         (Event.STARTED, None),
-        (Event.SUSPENDED, "jsonrpc_-32602"),
+        (Event.SUSPENDED, jsonrpc_code(INVALID_PARAMS)),
         (Event.RESUMED, None),
         (Event.BACKOFF, status_code(503)),
         (Event.RESUMED, None),
