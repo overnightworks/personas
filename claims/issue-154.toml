@@ -1,8 +1,0 @@
-claim_id = "274cd2c16c1a450ea55b9e25042b988a"
-agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
-role = "builder"
-base = "95fc7cca6108297312948f8048262b9b16651d6f"
-branch = "claude/issue-154-lines-at-a-place-with-a-view-are-told-no"
-scope = ["README.md", "docs/ARCHITECTURE.md", "pyproject.toml", "src/personas", "tests", "uv.lock"]
-opened_commit = "2067032f849e0b6b331b763daf6aea04e7c98622"
-whole_reason = "the read in loop.py, the place rule in decision.py, the pin and their tests, read together"
