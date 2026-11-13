@@ -7,6 +7,7 @@ from dataclasses import replace
 
 import pytest
 from agents.backend.fake_gateway import completion
+from agents.member import ParentPlace, PlaceRef
 from agents.turn import Principal, person_fingerprint
 
 from personas.reporting import Event
@@ -32,7 +33,7 @@ from tests.support.history import (
     written_turns,
 )
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import ISSUER, READ, active, paused
+from tests.support.hopin import ISSUER, READ, active, invited, paused
 from tests.support.realm import AGENT_NAME
 from tests.support.wire import cuts
 
@@ -51,6 +52,15 @@ async def seated_in_the_call_and_at_the_table(runner, *, state=None, revision: i
     await runner.app.until_view_read(TABLE)
     await settled(runner.app)
     return state
+
+
+async def test_a_table_invitation_whose_standing_names_the_call_it_lies_in_is_accepted(runner):
+    call = ParentPlace(app=runner.config.apps[0].mcp_url, place=PlaceRef(kind="call", id=PLACE_ID))
+    runner.app.stand(SUBJECT, invited(TABLE.id, "inv-4", kind=TABLE.kind, serves_view=True, parent=call))
+    runner.start()
+    await runner.reports.until(Event.JOINED)
+
+    assert [arguments.invitation for arguments in runner.app.accepted] == ["inv-4"]
 
 
 async def test_a_table_that_does_not_wait_is_told_to_his_written_turn_with_its_age_and_known_from_the_start(
