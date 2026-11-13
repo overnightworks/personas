@@ -3,6 +3,6 @@ agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
 role = "builder"
 base = "d636a8930989005d416c3cb84337d9f5838e37c3"
 branch = "claude/issue-136-the-loop-tests-name-backoff-and-suspend"
-scope = ["tests"]
+scope = ["src/personas/app_session.py", "src/personas/decision.py", "tests"]
 opened_commit = "6cf2a51e9db4ded1cae2a8887c7f408ad0320406"
 whole_reason = "The remaining code literals sit in about 39 sites across many loop and sweep test modules, so the scope is the tests directory."
