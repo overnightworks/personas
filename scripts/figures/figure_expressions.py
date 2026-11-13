@@ -90,9 +90,9 @@ def morph_deltas(part: Part, pose: Pose, places: Marks) -> list[Vector]:
 
 
 def _skin_delta(pose: Pose, places: Marks, position: Vector, layer: Layer) -> Vector:
-    front = smoothstep(0.0, 0.04, position[2])
-    if front == 0.0:
+    if position[2] <= 0.0:
         return ZERO
+    front = smoothstep(0.0, 0.04, position[2])
     delta = add(_mouth_delta(pose, places, position), _brow_delta(pose, places, position))
     if layer in (Layer.JAW, Layer.BEARD):
         drop = pose.jaw * _jaw_share(places, position, hanging=layer is Layer.BEARD)

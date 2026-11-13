@@ -66,7 +66,7 @@ RIBBON_END = ((0.004, 1.472, -0.103), (0.020, 1.44, -0.087), (0.030, 1.395, -0.1
 
 
 def mozart_wig() -> list[Part]:
-    cap = shell(_cap_rows(1.0), _cap_rows(LINING))
+    cap = shell(_cap_rows(1.0, STRAND_DEPTH), _cap_rows(LINING, 0.0))
     queue = sweep([place for place, _ in QUEUE], [radii for _, radii in QUEUE], ACROSS, 10)
     return [
         part(cap, _powder, Material.HAIR, NECK_BINDER),
@@ -81,15 +81,15 @@ def _powder(position: Vector) -> Colour:
     return mixed(POWDER, SHADE, 0.3 - 0.3 * math.cos(2.0 * math.pi * position[0] / 0.011))
 
 
-def _cap_rows(scale: float) -> list[list[Vector]]:
-    """Arcs over the head from ear to ear, from the hairline on the forehead back to the nape."""
+def _cap_rows(scale: float, strand_depth: float) -> list[list[Vector]]:
+    """Arcs over the head from ear to ear, from the hairline back to the nape, in strands `strand_depth` deep."""
     rows: list[list[Vector]] = []
     for pitch in spread(PROFILE[0][0], PROFILE[-1][0], ROWS):
         radius, half_width = interpolated(PROFILE, pitch)
         over = (0.0, math.sin(pitch), math.cos(pitch))
         radii = (half_width * scale, radius * scale)
         row = arc(CENTRE, ACROSS, over, radii, spread(-REACH, REACH, COLUMNS), SQUARENESS)
-        rows.append(rippled(row, CENTRE, STRANDS, STRAND_DEPTH * (1.0 if scale == 1.0 else 0.0)))
+        rows.append(rippled(row, CENTRE, STRANDS, strand_depth))
     return rows
 
 
