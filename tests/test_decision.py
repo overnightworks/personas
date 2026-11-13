@@ -392,20 +392,27 @@ OTHER_PLACE = PlaceRef(kind="call", id="room-8")
     ],
 )
 def test_the_standing_decides_which_checkpoints_exist(checkpoints, standings, expected):
-    assert sync_checkpoints(checkpoints, standings) == expected
+    assert sync_checkpoints(checkpoints, standings, ()) == expected
 
 
 def test_a_place_of_another_kind_that_serves_no_view_gets_no_checkpoint():
     table = Standing(place=PlaceRef(kind="table", id="table-1"), state=StandingState.ACTIVE)
 
-    assert sync_checkpoints({}, (table,)) == {}
+    assert sync_checkpoints({}, (table,), ()) == {}
 
 
-def test_a_place_that_stops_serving_a_view_and_serves_one_again_starts_as_restarted():
-    serving_view = (active("table-1", "table", serves_view=True),)
-    gone = sync_checkpoints({A_TABLE: Reading(GENERATION, 4)}, (active("table-1", "table"),))
+@pytest.mark.parametrize("kind", ["call", "table"])
+def test_a_place_that_stops_serving_a_view_and_serves_one_again_starts_as_restarted(kind):
+    place = PlaceRef(kind=kind, id="place-1")
+    without_view = (active("place-1", kind),)
+    with_view = (active("place-1", kind, serves_view=True),)
+    while_serving = sync_checkpoints({}, with_view, ())
+    read = {place: Reading(GENERATION, 4)}
 
-    assert sync_checkpoints(gone, serving_view) == {A_TABLE: Restarted()}
+    without = sync_checkpoints(read, without_view, with_view)
+    again = sync_checkpoints(without, with_view, without_view)
+
+    assert (while_serving, again) == ({place: Restarted()}, {place: Restarted()})
 
 
 @pytest.mark.parametrize(
@@ -825,7 +832,7 @@ def test_a_call_place_that_serves_a_view_is_a_view_place_and_its_window_is_kept_
     standing = Standing(place=PLACE, state=StandingState.ACTIVE, serves_view=True)
 
     assert active_window_places((standing,)) == (PLACE,)
-    assert sync_checkpoints({}, (standing,)) == {PLACE: Restarted()}
+    assert sync_checkpoints({}, (standing,), ()) == {PLACE: Restarted()}
     assert active_view_places((standing,)) == (PLACE,)
     assert accepts_for((invited("room-7", "inv-3", serves_view=True),), Memory(), takes_turns=False) == ()
 

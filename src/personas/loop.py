@@ -162,6 +162,7 @@ class AgentLoop:
         self._renewed_after_401 = False
         self._suspension: str | None = None
         self._backing_off = False
+        self._standings: tuple[Standing, ...] = ()
         self._checkpoints: dict[PlaceRef, Checkpoint] = {}
         self._turned_revisions: dict[PlaceRef, int] = {}
         self._turn: ActiveTurn | None = None
@@ -251,7 +252,8 @@ class AgentLoop:
         self._resume_if_unwell()
         self._boundaries.ready.announce()
         self._memory = forget_gone(self._memory, standing.standings)
-        self._checkpoints = sync_checkpoints(self._checkpoints, standing.standings)
+        self._checkpoints = sync_checkpoints(self._checkpoints, standing.standings, self._standings)
+        self._standings = standing.standings
         self._turned_revisions = sync_turned_revisions(self._turned_revisions, standing.standings)
         self._mind.undue(left_standing(self._app.mcp_url, standing.standings))
         self._mind.stand_at(self._app.mcp_url, holds=lends_tools(self._app.binding is not None, standing.standings))

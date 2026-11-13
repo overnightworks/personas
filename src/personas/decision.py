@@ -331,10 +331,14 @@ type Checkpoint = Restarted | Joined | Paused | Reading
 
 
 def sync_checkpoints(
-    checkpoints: Mapping[PlaceRef, Checkpoint], standings: tuple[Standing, ...]
+    checkpoints: Mapping[PlaceRef, Checkpoint], standings: tuple[Standing, ...], before: tuple[Standing, ...]
 ) -> dict[PlaceRef, Checkpoint]:
-    """The checkpoints after a standing read: a window place paused is paused, one active keeps its entry or starts as
-    restarted, and a place that is gone, invited again or no window place any more has none."""
+    """The checkpoints after a standing read, given the standing read before it: a window place paused is paused, one
+    active keeps its entry or starts as restarted, one that serves a view again after an active read without one starts
+    as restarted, and a place that is gone, invited again or no window place any more has none."""
+    viewless = frozenset(
+        standing.place for standing in before if standing.state is StandingState.ACTIVE and not standing.serves_view
+    )
     synced: dict[PlaceRef, Checkpoint] = {}
     for standing in standings:
         if not _has_window(standing):
@@ -342,7 +346,8 @@ def sync_checkpoints(
         if standing.state is StandingState.PAUSED:
             synced[standing.place] = Paused()
         elif standing.state is StandingState.ACTIVE:
-            synced[standing.place] = checkpoints.get(standing.place, Restarted())
+            returning = standing.serves_view and standing.place in viewless
+            synced[standing.place] = Restarted() if returning else checkpoints.get(standing.place, Restarted())
     return synced
 
 
