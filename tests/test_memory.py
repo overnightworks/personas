@@ -453,15 +453,13 @@ async def test_a_line_is_read_back_with_the_mark_of_having_been_an_act_as_it_was
     assert [(each.seq, each.act) for each in kept] == [(1, False), (2, True)]
 
 
-@pytest.mark.parametrize("forgotten", ["cut", "act"])
-def test_a_writer_that_forgets_a_mark_of_a_line_is_refused_by_the_database(database, forgotten):
-    named = [column for column in ("own", "spoken", "cut", "act") if column != forgotten]
-
+@pytest.mark.parametrize("named_marks", ["own, spoken, act", "own, spoken, cut"], ids=["forgets cut", "forgets act"])
+def test_a_writer_that_forgets_a_mark_of_a_line_is_refused_by_the_database(database, named_marks):
     with pytest.raises(IntegrityError):
         run_sql(
             database,
             "INSERT INTO lines (client_id, app, place_kind, place_id, generation, seq, first_read_at, speaker, kind,"
-            f" text, {', '.join(named)}) VALUES ('agent', 'app', 'call', 'room', 'visit', 1, now(), 'Ada', 'message',"
+            f" text, {named_marks}) VALUES ('agent', 'app', 'call', 'room', 'visit', 1, now(), 'Ada', 'message',"  # noqa: S608 - test-chosen column names
             " 'text', false, false, false)",
         )
 
