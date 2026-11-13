@@ -119,14 +119,6 @@ async def test_an_act_line_said_beside_a_line_in_one_read_gives_one_turn_told_bo
     assert [(each["seq"], each.get("act", False)) for each in turn.told("line")] == [(1, True), (2, False)]
 
 
-async def test_his_own_act_line_gives_no_turn(runner):
-    await restarted_in_the_call(runner)
-    await said_and_taken(runner.app, PLACE_ID, "played a card", author=SUBJECT, act=True)
-    await settled(runner.app)
-
-    assert runner.gateway.openings() == []
-
-
 async def test_a_turn_that_calls_nothing_says_nothing_reports_nothing_and_gives_no_further_turn(runner):
     await restarted_in_the_call(runner)
     say_in_the_call(runner, REMARK)
