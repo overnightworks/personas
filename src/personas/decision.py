@@ -19,10 +19,11 @@ from agents.member import (
     PlaceRef,
     PlaceView,
     PlaceWindow,
+    SpeakAnswer,
     SpeakRefusal,
-    Spoken,
     Standing,
     StandingState,
+    VoiceState,
 )
 from agents.turn import MAX_EVENT_BYTES
 
@@ -249,9 +250,14 @@ def is_voice_app(has_voice: bool, declared: Iterable[ToolDeclaration]) -> bool:
     return has_voice and any(each.name == SPEAK_TOOL for each in declared)
 
 
-def speaks_aloud(voice_app: bool, occasion: Occasion) -> bool:
-    """Whether a turn is spoken: it is for lines, which a call place gives, in the app of a voice."""
-    return voice_app and isinstance(occasion, Lines)
+def speaks_aloud(voice_app: bool, occasion: Occasion, checkpoint: Checkpoint | None) -> bool:
+    """Whether a turn is spoken: it is for lines, which a call place gives, in the app of a voice, unless the last
+    window of the place states that his voice is unavailable there. A checkpoint that is no reading states nothing."""
+    return voice_app and isinstance(occasion, Lines) and not _voice_is_unavailable(checkpoint)
+
+
+def _voice_is_unavailable(checkpoint: Checkpoint | None) -> bool:
+    return isinstance(checkpoint, Reading) and checkpoint.voice_state is VoiceState.UNAVAILABLE
 
 
 def spoken_wait_seconds(duration_ms: int) -> float:
@@ -307,10 +313,12 @@ class Paused:
 
 @dataclass(frozen=True)
 class Reading:
-    """How far one run of a window was read: its generation and the last seq taken."""
+    """What the last read of a window stated: its generation, the last seq taken and, when the app stated one, the
+    state of his voice at the place."""
 
     generation: str
     last_seq: int
+    voice_state: VoiceState | None = None
 
 
 type Checkpoint = Restarted | Joined | Paused | Reading
@@ -404,10 +412,10 @@ def act_outcome(ended: ToolOutcome | BaseException, *, cancelling: bool) -> ActO
     return _unanswered(ended, cancelling=cancelling)
 
 
-def speech_outcome(ended: Spoken | SpeakRefusal | BaseException, *, cancelling: bool) -> SpeechOutcome | None:
+def speech_outcome(ended: SpeakAnswer | SpeakRefusal | BaseException, *, cancelling: bool) -> SpeechOutcome | None:
     """The outcome of a sentence sent to ``speak`` from how its request ended and whether the turn's task is being
     cancelled. The app's answer, a refusal included, is an answer even while a cancel is pending."""
-    if isinstance(ended, Spoken | SpeakRefusal):
+    if isinstance(ended, SpeakAnswer | SpeakRefusal):
         return ended
     return _unanswered(ended, cancelling=cancelling)
 
@@ -468,7 +476,7 @@ def perceive(window: PlaceWindow, checkpoint: Checkpoint) -> Perception:
     """Reads a window from a checkpoint: a restart or a pause takes nothing, a join and a new run take every line."""
     if sets_where_reading_starts(checkpoint):
         highest = window.entries[-1].seq if window.entries else window.starts_at - 1
-        return Perception(Reading(window.generation, highest), (), missed=False)
+        return Perception(Reading(window.generation, highest, window.voice_state), (), missed=False)
     match checkpoint:
         case Reading(generation=window.generation, last_seq=last_seq):
             return _take_after(window, last_seq)
@@ -479,7 +487,9 @@ def perceive(window: PlaceWindow, checkpoint: Checkpoint) -> Perception:
 def _take_after(window: PlaceWindow, last_seq: int) -> Perception:
     new = tuple(line for line in window.entries if line.seq > last_seq)
     return Perception(
-        Reading(window.generation, new[-1].seq if new else last_seq), new, missed=window.starts_at > last_seq + 1
+        Reading(window.generation, new[-1].seq if new else last_seq, window.voice_state),
+        new,
+        missed=window.starts_at > last_seq + 1,
     )
 
 

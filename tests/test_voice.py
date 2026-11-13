@@ -6,7 +6,7 @@ import secrets
 import anyio
 import pytest
 from agents.backend import TurnStopped
-from agents.member import PlaceRef, Spoken
+from agents.member import PlaceRef, SpeakAnswer, Spoken, Written
 from agents.turn import FailureCode
 from agents.turn_events import AssistantTextEvent, FinalEvent
 
@@ -46,7 +46,8 @@ class SpeakingScenario:
     """A speaking whose sentences are answered as played for ``SENTENCE_MS``, and whose token renewal takes
     ``renewal_seconds`` and ends once ``renewal_gate`` is set; ``renewal_started`` is set when a renewal begins."""
 
-    def __init__(self, text: str, renewal_seconds: float = 0) -> None:
+    def __init__(self, text: str, renewal_seconds: float = 0, answer: SpeakAnswer | None = None) -> None:
+        self.answer = Spoken(duration_ms=SENTENCE_MS) if answer is None else answer
         self.clock = FakeClock()
         self.sent: list[str] = []
         self.entered: list[object] = []
@@ -72,9 +73,9 @@ class SpeakingScenario:
         await self.renewal_gate.wait()
         self.clock.time += self.renewal_seconds
 
-    async def speak(self, place: PlaceRef, sentence: str) -> Spoken:
+    async def speak(self, place: PlaceRef, sentence: str) -> SpeakAnswer:
         self.sent.append(sentence)
-        return Spoken(duration_ms=SENTENCE_MS)
+        return self.answer
 
 
 async def test_a_final_sentence_whose_wait_crosses_the_deadline_ends_the_turn_limit_exceeded_after_both_are_sent():
@@ -113,3 +114,14 @@ async def test_a_sentence_whose_token_renewal_ends_after_the_events_failed_is_no
 
     assert scenario.sent == []
     assert scenario.entered == []
+
+
+async def test_sentences_the_app_wrote_instead_of_voicing_are_each_sent_and_entered_with_no_wait_between_them():
+    scenario = SpeakingScenario("One. Two. Three.", answer=Written(written=True))
+    scenario.renewal_gate.set()
+
+    await scenario.speaking.play()
+
+    assert scenario.sent == ["One.", "Two.", "Three."]
+    assert len(scenario.entered) == 3
+    assert scenario.clock.slept == []

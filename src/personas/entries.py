@@ -8,7 +8,7 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from agents.member import PlaceEntry, PlaceRef, PlaceView, PlaceWindow, SpeakRefusal, Spoken
+from agents.member import PlaceEntry, PlaceRef, PlaceView, PlaceWindow, SpeakAnswer, SpeakRefusal, Spoken, Written
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -49,6 +49,7 @@ class KeptLine:
     text: str = field(repr=False)
     own: bool
     spoken: bool
+    cut: bool = False
 
 
 @dataclass(frozen=True)
@@ -91,7 +92,7 @@ class ActDone:
     at: datetime
 
 
-type SpeechOutcome = Spoken | SpeakRefusal | Unanswered
+type SpeechOutcome = SpeakAnswer | SpeakRefusal | Unanswered
 
 
 @dataclass(frozen=True)
@@ -173,12 +174,22 @@ class History:
 def taken_lines(visit: Visit, new: Iterable[PlaceEntry], read_at: datetime) -> tuple[KeptLine, ...]:
     """The lines a read of the visit's window took, as the history keeps them."""
     return tuple(
-        KeptLine(visit, line.seq, read_at, line.name, line.kind, line.text, line.own, line.spoken) for line in new
+        KeptLine(visit, line.seq, read_at, line.name, line.kind, line.text, line.own, line.spoken, line.cut)
+        for line in new
     )
 
 
 def told_line(line: KeptLine) -> dict[str, object]:
-    return {"name": line.name, "kind": line.kind, "text": line.text, "own": line.own, "spoken": line.spoken}
+    told: dict[str, object] = {
+        "name": line.name,
+        "kind": line.kind,
+        "text": line.text,
+        "own": line.own,
+        "spoken": line.spoken,
+    }
+    if line.cut:
+        told["cut"] = True
+    return told
 
 
 def told_place(place: PlaceRef) -> dict[str, str]:
@@ -192,6 +203,8 @@ def told_outcome(outcome: ActOutcome) -> dict[str, object]:
 
 
 def told_speech_outcome(outcome: SpeechOutcome) -> dict[str, object]:
+    if isinstance(outcome, Written):
+        return {"answered": True, "written": True}
     if isinstance(outcome, Spoken):
         return {"answered": True}
     if isinstance(outcome, SpeakRefusal):

@@ -11,11 +11,13 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
 from personas.config import MemoryTarget
-from personas.memory import migrate
+from personas.memory import MIGRATIONS_DIRECTORY, migrate
 from personas.secret import Secret
 
 if TYPE_CHECKING:
@@ -71,6 +73,19 @@ def created_database(template: str | None = None) -> Iterator[str]:
         with server.connect() as connection:
             connection.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
         server.dispose()
+
+
+def migrated_to(target: MemoryTarget, revision: str) -> None:
+    """Brings the target's database up to one revision, as a deployment that has not yet taken the newer ones."""
+    config = Config()
+    config.set_main_option("script_location", str(MIGRATIONS_DIRECTORY))
+    engine = engine_of(target.dbname)
+    try:
+        with engine.connect() as connection:
+            config.attributes["connection"] = connection
+            command.upgrade(config, revision)
+    finally:
+        engine.dispose()
 
 
 @contextmanager

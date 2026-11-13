@@ -19,10 +19,16 @@ from agents.member import (
     AcceptInvitationRefusal,
     AcceptInvitationRefused,
     FigureRef,
+    PartialSpeech,
+    PlaceEntry,
     PlaceRef,
+    PlaceWindow,
     SpeakRefusal,
     SpeakRefused,
     Spoken,
+    TalkedOver,
+    VoiceState,
+    Written,
 )
 from agents.tools import ToolEffect, ToolOutcome
 from mcp_types import (
@@ -242,6 +248,15 @@ async def test_a_speak_sends_the_place_and_the_sentence_and_gives_how_long_the_a
     assert app.spoken == [(SUBJECT, PLACE.id, sentence)]
 
 
+async def test_a_speak_the_app_answers_as_written_to_the_place_instead_is_told_as_written(app, bearer):
+    app.written_speaks = 1
+
+    async with opened(app, bearer) as session:
+        answer = await session.speak(PLACE, "A sentence.")
+
+    assert answer == Written(written=True)
+
+
 @pytest.mark.parametrize("refusal", list(SpeakRefusal))
 async def test_a_speak_refused_with_a_code_of_the_record_is_told_by_that_code(app, bearer, refusal):
     app.speak_outcomes.append(ToolOutcome(SpeakRefused(refused=refusal).model_dump_json(), is_error=True))
@@ -258,10 +273,20 @@ async def test_a_speak_refused_with_a_code_of_the_record_is_told_by_that_code(ap
         ToolOutcome(SpeakRefused(refused=SpeakRefusal.TOO_LONG).model_dump_json(), is_error=False),
         ToolOutcome('{"refused": "other"}', is_error=True),
         ToolOutcome(Spoken(duration_ms=1).model_dump_json(), is_error=True),
+        ToolOutcome('{"written": false}', is_error=False),
+        ToolOutcome(Written(written=True).model_dump_json(), is_error=True),
     ],
-    ids=["no json", "no duration", "a refusal that succeeded", "an unknown refusal", "a duration that failed"],
+    ids=[
+        "no json",
+        "no duration",
+        "a refusal that succeeded",
+        "an unknown refusal",
+        "a duration that failed",
+        "a sentence not written",
+        "a written sentence that failed",
+    ],
 )
-async def test_a_speak_answer_that_is_neither_a_spoken_nor_a_refusal_of_the_record_is_an_unusable_answer(
+async def test_a_speak_answer_that_is_none_of_the_answers_or_refusals_of_the_record_is_an_unusable_answer(
     app, bearer, outcome
 ):
     app.speak_outcomes.append(outcome)
@@ -651,6 +676,30 @@ async def test_a_window_holds_the_lines_of_the_place_and_marks_the_members_own(a
 
     assert window is not None
     assert [(each.seq, each.text, each.own) for each in window.entries] == [(1, heard, False), (2, own, True)]
+
+
+async def test_a_window_with_a_voice_state_a_cut_line_and_people_talking_over_him_is_read_whole(app, bearer):
+    window = PlaceWindow(
+        generation="generation-1",
+        starts_at=1,
+        entries=(PlaceEntry(seq=1, kind="message", name="Ada", text="heard", own=False, spoken=True, cut=True),),
+        talked_over=TalkedOver(id="talk-1", playing=True, speech=(PartialSpeech(name="Ada", text="but"),)),
+        voice_state=VoiceState.UNAVAILABLE,
+    )
+
+    async def shows_the_window(reply):
+        contents = TextResourceContents(
+            uri="member://standing/places/call/room-7", text=window.model_dump_json(), mime_type="application/json"
+        )
+        await reply.result(ReadResourceResult(contents=[contents], ttl_ms=0, cache_scope="private"))
+
+    app.stand(SUBJECT, active("room-7"))
+    app.script(READ, shows_the_window)
+
+    async with opened(app, bearer) as session:
+        read = await session.read_place(PLACE)
+
+    assert read == window
 
 
 @pytest.mark.parametrize("arrangement", ["the app lost the place", "not in the place", "answered inside a 200"])

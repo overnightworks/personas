@@ -219,9 +219,9 @@ def history_holding(entries):
     return history_after(EMPTY_HISTORY, entries, ROOMY.size_bytes)
 
 
-def kept(visit, seq, text, *, hours_before, own=False, spoken=False, name="Ada"):
+def kept(visit, seq, text, *, hours_before, own=False, spoken=False, cut=False, name="Ada"):
     """A kept line of a visit, first read this many hours before ``LATER``."""
-    return KeptLine(visit, seq, LATER - timedelta(hours=hours_before), name, "message", text, own, spoken)
+    return KeptLine(visit, seq, LATER - timedelta(hours=hours_before), name, "message", text, own, spoken, cut)
 
 
 def a_view(revision: int, *, awaits_you: bool = True) -> PlaceView:

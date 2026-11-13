@@ -72,7 +72,7 @@ RESET_AFTER_CANCEL_SECONDS = 0.5
 BEYOND_64_BITS = 2**63
 FRACTIONAL_SEQ_ROW = (
     "INSERT INTO lines VALUES ('agent', 'app', 'call', 'room', 'visit', 1.5, now(), 'Ada', 'message', 'text',"
-    " false, false)"
+    " false, false, false)"
 )
 REFUSE_EVERY_NEW_ROW = "ALTER TABLE lines ADD CONSTRAINT refuses_every_row CHECK (false) NOT VALID"
 """Its error names the failing row, so only the adapter's own wording keeps the row out of a traceback."""
@@ -442,6 +442,27 @@ async def test_a_line_is_read_back_with_the_mark_of_having_been_said_aloud_as_it
     kept = await store.kept_since(AGENT, WALL_START)
 
     assert [(each.seq, each.spoken) for each in kept] == [(1, False), (2, True)]
+
+
+async def test_a_line_is_read_back_with_the_mark_of_having_been_cut_as_it_was_kept(store):
+    visit = a_visit("morning")
+    await store.keep(
+        a_read_in(visit, line(1, "Heard so far", spoken=True, cut=True), line(2, "All of it", spoken=True))
+    )
+
+    kept = await store.kept_since(AGENT, WALL_START)
+
+    assert [(each.seq, each.cut) for each in kept] == [(1, True), (2, False)]
+
+
+def test_a_writer_that_forgets_the_cut_mark_of_a_line_is_refused_by_the_database(database):
+    with pytest.raises(IntegrityError):
+        run_sql(
+            database,
+            "INSERT INTO lines (client_id, app, place_kind, place_id, generation, seq, first_read_at, speaker, kind,"
+            " text, own, spoken) VALUES ('agent', 'app', 'call', 'room', 'visit', 1, now(), 'Ada', 'message', 'text',"
+            " false, false)",
+        )
 
 
 async def test_two_agents_with_lines_in_one_place_each_read_only_their_own(store):
