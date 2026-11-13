@@ -37,10 +37,13 @@ def test_migrating_an_empty_database_creates_the_schema_and_migrating_again_chan
 
     migrate(files, monkeypatch)
 
-    assert "lines" in after_the_first[0]
-    assert (tables_of(unmigrated_database), kept_lines(unmigrated_database, "client_id, seq, first_read_at")) == (
-        after_the_first
+    after_the_second = (
+        tables_of(unmigrated_database),
+        kept_lines(unmigrated_database, "client_id, seq, first_read_at"),
     )
+
+    assert "lines" in after_the_first[0]
+    assert after_the_second == after_the_first
 
 
 @pytest.mark.postgres
