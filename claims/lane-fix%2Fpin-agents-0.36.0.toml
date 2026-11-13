@@ -1,0 +1,7 @@
+claim_id = "5544120aafe64e18b037a5e907848f6b"
+agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
+role = "builder"
+base = "66081189e4af4d5c6a403780424fa1e9c5276987"
+branch = "fix/pin-agents-0.36.0"
+scope = ["pyproject.toml", "uv.lock"]
+opened_commit = "c87e16500777ad09c40d7f21741563a319df1a42"
