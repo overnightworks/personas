@@ -1,8 +1,0 @@
-claim_id = "69d75597c9bd48cca372084a40b5e242"
-agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
-role = "builder"
-base = "e401d5a551e9b4706abd552f49a8d2bff5f2401c"
-branch = "claude/issue-140-personas-pins-agents-v0-35-0-and-reads-a"
-scope = ["pyproject.toml", "src/personas/turning.py", "tests/support/hopin.py", "tests/test_loop_table.py", "uv.lock"]
-opened_commit = "1ada59673678a4069871fdf6a8a9983a1821b673"
-whole_reason = "dependency bump: two pins, the lock, one reader and its table test"
