@@ -295,10 +295,14 @@ class Gateway(FakeGateway):
         messages = json.loads(self.requests[request_number - 1].content)["messages"]
         return [message["content"] for message in messages if message["role"] == "tool"]
 
+    def held_result_texts(self, request_number: int) -> list[str]:
+        """The tool results of the request that arrived as this number (from one) that are a held call's, unparsed."""
+        return [each for each in self.tool_results(request_number) if each.startswith('{"sent": false')]
+
     def held_results(self, request_number: int) -> list[dict]:
         """The tool results of the request that arrived as this number (from one) that are a held call's, as the model
         read them."""
-        return [json.loads(each) for each in self.tool_results(request_number) if each.startswith('{"sent": false')]
+        return [json.loads(each) for each in self.held_result_texts(request_number)]
 
     def offered_tools(self, request_number: int = 1) -> list[str]:
         """The names of the tools the request that arrived as this number (from one) offered, in the order offered."""

@@ -124,7 +124,7 @@ async def test_a_turn_counts_the_result_of_a_held_call_among_its_results(runner,
     second.set()
     await runner.reports.until_a_turn_completed()
 
-    (held,) = (each for each in runner.gateway.tool_results(3) if each.startswith('{"sent": false'))
+    (held,) = runner.gateway.held_result_texts(3)
     _, _, results = (int(each) for each in the_turn_ended_line(caplog).groups()[1:4])
     assert results >= len(held)
 
