@@ -199,10 +199,14 @@ class FakeApp:
     lines: dict[str, list[Line]] = field(default_factory=dict[str, list[Line]])
     generations: dict[str, str] = field(default_factory=dict[str, str])
     reads: dict[str, int] = field(default_factory=dict[str, int])
+    read_order: list[str] = field(default_factory=list[str])
+    """The uri of each resource read, in the order the reads arrived."""
     read_added: asyncio.Event = field(default_factory=asyncio.Event)
     vanished: set[str] = field(default_factory=set[str])
     without_window: set[str] = field(default_factory=set[str])
     """Places whose window is listed and answers a read as unknown, as an app that serves none yet does."""
+    failing_windows: set[str] = field(default_factory=set[str])
+    """Places whose window read the app answers with a server error."""
     say_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
     speak_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
     spoken: list[tuple[str, str, str]] = field(default_factory=list[tuple[str, str, str]])
@@ -358,6 +362,7 @@ class FakeApp:
     async def read(self, principal: Principal, uri: str) -> MemberStanding | PlaceWindow | PlaceView | None:
         self.reads[uri] = self.reads.get(uri, 0) + 1
         self.read_added.set()
+        self.read_order.append(uri)
         viewed = place_ref_from_view_uri(uri)
         if viewed is not None:
             return self._view(principal, viewed)
@@ -564,6 +569,8 @@ class FakeApp:
         ):
             self.refusals.put_nowait(self.refuse_with)
             await reply.status(self.refuse_with)
+        elif method == READ and self._fails_the_window_read(document):
+            await reply.status(HTTPStatus.SERVICE_UNAVAILABLE)
         elif self.scripted[method]:
             try:
                 await self.scripted[method].pop(0)(reply)
@@ -573,6 +580,10 @@ class FakeApp:
         else:
             scope[_SUBJECT_KEY] = self.bearers[bearer]
             await self._front(scope, _replayed(body, receive), noting)
+
+    def _fails_the_window_read(self, document: dict[str, Any]) -> bool:
+        place = place_ref_from_window_uri((document.get("params") or {}).get("uri", ""))
+        return place is not None and place.id in self.failing_windows
 
     def _take_in(self, call: dict[str, Any]) -> None:
         """Content a request carries counts as held before any scripted answer, refusal or status can ignore it."""

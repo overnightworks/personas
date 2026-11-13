@@ -14,6 +14,8 @@ from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import memory_target
 from tests.support.gateway import Gateway, says
+from tests.support.history import TABLE, a_state, at_table
+from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import LIMIT_SECONDS
 
 if TYPE_CHECKING:
@@ -91,6 +93,20 @@ async def test_a_store_that_is_down_is_reported_once_and_costs_no_answer_and_the
         (Event.STORE_RESUMED, None),
     ]
     assert store.seqs_kept()[-3:] == [1, 2, 3]
+
+
+async def test_the_window_of_a_view_place_is_handed_to_the_store_under_its_kind_and_id_with_the_act_marks(runner):
+    store = ScriptedStore()
+    runner.lines = store
+    runner.app.stand(SUBJECT, at_table())
+    runner.app.speak(TABLE.id, "visitor", "Ada", "took a card", act=True)
+    runner.app.show_view(TABLE.id, 1, a_state(), awaits_you=False)
+    runner.start()
+    await store.until_attempts(1)
+
+    (read, *_) = store.kept
+    assert read.place == TABLE
+    assert [(each.text, each.act) for each in read.window.entries] == [("took a card", True)]
 
 
 async def test_a_write_that_ends_in_a_timeout_is_reported_by_its_code_and_the_turn_it_held_up_follows(runner):

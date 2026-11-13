@@ -678,6 +678,18 @@ async def test_a_window_holds_the_lines_of_the_place_and_marks_the_members_own(a
     assert [(each.seq, each.text, each.own) for each in window.entries] == [(1, heard, False), (2, own, True)]
 
 
+async def test_a_window_with_an_act_line_is_read_with_the_mark_kept(app, bearer):
+    app.stand(SUBJECT, active("room-7"))
+    app.speak("room-7", "visitor", "Ada", "took a card", act=True)
+    app.speak("room-7", "visitor", "Ada", "good luck")
+
+    async with opened(app, bearer) as session:
+        window = await session.read_place(PLACE)
+
+    assert window is not None
+    assert [(each.text, each.act) for each in window.entries] == [("took a card", True), ("good luck", False)]
+
+
 async def test_a_window_with_a_voice_state_a_cut_line_and_people_talking_over_him_is_read_whole(app, bearer):
     window = PlaceWindow(
         generation="generation-1",

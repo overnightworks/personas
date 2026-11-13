@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import secrets
 
 import pytest
@@ -31,7 +32,7 @@ from tests.support.history import (
     waits,
 )
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import CALL, DISCOVER
+from tests.support.hopin import CALL, DISCOVER, PLAY_TOOL
 from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG
 from tests.support.voice import in_a_voice_call_and_at_a_table
 
@@ -298,6 +299,23 @@ async def test_the_table_state_his_own_card_caused_holds_his_next_call_once_and_
     assert kinds == ["act", "line", "view"]
     assert all(each["new"] for each in held["arrived"]["entries"])
     assert len(runner.gateway.held_results(4)) == 1
+
+
+async def test_an_act_line_of_someone_else_at_his_table_holds_the_first_call_of_his_turn_once(runner, other):
+    runner.gateway = Gateway(*says_after_a_hold(TABLE.id, ANSWER, tool=PLAY_TOOL))
+    running = runner.gateway.hold_request(1)
+    other.stand(SUBJECT, at_table())
+    await restarted_in_the_call(runner)
+    waits(other, 1)
+    await runner.gateway.until_requested(1)
+    await said_and_taken(other, TABLE.id, REMARK, act=True, place_kind=TABLE.kind)
+    running.set()
+    await other.said_count(1)
+    await runner.gateway.until_requested(3)
+
+    (held,) = json.loads(runner.gateway.tool_results(2)[0])["arrived"]["entries"]
+    assert held == entry(url_of(runner, 1), TABLE.id, REMARK, new=True, place_kind=TABLE.kind, act=True)
+    assert [text for _, _, text in other.said] == [ANSWER]
 
 
 async def test_a_line_heard_at_a_voice_place_holds_the_call_of_his_table_turn(runner):
