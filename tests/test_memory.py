@@ -453,15 +453,26 @@ async def test_a_line_is_read_back_with_the_mark_of_having_been_an_act_as_it_was
     assert [(each.seq, each.act) for each in kept] == [(1, False), (2, True)]
 
 
-@pytest.mark.parametrize("named_marks", ["own, spoken, act", "own, spoken, cut"], ids=["forgets cut", "forgets act"])
-def test_a_writer_that_forgets_a_mark_of_a_line_is_refused_by_the_database(database, named_marks):
-    with pytest.raises(IntegrityError):
-        run_sql(
-            database,
+@pytest.mark.parametrize(
+    "insert",
+    [
+        pytest.param(
             "INSERT INTO lines (client_id, app, place_kind, place_id, generation, seq, first_read_at, speaker, kind,"
-            f" text, {named_marks}) VALUES ('agent', 'app', 'call', 'room', 'visit', 1, now(), 'Ada', 'message',"  # noqa: S608 - test-chosen column names
+            " text, own, spoken, act) VALUES ('agent', 'app', 'call', 'room', 'visit', 1, now(), 'Ada', 'message',"
             " 'text', false, false, false)",
-        )
+            id="forgets cut",
+        ),
+        pytest.param(
+            "INSERT INTO lines (client_id, app, place_kind, place_id, generation, seq, first_read_at, speaker, kind,"
+            " text, own, spoken, cut) VALUES ('agent', 'app', 'call', 'room', 'visit', 1, now(), 'Ada', 'message',"
+            " 'text', false, false, false)",
+            id="forgets act",
+        ),
+    ],
+)
+def test_a_writer_that_forgets_a_mark_of_a_line_is_refused_by_the_database(database, insert):
+    with pytest.raises(IntegrityError):
+        run_sql(database, insert)
 
 
 async def test_two_agents_with_lines_in_one_place_each_read_only_their_own(store):
