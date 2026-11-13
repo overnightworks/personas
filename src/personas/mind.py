@@ -7,12 +7,14 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from personas.decision import History, Turns, claimed, held_apps, history_after, released, with_due, without_due
+from personas.decision import Turns, claimed, held_apps, history_after, released, with_due, without_due
+from personas.entries import History
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
-    from personas.decision import AppPlace, Entry, Occasion
+    from personas.decision import AppPlace, Occasion
+    from personas.entries import Entry
 
 
 class Mind:

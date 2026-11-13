@@ -4,15 +4,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from personas.decision import earlier_today, today_since
 from personas.failures import StoreUnavailable
+from personas.recall import earlier_today, today_since
 from personas.reporting import StoreOutage
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from datetime import datetime
 
-    from personas.decision import EarlierToday, History, KeptLine, TodayBounds, WindowRead
+    from personas.entries import History, KeptLine, WindowRead
+    from personas.recall import EarlierToday, TodayBounds
     from personas.reporting import Event
 
 

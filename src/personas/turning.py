@@ -17,7 +17,6 @@ from agents.turn_events import FinalEvent, ToolCallEvent
 from personas.decision import (
     TOOL_NOT_DECLARED_CODE,
     TURN_ROLE,
-    ActDone,
     act_outcome,
     arrived_since,
     bound_declarations,
@@ -28,6 +27,7 @@ from personas.decision import (
     turn_call_bound,
     turn_told,
 )
+from personas.entries import ActDone
 from personas.failures import CallFailure, Unreachable, leaves_of, raise_if_cancelled, task_is_being_cancelled
 from personas.reporting import Event
 from personas.task_record import (
@@ -52,7 +52,8 @@ if TYPE_CHECKING:
     from personas.app_session import AppSession, SessionOpener
     from personas.clock import Clock
     from personas.config import AgentCredentials, AppTarget, ToolBinding
-    from personas.decision import Arrived, History, Occasion, Token
+    from personas.decision import Arrived, Occasion, Token
+    from personas.entries import History
     from personas.mind import Mind
     from personas.remembering import Remembering
     from personas.task_record import TaskRecord

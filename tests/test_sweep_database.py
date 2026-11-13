@@ -13,9 +13,10 @@ from typing import TYPE_CHECKING
 import pytest
 from agents.member import PlaceRef
 
-from personas.decision import TodayBounds, WindowRead
+from personas.entries import WindowRead
 from personas.failures import STORE_TIMEOUT_CODE, STORE_UNREACHABLE_CODE, StoreDefect, StoreUnavailable, leaves_of
 from personas.memory import PostgresLineStore
+from personas.recall import TodayBounds
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import SweepClock, line, window_of

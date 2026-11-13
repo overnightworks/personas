@@ -19,7 +19,7 @@ from tests.support.hopin import LIMIT_SECONDS
 if TYPE_CHECKING:
     from datetime import datetime
 
-    from personas.decision import KeptLine, WindowRead
+    from personas.entries import KeptLine, WindowRead
 
 pytestmark = pytest.mark.anyio
 

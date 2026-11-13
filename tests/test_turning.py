@@ -7,7 +7,8 @@ import pytest
 from agents.member import PlaceRef, PlaceView
 from agents.turn import Principal
 
-from personas.decision import ActDone, Answered, History, KeptLine, Lines, ViewSeen, Visit, Waiting, history_after
+from personas.decision import Lines, Waiting, history_after
+from personas.entries import ActDone, Answered, History, KeptLine, ViewSeen, Visit
 from personas.tokens import TokenFacts
 from personas.turning import Admitted, _Hold
 

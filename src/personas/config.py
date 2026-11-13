@@ -43,7 +43,8 @@ from pydantic import (
     model_validator,
 )
 
-from personas.decision import TURN_ROLE, TodayBounds
+from personas.decision import TURN_ROLE
+from personas.recall import TodayBounds
 from personas.secret import Secret
 
 if TYPE_CHECKING:

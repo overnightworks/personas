@@ -20,10 +20,7 @@ from personas.decision import (
     Reaction,
     Suspend,
     Token,
-    ViewSeen,
-    Visit,
     Waiting,
-    WindowRead,
     accepts_for,
     active_call_places,
     active_view_places,
@@ -43,11 +40,11 @@ from personas.decision import (
     speaks_aloud,
     sync_checkpoints,
     sync_turned_revisions,
-    taken_lines,
     turn_invalid,
     view_turn_due,
     wakes_him,
 )
+from personas.entries import ViewSeen, Visit, WindowRead, taken_lines
 from personas.failures import CallFailure, leaves_of, raise_if_cancelled
 from personas.mind import Mind
 from personas.remembering import LineStore, Remembering
@@ -70,8 +67,9 @@ if TYPE_CHECKING:
     from personas.app_session import AppSession, SessionOpener
     from personas.clock import Clock
     from personas.config import AgentCredentials, AppTarget, Config
-    from personas.decision import Checkpoint, TodayBounds
+    from personas.decision import Checkpoint
     from personas.readiness import ReadyMarker
+    from personas.recall import TodayBounds
     from personas.tokens import TokenSource
     from personas.turning import BackendFactory
 
