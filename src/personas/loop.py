@@ -68,6 +68,7 @@ if TYPE_CHECKING:
     from personas.clock import Clock
     from personas.config import AgentCredentials, AppTarget, Config
     from personas.decision import Checkpoint
+    from personas.entries import InputSizes
     from personas.readiness import ReadyMarker
     from personas.recall import TodayBounds
     from personas.tokens import TokenSource
@@ -384,12 +385,12 @@ class AgentLoop:
             self._report(Event.TURN_ENDED, TURN_CANCELLED_CODE)
         self._mind.release()
 
-    def _report_turn_end(self, code: str | None, usage: TurnUsage | None) -> None:
+    def _report_turn_end(self, code: str | None, usage: TurnUsage | None, sizes: InputSizes | None) -> None:
         """A turn reports its end at most once; the record tells the loop, which then reports no cancel."""
         assert self._turn is not None  # noqa: S101 - only the running turn's task reports its end
         self._turn = replace(self._turn, end_reported=True)
         self._boundaries.report(
-            StateChange(Event.TURN_ENDED, self._agent.client_id, self._app.mcp_url, code, usage=usage)
+            StateChange(Event.TURN_ENDED, self._agent.client_id, self._app.mcp_url, code, usage=usage, sizes=sizes)
         )
 
     async def _react(self, failure: CallFailure) -> None:
