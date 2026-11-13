@@ -1,0 +1,8 @@
+claim_id = "df438bc3d69b412b8484dbba9703d9b6"
+agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
+role = "builder"
+base = "66081189e4af4d5c6a403780424fa1e9c5276987"
+branch = "claude/issue-146-mozart-and-leonardo-look-like-themselves"
+scope = ["scripts/figures", "src/characters", "tests"]
+opened_commit = "ba5f2717976476f1af06fcfcf5240e3b3efe25c8"
+whole_reason = "the figure generator, its output and its tests, read together"
