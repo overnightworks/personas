@@ -948,12 +948,50 @@ def test_a_history_line_is_new_only_when_the_turn_is_for_that_line_of_that_visit
     evening = replace(MORNING, generation="evening")
     history = history_holding(
         (
-            KeptLine(NOON, 1, LATER - timedelta(seconds=300), "Bo", "message", "elsewhere", own=False, spoken=False),
             KeptLine(
-                evening, 1, LATER - timedelta(seconds=200), "Bo", "message", "an earlier run", own=False, spoken=False
+                NOON,
+                1,
+                LATER - timedelta(seconds=300),
+                "Bo",
+                "message",
+                "elsewhere",
+                own=False,
+                spoken=False,
+                cut=False,
             ),
-            KeptLine(MORNING, 1, LATER - timedelta(seconds=90), "Ada", "message", "woke him", own=False, spoken=False),
-            KeptLine(MORNING, 2, LATER - timedelta(seconds=1), "Mozart", "message", "his own", own=True, spoken=False),
+            KeptLine(
+                evening,
+                1,
+                LATER - timedelta(seconds=200),
+                "Bo",
+                "message",
+                "an earlier run",
+                own=False,
+                spoken=False,
+                cut=False,
+            ),
+            KeptLine(
+                MORNING,
+                1,
+                LATER - timedelta(seconds=90),
+                "Ada",
+                "message",
+                "woke him",
+                own=False,
+                spoken=False,
+                cut=False,
+            ),
+            KeptLine(
+                MORNING,
+                2,
+                LATER - timedelta(seconds=1),
+                "Mozart",
+                "message",
+                "his own",
+                own=True,
+                spoken=False,
+                cut=False,
+            ),
         )
     )
     occasion = Lines(MORNING.generation, frozenset({1}), missed=False)
@@ -1308,7 +1346,7 @@ def test_the_history_stays_marked_once_it_dropped_older_lines_though_the_next_li
 
 
 def an_own_line(seq: int, text: str = "mine") -> KeptLine:
-    return KeptLine(MORNING, seq, LATER, "Mozart", "message", text, own=True, spoken=False)
+    return KeptLine(MORNING, seq, LATER, "Mozart", "message", text, own=True, spoken=False, cut=False)
 
 
 def a_view_seen(revision: int, *, size: int | None = None) -> ViewSeen:

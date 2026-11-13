@@ -49,7 +49,7 @@ class KeptLine:
     text: str = field(repr=False)
     own: bool
     spoken: bool
-    cut: bool = False
+    cut: bool
 
 
 @dataclass(frozen=True)

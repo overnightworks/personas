@@ -232,7 +232,7 @@ APP = "https://app.test/mcp"
 
 
 def said(seq: int, text: str, *, name: str = "Bo", visit: Visit = MORNING, spoken: bool = False) -> KeptLine:
-    return KeptLine(visit, seq, LATER, name, "message", text, own=False, spoken=spoken)
+    return KeptLine(visit, seq, LATER, name, "message", text, own=False, spoken=spoken, cut=False)
 
 
 def an_act(*, arguments=None, outcome=None, tool="say", app=APP, at=LATER - timedelta(seconds=9)) -> ActDone:
