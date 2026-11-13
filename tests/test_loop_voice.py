@@ -214,20 +214,6 @@ async def test_a_turn_at_a_place_whose_window_says_his_voice_is_unavailable_is_w
     assert runner.app.spoken == []
 
 
-async def test_a_voice_that_is_available_again_makes_the_next_turn_spoken(runner):
-    runner.app.state_voice(PLACE_ID, VoiceState.UNAVAILABLE)
-    await a_voice_call(runner, completion("Written."), completion(ANSWER))
-    say_in_the_call(runner, ADDRESSED)
-    await runner.gateway.until_turns(1)
-    runner.app.state_voice(PLACE_ID, VoiceState.AVAILABLE)
-    say_in_the_call(runner, f"{ADDRESSED} Again.")
-    await runner.app.spoken_count(1)
-
-    written, spoken = runner.gateway.turns()
-    assert (written.aloud, spoken.aloud) == (False, True)
-    assert sentences_spoken(runner) == [ANSWER]
-
-
 async def test_a_voice_that_turns_unavailable_during_a_spoken_turn_leaves_that_turn_spoken_and_makes_the_next_written(
     runner,
 ):

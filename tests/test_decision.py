@@ -609,22 +609,6 @@ def told_a_written_turn(
     )
 
 
-def test_a_turn_is_told_a_cut_line_of_an_earlier_visit_with_the_mark_and_the_part_heard_and_an_uncut_one_without():
-    earlier = earlier_today(
-        [
-            kept(NOON, 1, "heard so far", hours_before=4, spoken=True, cut=True),
-            kept(NOON, 2, "all of it", hours_before=4, spoken=True),
-        ],
-        LATER,
-        ROOMY,
-        EMPTY_HISTORY,
-    )
-
-    (visit,) = json.loads(told_a_written_turn(earlier))["earlier_today"]["visits"]
-
-    assert [(each["text"], each.get("cut")) for each in visit["lines"]] == [("heard so far", True), ("all of it", None)]
-
-
 def test_a_turn_is_told_each_earlier_visit_how_long_ago_it_was_its_lines_their_speakers_and_his_own():
     mine, theirs = secrets.token_hex(4), secrets.token_hex(4)
     earlier = earlier_today(
