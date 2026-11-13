@@ -1,5 +1,7 @@
 import pytest
 
+from figures.figure_parts import Material
+
 PROFILE_BONES = {
     "hips", "spine", "head", "leftUpperLeg", "rightUpperLeg", "leftLowerLeg", "rightLowerLeg", "leftFoot", "rightFoot",
     "leftUpperArm", "rightUpperArm", "leftLowerArm", "rightLowerArm", "leftHand", "rightHand",
@@ -13,16 +15,16 @@ def test_the_figure_names_every_bone_the_profile_requires(figure):
 
 def test_the_eyes_lie_in_front_of_the_head(figure):
     bones = figure.bone_positions()
-    eye_whites = [
+    eyeballs = [
         position[2]
-        for primitive in figure.primitives("face")
-        if figure.material_name(primitive) == "eyeWhite"
+        for primitive in figure.primitives("body")
+        if figure.material_name(primitive) == Material.EYE
         for position in figure.accessor(primitive["attributes"]["POSITION"])
     ]
 
     assert bones["leftEye"][2] > bones["head"][2]
     assert bones["rightEye"][2] > bones["head"][2]
-    assert min(eye_whites) > bones["head"][2]
+    assert min(eyeballs) > bones["head"][2]
 
 
 @pytest.mark.parametrize(("side", "direction"), [("left", 1), ("right", -1)])

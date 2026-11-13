@@ -42,9 +42,18 @@ class GlbBuilder:
         self._accessors: list[JsonObject] = []
 
     def add_accessor(
-        self, rows: Sequence[Sequence[float]], kind: str, component: ComponentType, bounded: bool = False
+        self,
+        rows: Sequence[Sequence[float]],
+        kind: str,
+        component: ComponentType,
+        *,
+        bounded: bool = False,
+        normalized: bool = False,
     ) -> int:
-        """Packs the rows as one buffer view and accessor and returns the accessor's index."""
+        """Packs the rows as one buffer view and accessor and returns the accessor's index.
+
+        `normalized` marks integers that stand for the range 0 to 1, as colours and skin weights do.
+        """
         width = ACCESSOR_WIDTHS[kind]
         values = [
             round(value, ROUNDING) if component is ComponentType.FLOAT else value for row in rows for value in row
@@ -59,6 +68,8 @@ class GlbBuilder:
             "count": len(rows),
             "type": kind,
         }
+        if normalized:
+            accessor["normalized"] = True
         if bounded:
             stored = [struct.unpack("<f", struct.pack("<f", value))[0] for value in values]
             accessor["min"] = [min(stored[column::width]) for column in range(width)]
