@@ -1,0 +1,8 @@
+claim_id = "1a07138e0c37439bbc926594acf9486f"
+agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
+role = "builder"
+base = "4f7ef87513a85e0329dd5576af4df19a169c8934"
+branch = "claude/issue-148-a-card-move-costs-one-short-model-round"
+scope = ["README.md", "docs/ARCHITECTURE.md", "pyproject.toml", "src/characters", "src/personas", "tests", "uv.lock"]
+opened_commit = "9414697bc381c9c86adbf0808cff17e82d9c9049"
+whole_reason = "the turn's told message, its tool rounds and the characters, read together"
