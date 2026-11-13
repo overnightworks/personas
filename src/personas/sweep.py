@@ -5,8 +5,8 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, Protocol
 
-from personas.decision import SECONDS_PER_MINUTE, swept_before
 from personas.failures import StoreUnavailable
+from personas.recall import SECONDS_PER_MINUTE, swept_before
 from personas.reporting import Event, StateChange, StoreOutage
 
 if TYPE_CHECKING:

@@ -20,7 +20,7 @@ from tests.support.postgres import kept_lines, lines_table_locked
 
 if TYPE_CHECKING:
     from personas.config import MemoryTarget
-    from personas.decision import WindowRead
+    from personas.entries import WindowRead
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 

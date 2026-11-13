@@ -7,7 +7,8 @@ from datetime import UTC, datetime
 
 from agents.member import PlaceRef, PlaceView
 
-from personas.decision import AppPlace, KeptLine, Lines, ViewSeen, Visit, Waiting
+from personas.decision import AppPlace, Lines, Waiting
+from personas.entries import KeptLine, ViewSeen, Visit
 from personas.mind import Mind
 
 READ_AT = datetime(2026, 11, 11, 20, 0, tzinfo=UTC)

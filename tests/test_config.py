@@ -20,8 +20,8 @@ from personas.config import (
     Voice,
     load_config,
 )
-from personas.decision import TodayBounds
 from personas.main import CONFIGURATION_ERROR_EXIT_CODE, main
+from personas.recall import TodayBounds
 from tests.support.configfiles import MAX_TOOL_CALLS, PERSONA_NAME
 from tests.support.realm import API_GROUP
 

@@ -41,7 +41,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import InterfaceError, OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
-from personas.decision import KeptLine, Visit
+from personas.entries import KeptLine, Visit
 from personas.failures import (
     STORE_DEFECT_CODE,
     STORE_TIMEOUT_CODE,
@@ -58,7 +58,7 @@ if TYPE_CHECKING:
     from sqlalchemy import Delete
 
     from personas.config import MemoryTarget
-    from personas.decision import WindowRead
+    from personas.entries import WindowRead
 
 MIGRATIONS_DIRECTORY: Final = Path(__file__).parent / "migrations"
 # Serialises concurrent `personas migrate` runs; any constant shared by all of them does.

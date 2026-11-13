@@ -10,7 +10,8 @@ from agents.member import SpeakRefusal
 from agents.turn import FailureCode
 from agents.voice.reply import ReplyReader
 
-from personas.decision import SaidAloud, past_deadline, speech_outcome, spoken_wait_seconds
+from personas.decision import past_deadline, speech_outcome, spoken_wait_seconds
+from personas.entries import SaidAloud
 from personas.failures import task_is_being_cancelled
 from personas.reporting import Event
 from personas.task_record import RelayFailed
@@ -23,7 +24,7 @@ if TYPE_CHECKING:
 
     from personas.app_session import AppSession
     from personas.clock import Clock
-    from personas.decision import Entry
+    from personas.entries import Entry
 
 
 class Speaking:

@@ -311,3 +311,14 @@ async def other(runner):
     async with app.serving() as url:
         runner.add_listening_app(app, url, "mcp-other")
         yield app
+
+
+@pytest.fixture(
+    params=[
+        pytest.param(("one", "one"), id="plain text"),
+        pytest.param(('ä♠"\n', r"ä♠\"\n"), id="two-, three- and escaped characters"),
+    ]
+)
+def text_and_its_told_json(request):
+    """A text, and that text as the JSON a turn is told it in, between its quotes."""
+    return request.param

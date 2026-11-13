@@ -13,7 +13,7 @@ import pytest
 from agents.member import PlaceEntry, PlaceRef
 
 from personas.config import CONFIG_ENVIRONMENT_VARIABLE
-from personas.decision import Visit, WindowRead
+from personas.entries import Visit, WindowRead
 from personas.failures import STORE_DEFECT_CODE, STORE_UNREACHABLE_CODE
 from personas.main import CONFIGURATION_ERROR_EXIT_CODE, STORE_ERROR_EXIT_CODE, main
 from personas.memory import PostgresLineStore

@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import secrets
+from datetime import UTC, datetime, timedelta
 
-from agents.member import STANDING_URI, PlaceRef
+from agents.member import STANDING_URI, PlaceRef, PlaceView, Spoken
 
+from personas.decision import history_after
+from personas.entries import ActDone, Answered, History, KeptLine, SaidAloud, Visit
+from personas.recall import TodayBounds
 from tests.support.call import PERSON
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import FakeApp, active
@@ -193,3 +197,49 @@ async def shows(app, revision: int, state=None, *, awaits_you: bool = False) -> 
     await app.until_view_read(TABLE, reads + 1)
     await settled(app)
     return state
+
+
+LATER = datetime(2026, 11, 10, 18, 0, tzinfo=UTC)
+
+
+MORNING = Visit("https://app.test/mcp", PlaceRef(kind="call", id="room-7"), "morning")
+
+
+NOON = Visit("https://app.test/mcp", PlaceRef(kind="call", id="room-8"), "noon")
+
+
+ROOMY = TodayBounds(hours=24.0, size_bytes=10_000)
+
+
+EMPTY_HISTORY = History((), left_out=0, heard=0)
+
+
+def history_holding(entries):
+    """The history that took in these entries in order, with a bound none of them reaches."""
+    return history_after(EMPTY_HISTORY, entries, ROOMY.size_bytes)
+
+
+def kept(visit, seq, text, *, hours_before, own=False, spoken=False, name="Ada"):
+    """A kept line of a visit, first read this many hours before ``LATER``."""
+    return KeptLine(visit, seq, LATER - timedelta(hours=hours_before), name, "message", text, own, spoken)
+
+
+def a_view(revision: int, *, awaits_you: bool = True) -> PlaceView:
+    return PlaceView(revision=revision, awaits_you=awaits_you, state={"hand": secrets.token_hex(4)})
+
+
+APP = "https://app.test/mcp"
+
+
+def said(seq: int, text: str, *, name: str = "Bo", visit: Visit = MORNING, spoken: bool = False) -> KeptLine:
+    return KeptLine(visit, seq, LATER, name, "message", text, own=False, spoken=spoken)
+
+
+def an_act(*, arguments=None, outcome=None, tool="say", app=APP, at=LATER - timedelta(seconds=9)) -> ActDone:
+    return ActDone(
+        app, tool, {"text": "hi"} if arguments is None else arguments, outcome or Answered("posted", is_error=False), at
+    )
+
+
+def a_sentence(*, text="Guten Tag.", outcome=None, at=LATER - timedelta(seconds=9)) -> SaidAloud:
+    return SaidAloud(APP, MORNING.place, text, Spoken(duration_ms=1500) if outcome is None else outcome, at)

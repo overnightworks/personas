@@ -5,10 +5,9 @@ from __future__ import annotations
 import asyncio
 import itertools
 import json
-import math
 import secrets
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 
 import pytest
 from agents.member import (
@@ -17,7 +16,6 @@ from agents.member import (
     SPEAK_TOOL,
     AcceptInvitationRefusal,
     FigureRef,
-    PlaceEntry,
     PlaceRef,
     PlaceView,
     PlaceWindow,
@@ -38,14 +36,9 @@ from personas.decision import (
     SPOKEN_WAIT_BOUND_SECONDS,
     TURN_CANCELLED_CODE,
     Accept,
-    ActDone,
-    Answered,
     AppPlace,
     Arrived,
-    EarlierToday,
-    History,
     Joined,
-    KeptLine,
     Lines,
     Memory,
     Paused,
@@ -53,15 +46,10 @@ from personas.decision import (
     Reaction,
     Reading,
     Restarted,
-    SaidAloud,
     Suspend,
-    TodayBounds,
     Token,
     Turns,
-    Unanswered,
     UnrecognisedRefusal,
-    ViewSeen,
-    Visit,
     Waiting,
     accepts_for,
     act_outcome,
@@ -74,7 +62,6 @@ from personas.decision import (
     call_within_bound,
     claimed,
     decisive_failure,
-    earlier_today,
     failure_code,
     forget_gone,
     held_apps,
@@ -95,11 +82,8 @@ from personas.decision import (
     speaks_aloud,
     speech_outcome,
     spoken_wait_seconds,
-    swept_before,
     sync_checkpoints,
     sync_turned_revisions,
-    taken_lines,
-    today_since,
     turn_call_bound,
     turn_invalid,
     turn_told,
@@ -108,10 +92,27 @@ from personas.decision import (
     with_due,
     without_due,
 )
+from personas.entries import Answered, History, KeptLine, Unanswered, ViewSeen
 from personas.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer
+from personas.recall import EarlierToday, earlier_today
 from personas.secret import Secret
 from tests.support.fakes import line, window_of
-from tests.support.history import told_day_line_bytes, told_line_bytes
+from tests.support.history import (
+    APP,
+    EMPTY_HISTORY,
+    LATER,
+    MORNING,
+    NOON,
+    ROOMY,
+    TABLE,
+    a_sentence,
+    a_view,
+    an_act,
+    history_holding,
+    kept,
+    said,
+    told_line_bytes,
+)
 from tests.support.hopin import GENERATION, active, invited, paused
 
 TRANSIENT_REFUSALS = [
@@ -575,121 +576,7 @@ def test_a_bound_tool_the_app_declares_no_more_leaves_no_declarations():
     assert bound_declarations([_declaration("a")], ["a", "gone"]) is None
 
 
-LATER = datetime(2026, 11, 10, 18, 0, tzinfo=UTC)
-MORNING = Visit("https://app.test/mcp", PlaceRef(kind="call", id="room-7"), "morning")
-NOON = Visit("https://app.test/mcp", PlaceRef(kind="call", id="room-8"), "noon")
-ROOMY = TodayBounds(hours=24.0, size_bytes=10_000)
-EMPTY_HISTORY = History((), left_out=0, heard=0)
 ONCE_DROPPED = History((), left_out=1, heard=0)
-
-
-def history_holding(entries):
-    """The history that took in these entries in order, with a bound none of them reaches."""
-    return history_after(EMPTY_HISTORY, entries, ROOMY.size_bytes)
-
-
-def kept(visit, seq, text, *, hours_before, own=False, spoken=False, name="Ada"):
-    """A kept line of a visit, first read this many hours before ``LATER``."""
-    return KeptLine(visit, seq, LATER - timedelta(hours=hours_before), name, "message", text, own, spoken)
-
-
-def told(earlier):
-    return [[(each.seq, each.text) for each in visit.lines] for visit in earlier.visits]
-
-
-def test_two_earlier_visits_are_told_in_the_order_they_happened_each_as_its_own_group_in_seq_order():
-    lines = [
-        kept(NOON, 2, "noon two", hours_before=6),
-        kept(MORNING, 1, "morning one", hours_before=9),
-        kept(NOON, 1, "noon one", hours_before=6),
-        kept(MORNING, 2, "morning two", hours_before=9),
-    ]
-
-    earlier = earlier_today(lines, LATER, ROOMY, EMPTY_HISTORY)
-
-    assert told(earlier) == [[(1, "morning one"), (2, "morning two")], [(1, "noon one"), (2, "noon two")]]
-    assert [visit.minutes_ago for visit in earlier.visits] == [9 * 60, 6 * 60]
-    assert earlier.older_dropped is False
-
-
-@pytest.fixture(
-    params=[
-        pytest.param(("one", "one"), id="plain text"),
-        pytest.param(('ä♠"\n', r"ä♠\"\n"), id="two-, three- and escaped characters"),
-    ]
-)
-def text_and_its_told_json(request):
-    """A text, and that text as the JSON a turn is told it in, between its quotes."""
-    return request.param
-
-
-@pytest.mark.parametrize(
-    ("bound_over_the_two_lines", "told_seqs", "older_dropped"),
-    [
-        pytest.param(1, (1, 2), False, id="the bound lies above the lines"),
-        pytest.param(0, (1, 2), False, id="the bound is the lines' size"),
-        pytest.param(-1, (2,), True, id="the bound lies one byte below the lines"),
-    ],
-)
-def test_the_day_keeps_the_newest_lines_that_fit_its_bound_counted_in_utf8_bytes_of_their_told_json(
-    text_and_its_told_json, bound_over_the_two_lines, told_seqs, older_dropped
-):
-    text, told_text = text_and_its_told_json
-    lines = [kept(MORNING, seq, text, hours_before=1, name="Bo") for seq in (1, 2)]
-    bound = TodayBounds(hours=24.0, size_bytes=2 * told_day_line_bytes(told_text, name="Bo") + bound_over_the_two_lines)
-
-    earlier = earlier_today(lines, LATER, bound, EMPTY_HISTORY)
-
-    assert told(earlier) == [[(seq, text) for seq in told_seqs]]
-    assert earlier.older_dropped is older_dropped
-
-
-def test_an_earlier_visit_whose_lines_all_lie_past_the_size_bound_leaves_the_day_whole():
-    lines = [
-        kept(MORNING, 1, "oldest", hours_before=9, name="Bo"),
-        kept(NOON, 1, "middle", hours_before=6, name="Bo"),
-        kept(NOON, 2, "newest", hours_before=6, name="Bo"),
-    ]
-    two_lines = TodayBounds(hours=24.0, size_bytes=2 * told_day_line_bytes("middle", name="Bo"))
-
-    earlier = earlier_today(lines, LATER, two_lines, EMPTY_HISTORY)
-
-    assert told(earlier) == [[(1, "middle"), (2, "newest")]]
-    assert [visit.minutes_ago for visit in earlier.visits] == [6 * 60]
-    assert earlier.older_dropped is True
-
-
-def test_no_line_of_the_day_is_told_and_the_day_says_so_when_not_even_the_newest_fits_its_bound():
-    lines = [kept(NOON, 1, "middle", hours_before=6, name="Bo")]
-    too_small = TodayBounds(hours=24.0, size_bytes=told_day_line_bytes("middle", name="Bo") - 1)
-
-    earlier = earlier_today(lines, LATER, too_small, EMPTY_HISTORY)
-
-    assert earlier == EarlierToday((), older_dropped=True)
-
-
-def test_the_day_reaches_back_the_configured_hours_and_an_unbounded_day_reaches_back_to_any_line():
-    assert today_since(LATER, TodayBounds(hours=24.0, size_bytes=1)) == LATER - timedelta(hours=24)
-    assert today_since(LATER, TodayBounds(hours=math.inf, size_bytes=1)) <= datetime(1, 1, 2, tzinfo=UTC)
-
-
-@pytest.mark.parametrize(
-    ("keep_days", "oldest_kept"),
-    [
-        (30.0, datetime(2026, 10, 11, 18, 0, tzinfo=UTC)),
-        (0.5, datetime(2026, 11, 10, 6, 0, tzinfo=UTC)),
-        (math.inf, None),
-    ],
-    ids=["a month", "half a day", "every line"],
-)
-def test_the_oldest_first_read_that_stays_is_the_keep_period_before_now_and_an_infinite_period_sweeps_nothing(
-    keep_days, oldest_kept
-):
-    assert swept_before(LATER, keep_days) == oldest_kept
-
-
-def test_a_keep_period_that_reaches_before_the_calendar_sweeps_nothing():
-    assert swept_before(LATER, 1e12) is None
 
 
 def told_a_written_turn(
@@ -794,7 +681,6 @@ def test_a_failure_is_logged_with_its_status_its_answer_code_or_the_word_for_the
     assert failure_code(failure) == code
 
 
-TABLE = PlaceRef(kind="table", id="table-1")
 OTHER_TABLE = PlaceRef(kind="table", id="table-2")
 
 
@@ -802,10 +688,6 @@ def serving(place: PlaceRef = TABLE, *, state: StandingState = StandingState.ACT
     if state is StandingState.INVITED:
         return invited(place.id, "inv-3", kind=place.kind, serves_view=True)
     return Standing(place=place, state=state, serves_view=True)
-
-
-def a_view(revision: int, *, awaits_you: bool = True) -> PlaceView:
-    return PlaceView(revision=revision, awaits_you=awaits_you, state={"hand": secrets.token_hex(4)})
 
 
 @pytest.mark.parametrize("serves_view", [False, True], ids=["not yet serving a view", "serving a view"])
@@ -916,13 +798,6 @@ def test_the_standing_decides_which_turned_revisions_are_kept():
 )
 def test_a_view_is_due_a_turn_while_it_waits_at_a_revision_no_turn_was_started_for(turned_revision, view, due):
     assert view_turn_due(turned_revision, view) is due
-
-
-APP = "https://app.test/mcp"
-
-
-def said(seq: int, text: str, *, name: str = "Bo", visit: Visit = MORNING, spoken: bool = False) -> KeptLine:
-    return KeptLine(visit, seq, LATER, name, "message", text, own=False, spoken=spoken)
 
 
 @pytest.fixture
@@ -1076,28 +951,6 @@ def test_the_history_is_told_in_the_order_it_holds_its_entries():
     assert [entry["text"] for entry in told["history"]["entries"]] == ["later", "earlier"]
 
 
-def test_taken_lines_are_the_visits_lines_as_kept_with_the_time_of_the_read():
-    entries = (
-        PlaceEntry(seq=4, kind="message", name="Ada", text="four", own=False),
-        PlaceEntry(seq=5, kind="message", name="Mozart", text="five", own=True, spoken=True),
-    )
-
-    assert taken_lines(MORNING, entries, LATER) == (
-        KeptLine(MORNING, 4, LATER, "Ada", "message", "four", own=False, spoken=False),
-        KeptLine(MORNING, 5, LATER, "Mozart", "message", "five", own=True, spoken=True),
-    )
-
-
-def test_a_history_its_lines_and_its_views_show_no_name_no_text_and_no_state_in_their_repr():
-    marker = secrets.token_hex(8)
-    line = said(1, marker, name=marker)
-    view = ViewSeen(APP, TABLE, PlaceView(revision=1, awaits_you=True, state={"hand": marker}), LATER)
-
-    assert marker not in repr(history_holding((line, view)))
-    assert marker not in repr(line)
-    assert marker not in repr(view)
-
-
 def test_an_accept_shows_neither_its_figure_nor_its_voice_in_its_repr():
     voice = f"Voice_{secrets.token_hex(6)}"
     figure = FigureRef(url=f"https://figures.test/{secrets.token_hex(6)}.glb", sha256=secrets.token_hex(32))
@@ -1220,12 +1073,6 @@ def test_the_bound_counts_a_line_by_its_told_json_and_a_view_by_the_utf8_json_by
     assert history.older_dropped is older_dropped
 
 
-def an_act(*, arguments=None, outcome=None, tool="say", app=APP, at=LATER - timedelta(seconds=9)) -> ActDone:
-    return ActDone(
-        app, tool, {"text": "hi"} if arguments is None else arguments, outcome or Answered("posted", is_error=False), at
-    )
-
-
 @pytest.mark.parametrize(
     ("act", "told_act"),
     [
@@ -1321,15 +1168,6 @@ def test_a_view_turn_marks_no_act_new():
     assert [each["new"] for each in told_entries] == [False, True]
 
 
-def test_the_day_is_the_same_whether_or_not_the_history_holds_acts_and_holds_no_act():
-    kept_lines = [kept(MORNING, 1, "held", hours_before=5), kept(NOON, 1, "not held", hours_before=4)]
-
-    without = earlier_today(kept_lines, LATER, ROOMY, history_holding((said(1, "held"),)))
-    with_acts = earlier_today(kept_lines, LATER, ROOMY, history_holding((said(1, "held"), an_act())))
-
-    assert with_acts == without
-
-
 @pytest.mark.parametrize(
     ("ended", "cancelling", "expected"),
     [
@@ -1350,19 +1188,6 @@ def test_the_day_is_the_same_whether_or_not_the_history_holds_acts_and_holds_no_
 )
 def test_how_a_request_ended_decides_the_outcome_of_the_act_it_made(ended, cancelling, expected):
     assert act_outcome(ended, cancelling=cancelling) == expected
-
-
-def test_an_act_shows_no_arguments_and_no_answer_in_its_repr_nor_in_the_history_that_holds_it():
-    marker = secrets.token_hex(8)
-    act = an_act(arguments={"text": marker}, outcome=Answered(marker, is_error=False))
-
-    assert marker not in repr(act)
-    assert marker not in repr(act.outcome)
-    assert marker not in repr(history_holding((act,)))
-
-
-def a_sentence(*, text="Guten Tag.", outcome=None, at=LATER - timedelta(seconds=9)) -> SaidAloud:
-    return SaidAloud(APP, MORNING.place, text, Spoken(duration_ms=1500) if outcome is None else outcome, at)
 
 
 @pytest.mark.parametrize(
@@ -1439,14 +1264,6 @@ def test_how_a_speak_request_ended_decides_the_outcome_of_the_sentence_it_sent(e
     assert speech_outcome(ended, cancelling=cancelling) == expected
 
 
-def test_a_spoken_sentence_shows_no_text_in_its_repr_nor_in_the_history_that_holds_it():
-    marker = secrets.token_hex(8)
-    sentence = a_sentence(text=marker)
-
-    assert marker not in repr(sentence)
-    assert marker not in repr(history_holding((sentence,)))
-
-
 @pytest.mark.parametrize(
     ("started", "now", "past"),
     [(1000.0, 1000.0, False), (1000.0, 1029.9, False), (1000.0, 1030.0, True), (1000.0, 1100.0, True)],
@@ -1458,49 +1275,6 @@ def test_a_turn_is_past_its_deadline_once_its_longest_duration_has_gone_by(start
 
 def test_the_history_stays_marked_once_it_dropped_older_lines_though_the_next_lines_fit():
     assert history_after(ONCE_DROPPED, (said(1, "one"),), 10_000).older_dropped is True
-
-
-def test_the_day_leaves_out_the_lines_the_history_holds_by_visit_and_seq_and_those_first_read_after_the_turn():
-    kept_lines = [
-        kept(MORNING, 1, "held", hours_before=5),
-        kept(MORNING, 2, "not held", hours_before=5),
-        kept(NOON, 1, "same seq of another visit", hours_before=4),
-        kept(NOON, 2, "read as the turn was admitted", hours_before=0),
-        kept(NOON, 3, "read after the turn was admitted", hours_before=-1),
-    ]
-
-    earlier = earlier_today(kept_lines, LATER, ROOMY, history_holding((said(1, "held"),)))
-
-    assert told(earlier) == [
-        [(2, "not held")],
-        [(1, "same seq of another visit"), (2, "read as the turn was admitted")],
-    ]
-
-
-def test_the_day_is_the_same_whether_or_not_the_history_holds_views_and_holds_no_view():
-    kept_lines = [kept(MORNING, 1, "held", hours_before=5), kept(NOON, 1, "not held", hours_before=4)]
-    views = (ViewSeen(APP, TABLE, a_view(1), LATER),)
-
-    without = earlier_today(kept_lines, LATER, ROOMY, history_holding((said(1, "held"),)))
-    with_views = earlier_today(kept_lines, LATER, ROOMY, history_holding((said(1, "held"), *views)))
-
-    assert with_views == without
-    assert told(with_views) == [[(1, "not held")]]
-
-
-def test_what_is_left_out_of_the_day_counts_nothing_toward_its_size_bound():
-    two_lines = TodayBounds(hours=24.0, size_bytes=2 * told_day_line_bytes("middle", name="Bo"))
-    kept_lines = [
-        kept(MORNING, 1, "held" * 20, hours_before=5, name="Bo"),
-        kept(MORNING, 2, "held" * 20, hours_before=5, name="Bo"),
-        kept(NOON, 1, "middle", hours_before=4, name="Bo"),
-        kept(NOON, 2, "second", hours_before=4, name="Bo"),
-    ]
-
-    earlier = earlier_today(kept_lines, LATER, two_lines, history_holding((said(1, "held"), said(2, "held"))))
-
-    assert told(earlier) == [[(1, "middle"), (2, "second")]]
-    assert earlier.older_dropped is False
 
 
 def an_own_line(seq: int, text: str = "mine") -> KeptLine:

@@ -17,9 +17,10 @@ from agents.backend.fake_gateway import completion
 from agents.member import PlaceEntry, PlaceRef, PlaceWindow
 from sqlalchemy.exc import IntegrityError
 
-from personas.decision import TodayBounds, Visit, WindowRead, today_since
+from personas.entries import Visit, WindowRead
 from personas.failures import STORE_TIMEOUT_CODE, STORE_UNREACHABLE_CODE, StoreDefect, StoreUnavailable
 from personas.memory import PostgresLineStore, SchemaNotAtHeadError
+from personas.recall import TodayBounds, today_since
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import WALL_START, line, window_of
@@ -55,7 +56,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from personas.config import MemoryTarget
-    from personas.decision import KeptLine
+    from personas.entries import KeptLine
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 
