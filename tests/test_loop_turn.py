@@ -283,10 +283,11 @@ async def test_a_turn_binds_the_tools_the_app_lists_right_now_and_a_missing_one_
     await runner.reports.until_a_turn_completed()
     runner.app.script(LIST_TOOLS, lists_no_tools)
     say_in_the_call(runner, f"{ADDRESSED} Once more.")
-    await runner.gateway.until_requested(2)
+    await runner.reports.until_a_turn_completed(count=2)
 
     assert runner.gateway.offered_tools(1) == [SAY_TOOL]
     assert runner.gateway.offered_tools(2) == []
+    assert runner.reports.reported() == [(Event.STARTED, None)]
 
 
 async def refuses_the_token(reply):

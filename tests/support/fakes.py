@@ -306,8 +306,8 @@ class Reports:
                 self._added.clear()
                 await self._added.wait()
 
-    async def until_a_turn_completed(self, *, limit_seconds: float = 10.0) -> None:
+    async def until_a_turn_completed(self, *, count: int = 1, limit_seconds: float = 10.0) -> None:
         async with asyncio.timeout(limit_seconds):
-            while not any(self._completes_a_turn(change) for change in self.changes):
+            while sum(self._completes_a_turn(change) for change in self.changes) < count:
                 self._added.clear()
                 await self._added.wait()
