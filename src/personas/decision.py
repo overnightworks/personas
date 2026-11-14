@@ -46,7 +46,6 @@ from personas.entries import (
     told_time,
 )
 from personas.failures import CallFailure, StatusFailure, TokenStatusFailure, UnusableAnswer
-from personas.recall import told_earlier_today
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -56,7 +55,6 @@ if TYPE_CHECKING:
     from agents.tools import ToolDeclaration, ToolOutcome
     from agents.turn import AgentRole
 
-    from personas.recall import EarlierToday
     from personas.secret import Secret
 
 CALL_PLACE_KIND: Final = "call"
@@ -78,7 +76,6 @@ TURN_CANCELLED_CODE: Final = "cancelled"
 was in flight, by that or by the turn's deadline."""
 SPOKEN_WAIT_BOUND_SECONDS: Final = 30.0
 """The longest the voice waits after a sentence, whatever length the app says it plays."""
-EARLIER_TODAY_KEY: Final = "earlier_today"
 
 
 class UnrecognisedRefusal(StrEnum):
@@ -474,25 +471,12 @@ class TurnTold:
 
 
 @dataclass(frozen=True)
-class Header:
-    """The first message of every turn: his name, whether older entries have left the history, and what he kept of the
-    day that the history did not hold when the header was composed. ``settled`` is false while the store could not
-    answer, which makes the next turn compose it again."""
-
-    you: str
-    older_dropped: bool
-    earlier: EarlierToday | None
-    settled: bool
-
-
-@dataclass(frozen=True)
 class Present:
-    """What one agent's next request holds besides its own turn: the history, the answered turns whose messages are
-    still in it, oldest first, and the header; none until a turn composes it, and none again after a step."""
+    """What one agent's next request holds besides its header and its own turn: the history and the answered turns whose
+    messages are still in it, oldest first."""
 
     history: History
     told: tuple[TurnTold, ...] = ()
-    header: Header | None = None
 
 
 EMPTY_PRESENT: Final = Present(History((), left_out=0, heard=0))
@@ -509,8 +493,8 @@ def _step_cut(history: History, boundaries: Iterable[int], keep_bytes: int) -> i
 
 def taken_into(present: Present, new: Iterable[Entry], history_bytes: int, keep_bytes: int) -> Present:
     """The present with ``new`` appended, a view revision it already holds adding nothing and an act always added. Past
-    ``history_bytes`` the oldest whole messages leave in one step until what stays fits ``keep_bytes``, and the header
-    is to be composed again; only the newest message may be cut, and its newest entry always stays."""
+    ``history_bytes`` the oldest whole messages leave in one step until what stays fits ``keep_bytes``; only the newest
+    message may be cut, and its newest entry always stays."""
     entries = present.history.entries
     heard = present.history.heard
     for entry in new:
@@ -528,12 +512,6 @@ def taken_into(present: Present, new: Iterable[Entry], history_bytes: int, keep_
 def answered_into(present: Present, turn: TurnTold) -> Present:
     """The present once ``turn`` was answered: its message is part of every request after it, while it stays."""
     return replace(present, told=(*present.told, turn))
-
-
-def with_header(present: Present, header: Header, left_out: int) -> Present:
-    """The present holding ``header``, unless a step took place since it was composed from a history that had left out
-    ``left_out`` entries."""
-    return replace(present, header=header) if present.history.left_out == left_out else present
 
 
 @dataclass(frozen=True)
@@ -739,12 +717,10 @@ def _told_wake(turn: TurnTold) -> dict[str, object]:
     }
 
 
-def told_header(header: Header) -> str:
-    """The header message. It holds no instruction; those live in the persona."""
-    told: dict[str, object] = {"you": header.you, "older_dropped": header.older_dropped}
-    if header.earlier is not None:
-        told[EARLIER_TODAY_KEY] = told_earlier_today(header.earlier)
-    return json.dumps(told, ensure_ascii=False)
+def told_header(you: str, history: History) -> str:
+    """The header message: his name and whether older entries have left the history. It holds no instruction; those
+    live in the persona."""
+    return json.dumps({"you": you, "older_dropped": history.left_out > 0}, ensure_ascii=False)
 
 
 def told_turn(turn: TurnTold, entries: Iterable[Entry]) -> str:
@@ -754,12 +730,12 @@ def told_turn(turn: TurnTold, entries: Iterable[Entry]) -> str:
     return json.dumps(told, ensure_ascii=False)
 
 
-def turn_messages(header: Header, present: Present, current: TurnTold) -> tuple[str, ...]:
+def turn_messages(you: str, present: Present, current: TurnTold) -> tuple[str, ...]:
     """The messages of a turn's request after the persona: the header, one for each answered turn the present holds,
     each rendered from the history as it stands, and the turn's own, which tells what the history holds from where the
     last of those ended up to ``current.through``."""
     history = present.history
-    messages = [told_header(header)]
+    messages = [told_header(you, history)]
     start = history.left_out
     for turn in (*present.told, current):
         messages.append(told_turn(turn, history.entries[start - history.left_out : turn.through - history.left_out]))

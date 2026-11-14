@@ -220,9 +220,6 @@ class DownStore:
     async def keep(self, read) -> None:
         raise StoreUnavailable(STORE_UNREACHABLE_CODE)
 
-    async def kept_since(self, client_id, since):
-        raise StoreUnavailable(STORE_UNREACHABLE_CODE)
-
 
 @pytest.mark.parametrize(
     ("store", "failures"),
@@ -245,7 +242,6 @@ async def test_the_history_is_told_with_no_memory_and_with_a_store_that_is_down_
     assert opening.room["history"] == history_of(
         [entry(url_of(runner, 0), PLACE_ID, REMARK), view_entry(url_of(runner, 0), state, revision=1)]
     )
-    assert "earlier_today" not in opening.room
     assert [code for event, code in runner.reports.reported() if event is Event.STORE_FAILED] == [
         STORE_UNREACHABLE_CODE
     ] * (failures)
@@ -491,7 +487,6 @@ async def test_what_was_said_in_the_call_before_the_runner_started_is_told_to_no
 
     (written,) = written_turns(runner)
     assert written.room["history"] == history_of([entry(url_of(runner, 0), PLACE_ID, ADDRESSED, seq=2)])
-    assert "earlier_today" not in written.room
 
 
 async def test_a_line_is_told_with_the_time_it_was_taken_at_and_the_turn_with_the_time_it_was_admitted_at(runner):

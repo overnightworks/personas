@@ -111,11 +111,12 @@ class _Written(httpx2.AsyncByteStream):
 
 @dataclass(frozen=True)
 class TurnOpening:
-    """What a turn's first request told the gateway: the persona, the user messages it was told, the header first and
-    the turn's own last, and whom it is for."""
+    """What a turn's first request told the gateway: the persona, the user messages it was told as parsed and as sent,
+    the header first and the turn's own last, and whom it is for."""
 
     system: str
     messages: list[JsonObject]
+    texts: tuple[str, ...]
     user: str
 
     @property
@@ -310,6 +311,7 @@ class Gateway(FakeGateway):
             TurnOpening(
                 body["messages"][0]["content"],
                 [json.loads(each["content"]) for each in body["messages"][1:]],
+                tuple(each["content"] for each in body["messages"][1:]),
                 body["user"],
             )
             for body in bodies

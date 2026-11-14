@@ -16,10 +16,9 @@ read and the calls relayed for him at any of his apps and tells every turn; past
 step until what stays fits ``history_keep_bytes``, which is never above ``history_bytes``. The top-level
 ``budget_pause_cap_seconds`` is the longest wait between his turns while the gateway refuses them for a spent budget.
 The optional ``[memory]`` table names the Postgres database that keeps every line the agents read: its host, port,
-database, user, the file holding the password, ``write_seconds``, the bound on one write or read, and how far back
-(``today_hours``) and how much (``today_bytes``) a turn is told of the lines he kept that his history does not hold,
-and how long a line is kept (``lines_keep_days``) and how often older ones are swept (``sweep_minutes``); ``inf``
-keeps every line or sweeps once, at the start.
+database, user, the file holding the password, ``write_seconds``, the bound on one write or read, how long a line is
+kept (``lines_keep_days``) and how often older ones are swept (``sweep_minutes``); ``inf`` keeps every line or sweeps
+once, at the start.
 Every value is validated at start and an error names the field or path, never a secret.
 """
 
@@ -46,7 +45,6 @@ from pydantic import (
 )
 
 from personas.decision import BACKOFF_BASE_SECONDS, DEFAULT_BUDGET_PAUSE_CAP_SECONDS, TURN_ROLE
-from personas.recall import TodayBounds
 from personas.secret import Secret
 
 if TYPE_CHECKING:
@@ -55,7 +53,6 @@ if TYPE_CHECKING:
 CONFIG_ENVIRONMENT_VARIABLE: Final = "PERSONAS_CONFIG"
 DEFAULT_CALL_SECONDS: Final = 30.0
 DEFAULT_WRITE_SECONDS: Final = 2.0
-DEFAULT_TODAY: Final = TodayBounds(hours=24.0, size_bytes=32768)
 DEFAULT_HISTORY_BYTES: Final = 49152
 DEFAULT_HISTORY_KEEP_BYTES: Final = 32768
 DEFAULT_LINES_KEEP_DAYS: Final = 30.0
@@ -102,8 +99,8 @@ class AgentCredentials:
 
 @dataclass(frozen=True)
 class MemoryTarget:
-    """The database that keeps the lines, how long one write or read of it may take, what a turn is told of the day
-    and how long a line is kept, with how often older ones are swept."""
+    """The database that keeps the lines, how long one write or read of it may take and how long a line is kept, with
+    how often older ones are swept."""
 
     host: str
     port: int
@@ -111,7 +108,6 @@ class MemoryTarget:
     user: str
     password: Secret
     write_seconds: float = DEFAULT_WRITE_SECONDS
-    today: TodayBounds = DEFAULT_TODAY
     lines_keep_days: float = DEFAULT_LINES_KEEP_DAYS
     sweep_minutes: float = DEFAULT_SWEEP_MINUTES
 
@@ -188,8 +184,6 @@ class _MemoryEntry(_Entry):
     user: str = Field(min_length=1)
     password_file: Path
     write_seconds: PositiveFloat = Field(default=DEFAULT_WRITE_SECONDS, strict=True)
-    today_hours: PositiveFloat = Field(default=DEFAULT_TODAY.hours, strict=True)
-    today_bytes: PositiveInt = Field(default=DEFAULT_TODAY.size_bytes, strict=True)
     lines_keep_days: PositiveFloat = Field(default=DEFAULT_LINES_KEEP_DAYS, strict=True)
     sweep_minutes: PositiveFloat = Field(default=DEFAULT_SWEEP_MINUTES, strict=True)
 
@@ -310,7 +304,6 @@ def _memory_target(entry: _MemoryEntry | None) -> MemoryTarget | None:
     if entry is None:
         return None
     password = _read_secret("memory.password_file", entry.password_file)
-    today = TodayBounds(entry.today_hours, entry.today_bytes)
     return MemoryTarget(
         entry.host,
         entry.port,
@@ -318,7 +311,6 @@ def _memory_target(entry: _MemoryEntry | None) -> MemoryTarget | None:
         entry.user,
         password,
         entry.write_seconds,
-        today,
         entry.lines_keep_days,
         entry.sweep_minutes,
     )

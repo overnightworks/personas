@@ -10,7 +10,6 @@ from agents.member import STANDING_URI, PlaceRef, PlaceView, Spoken
 
 from personas.decision import EMPTY_PRESENT, taken_into
 from personas.entries import ActDone, Answered, KeptLine, SaidAloud, Visit
-from personas.recall import TodayBounds
 from tests.support.call import PERSON
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import FakeApp, active
@@ -57,15 +56,6 @@ def told_line_bytes(
     told = (
         f'{{"entry": "line", "app": "{app_url}", "place": {{"kind": "call", "id": "{place_id}"}}, "at": "{AT}",'
         f' "seq": {seq}, "name": "{name}", "kind": "message", "text": "{text}", "own": {str(own).lower()},'
-        f' "spoken": {str(spoken).lower()}}}'
-    )
-    return len(told.encode())
-
-
-def told_day_line_bytes(text: str, *, name: str = SPEAKER, own: bool = False, spoken: bool = False) -> int:
-    """The bytes a line of the day is told as, its text with no escape."""
-    told = (
-        f'{{"name": "{name}", "kind": "message", "text": "{text}", "own": {str(own).lower()},'
         f' "spoken": {str(spoken).lower()}}}'
     )
     return len(told.encode())
@@ -223,7 +213,7 @@ MORNING = Visit("https://app.test/mcp", PlaceRef(kind="call", id="room-7"), "mor
 NOON = Visit("https://app.test/mcp", PlaceRef(kind="call", id="room-8"), "noon")
 
 
-ROOMY = TodayBounds(hours=24.0, size_bytes=10_000)
+ROOMY_BYTES = 10_000
 
 
 EMPTY_HISTORY = EMPTY_PRESENT.history
@@ -231,12 +221,7 @@ EMPTY_HISTORY = EMPTY_PRESENT.history
 
 def history_holding(entries):
     """The history that took in these entries in order, with a bound none of them reaches."""
-    return taken_into(EMPTY_PRESENT, entries, ROOMY.size_bytes, ROOMY.size_bytes).history
-
-
-def kept(visit, seq, text, *, hours_before, own=False, spoken=False, act=False, name="Ada"):
-    """A kept line of a visit, first read this many hours before ``LATER``."""
-    return KeptLine(visit, seq, LATER - timedelta(hours=hours_before), name, "message", text, own, spoken, False, act)
+    return taken_into(EMPTY_PRESENT, entries, ROOMY_BYTES, ROOMY_BYTES).history
 
 
 def a_view(revision: int, *, awaits_you: bool = True) -> PlaceView:

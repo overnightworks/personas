@@ -83,7 +83,6 @@ async def test_a_table_that_does_not_wait_is_told_to_his_written_turn_known_from
         ]
     )
     assert written.new_seqs == [1]
-    assert "earlier_today" not in written.room
     assert view_turns(runner) == []
 
 
@@ -381,7 +380,6 @@ async def test_without_a_memory_the_table_displaces_the_early_call_lines_and_the
         older_dropped=True,
     )
     assert early not in runner.gateway.told_in(2)
-    assert "earlier_today" not in written.room
 
 
 async def test_a_table_that_moves_during_his_view_turn_enters_at_the_read_during_that_turn_and_is_told_in_the_next(

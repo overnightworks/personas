@@ -42,7 +42,6 @@ from personas.decision import (
     Accept,
     AppPlace,
     Arrived,
-    Header,
     Joined,
     Lines,
     Memory,
@@ -104,7 +103,6 @@ from personas.decision import (
 )
 from personas.entries import Answered, Entry, History, KeptLine, Unanswered, ViewSeen
 from personas.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer
-from personas.recall import EarlierToday, earlier_today
 from personas.secret import Secret
 from tests.support.fakes import line, window_of
 from tests.support.history import (
@@ -113,13 +111,12 @@ from tests.support.history import (
     LATER,
     MORNING,
     NOON,
-    ROOMY,
+    ROOMY_BYTES,
     TABLE,
     a_sentence,
     a_view,
     an_act,
     history_holding,
-    kept,
     said,
     told_line_bytes,
 )
@@ -777,53 +774,11 @@ def told_a_written_turn(
     return told_turn(turn, history.entries)
 
 
-def test_the_header_tells_each_earlier_visit_when_it_began_its_lines_their_speakers_and_his_own():
-    mine, theirs = secrets.token_hex(4), secrets.token_hex(4)
-    earlier = earlier_today(
-        [
-            kept(NOON, 1, theirs, hours_before=4),
-            kept(NOON, 2, mine, hours_before=4, own=True, spoken=True, name="Mozart"),
-        ],
-        LATER,
-        ROOMY,
-        EMPTY_HISTORY,
-    )
+@pytest.mark.parametrize("left_out", [1, 0])
+def test_the_header_tells_his_name_and_whether_older_entries_left_the_history(left_out):
+    history = History((), left_out=left_out, heard=0)
 
-    facts = json.loads(told_header(Header("Mozart", older_dropped=False, earlier=earlier, settled=True)))
-
-    assert facts["earlier_today"] == {
-        "older_dropped": False,
-        "visits": [
-            {
-                "at": "2026-11-10T14:00:00Z",
-                "lines": [
-                    {"name": "Ada", "kind": "message", "text": theirs, "own": False, "spoken": False},
-                    {"name": "Mozart", "kind": "message", "text": mine, "own": True, "spoken": True},
-                ],
-            }
-        ],
-    }
-
-
-@pytest.mark.parametrize(
-    ("earlier", "keys"),
-    [
-        (None, ["you", "older_dropped"]),
-        (EarlierToday((), older_dropped=False), ["you", "older_dropped", "earlier_today"]),
-    ],
-    ids=["without a memory he is told no day", "with a memory the day comes after whether older entries left"],
-)
-def test_the_header_tells_his_name_and_whether_older_entries_left_then_the_day(earlier, keys):
-    header = Header("Mozart", older_dropped=False, earlier=earlier, settled=True)
-
-    assert list(json.loads(told_header(header))) == keys
-
-
-@pytest.mark.parametrize("older_dropped", [True, False])
-def test_the_header_says_whether_older_entries_left_the_history(older_dropped):
-    header = Header("Mozart", older_dropped=older_dropped, earlier=None, settled=True)
-
-    assert json.loads(told_header(header)) == {"you": "Mozart", "older_dropped": older_dropped}
+    assert json.loads(told_header("Mozart", history)) == {"you": "Mozart", "older_dropped": left_out > 0}
 
 
 @pytest.mark.parametrize("has_voice", [True, False])
@@ -1439,7 +1394,7 @@ def a_view_seen(revision: int, *, size: int | None = None) -> ViewSeen:
     return ViewSeen(APP, TABLE, PlaceView(revision=revision, awaits_you=False, state=state), LATER)
 
 
-def taking(history: History, *entries, size_bytes: int = ROOMY.size_bytes) -> History:
+def taking(history: History, *entries, size_bytes: int = ROOMY_BYTES) -> History:
     return history_after(history, entries, size_bytes)
 
 

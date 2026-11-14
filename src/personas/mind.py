@@ -1,7 +1,7 @@
 """One agent's mind: the present his requests hold, which is the history of the lines he took in, the views he read and
-the calls relayed for him at any of his apps with the turns that were told of it and the header, the apps where he
-holds an active place, and the one turn he takes at a time, with the places that have one due. His loops and turns feed
-it and every turn reads it."""
+the calls relayed for him at any of his apps with the turns that were told of it, the apps where he holds an active
+place, and the one turn he takes at a time, with the places that have one due. His loops and turns feed it and every
+turn reads it."""
 
 from __future__ import annotations
 
@@ -21,14 +21,13 @@ from personas.decision import (
     released,
     taken_into,
     with_due,
-    with_header,
     without_due,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
-    from personas.decision import AppPlace, Header, Occasion, Present, TurnTold
+    from personas.decision import AppPlace, Occasion, Present, TurnTold
     from personas.entries import Entry, History
 
 
@@ -66,10 +65,6 @@ class Mind:
         if not taken:
             return
         self._present = taken_into(self._present, taken, self._history_bytes, self._history_keep_bytes)
-
-    def hold_header(self, header: Header, left_out: int) -> None:
-        """Keeps the header a turn composed, unless a step took place since the history had left out ``left_out``."""
-        self._present = with_header(self._present, header, left_out)
 
     def unanswered(self, *, budget_spent: bool) -> float:
         """A turn of his ended without an answer, refused for a spent budget or not; the seconds his turns wait now."""

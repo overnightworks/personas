@@ -1,4 +1,4 @@
-"""What one turn of an agent in an app does: the day read, the session, the tools held and how the turn ends."""
+"""What one turn of an agent in an app does: the session, the tools held and how the turn ends."""
 
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ from agents.turn_events import FinalEvent, ToolCallEvent
 from personas.decision import (
     TURN_ROLE,
     AppPlace,
-    Header,
     TurnTold,
     act_outcome,
     arrived_since,
@@ -57,7 +56,6 @@ if TYPE_CHECKING:
     from personas.decision import Arrived, Occasion, Present, Token
     from personas.entries import History
     from personas.mind import Mind
-    from personas.remembering import Remembering
     from personas.task_record import TaskRecord
     from personas.tokens import TokenFacts, TokenSource
 
@@ -205,7 +203,6 @@ class Turning:
         apps: tuple[AppTarget, ...],
         tokens: TokenSource,
         open_session: SessionOpener,
-        remembering: Remembering,
         mind: Mind,
         clock: Clock,
         current_token: Callable[[], Awaitable[Token]],
@@ -219,7 +216,6 @@ class Turning:
         self._apps = tuple((each, each.binding) for each in apps if each.binding is not None)
         self._tokens = tokens
         self._open_session = open_session
-        self._remembering = remembering
         self._mind = mind
         self._clock = clock
         self._current_token = current_token
@@ -284,7 +280,7 @@ class Turning:
             aloud=admitted.aloud,
             through=admitted.history.taken,
         )
-        told = await self._told(admitted, turn)
+        told = turn_messages(admitted.facts.name, admitted.present, turn)
         token = await self._current_token()
         async with self._open_session(self._app, token.value) as session:
             try:
@@ -292,16 +288,6 @@ class Turning:
             except Exception as error:
                 record.note(error)
                 raise
-
-    async def _told(self, admitted: Admitted, turn: TurnTold) -> tuple[str, ...]:
-        """The messages of the turn: the header, composed when the present holds none and the day is read at the
-        admission, one for each answered turn the present holds, and the turn's own."""
-        header = admitted.present.header
-        if header is None or not header.settled:
-            day = await self._remembering.read_day(admitted.at, admitted.history)
-            header = Header(admitted.facts.name, admitted.history.left_out > 0, day.earlier, settled=day.answered)
-            self._mind.hold_header(header, admitted.history.left_out)
-        return turn_messages(header, admitted.present, turn)
 
     async def _run_session_body(
         self,
