@@ -39,8 +39,9 @@ class Mind:
         taken = tuple(entries)
         if not taken:
             return
+        history = history_after(self._history, taken, self._size_bytes)
         this_take, self._next_take = self._next_take, asyncio.Event()
-        self._history = history_after(self._history, taken, self._size_bytes)
+        self._history = history
         this_take.set()
 
     def next_take(self) -> asyncio.Event:

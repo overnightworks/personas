@@ -252,7 +252,7 @@ class Turning:
                 self._report_turn_end(stopped.code.value, None, sizing.sizes())
             # What left the session beside the stop (a late answer, the failure another stop holds) still goes to the
             # group, to be judged there.
-            rest = failures_leaving_with(stopped, leaves)
+            rest = failures_leaving_with(stopped, held, leaves)
             if len(rest) == 1:
                 raise rest[0] from None
             if rest:

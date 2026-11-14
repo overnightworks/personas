@@ -31,13 +31,16 @@ def failure_held_by(leaf: BaseException) -> BaseException | None:
     return None if isinstance(leaf, TurnStopped) else leaf
 
 
-def failures_leaving_with(stopped: TurnStopped, leaves: Iterable[BaseException]) -> list[BaseException]:
-    """What leaves the session beside the chosen stop: its own failure and the failure each other leaf stands for.
+def failures_leaving_with(
+    stopped: TurnStopped, stopped_failure: BaseException | None, leaves: Iterable[BaseException]
+) -> list[BaseException]:
+    """What leaves the session beside the chosen stop: its own failure (``failure_held_by(stopped)``) and the failure
+    each other leaf stands for.
 
     A plain stop beside the chosen one holds nothing.
     """
-    held = (failure_held_by(leaf) for leaf in (stopped, *(leaf for leaf in leaves if leaf is not stopped)))
-    return [failure for failure in held if failure is not None]
+    held = (failure_held_by(leaf) for leaf in leaves if leaf is not stopped)
+    return [failure for failure in (stopped_failure, *held) if failure is not None]
 
 
 class UnrequestedCancellationError(Exception):
