@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import math
 import secrets
 import traceback
 from dataclasses import replace
@@ -16,7 +15,6 @@ from agents.member import PlaceRef
 from personas.entries import WindowRead
 from personas.failures import STORE_TIMEOUT_CODE, STORE_UNREACHABLE_CODE, StoreDefect, StoreUnavailable, leaves_of
 from personas.memory import PostgresLineStore
-from personas.recall import TodayBounds
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import SweepClock, line, window_of
@@ -179,20 +177,3 @@ async def test_no_line_text_speaker_or_password_reaches_a_log_line_of_a_sweep(ru
     assert Event.SWEPT.value in logged
     for held in (text, speaker, database.password.reveal()):
         assert held not in logged
-
-
-async def test_a_line_younger_than_the_period_is_still_told_in_a_turns_day_and_a_line_swept_is_not(
-    runner, store, database
-):
-    now = runner.clock.wall()
-    await store.keep(read_of("Swept long ago", days_ago=OLD_DAYS, now=now))
-    await store.keep(read_of("Still kept", days_ago=YOUNG_DAYS, now=now))
-    clock = sweeping(runner, database, store, today=TodayBounds(hours=math.inf, size_bytes=32768))
-    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
-    await restarted_in_the_call(runner)
-    await clock.until_waiting(1)
-    say_in_the_call(runner, ADDRESSED)
-    await runner.app.said_count(1)
-
-    told = runner.gateway.openings()[0].room["earlier_today"]["visits"]
-    assert [each["text"] for visit in told for each in visit["lines"]] == ["Still kept"]

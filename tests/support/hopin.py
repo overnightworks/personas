@@ -89,9 +89,6 @@ _SPEAK_DECLARATION = ToolDeclaration(
     effect=ToolEffect.SIDE_EFFECTING,
 )
 
-SPOKEN_DURATION_MS = 1500
-"""How long a sentence plays unless a test scripts the answer."""
-
 _ACCEPT_DECLARATION = ToolDeclaration(
     name=ACCEPT_INVITATION_TOOL,
     description="Joins the place an invitation is for.",
@@ -235,7 +232,10 @@ class FakeApp:
     spoken: list[tuple[str, str, str]] = field(default_factory=list[tuple[str, str, str]])
     spoken_added: asyncio.Event = field(default_factory=asyncio.Event)
     speak_bearers: list[str] = field(default_factory=list[str])
-    speak_duration_ms: int = SPOKEN_DURATION_MS
+    sentence_ends_held: bool = False
+    """Whether a voiced sentence's own line enters only when ``end_sentence`` is called, as at the end of the sound."""
+    playing: list[tuple[str, str, str]] = field(default_factory=list[tuple[str, str, str]])
+    """The place, the author and the text of each voiced sentence whose own line is held, in the order sent."""
     written_speaks: int = 0
     """How many of the next ``speak`` calls the app answers as written to the place instead of voiced."""
     voice_states: dict[str, VoiceState] = field(default_factory=dict[str, VoiceState])
@@ -459,7 +459,7 @@ class FakeApp:
         return ToolOutcome("said", is_error=False)
 
     async def _speak(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
-        """Takes a sentence, appends it as the member's own line and answers its length or that it was written."""
+        """Takes a sentence, appends it as the member's own line and answers that it starts or that it was written."""
         taken = SpeakArguments.model_validate(arguments)
         self.content.add(taken.text)
         if (held := self.held_speak) is not None:
@@ -473,8 +473,16 @@ class FakeApp:
             self.written_speaks -= 1
             self.speak(taken.place.id, request.principal.sub, ACCEPTED_NAME, taken.text)
             return ToolOutcome(Written(written=True).model_dump_json(), is_error=False)
-        self.speak(taken.place.id, request.principal.sub, ACCEPTED_NAME, taken.text, spoken=True)
-        return ToolOutcome(Spoken(duration_ms=self.speak_duration_ms).model_dump_json(), is_error=False)
+        if self.sentence_ends_held:
+            self.playing.append((taken.place.id, request.principal.sub, taken.text))
+        else:
+            self.speak(taken.place.id, request.principal.sub, ACCEPTED_NAME, taken.text, spoken=True)
+        return ToolOutcome(Spoken(spoken=True).model_dump_json(), is_error=False)
+
+    def end_sentence(self, *, cut: bool = False) -> None:
+        """The oldest voiced sentence whose end is held ends: its own line enters its place, whole or cut."""
+        place_id, author, text = self.playing.pop(0)
+        self.speak(place_id, author, ACCEPTED_NAME, text, spoken=True, cut=cut)
 
     async def until_window_read_held(self) -> None:
         async with asyncio.timeout(LIMIT_SECONDS):

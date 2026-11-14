@@ -1,4 +1,4 @@
-"""What one turn of an agent in an app does: the day read, the session, the tools held and how the turn ends."""
+"""What one turn of an agent in an app does: the session, the tools held and how the turn ends."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from agents.turn_events import FinalEvent, ToolCallEvent
 from personas.decision import (
     TURN_ROLE,
     AppPlace,
+    TurnTold,
     act_outcome,
     arrived_since,
     bound_declarations,
@@ -25,7 +26,7 @@ from personas.decision import (
     failure_code,
     held_told,
     turn_call_bound,
-    turn_told,
+    turn_messages,
 )
 from personas.entries import ActDone, InputSizes, message_bytes, picture_bytes, told_bytes
 from personas.failures import CallFailure, Unreachable, leaves_of, raise_if_cancelled, task_is_being_cancelled
@@ -35,6 +36,7 @@ from personas.task_record import (
     ending_loud_when_cancelled,
     ending_with_recorded_defect,
     failure_held_by,
+    failures_leaving_with,
     unreachable_unless_cancelling,
 )
 from personas.voice import Speaking
@@ -52,10 +54,9 @@ if TYPE_CHECKING:
     from personas.app_session import AppSession, SessionOpener
     from personas.clock import Clock
     from personas.config import AgentCredentials, AppTarget, ToolBinding
-    from personas.decision import Arrived, Occasion, Token
+    from personas.decision import Arrived, Occasion, Present, Token
     from personas.entries import History
     from personas.mind import Mind
-    from personas.remembering import Remembering
     from personas.task_record import TaskRecord
     from personas.tokens import TokenFacts, TokenSource
 
@@ -90,7 +91,7 @@ class TurnSetup:
 
 
 class _Sizing:
-    """What the turn's input weighs: the request's tools and told message once it is built, and every tool result
+    """What the turn's input weighs: the request's tools and told messages once it is built, and every tool result
     relayed back to the model, held and refused calls included. Only bytes are kept."""
 
     def __init__(self) -> None:
@@ -98,9 +99,9 @@ class _Sizing:
         self._results = 0
         self._images = 0
 
-    def request_built(self, declarations: Iterable[ToolDeclaration], told: str) -> None:
+    def request_built(self, declarations: Iterable[ToolDeclaration], told: Iterable[str]) -> None:
         tools = sum(told_bytes(each.model_dump(mode="json", include=_MODEL_FACING)) for each in declarations)
-        self._request = (tools, message_bytes(TurnRole.USER.value, told))
+        self._request = (tools, sum(message_bytes(TurnRole.USER.value, each) for each in told))
 
     def measuring(self, tool: HandTool) -> HandTool:
         """The tool with a handler that counts the result it returns."""
@@ -172,10 +173,14 @@ class Admitted:
     facts: TokenFacts
     place: PlaceRef
     occasion: Occasion
-    history: History = field(repr=False)
+    present: Present = field(repr=False)
     at: datetime
     aloud: bool
     apps: frozenset[str]
+
+    @property
+    def history(self) -> History:
+        return self.present.history
 
     def groups(self) -> Coroutine[None, None, frozenset[str]]:
         """The library's GroupSource wants an awaitable; the groups are already known."""
@@ -199,7 +204,6 @@ class Turning:
         apps: tuple[AppTarget, ...],
         tokens: TokenSource,
         open_session: SessionOpener,
-        remembering: Remembering,
         mind: Mind,
         clock: Clock,
         current_token: Callable[[], Awaitable[Token]],
@@ -213,7 +217,6 @@ class Turning:
         self._apps = tuple((each, each.binding) for each in apps if each.binding is not None)
         self._tokens = tokens
         self._open_session = open_session
-        self._remembering = remembering
         self._mind = mind
         self._clock = clock
         self._current_token = current_token
@@ -254,9 +257,9 @@ class Turning:
                 self._report_turn_end(stopped.code.value, None, sizing.sizes())
                 await self._wait_before_retry(stopped.code)
                 self._mind.due_again(AppPlace(self._app.mcp_url, admitted.place), admitted.occasion)
-            # What left the session beside the stop (a late answer) still goes to the group, to be judged there.
-            rest: list[BaseException] = [held] if held is not None else []
-            rest.extend(leaf for leaf in leaves if leaf is not stopped)
+            # What left the session beside the stop (a late answer, the failure another stop holds) still goes to the
+            # group, to be judged there.
+            rest = failures_leaving_with(stopped, held, leaves)
             if len(rest) == 1:
                 raise rest[0] from None
             if rest:
@@ -270,34 +273,29 @@ class Turning:
         await self._clock.sleep(seconds)
 
     async def _run_turn(self, setup: TurnSetup, admitted: Admitted, record: TaskRecord, sizing: _Sizing) -> None:
-        told = await self._told(admitted)
-        token = await self._current_token()
-        async with self._open_session(self._app, token.value) as session:
-            try:
-                await self._run_session_body(setup, admitted, told, session, record, sizing)
-            except Exception as error:
-                record.note(error)
-                raise
-
-    async def _told(self, admitted: Admitted) -> str:
-        """The user message of the turn: the day is read at its admission and tells what the history does not hold."""
-        earlier = await self._remembering.read_day(admitted.at, admitted.history)
-        return turn_told(
-            admitted.facts.name,
+        turn = TurnTold(
+            admitted.at,
             self._app.mcp_url,
             admitted.place,
             admitted.occasion,
-            admitted.history,
-            earlier,
-            admitted.at,
             aloud=admitted.aloud,
+            through=admitted.history.taken,
         )
+        told = turn_messages(admitted.facts.name, admitted.present, turn)
+        token = await self._current_token()
+        async with self._open_session(self._app, token.value) as session:
+            try:
+                await self._run_session_body(setup, admitted, turn, told, session, record, sizing)
+            except Exception as error:
+                record.note(error)
+                raise
 
     async def _run_session_body(
         self,
         setup: TurnSetup,
         admitted: Admitted,
-        told: str,
+        turn: TurnTold,
+        told: tuple[str, ...],
         session: AppSession,
         record: TaskRecord,
         sizing: _Sizing,
@@ -306,7 +304,9 @@ class Turning:
         held = await self._hold_tools(setup, session, record, admitted)
         request = TurnRequest(
             agent=setup.persona.name,
-            turn=Turn(system=setup.persona.prompt, messages=[TurnMessage(role=TurnRole.USER, text=told)]),
+            turn=Turn(
+                system=setup.persona.prompt, messages=[TurnMessage(role=TurnRole.USER, text=each) for each in told]
+            ),
             roles=setup.persona.roles,
             tools=held.declarations,
             model=setup.persona.model,
@@ -327,22 +327,22 @@ class Turning:
                     setup.persona.max_duration_seconds,
                     partial(self._use_current_token, session),
                     lambda event, code: self._report(event, code, None),
-                    self._mind.take,
+                    self._mind,
                 )
                 final = await self._speak_along(events, speaking)
             else:
                 final = await _final_event_of(events)
         if final is not None:
             self._report_turn_end(None, final.usage, sizing.sizes())
-            self._mind.answered()
+            self._mind.answered(turn)
 
     async def _speak_along(self, events: AsyncIterator[TurnEvent], speaking: Speaking) -> FinalEvent | None:
         """Reads the turn's events while the sentences they release are spoken beside them.
 
-        A call is relayed only when the events are asked for again, so it goes out after every sentence before it was
-        spoken. When the events end in an error, the sentence in flight is answered and entered before it is raised;
-        only a cancel cuts the speech. The turn ends once the speech has, and its final event, if it had one, is
-        returned.
+        A call is relayed only when the events are asked for again, so it goes out after his own line for every
+        sentence before it has entered. When the events end in an error, the sentence in flight is answered and entered
+        before it is raised; only a cancel cuts the speech. The turn ends once the speech has, and its final event, if
+        it had one, is returned.
         """
         async with asyncio.TaskGroup() as group:
             group.create_task(speaking.play())
@@ -406,7 +406,7 @@ class Turning:
         arrived = hold.holding(self._mind.history)
         if arrived is None:
             return None
-        return ToolOutcome(held_told(arrived, self._clock.wall()), is_error=False)
+        return ToolOutcome(held_told(arrived), is_error=False)
 
     async def _relay(
         self, session: AppSession, name: str, calls: _Calls, hold: _Hold, _principal: Principal, arguments: JsonObject

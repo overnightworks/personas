@@ -79,7 +79,7 @@ async def test_a_turn_paused_mid_way_is_cancelled_and_after_the_resume_the_old_l
     await runner.app.said_count(1)
 
     assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
-    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[4]]
+    assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[4]]
 
 
 @LATE_ANSWERS

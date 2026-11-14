@@ -108,9 +108,9 @@ class AppSession(Protocol):
         ...
 
     async def speak(self, place: PlaceRef, sentence: str) -> SpeakAnswer | SpeakRefusal:
-        """How long the app says the sentence plays, that it wrote it at the place instead, or why it does not
-        speak it; raises ``StatusFailure``, ``Unreachable`` or ``UnusableAnswer``, the last for an answer that is none
-        of these."""
+        """That the sentence starts to play, that the app wrote it at the place instead, or why it does not speak it;
+        raises ``StatusFailure``, ``Unreachable`` or ``UnusableAnswer``, the last for an answer that is none of
+        these."""
         ...
 
     async def declared_tools(self) -> tuple[ToolDeclaration, ...]:

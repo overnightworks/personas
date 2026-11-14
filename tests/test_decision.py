@@ -7,7 +7,8 @@ import itertools
 import json
 import secrets
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING
 
 import pytest
 from agents.member import (
@@ -34,9 +35,9 @@ from personas.app_session import READ_SECONDS
 from personas.decision import (
     BACKOFF_BASE_SECONDS,
     BACKOFF_CAP_SECONDS,
+    EMPTY_PRESENT,
     NETWORK_FAILURE_CODE,
     RENEW_BEFORE_EXPIRY_SECONDS,
-    SPOKEN_WAIT_BOUND_SECONDS,
     TURN_CANCELLED_CODE,
     Accept,
     AppPlace,
@@ -46,12 +47,14 @@ from personas.decision import (
     Memory,
     Paused,
     Perception,
+    Present,
     Reaction,
     Reading,
     Restarted,
     Suspend,
     Token,
     Turns,
+    TurnTold,
     UnrecognisedRefusal,
     Waiting,
     accepts_for,
@@ -59,6 +62,7 @@ from personas.decision import (
     active_view_places,
     active_window_places,
     after_refusal,
+    answered_into,
     arrived_since,
     backoff_delay,
     bound_declarations,
@@ -71,7 +75,6 @@ from personas.decision import (
     forget_gone,
     held_apps,
     held_told,
-    history_after,
     holds_a_place,
     is_voice_app,
     jsonrpc_code,
@@ -82,24 +85,27 @@ from personas.decision import (
     perceive,
     reaction_to,
     released,
+    remaining_seconds,
     renewal_due,
+    sentence_ended,
     sets_where_reading_starts,
     speaks_aloud,
     speech_outcome,
-    spoken_wait_seconds,
     sync_checkpoints,
     sync_turned_revisions,
+    taken_into,
+    told_header,
+    told_turn,
     turn_call_bound,
     turn_invalid,
-    turn_told,
+    turn_messages,
     view_turn_due,
     wakes_him,
     with_due,
     without_due,
 )
-from personas.entries import Answered, History, KeptLine, Unanswered, ViewSeen
+from personas.entries import Answered, Entry, History, KeptLine, Unanswered, ViewSeen, Visit
 from personas.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer
-from personas.recall import EarlierToday, earlier_today
 from personas.secret import Secret
 from tests.support.fakes import line, window_of
 from tests.support.history import (
@@ -108,17 +114,19 @@ from tests.support.history import (
     LATER,
     MORNING,
     NOON,
-    ROOMY,
+    ROOMY_BYTES,
     TABLE,
     a_sentence,
     a_view,
     an_act,
     history_holding,
-    kept,
     said,
     told_line_bytes,
 )
 from tests.support.hopin import GENERATION, a_picture, active, invited, paused
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 TRANSIENT_REFUSALS = [
     AcceptInvitationRefusal.SPONSOR_AWAY,
@@ -748,60 +756,72 @@ def test_a_turn_binds_the_bound_tools_the_app_lists_in_binding_order(listed, bou
 ONCE_DROPPED = History((), left_out=1, heard=0)
 
 
+def history_after(history: History, new: Iterable[Entry], size_bytes: int) -> History:
+    """The history once ``new`` joined it, in a step that keeps what ``size_bytes`` holds, with no message but the
+    newest."""
+    return taken_into(Present(history), new, size_bytes, size_bytes).history
+
+
 def told_a_written_turn(
-    earlier: EarlierToday | None, history: History = EMPTY_HISTORY, *, missed: bool = False, aloud: bool = False
+    history: History = EMPTY_HISTORY, *, missed: bool = False, aloud: bool = False, seqs: tuple[int, ...] = ()
 ) -> str:
-    """The message of a turn at ``LATER`` in the place of the morning visit, for lines that are none yet."""
-    return turn_told(
-        "Mozart",
+    """The message of a turn at ``LATER`` in the place of the morning visit that tells the whole history."""
+    turn = TurnTold(
+        LATER,
         APP,
         MORNING.place,
-        Lines(MORNING.generation, frozenset(), missed),
-        history,
-        earlier,
-        LATER,
+        Lines(MORNING.generation, frozenset(seqs), missed),
         aloud=aloud,
+        through=history.taken,
     )
+    return told_turn(turn, history.entries)
 
 
-def test_a_turn_is_told_each_earlier_visit_how_long_ago_it_was_its_lines_their_speakers_and_his_own():
-    mine, theirs = secrets.token_hex(4), secrets.token_hex(4)
-    earlier = earlier_today(
-        [
-            kept(NOON, 1, theirs, hours_before=4),
-            kept(NOON, 2, mine, hours_before=4, own=True, spoken=True, name="Mozart"),
-        ],
-        LATER,
-        ROOMY,
-        EMPTY_HISTORY,
-    )
+@pytest.mark.parametrize("left_out", [1, 0])
+def test_the_header_tells_his_name_and_whether_older_entries_left_the_history(left_out):
+    history = History((), left_out=left_out, heard=0)
 
-    facts = json.loads(told_a_written_turn(earlier))
-
-    assert facts["earlier_today"] == {
-        "older_dropped": False,
-        "visits": [
-            {
-                "minutes_ago": 240,
-                "lines": [
-                    {"name": "Ada", "kind": "message", "text": theirs, "own": False, "spoken": False},
-                    {"name": "Mozart", "kind": "message", "text": mine, "own": True, "spoken": True},
-                ],
-            }
-        ],
-    }
+    assert json.loads(told_header("Mozart", history)) == {"you": "Mozart", "older_dropped": left_out > 0}
 
 
-@pytest.mark.parametrize(
-    ("earlier", "keys"),
-    [
-        (None, ["you", "history", "woke"]),
-        (EarlierToday((), older_dropped=False), ["you", "earlier_today", "history", "woke"]),
-    ],
-    ids=["without a memory he is told no day", "with a memory the day comes between his name and his history"],
-)
-def test_a_turn_is_told_his_name_then_the_day_then_his_history_and_last_what_woke_him(earlier, keys):
-    assert list(json.loads(told_a_written_turn(earlier))) == keys
+def a_lines_turn(*seqs: int, through: int) -> TurnTold:
+    lines = Lines(MORNING.generation, frozenset(seqs), missed=False)
+    return TurnTold(LATER, APP, MORNING.place, lines, aloud=False, through=through)
+
+
+def present_with_a_turn_told(line_seq: int) -> Present:
+    """The present after one line was taken and the turn at the table for it was answered."""
+    present = taken_into(EMPTY_PRESENT, (said(line_seq, "one"),), ROOMY_BYTES, ROOMY_BYTES)
+    return answered_into(present, TurnTold(LATER, APP, TABLE, Waiting(1), aloud=False, through=present.history.taken))
+
+
+def test_the_messages_before_the_last_do_not_change_with_the_clock_a_turn_is_composed_at():
+    present = present_with_a_turn_told(1)
+    next_turn = a_lines_turn(1, through=1)
+
+    early = turn_messages("Mozart", present, next_turn)
+    late = turn_messages("Mozart", present, replace(next_turn, at=LATER + timedelta(hours=3)))
+
+    assert early[:-1] == late[:-1]
+    assert early[-1] != late[-1]
+
+
+def test_a_line_another_places_turn_told_first_is_named_by_the_woke_seqs_of_the_turn_it_is_for():
+    present = present_with_a_turn_told(1)
+
+    *_, own = (json.loads(each) for each in turn_messages("Mozart", present, a_lines_turn(1, through=1)))
+
+    assert (own["entries"], own["woke"]["seqs"]) == ([], [1])
+
+
+def test_a_view_another_places_turn_told_first_is_named_by_the_woke_revision_of_the_turn_it_is_for():
+    view = ViewSeen(APP, TABLE, PlaceView(revision=2, awaits_you=True, state={"hand": []}), LATER)
+    present = answered_into(taken_into(EMPTY_PRESENT, (view,), ROOMY_BYTES, ROOMY_BYTES), a_lines_turn(through=1))
+    for_the_view = TurnTold(LATER, APP, TABLE, Waiting(2), aloud=False, through=1)
+
+    *_, own = (json.loads(each) for each in turn_messages("Mozart", present, for_the_view))
+
+    assert (own["entries"], own["woke"]["revision"]) == ([], 2)
 
 
 @pytest.mark.parametrize("has_voice", [True, False])
@@ -812,19 +832,6 @@ def test_the_places_of_an_app_are_spoken_only_for_an_agent_with_a_voice_and_an_a
     declared = [_declaration(name) for name in declared_names]
 
     assert is_voice_app(has_voice, declared) is (has_voice and SPEAK_TOOL in declared_names)
-
-
-@pytest.mark.parametrize(
-    ("duration_ms", "waited"),
-    [(1500, 1.5), (1, 0.001), (int(SPOKEN_WAIT_BOUND_SECONDS * 1000), SPOKEN_WAIT_BOUND_SECONDS)],
-    ids=["a sentence", "the shortest", "exactly the bound"],
-)
-def test_the_voice_waits_as_long_as_a_sentence_plays_up_to_the_bound(duration_ms, waited):
-    assert spoken_wait_seconds(duration_ms) == waited
-
-
-def test_the_voice_waits_no_longer_than_the_bound_whatever_the_app_says():
-    assert spoken_wait_seconds(int(SPOKEN_WAIT_BOUND_SECONDS * 1000) + 1) == SPOKEN_WAIT_BOUND_SECONDS
 
 
 def test_a_turns_call_bound_is_the_sum_of_the_bounds_of_the_apps_whose_tools_it_holds_plus_the_call_it_may_hold_back():
@@ -979,97 +986,74 @@ def told_one_bytes() -> int:
     return told_line_bytes(APP, "room-7", "one", name="Bo")
 
 
-def test_a_view_turn_is_told_its_revision_as_the_one_entry_marked_new_and_woke_names_only_why_app_and_place():
+def test_a_view_turn_message_tells_its_admission_what_woke_him_and_every_entry_with_the_time_it_happened_at():
     view = PlaceView(revision=3, awaits_you=True, state={"hand": ["x", {"seen": True}], "umläut": "ä"})
-    history = history_after(
-        ONCE_DROPPED,
+    history = history_holding(
         (
             said(1, "Spiel den Buben", name="Ada", visit=NOON, spoken=True),
-            ViewSeen(APP, TABLE, view, LATER - timedelta(seconds=7)),
-        ),
-        ROOMY.size_bytes,
+            ViewSeen(APP, TABLE, view, LATER - timedelta(seconds=7, microseconds=400)),
+        )
     )
+    turn = TurnTold(LATER + timedelta(microseconds=900), APP, TABLE, Waiting(3), aloud=False, through=history.taken)
 
-    told = turn_told("Mozart", APP, TABLE, Waiting(3), history, None, LATER, aloud=False)
+    told = told_turn(turn, history.entries)
 
     assert json.loads(told) == {
-        "you": "Mozart",
-        "history": {
-            "older_dropped": True,
-            "entries": [
-                {
-                    "entry": "line",
-                    "app": NOON.app,
-                    "place": {"kind": "call", "id": "room-8"},
-                    "seconds_ago": 0,
-                    "seq": 1,
-                    "name": "Ada",
-                    "kind": "message",
-                    "text": "Spiel den Buben",
-                    "own": False,
-                    "spoken": True,
-                    "new": False,
-                },
-                {
-                    "entry": "view",
-                    "app": APP,
-                    "place": {"kind": "table", "id": "table-1"},
-                    "seconds_ago": 7,
-                    "revision": 3,
-                    "awaits_you": True,
-                    "state": view.state,
-                    "new": True,
-                },
-            ],
-        },
-        "woke": {"why": "view", "app": APP, "place": {"kind": "table", "id": "table-1"}},
+        "at": "2026-11-10T18:00:00Z",
+        "woke": {"why": "view", "app": APP, "place": {"kind": "table", "id": "table-1"}, "revision": 3},
+        "entries": [
+            {
+                "entry": "line",
+                "app": NOON.app,
+                "place": {"kind": "call", "id": "room-8"},
+                "at": "2026-11-10T18:00:00Z",
+                "seq": 1,
+                "name": "Ada",
+                "kind": "message",
+                "text": "Spiel den Buben",
+                "own": False,
+                "spoken": True,
+            },
+            {
+                "entry": "view",
+                "app": APP,
+                "place": {"kind": "table", "id": "table-1"},
+                "at": "2026-11-10T17:59:52Z",
+                "revision": 3,
+                "awaits_you": True,
+                "state": view.state,
+            },
+        ],
     }
     assert "ä" in told
     assert told.count(json.dumps(view.state, ensure_ascii=False)) == 1
 
 
-@pytest.mark.parametrize(
-    ("app", "place", "revision"),
-    [(APP, TABLE, 4), (APP, OTHER_TABLE, 3), ("https://other.test/mcp", TABLE, 3)],
-    ids=["another revision", "another place", "another app"],
-)
-def test_a_view_turn_marks_new_only_the_entry_of_its_app_place_and_revision(app, place, revision):
-    held = ViewSeen(app, place, a_view(revision), LATER)
-    admitted = ViewSeen(APP, TABLE, a_view(3), LATER)
+def test_a_time_is_told_in_utc_whatever_the_zone_it_is_held_in():
+    zone = timezone(timedelta(hours=2))
+    turn = TurnTold(datetime(2026, 11, 10, 20, 0, 5, tzinfo=zone), APP, TABLE, Waiting(3), aloud=False, through=0)
 
-    told = json.loads(
-        turn_told("Mozart", APP, TABLE, Waiting(3), history_holding((held, admitted)), None, LATER, aloud=False)
-    )
-
-    assert [each["new"] for each in told["history"]["entries"]] == [False, True]
-
-
-def test_a_written_turn_marks_no_view_new():
-    history = history_holding((ViewSeen(APP, MORNING.place, a_view(1), LATER), said(1, "hello")))
-
-    told = json.loads(told_a_written_turn(None, history))
-
-    assert [(each["entry"], each["new"]) for each in told["history"]["entries"]] == [("view", False), ("line", False)]
+    assert json.loads(told_turn(turn, ()))["at"] == "2026-11-10T18:00:05Z"
 
 
 @pytest.mark.parametrize("missed", [False, True])
-def test_a_written_turn_is_told_in_which_place_it_woke_and_whether_older_lines_were_not_seen(missed):
-    woke = json.loads(told_a_written_turn(None, missed=missed))["woke"]
+def test_a_written_turn_is_told_in_which_place_it_woke_which_lines_it_is_for_and_whether_older_ones_were_not_seen(
+    missed,
+):
+    woke = json.loads(told_a_written_turn(missed=missed, seqs=(9, 3)))["woke"]
 
-    assert woke == {"why": "lines", "app": APP, "place": {"kind": "call", "id": "room-7"}, "missed": missed}
-
-
-def test_a_turn_that_is_spoken_is_told_so_in_what_woke_him_and_any_other_turn_is_told_no_such_key():
-    spoken = json.loads(told_a_written_turn(None, aloud=True))["woke"]
-
-    assert spoken == {
+    assert woke == {
         "why": "lines",
         "app": APP,
         "place": {"kind": "call", "id": "room-7"},
-        "missed": False,
-        "aloud": True,
+        "missed": missed,
+        "seqs": [3, 9],
     }
-    assert "aloud" not in json.loads(told_a_written_turn(None))["woke"]
+
+
+def test_a_turn_that_is_spoken_is_told_so_in_what_woke_him_and_any_other_turn_is_told_no_such_key():
+    assert json.loads(told_a_written_turn(aloud=True))["woke"]["aloud"] is True
+    assert "aloud" not in json.loads(told_a_written_turn())["woke"]
 
 
 LINES = Lines(MORNING.generation, frozenset({1}), missed=False)
@@ -1099,85 +1083,16 @@ def test_a_turn_for_lines_at_a_voice_app_is_spoken_unless_the_last_window_states
     assert speaks_aloud(voice_app, occasion, checkpoint) is aloud
 
 
-def test_a_turn_told_an_empty_history_is_told_no_entries_and_none_dropped():
-    assert json.loads(told_a_written_turn(None))["history"] == {"older_dropped": False, "entries": []}
-
-
-def test_a_history_line_is_new_only_when_the_turn_is_for_that_line_of_that_visit():
-    evening = replace(MORNING, generation="evening")
-    history = history_holding(
-        (
-            KeptLine(
-                NOON,
-                1,
-                LATER - timedelta(seconds=300),
-                "Bo",
-                "message",
-                "elsewhere",
-                own=False,
-                spoken=False,
-                cut=False,
-                act=False,
-            ),
-            KeptLine(
-                evening,
-                1,
-                LATER - timedelta(seconds=200),
-                "Bo",
-                "message",
-                "an earlier run",
-                own=False,
-                spoken=False,
-                cut=False,
-                act=False,
-            ),
-            KeptLine(
-                MORNING,
-                1,
-                LATER - timedelta(seconds=90),
-                "Ada",
-                "message",
-                "woke him",
-                own=False,
-                spoken=False,
-                cut=False,
-                act=False,
-            ),
-            KeptLine(
-                MORNING,
-                2,
-                LATER - timedelta(seconds=1),
-                "Mozart",
-                "message",
-                "his own",
-                own=True,
-                spoken=False,
-                cut=False,
-                act=False,
-            ),
-        )
-    )
-    occasion = Lines(MORNING.generation, frozenset({1}), missed=False)
-
-    told = json.loads(turn_told("Mozart", APP, MORNING.place, occasion, history, None, LATER, aloud=False))
-
-    assert [
-        (each["place"]["id"], each["seq"], each["text"], each["own"], each["new"])
-        for each in told["history"]["entries"]
-    ] == [
-        ("room-8", 1, "elsewhere", False, False),
-        ("room-7", 1, "an earlier run", False, False),
-        ("room-7", 1, "woke him", False, True),
-        ("room-7", 2, "his own", True, False),
-    ]
+def test_a_turn_told_an_empty_history_is_told_no_entries():
+    assert json.loads(told_a_written_turn())["entries"] == []
 
 
 def test_the_history_is_told_in_the_order_it_holds_its_entries():
     history = history_holding((said(2, "later", visit=NOON), said(1, "earlier")))
 
-    told = json.loads(told_a_written_turn(None, history))
+    told = json.loads(told_a_written_turn(history))
 
-    assert [entry["text"] for entry in told["history"]["entries"]] == ["later", "earlier"]
+    assert [entry["text"] for entry in told["entries"]] == ["later", "earlier"]
 
 
 def test_an_accept_shows_neither_its_figure_nor_its_voice_in_its_repr():
@@ -1307,22 +1222,21 @@ def test_the_bound_counts_a_line_by_its_told_json_and_a_view_by_the_utf8_json_by
     [
         pytest.param(
             an_act(),
-            '{"entry": "act", "app": "https://app.test/mcp", "seconds_ago": 0, "tool": "say",'
-            ' "arguments": {"text": "hi"}, "outcome": {"answered": true, "is_error": false, "text": "posted"},'
-            ' "new": false}',
+            '{"entry": "act", "app": "https://app.test/mcp", "at": "2026-11-10T17:59:51Z", "tool": "say",'
+            ' "arguments": {"text": "hi"}, "outcome": {"answered": true, "is_error": false, "text": "posted"}}',
             id="an answer",
         ),
         pytest.param(
             an_act(outcome=Unanswered("network")),
-            '{"entry": "act", "app": "https://app.test/mcp", "seconds_ago": 0, "tool": "say",'
-            ' "arguments": {"text": "hi"}, "outcome": {"answered": false, "code": "network"}, "new": false}',
+            '{"entry": "act", "app": "https://app.test/mcp", "at": "2026-11-10T17:59:51Z", "tool": "say",'
+            ' "arguments": {"text": "hi"}, "outcome": {"answered": false, "code": "network"}}',
             id="no answer",
         ),
         pytest.param(
             an_act(arguments={"text": 'ä♠"\n'}),
-            '{"entry": "act", "app": "https://app.test/mcp", "seconds_ago": 0, "tool": "say",'
+            '{"entry": "act", "app": "https://app.test/mcp", "at": "2026-11-10T17:59:51Z", "tool": "say",'
             ' "arguments": {"text": "ä♠\\"\\n"},'
-            ' "outcome": {"answered": true, "is_error": false, "text": "posted"}, "new": false}',
+            ' "outcome": {"answered": true, "is_error": false, "text": "posted"}}',
             id="arguments of two-, three- and escaped characters",
         ),
     ],
@@ -1335,7 +1249,7 @@ def test_the_bound_counts_a_line_by_its_told_json_and_a_view_by_the_utf8_json_by
         pytest.param(-1, ["act"], True, id="the bound lies one byte below them"),
     ],
 )
-def test_the_bound_counts_an_act_by_the_utf8_bytes_of_its_told_json_with_its_age_as_zero(
+def test_the_bound_counts_an_act_by_the_utf8_bytes_of_its_told_json_(
     act, told_act, bound_over_the_two, kept_kinds, older_dropped, told_one_bytes
 ):
     size = told_one_bytes + len(told_act.encode()) + bound_over_the_two
@@ -1361,20 +1275,19 @@ def test_an_act_the_history_already_holds_is_appended_again():
     assert history_after(history_holding((act,)), (act,), 10_000).entries == (act, act)
 
 
-def test_an_answered_act_is_told_with_its_app_tool_arguments_answer_and_age_and_is_never_new():
+def test_an_answered_act_is_told_with_its_app_tool_arguments_answer_and_time():
     act = an_act(arguments={"place": "room-7", "text": "ä"}, outcome=Answered("gone", is_error=True))
 
-    told_entries = json.loads(told_a_written_turn(None, history_holding((act,))))["history"]["entries"]
+    told_entries = json.loads(told_a_written_turn(history_holding((act,))))["entries"]
 
     assert told_entries == [
         {
             "entry": "act",
             "app": APP,
-            "seconds_ago": 9,
+            "at": "2026-11-10T17:59:51Z",
             "tool": "say",
             "arguments": {"place": "room-7", "text": "ä"},
             "outcome": {"answered": True, "is_error": True, "text": "gone"},
-            "new": False,
         }
     ]
 
@@ -1382,19 +1295,9 @@ def test_an_answered_act_is_told_with_its_app_tool_arguments_answer_and_age_and_
 def test_an_unanswered_act_is_told_with_the_code_and_no_text():
     act = an_act(outcome=Unanswered(TURN_CANCELLED_CODE))
 
-    told_entry = json.loads(told_a_written_turn(None, history_holding((act,))))["history"]["entries"][0]
+    told_entry = json.loads(told_a_written_turn(history_holding((act,))))["entries"][0]
 
     assert told_entry["outcome"] == {"answered": False, "code": TURN_CANCELLED_CODE}
-
-
-def test_a_view_turn_marks_no_act_new():
-    history = history_holding((an_act(), ViewSeen(APP, TABLE, a_view(3), LATER)))
-
-    told_entries = json.loads(turn_told("Mozart", APP, TABLE, Waiting(3), history, None, LATER, aloud=False))[
-        "history"
-    ]["entries"]
-
-    assert [each["new"] for each in told_entries] == [False, True]
 
 
 @pytest.mark.parametrize(
@@ -1428,26 +1331,25 @@ def test_how_a_request_ended_decides_the_outcome_of_the_act_it_made(ended, cance
 @pytest.mark.parametrize(
     ("outcome", "told_outcome"),
     [
-        pytest.param(Spoken(duration_ms=1500), {"answered": True}, id="spoken"),
+        pytest.param(Spoken(spoken=True), {"answered": True}, id="spoken"),
         pytest.param(Written(written=True), {"answered": True, "written": True}, id="written to the place instead"),
         pytest.param(SpeakRefusal.TOO_LONG, {"answered": True, "refused": "too_long"}, id="refused"),
         pytest.param(Unanswered("network"), {"answered": False, "code": "network"}, id="no answer"),
     ],
 )
-def test_a_spoken_sentence_is_told_as_a_speech_entry_with_its_text_age_and_how_the_app_took_it(outcome, told_outcome):
+def test_a_spoken_sentence_is_told_as_a_speech_entry_with_its_text_time_and_how_the_app_took_it(outcome, told_outcome):
     sentence = a_sentence(text="Grüß dich.", outcome=outcome)
 
-    told_entries = json.loads(told_a_written_turn(None, history_holding((sentence,))))["history"]["entries"]
+    told_entries = json.loads(told_a_written_turn(history_holding((sentence,))))["entries"]
 
     assert told_entries == [
         {
             "entry": "speech",
             "app": APP,
             "place": {"kind": "call", "id": "room-7"},
-            "seconds_ago": 9,
+            "at": "2026-11-10T17:59:51Z",
             "text": "Grüß dich.",
             "outcome": told_outcome,
-            "new": False,
         }
     ]
 
@@ -1460,7 +1362,7 @@ def test_a_spoken_sentence_is_told_as_a_speech_entry_with_its_text_age_and_how_t
         pytest.param(-1, ["speech"], True, id="the bound lies one byte below them"),
     ],
 )
-def test_the_bound_counts_a_spoken_sentence_by_the_utf8_bytes_of_its_told_json_with_its_age_as_zero(
+def test_the_bound_counts_a_spoken_sentence_by_the_utf8_bytes_of_its_told_json_(
     bound_over_the_two, kept_kinds, older_dropped, told_one_bytes
 ):
     sentence = a_sentence(text="ä♠")
@@ -1469,10 +1371,9 @@ def test_the_bound_counts_a_spoken_sentence_by_the_utf8_bytes_of_its_told_json_w
             "entry": "speech",
             "app": APP,
             "place": {"kind": "call", "id": "room-7"},
-            "seconds_ago": 0,
+            "at": "2026-11-10T17:59:51Z",
             "text": "ä♠",
             "outcome": {"answered": True},
-            "new": False,
         },
         ensure_ascii=False,
     )
@@ -1487,7 +1388,7 @@ def test_the_bound_counts_a_spoken_sentence_by_the_utf8_bytes_of_its_told_json_w
 @pytest.mark.parametrize(
     ("ended", "cancelling", "expected"),
     [
-        pytest.param(Spoken(duration_ms=900), True, Spoken(duration_ms=900), id="a spoken sentence while cancelled"),
+        pytest.param(Spoken(spoken=True), True, Spoken(spoken=True), id="a spoken sentence while cancelled"),
         pytest.param(Written(written=True), True, Written(written=True), id="a written sentence while cancelled"),
         pytest.param(SpeakRefusal.NOT_ACTIVE, False, SpeakRefusal.NOT_ACTIVE, id="a refusal"),
         pytest.param(StatusFailure(502), True, Unanswered(TURN_CANCELLED_CODE), id="a failure while cancelled"),
@@ -1510,6 +1411,15 @@ def test_a_turn_is_past_its_deadline_once_its_longest_duration_has_gone_by(start
     assert past_deadline(now, started, 30) is past
 
 
+@pytest.mark.parametrize(
+    ("now", "remaining"),
+    [(1000.0, 30.0), (1012.5, 17.5), (1030.0, 0.0), (1100.0, 0.0)],
+    ids=["at the start", "part way", "at the deadline", "long past it"],
+)
+def test_what_is_left_of_a_turns_longest_duration_is_never_below_zero(now, remaining):
+    assert remaining_seconds(now, 1000.0, 30) == remaining
+
+
 def test_the_history_stays_marked_once_it_dropped_older_lines_though_the_next_lines_fit():
     assert history_after(ONCE_DROPPED, (said(1, "one"),), 10_000).older_dropped is True
 
@@ -1518,12 +1428,19 @@ def an_own_line(seq: int, text: str = "mine") -> KeptLine:
     return KeptLine(MORNING, seq, LATER, "Mozart", "message", text, own=True, spoken=False, cut=False, act=False)
 
 
+MORNING_AT = AppPlace(MORNING.app, MORNING.place)
+
+
+def a_spoken_line(seq: int, *, visit: Visit = MORNING, cut: bool = False) -> KeptLine:
+    return KeptLine(visit, seq, LATER, "Mozart", "message", "a sentence", own=True, spoken=True, cut=cut, act=False)
+
+
 def a_view_seen(revision: int, *, size: int | None = None) -> ViewSeen:
     state = {"hand": "x" * size} if size is not None else {"hand": secrets.token_hex(4)}
     return ViewSeen(APP, TABLE, PlaceView(revision=revision, awaits_you=False, state=state), LATER)
 
 
-def taking(history: History, *entries, size_bytes: int = ROOMY.size_bytes) -> History:
+def taking(history: History, *entries, size_bytes: int = ROOMY_BYTES) -> History:
     return history_after(history, entries, size_bytes)
 
 
@@ -1645,11 +1562,60 @@ def test_what_arrived_when_the_bound_leaves_only_the_newest_entry_taken_during_t
     assert arrived_since(after, admitted) == Arrived(during, older_dropped=older_dropped)
 
 
+@pytest.mark.parametrize("cut", [False, True], ids=["whole", "cut"])
+def test_a_sentence_has_ended_once_his_own_spoken_line_at_its_place_entered_after_it_was_sent(cut):
+    sent = taking(EMPTY_HISTORY, said(1, "before"))
+
+    after = taking(sent, said(2, "theirs"), a_spoken_line(3, cut=cut))
+
+    assert sentence_ended(after, sent.taken, MORNING_AT) is True
+
+
+@pytest.mark.parametrize(
+    "arrivals",
+    [
+        pytest.param((), id="nothing entered"),
+        pytest.param((said(2, "theirs", spoken=True),), id="another's spoken line"),
+        pytest.param((an_own_line(2),), id="his own written line"),
+        pytest.param(
+            (KeptLine(MORNING, 2, LATER, "Mozart", "message", "x", own=True, spoken=False, cut=False, act=True),),
+            id="his own act line",
+        ),
+        pytest.param((a_spoken_line(2, visit=NOON),), id="his own spoken line at another place"),
+        pytest.param(
+            (a_spoken_line(2, visit=replace(MORNING, app="https://other.test/mcp")),),
+            id="his own spoken line at the place of another app",
+        ),
+        pytest.param((a_sentence(),), id="the sentence he sent"),
+        pytest.param((a_view_seen(1),), id="a view"),
+    ],
+)
+def test_a_sentence_has_not_ended_by_anything_but_his_own_spoken_line_at_its_place(arrivals):
+    sent = taking(EMPTY_HISTORY, said(1, "before"))
+
+    assert sentence_ended(taking(sent, *arrivals), sent.taken, MORNING_AT) is False
+
+
+def test_a_sentence_has_not_ended_by_his_own_spoken_line_that_entered_before_it_was_sent():
+    sent = taking(EMPTY_HISTORY, a_spoken_line(1))
+
+    assert sentence_ended(taking(sent, said(2, "theirs")), sent.taken, MORNING_AT) is False
+
+
+def test_a_sentence_ends_by_his_own_line_when_the_bound_left_out_older_entries_than_the_mark(told_one_bytes):
+    sent = taking(EMPTY_HISTORY, *(said(each, "one") for each in range(1, 4)), size_bytes=told_one_bytes + 5)
+
+    after = taking(sent, a_spoken_line(4), size_bytes=2 * told_one_bytes + 5)
+
+    assert after.left_out > 0
+    assert sentence_ended(after, sent.taken, MORNING_AT) is True
+
+
 def told_held(arrived: Arrived) -> dict:
-    return json.loads(held_told(arrived, LATER))
+    return json.loads(held_told(arrived))
 
 
-def test_a_held_call_is_told_it_was_not_sent_and_every_arrived_entry_as_new_his_own_act_too():
+def test_a_held_call_is_told_it_was_not_sent_and_every_arrived_entry_his_own_act_too():
     act = an_act(at=LATER - timedelta(seconds=4))
     line = said(2, "Spiel den Buben", name="Ada")
 
@@ -1657,8 +1623,8 @@ def test_a_held_call_is_told_it_was_not_sent_and_every_arrived_entry_as_new_his_
 
     assert told_text["sent"] is False
     assert told_text["arrived"]["older_dropped"] is True
-    assert [(each["entry"], each["new"]) for each in told_text["arrived"]["entries"]] == [("act", True), ("line", True)]
-    assert told_text["arrived"]["entries"][0]["seconds_ago"] == 4
+    assert [each["entry"] for each in told_text["arrived"]["entries"]] == ["act", "line"]
+    assert told_text["arrived"]["entries"][0]["at"] == "2026-11-10T17:59:56Z"
     assert told_text["arrived"]["entries"][1]["text"] == "Spiel den Buben"
 
 
@@ -1666,7 +1632,7 @@ def test_a_held_text_whose_arrivals_pass_the_event_bound_tells_the_newest_that_f
     third = MAX_EVENT_BYTES // 3 + 1
     views = tuple(a_view_seen(each, size=third) for each in (1, 2, 3))
 
-    text = held_told(Arrived(views, older_dropped=False), LATER)
+    text = held_told(Arrived(views, older_dropped=False))
 
     told_text = json.loads(text)
     assert len(text.encode()) <= MAX_EVENT_BYTES
@@ -1675,7 +1641,7 @@ def test_a_held_text_whose_arrivals_pass_the_event_bound_tells_the_newest_that_f
 
 
 def test_an_arrival_that_alone_passes_the_event_bound_is_left_out_and_older_dropped_is_said():
-    text = held_told(Arrived((a_view_seen(1, size=MAX_EVENT_BYTES),), older_dropped=False), LATER)
+    text = held_told(Arrived((a_view_seen(1, size=MAX_EVENT_BYTES),), older_dropped=False))
 
     assert json.loads(text) == {"sent": False, "arrived": {"older_dropped": True, "entries": []}}
 

@@ -13,7 +13,7 @@ from personas.decision import is_defect
 from personas.failures import Unreachable, leaves_of, task_is_being_cancelled
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Iterable
 
 
 class RelayFailed(TurnStopped):
@@ -29,6 +29,18 @@ def failure_held_by(leaf: BaseException) -> BaseException | None:
     if isinstance(leaf, RelayFailed):
         return leaf.failure
     return None if isinstance(leaf, TurnStopped) else leaf
+
+
+def failures_leaving_with(
+    stopped: TurnStopped, stopped_failure: BaseException | None, leaves: Iterable[BaseException]
+) -> list[BaseException]:
+    """What leaves the session beside the chosen stop: its own failure (``failure_held_by(stopped)``) and the failure
+    each other leaf stands for.
+
+    A plain stop beside the chosen one holds nothing.
+    """
+    held = (failure_held_by(leaf) for leaf in leaves if leaf is not stopped)
+    return [failure for failure in (stopped_failure, *held) if failure is not None]
 
 
 class UnrequestedCancellationError(Exception):

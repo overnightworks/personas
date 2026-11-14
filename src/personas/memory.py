@@ -28,7 +28,6 @@ from sqlalchemy import (
     MetaData,
     Numeric,
     PrimaryKeyConstraint,
-    Row,
     Table,
     Text,
     create_engine,
@@ -41,7 +40,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import InterfaceError, OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
-from personas.entries import KeptLine, Visit
+from personas.entries import Visit
 from personas.failures import (
     STORE_DEFECT_CODE,
     STORE_TIMEOUT_CODE,
@@ -201,22 +200,6 @@ def _rows_of(read: WindowRead) -> list[dict[str, object]]:
     ]
 
 
-def _kept_line(row: Row[tuple[object, ...]]) -> KeptLine:
-    place = PlaceRef(kind=row.place_kind, id=row.place_id)
-    return KeptLine(
-        Visit(row.app, place, row.generation),
-        int(row.seq),
-        row.first_read_at,
-        row.speaker,
-        row.kind,
-        row.text,
-        row.own,
-        row.spoken,
-        row.cut,
-        row.act,
-    )
-
-
 class PostgresLineStore:
     """Keeps the lines of the windows the loops read in the database the configuration names.
 
@@ -237,13 +220,6 @@ class PostgresLineStore:
         statement = insert(_LINES).values(_rows_of(read)).on_conflict_do_nothing()
         async with self._bounded_transaction() as connection:
             await connection.execute(statement)
-
-    async def kept_since(self, client_id: str, since: datetime) -> tuple[KeptLine, ...]:
-        """The agent's lines first read at or after ``since``, under the bound of a write."""
-        statement = select(_LINES).where(_LINES.c.client_id == client_id, _LINES.c.first_read_at >= since)
-        async with self._bounded_transaction() as connection:
-            rows = (await connection.execute(statement)).all()
-        return tuple(_kept_line(row) for row in rows)
 
     async def kept_visits(self, client_id: str | None) -> tuple[KeptVisit, ...]:
         """Every agent's visits, or those of one agent, ordered by agent and first read; no line's content."""

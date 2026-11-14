@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import secrets
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 from agents.member import STANDING_URI, PlaceRef, PlaceView, Spoken
 
-from personas.decision import history_after
-from personas.entries import ActDone, Answered, History, KeptLine, SaidAloud, Visit
-from personas.recall import TodayBounds
+from personas.decision import EMPTY_PRESENT, taken_into
+from personas.entries import ActDone, Answered, KeptLine, SaidAloud, Visit
 from tests.support.call import PERSON
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import FakeApp, active
@@ -18,6 +18,20 @@ TABLE = PlaceRef(kind="table", id="table-1")
 OTHER_CALL_ID = "room-9"
 SPEAKER = "Ada"
 REMARK = "Play the jack."
+
+
+AT = "2026-11-10T08:16:40Z"
+"""When an entry is read or done while a test's clock stands where it starts."""
+
+
+def after_start(seconds: int) -> str:
+    """When an entry is read or done this many seconds after a test's clock starts."""
+    return (datetime.fromisoformat(AT) + timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def bounded_history(config, history_bytes: int):
+    """The configuration with a history that holds this many bytes and keeps all of them in a step."""
+    return replace(config, history_bytes=history_bytes, history_keep_bytes=history_bytes)
 
 
 def a_state() -> dict[str, str]:
@@ -38,19 +52,10 @@ def told_line_bytes(
     own: bool = False,
     spoken: bool = False,
 ) -> int:
-    """The bytes a line of a call is told as in the history, its age 0, not new, its text with no escape."""
+    """The bytes a line of a call is told as in the history, its text with no escape."""
     told = (
-        f'{{"entry": "line", "app": "{app_url}", "place": {{"kind": "call", "id": "{place_id}"}}, "seconds_ago": 0,'
+        f'{{"entry": "line", "app": "{app_url}", "place": {{"kind": "call", "id": "{place_id}"}}, "at": "{AT}",'
         f' "seq": {seq}, "name": "{name}", "kind": "message", "text": "{text}", "own": {str(own).lower()},'
-        f' "spoken": {str(spoken).lower()}, "new": false}}'
-    )
-    return len(told.encode())
-
-
-def told_day_line_bytes(text: str, *, name: str = SPEAKER, own: bool = False, spoken: bool = False) -> int:
-    """The bytes a line of the day is told as, its text with no escape."""
-    told = (
-        f'{{"name": "{name}", "kind": "message", "text": "{text}", "own": {str(own).lower()},'
         f' "spoken": {str(spoken).lower()}}}'
     )
     return len(told.encode())
@@ -76,11 +81,10 @@ def entry(
     text: str,
     *,
     seq: int = 1,
-    seconds_ago: int = 0,
+    at: str = AT,
     name: str = SPEAKER,
     own: bool = False,
     spoken: bool = False,
-    new: bool = False,
     place_kind: str = "call",
     act: bool = False,
 ) -> dict[str, object]:
@@ -88,14 +92,13 @@ def entry(
         "entry": "line",
         "app": app_url,
         "place": {"kind": place_kind, "id": place_id},
-        "seconds_ago": seconds_ago,
+        "at": at,
         "seq": seq,
         "name": name,
         "kind": "message",
         "text": text,
         "own": own,
         "spoken": spoken,
-        "new": new,
     }
     return told | {"act": True} if act else told
 
@@ -106,18 +109,16 @@ def view_entry(
     *,
     revision: int,
     awaits_you: bool = True,
-    seconds_ago: int = 0,
-    new: bool = False,
+    at: str = AT,
 ) -> dict[str, object]:
     return {
         "entry": "view",
         "app": app_url,
         "place": {"kind": TABLE.kind, "id": TABLE.id},
-        "seconds_ago": seconds_ago,
+        "at": at,
         "revision": revision,
         "awaits_you": awaits_you,
         "state": state,
-        "new": new,
     }
 
 
@@ -131,25 +132,17 @@ def unanswered(code: str) -> dict[str, object]:
 
 
 def act_entry(
-    app_url: str, tool: str, arguments: dict[str, object], outcome: dict[str, object], *, seconds_ago: int = 0
+    app_url: str, tool: str, arguments: dict[str, object], outcome: dict[str, object], *, at: str = AT
 ) -> dict[str, object]:
-    return {
-        "entry": "act",
-        "app": app_url,
-        "seconds_ago": seconds_ago,
-        "tool": tool,
-        "arguments": arguments,
-        "outcome": outcome,
-        "new": False,
-    }
+    return {"entry": "act", "app": app_url, "at": at, "tool": tool, "arguments": arguments, "outcome": outcome}
 
 
-def woke_at_table(app_url: str) -> dict[str, object]:
-    return {"why": "view", "app": app_url, "place": {"kind": TABLE.kind, "id": TABLE.id}}
+def woke_at_table(app_url: str, revision: int) -> dict[str, object]:
+    return {"why": "view", "app": app_url, "place": {"kind": TABLE.kind, "id": TABLE.id}, "revision": revision}
 
 
-def woke_at_lines(app_url: str, place_id: str, *, missed: bool = False) -> dict[str, object]:
-    return {"why": "lines", "app": app_url, "place": {"kind": "call", "id": place_id}, "missed": missed}
+def woke_at_lines(app_url: str, place_id: str, seqs: list[int], *, missed: bool = False) -> dict[str, object]:
+    return {"why": "lines", "app": app_url, "place": {"kind": "call", "id": place_id}, "missed": missed, "seqs": seqs}
 
 
 def turns_woken_by(runner, why: str):
@@ -220,20 +213,15 @@ MORNING = Visit("https://app.test/mcp", PlaceRef(kind="call", id="room-7"), "mor
 NOON = Visit("https://app.test/mcp", PlaceRef(kind="call", id="room-8"), "noon")
 
 
-ROOMY = TodayBounds(hours=24.0, size_bytes=10_000)
+ROOMY_BYTES = 10_000
 
 
-EMPTY_HISTORY = History((), left_out=0, heard=0)
+EMPTY_HISTORY = EMPTY_PRESENT.history
 
 
 def history_holding(entries):
     """The history that took in these entries in order, with a bound none of them reaches."""
-    return history_after(EMPTY_HISTORY, entries, ROOMY.size_bytes)
-
-
-def kept(visit, seq, text, *, hours_before, own=False, spoken=False, act=False, name="Ada"):
-    """A kept line of a visit, first read this many hours before ``LATER``."""
-    return KeptLine(visit, seq, LATER - timedelta(hours=hours_before), name, "message", text, own, spoken, False, act)
+    return taken_into(EMPTY_PRESENT, entries, ROOMY_BYTES, ROOMY_BYTES).history
 
 
 def a_view(revision: int, *, awaits_you: bool = True) -> PlaceView:
@@ -256,4 +244,4 @@ def an_act(*, arguments=None, outcome=None, tool="say", app=APP, at=LATER - time
 
 
 def a_sentence(*, text="Guten Tag.", outcome=None, at=LATER - timedelta(seconds=9)) -> SaidAloud:
-    return SaidAloud(APP, MORNING.place, text, Spoken(duration_ms=1500) if outcome is None else outcome, at)
+    return SaidAloud(APP, MORNING.place, text, Spoken(spoken=True) if outcome is None else outcome, at)

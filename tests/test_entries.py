@@ -44,7 +44,7 @@ def test_a_line_that_is_an_act_is_kept_as_one_and_told_with_the_mark_while_any_o
     assert kept_act.act is True
     assert told_line(kept_act)["act"] is True
     assert "act" not in told_line(kept_talk)
-    assert told_entry(kept_act, LATER, new=True)["act"] is True
+    assert told_entry(kept_act)["act"] is True
 
 
 def test_a_history_its_lines_and_its_views_show_no_name_no_text_and_no_state_in_their_repr():

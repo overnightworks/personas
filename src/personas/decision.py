@@ -38,15 +38,14 @@ from personas.entries import (
     SpeechOutcome,
     Unanswered,
     ViewSeen,
-    Visit,
     entry_size,
     newest_that_fit,
     told_bytes,
     told_entry,
     told_place,
+    told_time,
 )
 from personas.failures import CallFailure, StatusFailure, TokenStatusFailure, UnusableAnswer
-from personas.recall import EarlierToday, told_earlier_today
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -75,9 +74,6 @@ TURN_ROLE: Final[AgentRole] = "user"
 TURN_CANCELLED_CODE: Final = "cancelled"
 """The code of a turn the loop cancelled because its place left the standing, and of an act whose call was cut while it
 was in flight, by that or by the turn's deadline."""
-SPOKEN_WAIT_BOUND_SECONDS: Final = 30.0
-"""The longest the voice waits after a sentence, whatever length the app says it plays."""
-EARLIER_TODAY_KEY: Final = "earlier_today"
 
 
 class UnrecognisedRefusal(StrEnum):
@@ -276,14 +272,15 @@ def _voice_is_unavailable(checkpoint: Checkpoint | None) -> bool:
     return isinstance(checkpoint, Reading) and checkpoint.voice_state is VoiceState.UNAVAILABLE
 
 
-def spoken_wait_seconds(duration_ms: int) -> float:
-    """How long the voice waits after a sentence the app says plays for ``duration_ms``."""
-    return min(duration_ms / 1000, SPOKEN_WAIT_BOUND_SECONDS)
+def remaining_seconds(now: float, started: float, max_duration_seconds: float) -> float:
+    """What is left of the longest duration of a turn that started at ``started``, at ``now`` on one monotonic scale;
+    never below zero."""
+    return max(0.0, max_duration_seconds - (now - started))
 
 
 def past_deadline(now: float, started: float, max_duration_seconds: float) -> bool:
-    """Whether a turn that started at ``started`` has used its longest duration at ``now``, on one monotonic scale."""
-    return now - started >= max_duration_seconds
+    """Whether a turn that started at ``started`` has used its longest duration at ``now``."""
+    return remaining_seconds(now, started, max_duration_seconds) <= 0.0
 
 
 def is_defect(leaf: BaseException) -> bool:
@@ -458,17 +455,65 @@ def _not_his_own(entry: Entry) -> bool:
     return not isinstance(entry, ActDone | SaidAloud) and not (isinstance(entry, KeptLine) and entry.own)
 
 
-def history_after(history: History, new: Iterable[Entry], size_bytes: int) -> History:
-    """The history with ``new`` appended, a view revision it already holds adding nothing and an act always added; past
-    ``size_bytes`` the oldest entries are left out, but the newest always stays."""
-    entries = history.entries
-    heard = history.heard
+@dataclass(frozen=True)
+class TurnTold:
+    """An answered turn and what its message told: the turn's app, place, occasion and admission time, and ``through``,
+    the ordinal after the last entry of the history it told. It tells the entries of the history from the ordinal
+    where the message before it ended, or from the oldest the history holds."""
+
+    at: datetime
+    app: str
+    place: PlaceRef
+    occasion: Occasion
+    aloud: bool
+    through: int
+
+
+@dataclass(frozen=True)
+class Present:
+    """What one agent's next request holds besides its header and its own turn: the history and the answered turns whose
+    messages are still in it, oldest first."""
+
+    history: History
+    told: tuple[TurnTold, ...] = ()
+
+
+EMPTY_PRESENT: Final = Present(History((), left_out=0, heard=0))
+
+
+def _step_cut(history: History, boundaries: Iterable[int], keep_bytes: int) -> int:
+    """The ordinal the entries before which leave in a step: the oldest end of a message from which on what stays fits
+    ``keep_bytes``, or, when the newest message alone does not fit, the oldest of its entries that fits with the
+    newer ones. The newest entry stays."""
+    fitting = max(1, newest_that_fit(map(entry_size, reversed(history.entries)), keep_bytes))
+    oldest_that_fits = history.taken - fitting
+    return min((end for end in boundaries if oldest_that_fits <= end < history.taken), default=oldest_that_fits)
+
+
+def taken_into(present: Present, new: Iterable[Entry], history_bytes: int, keep_bytes: int) -> Present:
+    """The present with ``new`` appended, a view revision it already holds adding nothing and an act always added. Past
+    ``history_bytes`` the oldest whole messages leave in one step until what stays fits ``keep_bytes``; only the newest
+    message may be cut, and its newest entry always stays."""
+    entries = present.history.entries
+    heard = present.history.heard
     for entry in new:
         if not (isinstance(entry, ViewSeen) and _holds_revision(entries, entry)):
             entries = (*entries, entry)
             heard += _not_his_own(entry)
-    leaving = max(0, len(entries) - max(1, newest_that_fit(map(entry_size, reversed(entries)), size_bytes)))
-    return History(entries[leaving:], history.left_out + leaving, heard)
+    grown = History(entries, present.history.left_out, heard)
+    if sum(map(entry_size, entries)) <= history_bytes:
+        return Present(grown, present.told)
+    cut = _step_cut(grown, (each.through for each in present.told), keep_bytes)
+    history = History(entries[cut - grown.left_out :], cut, heard)
+    return Present(history, tuple(each for each in present.told if each.through > cut))
+
+
+def answered_into(present: Present, turn: TurnTold) -> Present:
+    """The present once ``turn`` was answered: its message is part of every request after it, while it stays. A turn
+    whose entries all left in a step while it ran has no message left to tell."""
+    if turn.through <= present.history.left_out:
+        return present
+    return Present(present.history, (*present.told, turn))
 
 
 @dataclass(frozen=True)
@@ -480,12 +525,30 @@ class Arrived:
     older_dropped: bool
 
 
+def _entered_since(current: History, taken: int) -> tuple[Entry, ...]:
+    """The entries of ``current`` that were appended after the first ``taken`` ones that were ever appended."""
+    return current.entries[max(0, taken - current.left_out) :]
+
+
 def arrived_since(current: History, admitted: History) -> Arrived | None:
     """What entered ``current`` since ``admitted``, an earlier value of the same history, when any of it is not his own;
     otherwise ``None``. His own lines, his acts and his spoken sentences alone arrive as nothing."""
     if current.heard == admitted.heard:
         return None
-    return Arrived(current.entries[max(0, admitted.taken - current.left_out) :], current.left_out > admitted.taken)
+    return Arrived(_entered_since(current, admitted.taken), current.left_out > admitted.taken)
+
+
+def sentence_ended(history: History, mark: int, at: AppPlace) -> bool:
+    """Whether a sentence sent when ``history`` had taken ``mark`` entries has ended: his own spoken line at ``at`` has
+    entered since, whole or cut. A sentence is in flight alone, so the first such line is its own."""
+    return any(
+        isinstance(entry, KeptLine)
+        and entry.own
+        and entry.spoken
+        and entry.visit.app == at.app
+        and entry.visit.place == at.place
+        for entry in _entered_since(history, mark)
+    )
 
 
 @dataclass(frozen=True)
@@ -637,23 +700,10 @@ class WakeReason(StrEnum):
     VIEW = "view"
 
 
-def _is_new(entry: Entry, app: str, place: PlaceRef, occasion: Occasion) -> bool:
-    """Whether the turn is for this entry: a line taken at its place since his last turn there, or the revision a view
-    turn waits at."""
-    if isinstance(occasion, Waiting):
-        return isinstance(entry, ViewSeen) and _revision_key(entry) == (app, place, occasion.revision)
-    return (
-        isinstance(entry, KeptLine)
-        and entry.visit == Visit(app, place, occasion.generation)
-        and entry.seq in occasion.seqs
-    )
-
-
-def held_told(arrived: Arrived, at: datetime) -> str:
-    """The result of a call that was not sent: that it was not, and the entries that arrived, each told as new except
-    his own speech. When their text would pass ``MAX_EVENT_BYTES`` the oldest are left out, and so is an entry that
-    alone does not fit."""
-    told = [told_entry(entry, at, new=True) for entry in arrived.entries]
+def held_told(arrived: Arrived) -> str:
+    """The result of a call that was not sent: that it was not, and the entries that arrived. When their text would
+    pass ``MAX_EVENT_BYTES`` the oldest are left out, and so is an entry that alone does not fit."""
+    told = [told_entry(entry) for entry in arrived.entries]
     empty = _held_json([], older_dropped=False)
     separator = len(", ")
     sizes = reversed([told_bytes(each) + separator for each in told])
@@ -668,44 +718,46 @@ def _held_json(entries: list[dict[str, object]], *, older_dropped: bool) -> str:
     )
 
 
-def _told_entries(history: History, app: str, place: PlaceRef, occasion: Occasion, at: datetime) -> dict[str, object]:
-    entries = [told_entry(entry, at, new=_is_new(entry, app, place, occasion)) for entry in history.entries]
-    return {"older_dropped": history.older_dropped, "entries": entries}
-
-
-def _told_wake(app: str, place: PlaceRef, occasion: Occasion, *, aloud: bool) -> dict[str, object]:
+def _told_wake(turn: TurnTold) -> dict[str, object]:
+    occasion = turn.occasion
     if isinstance(occasion, Lines):
         woke: dict[str, object] = {
             "why": WakeReason.LINES,
-            "app": app,
-            "place": told_place(place),
+            "app": turn.app,
+            "place": told_place(turn.place),
             "missed": occasion.missed,
+            "seqs": sorted(occasion.seqs),
         }
-        return woke | {"aloud": True} if aloud else woke
-    return {"why": WakeReason.VIEW, "app": app, "place": told_place(place)}
+        return woke | {"aloud": True} if turn.aloud else woke
+    return {
+        "why": WakeReason.VIEW,
+        "app": turn.app,
+        "place": told_place(turn.place),
+        "revision": occasion.revision,
+    }
 
 
-def turn_told(
-    you: str,
-    app: str,
-    place: PlaceRef,
-    occasion: Occasion,
-    history: History,
-    earlier: EarlierToday | None,
-    at: datetime,
-    *,
-    aloud: bool,
-) -> str:
-    """The one user message of every turn, the facts in the order things happened: his name, with a memory what he kept
-    of the day that his history does not hold, his history as it stood when the turn was admitted at ``at`` with the
-    lines or the view revision the turn is for marked new, and what woke him; a turn for lines is told when its answer
-    is heard aloud.
+def told_header(you: str, history: History) -> str:
+    """The header message: his name and whether older entries have left the history. It holds no instruction; those
+    live in the persona."""
+    return json.dumps({"you": you, "older_dropped": history.left_out > 0}, ensure_ascii=False)
 
-    It holds no instruction; those live in the persona.
-    """
-    told: dict[str, object] = {"you": you}
-    if earlier is not None:
-        told[EARLIER_TODAY_KEY] = told_earlier_today(earlier)
-    told["history"] = _told_entries(history, app, place, occasion, at)
-    told["woke"] = _told_wake(app, place, occasion, aloud=aloud)
+
+def told_turn(turn: TurnTold, entries: Iterable[Entry]) -> str:
+    """The message of a turn: when it was admitted, what woke him and every entry taken since the message before it,
+    the facts in the order things happened. A turn for lines is told when its answer is heard aloud."""
+    told = {"at": told_time(turn.at), "woke": _told_wake(turn), "entries": [told_entry(entry) for entry in entries]}
     return json.dumps(told, ensure_ascii=False)
+
+
+def turn_messages(you: str, present: Present, current: TurnTold) -> tuple[str, ...]:
+    """The messages of a turn's request after the persona: the header, one for each answered turn the present holds,
+    each rendered from the history as it stands, and the turn's own, which tells what the history holds from where the
+    last of those ended up to ``current.through``."""
+    history = present.history
+    messages = [told_header(you, history)]
+    start = history.left_out
+    for turn in (*present.told, current):
+        messages.append(told_turn(turn, history.entries[start - history.left_out : turn.through - history.left_out]))
+        start = max(start, turn.through)
+    return tuple(messages)
