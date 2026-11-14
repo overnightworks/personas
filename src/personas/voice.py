@@ -119,7 +119,7 @@ class Speaking:
         """Returns once his own spoken line for the sentence sent at ``mark`` has entered; the turn's deadline, the one
         bound of all the waits for that sentence, ends the turn first when it passes before, a tie going to it."""
         remaining = remaining_seconds(self._clock.now(), self._started, self._max_duration_seconds)
-        if remaining == 0:
+        if remaining <= 0.0:
             raise TurnStopped(TurnStopKind.FAILED, FailureCode.LIMIT_EXCEEDED)
         bound = asyncio.create_task(self._clock.sleep(remaining))
         try:

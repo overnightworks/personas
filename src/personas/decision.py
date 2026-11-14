@@ -270,7 +270,7 @@ def remaining_seconds(now: float, started: float, max_duration_seconds: float) -
 
 def past_deadline(now: float, started: float, max_duration_seconds: float) -> bool:
     """Whether a turn that started at ``started`` has used its longest duration at ``now``."""
-    return remaining_seconds(now, started, max_duration_seconds) == 0.0
+    return remaining_seconds(now, started, max_duration_seconds) <= 0.0
 
 
 def is_defect(leaf: BaseException) -> bool:
