@@ -225,7 +225,6 @@ class Turning:
         report_turn_end: Callable[[str | None, TurnUsage | None, InputSizes | None], None],
         report_pause: Callable[[float, str], None],
         remembering: Remembering,
-        lookup: LookupBounds | None,
     ) -> None:
         self._agent = agent
         self._app = app
@@ -240,7 +239,6 @@ class Turning:
         self._report_turn_end = report_turn_end
         self._report_pause = report_pause
         self._remembering = remembering
-        self._lookup = lookup
 
     async def take(self, setup: TurnSetup, admitted: Admitted, record: TaskRecord) -> None:
         """Runs one turn; whatever way it ends, a defect a request of it met ends the runner loud.
@@ -395,11 +393,10 @@ class Turning:
         hold = _Hold(admitted.history)
         tools: list[HandTool] = []
         bounds: list[int] = []
-        if self._lookup is not None:
-            tools.append(
-                HandTool(RECALL_DECLARATION, partial(self._look, self._lookup, _Calls(self._lookup.calls), admitted))
-            )
-            bounds.append(self._lookup.calls)
+        lookup = self._remembering.lookup
+        if lookup is not None:
+            tools.append(HandTool(RECALL_DECLARATION, partial(self._look, lookup, _Calls(lookup.calls), admitted)))
+            bounds.append(lookup.calls)
         for app, binding in self._apps:
             calls = _Calls(binding.max_tool_calls)
             if app.mcp_url == self._app.mcp_url:

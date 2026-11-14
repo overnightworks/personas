@@ -141,7 +141,7 @@ class AgentLoop:
         self._app = app
         self._boundaries = boundaries
         self._mind = mind
-        self._remembering = Remembering(boundaries.lines, self._report)
+        self._remembering = Remembering(boundaries.lines, self._report, lookup)
         self._turning = Turning(
             agent,
             app,
@@ -156,7 +156,6 @@ class AgentLoop:
             self._report_turn_end,
             self._report_pause,
             self._remembering,
-            lookup,
         )
         self._token: Token | None = None
         self._memory = Memory()

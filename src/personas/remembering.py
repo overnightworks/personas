@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from personas.entries import KeptLine, WindowRead
-    from personas.recall import LineSearch
+    from personas.recall import LineSearch, LookupBounds
     from personas.reporting import Event
 
 
@@ -28,15 +28,22 @@ class LineStore(Protocol):
 
 
 class Remembering:
-    """One loop's way to the store: it keeps each window it reads and searches the lines kept for a turn's lookup.
+    """One loop's way to the store: it keeps each window it reads and searches the lines kept for a turn's lookup,
+    within the ``lookup`` bounds, which are set exactly when the configuration has a memory.
 
     Without a store there is nothing kept, and no turn looks. A store that fails a write or a search is reported once
     per outage, shared by both, and the loop goes on without memory meanwhile; the report goes through
     ``report_state``, which names the loop's agent and app.
     """
 
-    def __init__(self, store: LineStore | None, report_state: Callable[[Event, str | None], None]) -> None:
+    def __init__(
+        self,
+        store: LineStore | None,
+        report_state: Callable[[Event, str | None], None],
+        lookup: LookupBounds | None,
+    ) -> None:
         self._store = store
+        self.lookup = lookup
         self._outage = StoreOutage(report_state)
 
     async def keep(self, read: WindowRead) -> None:
