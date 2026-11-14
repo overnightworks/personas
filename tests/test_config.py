@@ -12,6 +12,8 @@ from personas.config import (
     CONFIG_ENVIRONMENT_VARIABLE,
     DEFAULT_CALL_SECONDS,
     DEFAULT_LINES_KEEP_DAYS,
+    DEFAULT_LOOKUP_BYTES,
+    DEFAULT_LOOKUP_CALLS,
     DEFAULT_SWEEP_MINUTES,
     DEFAULT_WRITE_SECONDS,
     ToolBinding,
@@ -20,6 +22,7 @@ from personas.config import (
 )
 from personas.decision import DEFAULT_BUDGET_PAUSE_CAP_SECONDS
 from personas.main import CONFIGURATION_ERROR_EXIT_CODE, main
+from personas.recall import RECALL_TOOL
 from tests.support.configfiles import MAX_TOOL_CALLS, PERSONA_NAME
 from tests.support.realm import API_GROUP
 
@@ -292,6 +295,7 @@ def test_a_configuration_without_tools_in_any_app_needs_no_gateway_and_no_person
         (lambda text: text.replace('tools = ["say"]', 'tools = ["say", "say"]'), "apps.0"),
         (lambda text: text.replace('tools = ["say"]', 'tools = [""]'), "apps.0"),
         (lambda text: text.replace('tools = ["say"]', 'tools = ["say", "speak"]'), "apps.0.tools"),
+        (lambda text: text.replace('tools = ["say"]', f'tools = ["say", "{RECALL_TOOL}"]'), "apps.0.tools"),
         (lambda text: text.replace('[gateway]\nbackend = "litellm"\n', '[gatewa]\nbackend = "litellm"\n'), "gatewa"),
         (lambda text: text.split("[gateway]")[0] + "[[apps]]" + text.split("[[apps]]")[1], "gateway"),
         (lambda text: text.replace('backend = "litellm"', 'backend = "other"'), "gateway.backend"),
@@ -306,6 +310,7 @@ def test_a_configuration_without_tools_in_any_app_needs_no_gateway_and_no_person
         "a tool listed twice",
         "an empty tool name",
         "speak among the tools",
+        "the lookup among the tools",
         "unknown gateway key",
         "tools without a gateway",
         "unknown backend",
@@ -500,6 +505,36 @@ def test_a_memory_table_keeps_and_sweeps_by_default_unless_it_sets_either_or_lea
     assert memory is not None
     assert memory.lines_keep_days == days
     assert memory.sweep_minutes == minutes
+
+
+@pytest.mark.parametrize(
+    ("written", "calls", "result_bytes"),
+    [
+        ({}, DEFAULT_LOOKUP_CALLS, DEFAULT_LOOKUP_BYTES),
+        ({"lookup_calls": "5", "lookup_bytes": "300"}, 5, 300),
+        ({"lookup_calls": "1", "lookup_bytes": "1"}, 1, 1),
+    ],
+    ids=["defaults", "set", "the least"],
+)
+def test_a_memory_table_lets_a_turn_look_up_twice_within_a_result_of_bytes_unless_it_sets_either(
+    files, written, calls, result_bytes
+):
+    files.text += files.memory_table(**written)
+
+    memory = load_config(files.write()).memory
+
+    assert memory is not None
+    assert (memory.lookup_calls, memory.lookup_bytes) == (calls, result_bytes)
+
+
+@pytest.mark.parametrize("field", ["lookup_calls", "lookup_bytes"])
+@pytest.mark.parametrize("written", ["0", "-1", "1.5", "2.0", '"2"', "true", "inf", "nan"])
+def test_a_lookup_bound_that_is_no_positive_integer_stops_the_start_and_names_the_field(
+    files, monkeypatch, capsys, field, written
+):
+    files.text += files.memory_table(**{field: written})
+
+    assert f"memory.{field}" in fails_at_start(files.write(), monkeypatch, capsys)
 
 
 def test_the_history_is_bounded_at_49152_bytes_and_a_step_keeps_32768_unless_the_file_says_otherwise(files):

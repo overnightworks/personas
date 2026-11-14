@@ -10,7 +10,7 @@ An app with ``listens = false`` serves tools only: it starts no turn, and its bo
 that listen. An app that listens lends its bound tools to a turn of another app too, while the agent holds a place
 there. ``call_seconds`` bounds each request a turn of another app makes to an app. No tool name is bound by two apps,
 since one turn holds the tools of several, and no app names ``speak``, the voice's own tool, which is never offered to
-a turn.
+a turn, or ``recall``, the lookup, which every turn holds while ``[memory]`` is set.
 The top-level ``history_bytes`` bounds the history each agent keeps in memory of the lines he took in, the views he
 read and the calls relayed for him at any of his apps and tells every turn; past it the oldest messages leave in one
 step until what stays fits ``history_keep_bytes``, which is never above ``history_bytes``. The top-level
@@ -18,7 +18,9 @@ step until what stays fits ``history_keep_bytes``, which is never above ``histor
 The optional ``[memory]`` table names the Postgres database that keeps every line the agents read: its host, port,
 database, user, the file holding the password, ``write_seconds``, the bound on one write or read, how long a line is
 kept (``lines_keep_days``) and how often older ones are swept (``sweep_minutes``); ``inf`` keeps every line or sweeps
-once, at the start.
+once, at the start. A turn may look up what was said in its place before its history (``lookup_calls``, the lookups one
+turn makes, and ``lookup_bytes``, the bytes of one result and the longest text a lookup accepts); both are positive
+integers and neither turns the lookup off.
 Every value is validated at start and an error names the field or path, never a secret.
 """
 
@@ -45,6 +47,7 @@ from pydantic import (
 )
 
 from personas.decision import BACKOFF_BASE_SECONDS, DEFAULT_BUDGET_PAUSE_CAP_SECONDS, TURN_ROLE
+from personas.recall import RECALL_TOOL
 from personas.secret import Secret
 
 if TYPE_CHECKING:
@@ -57,6 +60,8 @@ DEFAULT_HISTORY_BYTES: Final = 49152
 DEFAULT_HISTORY_KEEP_BYTES: Final = 32768
 DEFAULT_LINES_KEEP_DAYS: Final = 30.0
 DEFAULT_SWEEP_MINUTES: Final = 60.0
+DEFAULT_LOOKUP_CALLS: Final = 2
+DEFAULT_LOOKUP_BYTES: Final = 8192
 
 
 class ConfigError(Exception):
@@ -100,7 +105,7 @@ class AgentCredentials:
 @dataclass(frozen=True)
 class MemoryTarget:
     """The database that keeps the lines, how long one write or read of it may take and how long a line is kept, with
-    how often older ones are swept."""
+    how often older ones are swept, and what a turn's lookups may take."""
 
     host: str
     port: int
@@ -110,6 +115,8 @@ class MemoryTarget:
     write_seconds: float = DEFAULT_WRITE_SECONDS
     lines_keep_days: float = DEFAULT_LINES_KEEP_DAYS
     sweep_minutes: float = DEFAULT_SWEEP_MINUTES
+    lookup_calls: int = DEFAULT_LOOKUP_CALLS
+    lookup_bytes: int = DEFAULT_LOOKUP_BYTES
 
 
 @dataclass(frozen=True)
@@ -150,6 +157,13 @@ class _AppEntry(_Entry):
             raise ValueError(f"{SPEAK_TOOL} is the voice's own tool and is never offered to a turn")
         return tools
 
+    @field_validator("tools")
+    @classmethod
+    def _the_lookups_name_is_never_bound(cls, tools: tuple[str, ...]) -> tuple[str, ...]:
+        if RECALL_TOOL in tools:
+            raise ValueError(f"{RECALL_TOOL} is the lookup's own tool and no app binds it")
+        return tools
+
     @model_validator(mode="after")
     def _tools_come_with_their_call_bound(self) -> Self:
         if bool(self.tools) != (self.max_tool_calls is not None):
@@ -186,6 +200,8 @@ class _MemoryEntry(_Entry):
     write_seconds: PositiveFloat = Field(default=DEFAULT_WRITE_SECONDS, strict=True)
     lines_keep_days: PositiveFloat = Field(default=DEFAULT_LINES_KEEP_DAYS, strict=True)
     sweep_minutes: PositiveFloat = Field(default=DEFAULT_SWEEP_MINUTES, strict=True)
+    lookup_calls: PositiveInt = Field(default=DEFAULT_LOOKUP_CALLS, strict=True)
+    lookup_bytes: PositiveInt = Field(default=DEFAULT_LOOKUP_BYTES, strict=True)
 
 
 class _FileModel(_Entry):
@@ -313,6 +329,8 @@ def _memory_target(entry: _MemoryEntry | None) -> MemoryTarget | None:
         entry.write_seconds,
         entry.lines_keep_days,
         entry.sweep_minutes,
+        entry.lookup_calls,
+        entry.lookup_bytes,
     )
 
 
