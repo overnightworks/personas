@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 from personas.failures import StoreUnavailable
-from personas.recall import earlier_today, today_since
+from personas.recall import DayRead, earlier_today, today_since
 from personas.reporting import StoreOutage
 
 if TYPE_CHECKING:
@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from personas.entries import History, KeptLine, WindowRead
-    from personas.recall import EarlierToday, TodayBounds
+    from personas.recall import TodayBounds
     from personas.reporting import Event
 
 
@@ -61,16 +61,17 @@ class Remembering:
         else:
             self._outage.answered()
 
-    async def read_day(self, now: datetime, leaving_out: History) -> EarlierToday | None:
-        """What the store kept of the agent's day up to ``now`` besides what ``leaving_out`` holds, or nothing without a
-        store or a day, or when the store cannot be read now; that failure is reported once, as a write's is."""
+    async def read_day(self, now: datetime, leaving_out: History) -> DayRead:
+        """What the store kept of the agent's day up to ``now`` besides what ``leaving_out`` holds; nothing, answered,
+        without a store or a day, and nothing, unanswered, when the store cannot be read now. That failure is reported
+        once, as a write's is."""
         store, bounds = self._store, self._today
         if store is None or bounds is None:
-            return None
+            return DayRead(None, answered=True)
         try:
             kept = await store.kept_since(self._client_id, today_since(now, bounds))
         except StoreUnavailable as unavailable:
             self._outage.failed(unavailable.code)
-            return None
+            return DayRead(None, answered=False)
         self._outage.answered()
-        return earlier_today(kept, now, bounds, leaving_out)
+        return DayRead(earlier_today(kept, now, bounds, leaving_out), answered=True)

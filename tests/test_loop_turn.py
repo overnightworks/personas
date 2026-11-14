@@ -30,7 +30,7 @@ from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import SweepClock
 from tests.support.gateway import BUDGET_SPENT, Gateway, says, says_after_a_hold
-from tests.support.history import act_entry, unanswered, url_of, woke_at_lines
+from tests.support.history import act_entry, after_start, unanswered, url_of, woke_at_lines
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import (
     CALL,
@@ -166,7 +166,7 @@ async def test_a_line_said_while_a_turn_ran_is_answered_once_that_turn_ends_thou
     await runner.app.said_count(1)
     await runner.gateway.until_requested(3)
 
-    assert runner.gateway.round_sizes() == [2, 2, 4]
+    assert runner.gateway.round_sizes() == [3, 3, 5]
     assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [1, 2]]
     assert runner.reports.reported()[:3] == [
         (Event.STARTED, None),
@@ -193,7 +193,7 @@ async def test_a_line_said_while_a_turn_ran_is_read_at_once_and_answered_after_a
     await runner.app.said_count(2)
     await runner.gateway.until_requested(5)
 
-    assert runner.gateway.round_sizes() == [2, 4, 6, 2, 4]
+    assert runner.gateway.round_sizes() == [3, 5, 7, 4, 6]
     assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [2]]
 
 
@@ -279,7 +279,7 @@ async def test_a_lines_turn_the_gateway_failed_runs_again_after_the_wait_with_it
     assert held_requests == 1
     assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [1]]
     assert [opening.room["woke"] for opening in runner.gateway.openings()] == [
-        woke_at_lines(url_of(runner, 0), PLACE_ID)
+        woke_at_lines(url_of(runner, 0), PLACE_ID, [1])
     ] * 2
 
 
@@ -462,7 +462,7 @@ async def test_a_relayed_call_that_fails_ends_the_turn_after_one_round_and_leads
     await runner.gateway.until_requested(3)
 
     assert runner.reports.reported() == events
-    assert runner.gateway.round_sizes() == [2, 2, 4]
+    assert runner.gateway.round_sizes() == [3, 3, 5]
     assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [2]]
     assert len(runner.realm.issued) == issued
 
@@ -519,7 +519,7 @@ async def test_a_deadline_during_a_relayed_call_ends_the_turn_as_limit_exceeded_
         "say",
         {"place": PLACE_ID, "text": ANSWER},
         unanswered(TURN_CANCELLED_CODE),
-        seconds_ago=int(BACKOFF_BASE_SECONDS),
+        at=after_start(0),
     )
     assert runner.task is not None
     assert not runner.task.done()

@@ -104,7 +104,7 @@ async def test_an_act_line_of_someone_else_gives_no_turn_and_is_told_marked_with
     assert turn.new_seqs == [2]
     assert turn.told("line") == [
         entry(url_of(runner, 0), PLACE_ID, "took a card", seq=1, act=True),
-        entry(url_of(runner, 0), PLACE_ID, "Hello everyone", seq=2, new=True),
+        entry(url_of(runner, 0), PLACE_ID, "Hello everyone", seq=2),
     ]
 
 
@@ -162,13 +162,13 @@ async def test_a_table_that_starts_waiting_at_another_app_during_his_call_turn_g
 
     assert turn_order(runner) == [(0, "lines"), (1, "view"), (0, "lines")]
     _, table_turn, call_turn = runner.gateway.openings()
-    assert [(each["entry"], each["new"]) for each in table_turn.room["history"]["entries"]] == [
+    assert [(each["entry"], table_turn.is_for(each)) for each in table_turn.room["history"]["entries"]] == [
         ("line", False),
         ("view", True),
         ("line", False),
     ]
     assert call_turn.new_seqs == [2]
-    assert [(each["entry"], each["new"]) for each in call_turn.room["history"]["entries"]] == [
+    assert [(each["entry"], call_turn.is_for(each)) for each in call_turn.room["history"]["entries"]] == [
         ("line", False),
         ("view", False),
         ("line", True),
@@ -200,9 +200,9 @@ async def test_a_line_in_his_own_call_while_his_call_turn_runs_enters_the_histor
     running.set()
     await runner.gateway.until_written_turn(PLACE_ID, 2)
     first, second = written_turns(runner)
-    assert [(each["seq"], each["new"]) for each in first.room["history"]["entries"] if each["entry"] == "line"] == [
-        (1, True)
-    ]
+    assert [
+        (each["seq"], first.is_for(each)) for each in first.room["history"]["entries"] if each["entry"] == "line"
+    ] == [(1, True)]
     assert second.new_seqs == [2]
 
 
@@ -267,7 +267,7 @@ async def test_a_table_that_waits_at_several_revisions_during_a_turn_gets_one_tu
     assert turn_order(runner) == [(0, "lines"), (0, "view"), (0, "lines")]
     (table,) = view_turns(runner)
     assert [
-        (each["revision"], each["new"]) for each in table.room["history"]["entries"] if each["entry"] == "view"
+        (each["revision"], table.is_for(each)) for each in table.room["history"]["entries"] if each["entry"] == "view"
     ] == [
         (1, False),
         (2, True),
@@ -349,7 +349,7 @@ async def test_a_relayed_call_that_fails_at_one_app_ends_its_turn_and_the_turn_d
     assert turn_order(runner) == [(0, "lines"), (1, "lines")]
     await runner.reports.until(Event.RESUMED)
     assert runner.reports.reported(started=False) == [(Event.BACKOFF, NETWORK_FAILURE_CODE), (Event.RESUMED, None)]
-    assert runner.gateway.round_sizes() == [2, 4, 2]
+    assert runner.gateway.round_sizes() == [3, 5, 3]
 
 
 async def test_while_a_cancelled_turn_still_unwinds_no_turn_of_his_starts_at_another_app_until_it_ended(runner, other):

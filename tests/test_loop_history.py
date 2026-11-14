@@ -22,8 +22,10 @@ from tests.support.history import (
     STATE_BYTES,
     TABLE,
     act_entry,
+    after_start,
     answered,
     at_table,
+    bounded_history,
     entry,
     histories,
     history_of,
@@ -63,9 +65,9 @@ async def test_a_line_said_in_a_call_of_one_app_is_told_to_his_view_turn_of_anot
     assert opening.room == {
         "you": AGENT_NAME,
         "history": history_of(
-            [entry(url_of(runner, 0), PLACE_ID, REMARK), view_entry(url_of(runner, 1), state, revision=1, new=True)]
+            [entry(url_of(runner, 0), PLACE_ID, REMARK), view_entry(url_of(runner, 1), state, revision=1)]
         ),
-        "woke": woke_at_table(url_of(runner, 1)),
+        "woke": woke_at_table(url_of(runner, 1), 1),
     }
     assert runner.app.said == []
 
@@ -86,7 +88,7 @@ async def test_a_line_read_in_the_same_wake_as_the_view_of_its_own_app_is_told_w
         [
             view_entry(url_of(runner, 0), {"hand": "none"}, revision=1, awaits_you=False),
             entry(url_of(runner, 0), PLACE_ID, REMARK),
-            view_entry(url_of(runner, 0), state, revision=2, new=True),
+            view_entry(url_of(runner, 0), state, revision=2),
         ]
     )
 
@@ -111,7 +113,7 @@ async def test_lines_of_two_calls_of_two_apps_are_told_in_the_order_they_were_ta
                 entry(url_of(runner, 0), PLACE_ID, "first"),
                 entry(url_of(runner, 1), OTHER_CALL_ID, "second"),
                 entry(url_of(runner, 0), PLACE_ID, "third", seq=2),
-                view_entry(url_of(runner, 0), state, revision=1, new=True),
+                view_entry(url_of(runner, 0), state, revision=1),
             ]
         )
     ]
@@ -128,7 +130,7 @@ async def test_his_own_line_is_told_as_his_own_and_starts_no_turn(runner):
         history_of(
             [
                 entry(url_of(runner, 0), PLACE_ID, REMARK, name=AGENT_NAME, own=True),
-                view_entry(url_of(runner, 0), state, revision=1, new=True),
+                view_entry(url_of(runner, 0), state, revision=1),
             ]
         )
     ]
@@ -143,9 +145,7 @@ async def test_a_line_stays_told_after_the_call_it_was_said_in_left_the_standing
     await runner.gateway.until_turns(1, why="view")
 
     assert histories(runner) == [
-        history_of(
-            [entry(url_of(runner, 0), PLACE_ID, REMARK), view_entry(url_of(runner, 0), state, revision=1, new=True)]
-        )
+        history_of([entry(url_of(runner, 0), PLACE_ID, REMARK), view_entry(url_of(runner, 0), state, revision=1)])
     ]
 
 
@@ -163,20 +163,20 @@ async def test_what_was_said_before_the_runner_started_is_not_told_and_what_is_s
 
     app_url = url_of(runner, 0)
     assert histories(runner) == [
-        history_of([view_entry(app_url, first, revision=1, new=True)]),
+        history_of([view_entry(app_url, first, revision=1)]),
         history_of(
             [
                 view_entry(app_url, first, revision=1),
                 entry(app_url, PLACE_ID, REMARK, seq=2),
-                view_entry(app_url, second, revision=2, new=True),
+                view_entry(app_url, second, revision=2),
             ]
         ),
     ]
 
 
 async def test_lines_past_the_bound_leave_the_oldest_out_and_the_history_says_so(runner):
-    runner.config = replace(
-        runner.config, history_bytes=2 * told_line_bytes(url_of(runner, 0), PLACE_ID, "line-1") + STATE_BYTES
+    runner.config = bounded_history(
+        runner.config, 2 * told_line_bytes(url_of(runner, 0), PLACE_ID, "line-1") + STATE_BYTES
     )
     await restarted_in_the_call(runner)
     for number in (1, 2, 3):
@@ -190,7 +190,7 @@ async def test_lines_past_the_bound_leave_the_oldest_out_and_the_history_says_so
             [
                 entry(url_of(runner, 0), PLACE_ID, "line-2", seq=2),
                 entry(url_of(runner, 0), PLACE_ID, "line-3", seq=3),
-                view_entry(url_of(runner, 0), state, revision=1, new=True),
+                view_entry(url_of(runner, 0), state, revision=1),
             ],
             older_dropped=True,
         )
@@ -199,10 +199,9 @@ async def test_lines_past_the_bound_leave_the_oldest_out_and_the_history_says_so
 
 async def test_a_turn_is_told_as_many_of_the_newest_lines_as_the_bytes_they_are_told_as_fit_the_bound(runner):
     app = url_of(runner, 0)
-    runner.config = replace(
+    runner.config = bounded_history(
         runner.config,
-        history_bytes=told_line_bytes(app, PLACE_ID, "second", seq=2)
-        + told_line_bytes(app, PLACE_ID, ADDRESSED, seq=3),
+        told_line_bytes(app, PLACE_ID, "second", seq=2) + told_line_bytes(app, PLACE_ID, ADDRESSED, seq=3),
     )
     await restarted_in_the_call(runner)
     await said_and_taken(runner.app, PLACE_ID, "first")
@@ -211,7 +210,7 @@ async def test_a_turn_is_told_as_many_of_the_newest_lines_as_the_bytes_they_are_
     written = await runner.gateway.until_written_turn(PLACE_ID, 3)
 
     assert written.room["history"] == history_of(
-        [entry(app, PLACE_ID, "second", seq=2), entry(app, PLACE_ID, ADDRESSED, seq=3, new=True)], older_dropped=True
+        [entry(app, PLACE_ID, "second", seq=2), entry(app, PLACE_ID, ADDRESSED, seq=3)], older_dropped=True
     )
 
 
@@ -244,7 +243,7 @@ async def test_the_history_is_told_with_no_memory_and_with_a_store_that_is_down_
 
     (opening,) = view_turns(runner)
     assert opening.room["history"] == history_of(
-        [entry(url_of(runner, 0), PLACE_ID, REMARK), view_entry(url_of(runner, 0), state, revision=1, new=True)]
+        [entry(url_of(runner, 0), PLACE_ID, REMARK), view_entry(url_of(runner, 0), state, revision=1)]
     )
     assert "earlier_today" not in opening.room
     assert [code for event, code in runner.reports.reported() if event is Event.STORE_FAILED] == [
@@ -271,12 +270,12 @@ async def test_a_view_turn_starts_at_once_told_what_the_history_holds_while_a_wi
 
     table = url_of(runner, 0)
     assert histories(runner) == [
-        history_of([view_entry(table, first, revision=1, new=True)]),
+        history_of([view_entry(table, first, revision=1)]),
         history_of(
             [
                 view_entry(table, first, revision=1),
                 entry(url_of(runner, 1), OTHER_CALL_ID, REMARK),
-                view_entry(table, second, revision=2, new=True),
+                view_entry(table, second, revision=2),
             ]
         ),
     ]
@@ -291,7 +290,7 @@ async def test_a_line_said_while_the_call_is_paused_is_never_in_the_history(runn
     state = waits(runner.app, 1)
     await runner.gateway.until_turns(1, why="view")
 
-    assert histories(runner) == [history_of([view_entry(url_of(runner, 0), state, revision=1, new=True)])]
+    assert histories(runner) == [history_of([view_entry(url_of(runner, 0), state, revision=1)])]
 
 
 async def test_a_new_generation_of_the_call_adds_its_lines_from_the_start_and_keeps_the_earlier_ones(runner):
@@ -308,7 +307,7 @@ async def test_a_new_generation_of_the_call_adds_its_lines_from_the_start_and_ke
             [
                 entry(url_of(runner, 0), PLACE_ID, "earlier"),
                 entry(url_of(runner, 0), PLACE_ID, "later"),
-                view_entry(url_of(runner, 0), state, revision=1, new=True),
+                view_entry(url_of(runner, 0), state, revision=1),
             ]
         )
     ]
@@ -341,9 +340,7 @@ async def test_a_window_read_again_with_the_same_lines_tells_each_line_once(runn
     await runner.gateway.until_turns(1, why="view")
 
     assert histories(runner) == [
-        history_of(
-            [entry(url_of(runner, 0), PLACE_ID, REMARK), view_entry(url_of(runner, 0), state, revision=1, new=True)]
-        )
+        history_of([entry(url_of(runner, 0), PLACE_ID, REMARK), view_entry(url_of(runner, 0), state, revision=1)])
     ]
 
 
@@ -365,16 +362,16 @@ async def test_a_line_said_while_a_view_turn_runs_holds_its_call_once_and_is_tol
 
     table = url_of(runner, 1)
     (held,) = json.loads(runner.gateway.tool_results(2)[0])["arrived"]["entries"]
-    assert held == entry(url_of(runner, 0), PLACE_ID, REMARK, new=True)
+    assert held == entry(url_of(runner, 0), PLACE_ID, REMARK)
     assert histories(runner) == [
-        history_of([view_entry(table, first, revision=1, new=True)]),
+        history_of([view_entry(table, first, revision=1)]),
         history_of(
             [
                 view_entry(table, first, revision=1),
                 entry(url_of(runner, 0), PLACE_ID, REMARK),
                 act_entry(table, PLAY_TOOL, {"place": TABLE.id, "text": ANSWER}, answered("said")),
                 entry(table, TABLE.id, ANSWER, seq=1, name=ACCEPTED_NAME, own=True, place_kind=TABLE.kind),
-                view_entry(table, second, revision=2, new=True),
+                view_entry(table, second, revision=2),
             ]
         ),
     ]
@@ -392,7 +389,7 @@ async def test_each_agent_is_told_the_history_of_his_own_places_only(runner):
     await runner.gateway.until_turns(2, why="view")
 
     told = {opening.user: opening.room["history"] for opening in view_turns(runner)}
-    table = view_entry(url_of(runner, 0), state, revision=1, new=True)
+    table = view_entry(url_of(runner, 0), state, revision=1)
     assert told == {
         person_fingerprint(Principal(iss=ISSUER, sub=SUBJECT)): history_of(
             [entry(url_of(runner, 0), PLACE_ID, REMARK), table]
@@ -415,8 +412,8 @@ async def test_a_line_that_names_him_starts_his_written_turn_told_it_as_new_and_
     (written,) = written_turns(runner)
     assert written.room == {
         "you": AGENT_NAME,
-        "history": history_of([entry(url_of(runner, 0), PLACE_ID, ADDRESSED, new=True)]),
-        "woke": woke_at_lines(url_of(runner, 0), PLACE_ID),
+        "history": history_of([entry(url_of(runner, 0), PLACE_ID, ADDRESSED)]),
+        "woke": woke_at_lines(url_of(runner, 0), PLACE_ID, [1]),
     }
     assert written.system == runner.files.persona_prompt
     (told,) = histories(runner)
@@ -436,7 +433,7 @@ async def test_lines_said_earlier_in_the_call_are_told_in_the_order_taken_and_on
         [
             entry(url_of(runner, 0), PLACE_ID, "first"),
             entry(url_of(runner, 0), PLACE_ID, "second", seq=2),
-            entry(url_of(runner, 0), PLACE_ID, ADDRESSED, seq=3, new=True),
+            entry(url_of(runner, 0), PLACE_ID, ADDRESSED, seq=3),
         ]
     )
 
@@ -452,10 +449,10 @@ async def test_a_line_that_names_him_in_one_app_is_told_after_the_lines_taken_in
     assert written.room["history"] == history_of(
         [
             entry(url_of(runner, 1), OTHER_CALL_ID, REMARK),
-            entry(url_of(runner, 0), PLACE_ID, ADDRESSED, new=True),
+            entry(url_of(runner, 0), PLACE_ID, ADDRESSED),
         ]
     )
-    assert written.room["woke"] == woke_at_lines(url_of(runner, 0), PLACE_ID)
+    assert written.room["woke"] == woke_at_lines(url_of(runner, 0), PLACE_ID, [1])
 
 
 async def test_his_own_line_said_before_a_line_that_names_him_is_told_as_his_own_and_started_no_turn(runner):
@@ -469,7 +466,7 @@ async def test_his_own_line_said_before_a_line_that_names_him_is_told_as_his_own
     assert written.room["history"] == history_of(
         [
             entry(url_of(runner, 0), PLACE_ID, REMARK, name=AGENT_NAME, own=True),
-            entry(url_of(runner, 0), PLACE_ID, ADDRESSED, seq=2, new=True),
+            entry(url_of(runner, 0), PLACE_ID, ADDRESSED, seq=2),
         ]
     )
 
@@ -493,11 +490,11 @@ async def test_what_was_said_in_the_call_before_the_runner_started_is_told_to_no
     await runner.gateway.until_turns(1, why="lines")
 
     (written,) = written_turns(runner)
-    assert written.room["history"] == history_of([entry(url_of(runner, 0), PLACE_ID, ADDRESSED, seq=2, new=True)])
+    assert written.room["history"] == history_of([entry(url_of(runner, 0), PLACE_ID, ADDRESSED, seq=2)])
     assert "earlier_today" not in written.room
 
 
-async def test_a_line_taken_ninety_seconds_before_a_turn_was_admitted_is_told_with_that_age(runner):
+async def test_a_line_is_told_with_the_time_it_was_taken_at_and_the_turn_with_the_time_it_was_admitted_at(runner):
     await restarted_in_the_call(runner)
     await said_and_taken(runner.app, PLACE_ID, REMARK)
     runner.clock.time += 90
@@ -508,11 +505,12 @@ async def test_a_line_taken_ninety_seconds_before_a_turn_was_admitted_is_told_wi
     assert histories(runner) == [
         history_of(
             [
-                entry(url_of(runner, 0), PLACE_ID, REMARK, seconds_ago=90),
-                view_entry(url_of(runner, 0), state, revision=1, new=True),
+                entry(url_of(runner, 0), PLACE_ID, REMARK),
+                view_entry(url_of(runner, 0), state, revision=1, at=after_start(90)),
             ]
         )
     ]
+    assert view_turns(runner)[0].own["at"] == after_start(90)
 
 
 async def test_a_window_the_app_lost_enters_no_line_again_and_the_earlier_one_stays_once(runner):
@@ -529,9 +527,7 @@ async def test_a_window_the_app_lost_enters_no_line_again_and_the_earlier_one_st
     await runner.gateway.until_turns(1, why="view")
 
     assert histories(runner) == [
-        history_of(
-            [entry(url_of(runner, 0), PLACE_ID, REMARK), view_entry(url_of(runner, 0), state, revision=1, new=True)]
-        )
+        history_of([entry(url_of(runner, 0), PLACE_ID, REMARK), view_entry(url_of(runner, 0), state, revision=1)])
     ]
 
 

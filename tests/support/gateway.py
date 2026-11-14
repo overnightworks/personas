@@ -21,8 +21,8 @@ if TYPE_CHECKING:
 
     from agents.tools import JsonObject
 
-TURN_OPENING_MESSAGES = 2
-"""A turn's first round holds the persona and the message told; every later round adds the model's calls and results."""
+MESSAGES_OF_A_FIRST_ROUND = 2
+"""A turn's first round holds at least its header and its own message after the persona."""
 BUDGET_SPENT = Reply(
     status=HTTPStatus.UNPROCESSABLE_ENTITY,
     body=json.dumps({"error": {"type": "budget_exceeded", "code": "422"}}).encode(),
@@ -111,11 +111,31 @@ class _Written(httpx2.AsyncByteStream):
 
 @dataclass(frozen=True)
 class TurnOpening:
-    """What a turn's first request told the gateway: the persona, the message it was told and whom it is for."""
+    """What a turn's first request told the gateway: the persona, the user messages it was told, the header first and
+    the turn's own last, and whom it is for."""
 
     system: str
-    room: JsonObject
+    messages: list[JsonObject]
     user: str
+
+    @property
+    def header(self) -> JsonObject:
+        return self.messages[0]
+
+    @property
+    def own(self) -> JsonObject:
+        """The turn's own message, the last."""
+        return self.messages[-1]
+
+    @property
+    def room(self) -> JsonObject:
+        """The header's name and day, what woke the turn and every entry told in any message, in the order told."""
+        entries = [each for message in self.messages[1:] for each in message["entries"]]
+        return {
+            **{key: value for key, value in self.header.items() if key != "older_dropped"},
+            "history": {"older_dropped": self.header["older_dropped"], "entries": entries},
+            "woke": self.own["woke"],
+        }
 
     @property
     def missed(self) -> bool:
@@ -131,12 +151,42 @@ class TurnOpening:
         """The entries of the history the turn was told, those of these kinds, in the order told."""
         return [each for each in self.room["history"]["entries"] if each["entry"] in kinds]
 
+    def is_for(self, entry: JsonObject) -> bool:
+        """Whether the turn is for this entry: a line of its woke seqs or the view of its woke revision."""
+        woke = self.own["woke"]
+        return (
+            entry["app"] == woke["app"]
+            and entry.get("place") == woke["place"]
+            and (
+                (entry["entry"] == "line" and entry["seq"] in woke.get("seqs", []))
+                or (entry["entry"] == "view" and entry["revision"] == woke.get("revision"))
+            )
+        )
+
+    @property
+    def for_entries(self) -> list[JsonObject]:
+        """The entries the turn is for, in the order told."""
+        return [each for each in self.room["history"]["entries"] if self.is_for(each)]
+
+    def told_own(self, *kinds: str) -> list[JsonObject]:
+        """The entries of the turn's own message, those of these kinds, in the order told."""
+        return [each for each in self.own["entries"] if each["entry"] in kinds]
+
     @property
     def new_seqs(self) -> list[int]:
-        """The seqs of the lines the turn is for; an entry of another kind marked new fails, never filtered out."""
-        new = [each for each in self.room["history"]["entries"] if each["new"]]
-        assert all(each["entry"] == "line" for each in new), "a view entry is marked new in a turn told as lines"
-        return [line["seq"] for line in new]
+        """The seqs of the lines the turn is for."""
+        return list(self.own["woke"].get("seqs", []))
+
+
+def _opens_a_turn(messages: list[JsonObject]) -> bool:
+    """A turn's first round holds the persona and user messages alone, the turn's own last; every later round adds the
+    model's calls and results."""
+    told = messages[1:]
+    return (
+        len(told) >= MESSAGES_OF_A_FIRST_ROUND
+        and all(each["role"] == "user" for each in told)
+        and '"woke"' in told[-1]["content"]
+    )
 
 
 class Gateway(FakeGateway):
@@ -257,9 +307,13 @@ class Gateway(FakeGateway):
     def openings(self) -> list[TurnOpening]:
         bodies = [json.loads(request.content) for request in self.requests]
         return [
-            TurnOpening(body["messages"][0]["content"], json.loads(body["messages"][1]["content"]), body["user"])
+            TurnOpening(
+                body["messages"][0]["content"],
+                [json.loads(each["content"]) for each in body["messages"][1:]],
+                body["user"],
+            )
             for body in bodies
-            if len(body["messages"]) == TURN_OPENING_MESSAGES
+            if _opens_a_turn(body["messages"])
         ]
 
     def system_of(self, request_number: int) -> str:

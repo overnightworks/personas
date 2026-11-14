@@ -6,6 +6,7 @@ from __future__ import annotations
 import itertools
 import json
 from dataclasses import dataclass, field
+from datetime import UTC
 from typing import TYPE_CHECKING
 
 from agents.member import PlaceEntry, PlaceRef, PlaceView, PlaceWindow, SpeakAnswer, SpeakRefusal, Spoken, Written
@@ -113,8 +114,9 @@ class SaidAloud:
 type Entry = KeptLine | ViewSeen | ActDone | SaidAloud
 
 
-def _own_time(entry: KeptLine | ActDone | SaidAloud) -> datetime:
-    return entry.first_read_at if isinstance(entry, KeptLine) else entry.at
+def told_time(at: datetime) -> str:
+    """A wall time as a turn is told it: UTC, whole seconds."""
+    return at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def told_bytes(told: dict[str, object]) -> int:
@@ -144,11 +146,10 @@ def picture_bytes(image: ToolImage | None) -> int:
 
 def entry_size(entry: Entry) -> int:
     """A view counts the bytes of its state's JSON; a line, an act and a spoken sentence count the bytes of the JSON
-    they are told as, with their age as 0 and no mark as new, so a size does not change while the entry stays in the
-    history."""
+    they are told as."""
     if isinstance(entry, ViewSeen):
         return len(json.dumps(entry.view.state, ensure_ascii=False).encode())
-    return told_bytes(told_entry(entry, _own_time(entry), new=False))
+    return told_bytes(told_entry(entry))
 
 
 def newest_that_fit(sizes_newest_first: Iterable[int], size_bytes: int) -> int:
@@ -163,8 +164,8 @@ class History:
 
     ``left_out`` counts the entries that ever left it by the bound and ``heard`` the entries not his own that were ever
     appended. ``entries`` are the entries ever appended with the ordinals ``left_out`` up to ``taken - 1``, without a
-    gap: ``history_after`` is the only writer, appends only at the newest end and removes only a prefix. A change
-    that removes entries from elsewhere gives each entry its ordinal first.
+    gap: ``taken_into`` is the only writer, appends only at the newest end and removes only a prefix. A change that
+    removes entries from elsewhere gives each entry its ordinal first.
     """
 
     entries: tuple[Entry, ...] = field(repr=False)
@@ -225,46 +226,39 @@ def told_speech_outcome(outcome: SpeechOutcome) -> dict[str, object]:
     return {"answered": False, "code": outcome.code}
 
 
-def told_entry(entry: Entry, at: datetime, *, new: bool) -> dict[str, object]:
+def told_entry(entry: Entry) -> dict[str, object]:
     if isinstance(entry, SaidAloud):
         return {
             "entry": "speech",
             "app": entry.app,
             "place": told_place(entry.place),
-            "seconds_ago": int((at - entry.at).total_seconds()),
+            "at": told_time(entry.at),
             "text": entry.text,
             "outcome": told_speech_outcome(entry.outcome),
-            "new": False,
         }
     if isinstance(entry, ActDone):
         return {
             "entry": "act",
             "app": entry.app,
-            "seconds_ago": int((at - entry.at).total_seconds()),
+            "at": told_time(entry.at),
             "tool": entry.tool,
             "arguments": entry.arguments,
             "outcome": told_outcome(entry.outcome),
-            "new": new,
         }
     if isinstance(entry, ViewSeen):
         return {
             "entry": "view",
             "app": entry.app,
             "place": told_place(entry.place),
-            "seconds_ago": int((at - entry.read_at).total_seconds()),
+            "at": told_time(entry.read_at),
             "revision": entry.view.revision,
             "awaits_you": entry.view.awaits_you,
             "state": entry.view.state,
-            "new": new,
         }
-    return (
-        {
-            "entry": "line",
-            "app": entry.visit.app,
-            "place": told_place(entry.visit.place),
-            "seconds_ago": int((at - entry.first_read_at).total_seconds()),
-            "seq": entry.seq,
-        }
-        | told_line(entry)
-        | {"new": new}
-    )
+    return {
+        "entry": "line",
+        "app": entry.visit.app,
+        "place": told_place(entry.visit.place),
+        "at": told_time(entry.first_read_at),
+        "seq": entry.seq,
+    } | told_line(entry)

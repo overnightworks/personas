@@ -16,7 +16,7 @@ from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, say_in_the_call
 from tests.support.fakes import SweepClock
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
-from tests.support.history import entry, history_of, said_and_taken, settled, view_entry, woke_at_table
+from tests.support.history import after_start, entry, history_of, said_and_taken, settled, view_entry, woke_at_table
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, READ, SAY_TOOL, active, formatted, invited, paused
 from tests.support.realm import AGENT_NAME
@@ -49,8 +49,8 @@ def told_states(runner) -> list[object]:
     return [
         each["state"]
         for opening in runner.gateway.openings()
-        for each in opening.room["history"]["entries"]
-        if each["entry"] == "view" and each["new"]
+        for each in opening.for_entries
+        if each["entry"] == "view"
     ]
 
 
@@ -183,10 +183,10 @@ async def test_a_view_that_moves_to_a_revision_waiting_for_him_gets_one_turn_tol
         "history": history_of(
             [
                 view_entry(app_url, first_state, revision=1, awaits_you=False),
-                view_entry(app_url, state, revision=2, new=True),
+                view_entry(app_url, state, revision=2),
             ]
         ),
-        "woke": woke_at_table(app_url),
+        "woke": woke_at_table(app_url, 2),
     }
     assert opening.system == runner.files.persona_prompt
     assert sorted(runner.gateway.offered_tools()) == sorted([SAY_TOOL, CREATE_SONG, GENERATE_SONG])
@@ -231,7 +231,7 @@ async def test_a_view_turn_the_budget_ended_runs_again_at_the_same_revision_afte
 
     assert held_requests == 1
     assert [opening.room["woke"] for opening in runner.gateway.openings()] == [
-        woke_at_table(runner.config.apps[0].mcp_url)
+        woke_at_table(runner.config.apps[0].mcp_url, 1)
     ] * 2
     assert len({opening.room["history"]["entries"][-1]["revision"] for opening in runner.gateway.openings()}) == 1
 
@@ -423,7 +423,7 @@ async def test_the_lines_of_a_place_enter_his_history_before_the_view_of_that_wa
     assert opening.room["history"] == history_of(
         [
             *(entry(app, place.id, text, seq=seq, place_kind=place.kind) for seq, text in enumerate(said, 1)),
-            {**view_entry(app, state, revision=1, new=True), "place": {"kind": place.kind, "id": place.id}},
+            {**view_entry(app, state, revision=1), "place": {"kind": place.kind, "id": place.id}},
         ]
     )
     assert opening.room["woke"]["why"] == "view"
@@ -454,7 +454,7 @@ async def test_the_lines_said_between_his_accept_and_the_first_view_are_told_tho
         [
             entry(app, TABLE.id, "said", seq=1, place_kind=TABLE.kind),
             entry(app, TABLE.id, "acted", seq=2, place_kind=TABLE.kind, act=True),
-            {**view_entry(app, state, revision=1, new=True), "place": {"kind": TABLE.kind, "id": TABLE.id}},
+            {**view_entry(app, state, revision=1), "place": {"kind": TABLE.kind, "id": TABLE.id}},
         ]
     )
 
@@ -470,8 +470,8 @@ async def test_a_line_of_someone_else_at_a_place_with_a_view_starts_no_turn_and_
 
     (opening,) = runner.gateway.openings()
     [told] = [each for each in opening.room["history"]["entries"] if each["entry"] == "line"]
-    assert (told["text"], told.get("act", False), told["new"]) == ("a remark", act, False)
-    assert [each["new"] for each in opening.room["history"]["entries"]] == [False, False, True]
+    assert (told["text"], told.get("act", False)) == ("a remark", act)
+    assert [opening.is_for(each) for each in opening.room["history"]["entries"]] == [False, False, True]
 
 
 async def test_a_view_place_with_an_empty_window_is_read_view_first_then_window_with_no_extra_standing_read(runner):
@@ -506,7 +506,9 @@ async def test_a_window_that_fails_at_a_view_place_backs_off_and_the_resume_give
 
     (opening,) = runner.gateway.openings()
     app = runner.config.apps[0].mcp_url
-    assert opening.room["history"] == history_of([view_entry(app, state, revision=1, new=True)])
+    assert opening.room["history"] == history_of(
+        [view_entry(app, state, revision=1, at=after_start(int(BACKOFF_BASE_SECONDS)))]
+    )
 
 
 async def test_the_lines_a_view_place_held_before_a_restart_are_never_taken_and_the_ones_said_after_it_are(runner):

@@ -93,7 +93,7 @@ async def test_back_after_a_restart_his_first_turn_at_the_voice_place_is_told_th
     (visit,) = second.room["earlier_today"]["visits"]
     assert [(each["text"], each["spoken"]) for each in visit["lines"]] == [(ADDRESSED, True), (ANSWER, True)]
     assert [each.get("cut", False) for each in visit["lines"]] == [True, False]
-    assert [each["text"] for each in second.room["history"]["entries"] if each["new"]] == [welcome_back]
+    assert [each["text"] for each in second.own["entries"]] == [welcome_back]
 
 
 async def test_a_store_that_cannot_be_read_lets_the_turn_speak_without_the_day_and_is_logged_once(runner, database):

@@ -41,7 +41,7 @@ def test_two_earlier_visits_are_told_in_the_order_they_happened_each_as_its_own_
     earlier = earlier_today(lines, LATER, ROOMY, EMPTY_HISTORY)
 
     assert told(earlier) == [[(1, "morning one"), (2, "morning two")], [(1, "noon one"), (2, "noon two")]]
-    assert [visit.minutes_ago for visit in earlier.visits] == [9 * 60, 6 * 60]
+    assert [visit.at for visit in earlier.visits] == [LATER - timedelta(hours=9), LATER - timedelta(hours=6)]
     assert earlier.older_dropped is False
 
 
@@ -85,7 +85,7 @@ def test_an_earlier_visit_whose_lines_all_lie_past_the_size_bound_leaves_the_day
     earlier = earlier_today(lines, LATER, two_lines, EMPTY_HISTORY)
 
     assert told(earlier) == [[(1, "middle"), (2, "newest")]]
-    assert [visit.minutes_ago for visit in earlier.visits] == [6 * 60]
+    assert [visit.at for visit in earlier.visits] == [LATER - timedelta(hours=6)]
     assert earlier.older_dropped is True
 
 

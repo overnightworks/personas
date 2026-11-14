@@ -11,7 +11,6 @@ import pytest
 from personas.config import (
     CONFIG_ENVIRONMENT_VARIABLE,
     DEFAULT_CALL_SECONDS,
-    DEFAULT_HISTORY_BYTES,
     DEFAULT_LINES_KEEP_DAYS,
     DEFAULT_SWEEP_MINUTES,
     DEFAULT_TODAY,
@@ -518,25 +517,39 @@ def test_a_memory_table_keeps_and_sweeps_by_default_unless_it_sets_either_or_lea
     assert memory.sweep_minutes == minutes
 
 
+def test_the_history_is_bounded_at_49152_bytes_and_a_step_keeps_32768_unless_the_file_says_otherwise(files):
+    config = load_config(files.write())
+
+    assert (config.history_bytes, config.history_keep_bytes) == (49152, 32768)
+
+
 @pytest.mark.parametrize(
-    ("written", "bytes_kept"),
-    [(None, DEFAULT_HISTORY_BYTES), ("1024", 1024)],
-    ids=["absent", "set"],
+    ("bound", "kept"), [(2048, 1024), (1024, 1024)], ids=["a step keeps less", "a step keeps all it may hold"]
 )
-def test_the_history_is_bounded_by_the_default_unless_the_file_sets_history_bytes(files, written, bytes_kept):
-    if written is not None:
-        files.text = f"history_bytes = {written}\n{files.text}"
+def test_the_file_sets_the_history_bound_and_what_a_step_keeps(files, bound, kept):
+    files.text = f"history_bytes = {bound}\nhistory_keep_bytes = {kept}\n{files.text}"
 
-    assert load_config(files.write()).history_bytes == bytes_kept
+    config = load_config(files.write())
+
+    assert (config.history_bytes, config.history_keep_bytes) == (bound, kept)
 
 
+def test_a_step_that_keeps_more_than_the_history_may_hold_stops_the_start_and_names_the_field(
+    files, monkeypatch, capsys
+):
+    files.text = f"history_bytes = 1024\nhistory_keep_bytes = 1025\n{files.text}"
+
+    assert "history_keep_bytes" in fails_at_start(files.write(), monkeypatch, capsys)
+
+
+@pytest.mark.parametrize("field", ["history_bytes", "history_keep_bytes"])
 @pytest.mark.parametrize("written", ["0", "-1", "1.5", '"1024"', "true"])
 def test_a_history_bound_that_is_no_positive_integer_stops_the_start_and_names_the_field(
-    files, monkeypatch, capsys, written
+    files, monkeypatch, capsys, field, written
 ):
-    files.text = f"history_bytes = {written}\n{files.text}"
+    files.text = f"{field} = {written}\n{files.text}"
 
-    assert "history_bytes" in fails_at_start(files.write(), monkeypatch, capsys)
+    assert field in fails_at_start(files.write(), monkeypatch, capsys)
 
 
 @pytest.mark.parametrize(

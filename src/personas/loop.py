@@ -382,7 +382,7 @@ class AgentLoop:
             self._turned_revisions[at.place] = occasion.revision
         aloud = speaks_aloud(self._voice_app, occasion, self._checkpoints.get(at.place))
         apps = self._mind.held_apps(self._app.mcp_url)
-        admitted = Admitted(facts, at.place, occasion, self._mind.history, self._boundaries.clock.wall(), aloud, apps)
+        admitted = Admitted(facts, at.place, occasion, self._mind.present, self._boundaries.clock.wall(), aloud, apps)
         self._start_turn(turns, setup, at.place, admitted)
 
     def _take_lines(self, place: PlaceRef, window: PlaceWindow, read_at: datetime, *, serves_view: bool) -> None:
@@ -484,7 +484,7 @@ async def run_all(config: Config, boundaries: Boundaries) -> NoReturn:
     async with asyncio.TaskGroup() as group:
         today = None if config.memory is None else config.memory.today
         for agent in config.agents:
-            mind = Mind(config.history_bytes, config.budget_pause_cap_seconds)
+            mind = Mind(config.history_bytes, config.history_keep_bytes, config.budget_pause_cap_seconds)
             for app in config.apps:
                 if app.listens:
                     loop = AgentLoop(agent, app, boundaries, mind, config.apps, today)

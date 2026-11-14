@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import secrets
-from dataclasses import replace
 from http import HTTPStatus
 
 import pytest
@@ -15,7 +14,14 @@ from agents.turn import TOOL_IMAGE_MEDIA_TYPE, Principal, person_fingerprint
 from mcp_types import INVALID_PARAMS, CallToolResult, TextContent
 
 from personas.app_session import READ_SECONDS, open_mcp_session
-from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE, jsonrpc_code, status_code
+from personas.decision import (
+    BACKOFF_BASE_SECONDS,
+    NETWORK_FAILURE_CODE,
+    SUSPENDED_RETRY_SECONDS,
+    TURN_CANCELLED_CODE,
+    jsonrpc_code,
+    status_code,
+)
 from personas.failures import INVALID_ANSWER_CODE, Unreachable
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
@@ -25,8 +31,10 @@ from tests.support.history import (
     REMARK,
     SPEAKER,
     act_entry,
+    after_start,
     answered,
     at_table,
+    bounded_history,
     entry,
     history_of,
     said_and_taken,
@@ -118,7 +126,7 @@ async def test_a_say_the_app_answered_is_told_to_his_next_turn_before_his_own_li
             entry(app, PLACE_ID, ADDRESSED),
             a_say(runner, ANSWER, answered("said")),
             entry(app, PLACE_ID, ANSWER, seq=2, name=AGENT_NAME, own=True),
-            entry(app, PLACE_ID, AGAIN, seq=3, new=True),
+            entry(app, PLACE_ID, AGAIN, seq=3),
         ]
     )
     assert second.new_seqs == [3]
@@ -192,16 +200,16 @@ async def test_a_picture_that_breaks_the_wire_is_the_failure_of_the_tools_only_a
 
 
 @pytest.mark.parametrize(
-    ("fails", "code"),
+    ("fails", "code", "waited"),
     [
-        (cuts, NETWORK_FAILURE_CODE),
-        (refuses_the_token, status_code(401)),
-        (answers_wrongly, jsonrpc_code(INVALID_PARAMS)),
+        (cuts, NETWORK_FAILURE_CODE, BACKOFF_BASE_SECONDS),
+        (refuses_the_token, status_code(401), 0),
+        (answers_wrongly, jsonrpc_code(INVALID_PARAMS), SUSPENDED_RETRY_SECONDS),
     ],
     ids=["transport", "401", "protocol error"],
 )
 async def test_a_relayed_say_that_fails_is_told_as_not_answered_with_the_failures_code_and_the_turn_ends_as_before(
-    runner, fails, code
+    runner, fails, code, waited
 ):
     runner.gateway = Gateway(say_round(ANSWER), say_round(ANSWER), completion("done"))
     await restarted_in_the_call(runner)
@@ -214,15 +222,14 @@ async def test_a_relayed_say_that_fails_is_told_as_not_answered_with_the_failure
     await runner.gateway.until_turns(2)
 
     app = url_of(runner, 0)
-    waited = int(sum(runner.clock.slept))
     assert written_turns(runner)[1].room["history"] == history_of(
         [
-            entry(app, PLACE_ID, ADDRESSED, seconds_ago=waited),
-            act_entry(app, "say", {"place": PLACE_ID, "text": ANSWER}, unanswered(code), seconds_ago=waited),
-            entry(app, PLACE_ID, AGAIN, seq=2, new=True),
+            entry(app, PLACE_ID, ADDRESSED),
+            act_entry(app, "say", {"place": PLACE_ID, "text": ANSWER}, unanswered(code)),
+            entry(app, PLACE_ID, AGAIN, seq=2, at=after_start(int(waited))),
         ]
     )
-    assert runner.gateway.round_sizes() == [2, 2, 4]
+    assert runner.gateway.round_sizes() == [3, 3, 5]
 
 
 async def test_calls_past_the_places_own_bound_enter_no_act(runner, songmaker):
@@ -329,7 +336,7 @@ async def test_a_call_cut_in_flight_because_its_place_left_is_told_cancelled_to_
         [
             entry(url_of(runner, 0), PLACE_ID, ADDRESSED),
             act,
-            entry(url_of(runner, 0), OTHER_CALL_ID, ADDRESSED, new=True),
+            entry(url_of(runner, 0), OTHER_CALL_ID, ADDRESSED),
         ]
     )
     assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
@@ -385,16 +392,14 @@ async def test_the_bound_counts_an_act_by_the_utf8_bytes_of_its_told_json(runner
     text = "Grüße ♠"
     app = url_of(runner, 0)
     told_act = (
-        f'{{"entry": "act", "app": "{app}", "seconds_ago": 0, "tool": "say",'
+        f'{{"entry": "act", "app": "{app}", "at": "2026-11-10T08:16:40Z", "tool": "say",'
         f' "arguments": {{"place": "{PLACE_ID}", "text": "{text}"}},'
-        ' "outcome": {"answered": true, "is_error": false, "text": "said"}, "new": false}'
+        ' "outcome": {"answered": true, "is_error": false, "text": "said"}}'
     )
     act_bytes = len(told_act.encode())
     own_line_bytes = told_line_bytes(app, PLACE_ID, text, seq=2, name=AGENT_NAME, own=True)
     new_line_bytes = told_line_bytes(app, PLACE_ID, AGAIN, seq=3)
-    runner.config = replace(
-        runner.config, history_bytes=act_bytes + own_line_bytes + new_line_bytes + bytes_over_the_three
-    )
+    runner.config = bounded_history(runner.config, act_bytes + own_line_bytes + new_line_bytes + bytes_over_the_three)
     runner.gateway = Gateway(say_round(text), completion("done"), completion("again"))
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
@@ -437,7 +442,7 @@ async def test_each_agent_is_told_only_his_own_acts(runner):
     }
 
 
-async def test_an_act_is_told_after_the_line_taken_while_its_turn_ran_and_ages_from_the_moment_its_answer_came(
+async def test_an_act_is_told_after_the_line_taken_while_its_turn_ran_and_is_told_the_moment_its_answer_came(
     runner, other
 ):
     async def answers_after_a_while(reply):
@@ -460,9 +465,9 @@ async def test_an_act_is_told_after_the_line_taken_while_its_turn_ran_and_ages_f
     table = url_of(runner, 1)
     assert view_turns(runner)[1].room["history"] == history_of(
         [
-            view_entry(table, first, revision=1, seconds_ago=30),
-            entry(url_of(runner, 0), PLACE_ID, REMARK, seconds_ago=30),
-            act_entry(table, PLAY_TOOL, {"place": OTHER_CALL_ID, "text": ANSWER}, answered("said")),
-            view_entry(table, second, revision=2, new=True),
+            view_entry(table, first, revision=1),
+            entry(url_of(runner, 0), PLACE_ID, REMARK),
+            act_entry(table, PLAY_TOOL, {"place": OTHER_CALL_ID, "text": ANSWER}, answered("said"), at=after_start(30)),
+            view_entry(table, second, revision=2, at=after_start(30)),
         ]
     )

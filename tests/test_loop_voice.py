@@ -281,7 +281,7 @@ async def test_a_line_said_while_he_speaks_is_not_in_the_running_turn_and_is_tol
 
     first, second = runner.gateway.turns()
     assert first.new_seqs == [1]
-    assert REMARK in [each["text"] for each in second.room["history"]["entries"] if each["new"]]
+    assert REMARK in [each["text"] for each in second.own["entries"]]
 
 
 async def test_a_call_reaches_the_app_only_after_the_sentence_before_it_was_answered_and_its_length_has_passed(runner):
@@ -340,8 +340,8 @@ async def test_two_agents_in_one_place_make_no_turn_of_their_own_spoken_lines_an
 
     mozarts, bachs = ([turn for turn in runner.gateway.turns() if turn.user == user] for user in (mozart, bach))
     assert (len(mozarts), len(bachs)) == (3, 3)
-    assert "Mozart answers." in [each["text"] for each in bachs[1].room["history"]["entries"] if each["new"]]
-    assert "Bach answers." in [each["text"] for each in mozarts[1].room["history"]["entries"] if each["new"]]
+    assert "Mozart answers." in [each["text"] for each in bachs[1].own["entries"]]
+    assert "Bach answers." in [each["text"] for each in mozarts[1].own["entries"]]
 
 
 async def test_a_window_that_lost_older_lines_makes_a_turn_told_it_missed_lines(runner, monkeypatch):
@@ -379,7 +379,7 @@ async def test_a_line_heard_while_he_speaks_holds_the_call_after_the_sentence_on
     assert [(each["text"], each["spoken"]) for each in arrived if each["entry"] == "line" and not each["own"]] == [
         ("Anyone there?", True)
     ]
-    assert [(each["text"], each["new"]) for each in arrived if each["entry"] == "speech"] == [(ANSWER, False)]
+    assert [each["text"] for each in arrived if each["entry"] == "speech"] == [ANSWER]
     assert runner.app.said == [(SUBJECT, PLACE_ID, "Written.")]
     assert sentences_spoken(runner) == [ANSWER]
 
@@ -397,7 +397,7 @@ async def test_the_next_turn_is_told_which_lines_were_said_aloud_and_that_his_ow
         (ANSWER, True, True),
         (ADDRESSED, False, False),
     ]
-    assert [(each["text"], each["new"]) for each in second.told("speech")] == [(ANSWER, False)]
+    assert [each["text"] for each in second.told("speech")] == [ANSWER]
 
 
 async def test_the_next_turn_is_told_a_line_the_app_marked_as_cut_as_cut_with_the_part_heard(runner):

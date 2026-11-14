@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Final
 
-from personas.entries import KeptLine, Visit, newest_that_fit, told_bytes, told_line
+from personas.entries import KeptLine, Visit, newest_that_fit, told_bytes, told_line, told_time
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -29,10 +29,10 @@ class TodayBounds:
 
 @dataclass(frozen=True)
 class EarlierVisit:
-    """An earlier visit as a turn is told it: how many minutes ago its first line was read, and its lines. It is a
-    visit whose lines the history does not hold."""
+    """An earlier visit as a turn is told it: when its first line was read, and its lines. It is a visit whose lines the
+    history does not hold."""
 
-    minutes_ago: int
+    at: datetime
     lines: tuple[KeptLine, ...]
 
 
@@ -43,6 +43,15 @@ class EarlierToday:
 
     visits: tuple[EarlierVisit, ...]
     older_dropped: bool
+
+
+@dataclass(frozen=True)
+class DayRead:
+    """What reading the agent's day came to: the day, or none without a store or a day, and whether the read was
+    answered. A read the store could not answer is not, and is made again."""
+
+    earlier: EarlierToday | None
+    answered: bool
 
 
 def _before(now: datetime, seconds: float) -> datetime | None:
@@ -86,7 +95,7 @@ def earlier_today(kept: Iterable[KeptLine], now: datetime, bounds: TodayBounds, 
     for lines in groups:
         told, left_out = lines[left_out:], max(0, left_out - len(lines))
         if told:
-            visits.append(EarlierVisit(int((now - _first_read(lines)).total_seconds() // 60), tuple(told)))
+            visits.append(EarlierVisit(_first_read(lines), tuple(told)))
     return EarlierToday(tuple(visits), older_dropped)
 
 
@@ -96,7 +105,6 @@ def _first_read(lines: Sequence[KeptLine]) -> datetime:
 
 def told_earlier_today(earlier: EarlierToday) -> dict[str, object]:
     visits = [
-        {"minutes_ago": visit.minutes_ago, "lines": [told_line(each) for each in visit.lines]}
-        for visit in earlier.visits
+        {"at": told_time(visit.at), "lines": [told_line(each) for each in visit.lines]} for visit in earlier.visits
     ]
     return {"older_dropped": earlier.older_dropped, "visits": visits}
