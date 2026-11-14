@@ -117,7 +117,7 @@ async def test_a_table_that_serves_no_view_yet_is_accepted_with_figure_and_voice
     await runner.gateway.until_turns(1)
 
     assert wire["figure"] == {"url": figure.url, "sha256": figure.sha256}
-    assert wire["voice"] == voice_name
+    assert wire["voices"] == [voice_name]
     assert told_states(runner) == [told]
     assert runner.app.window_reads(TABLE.id, TABLE.kind) > 0
 
