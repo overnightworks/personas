@@ -34,14 +34,14 @@ HAIR_ROWS = 36
 HAIR_COLUMNS = 96
 HAIR_THICKNESS = 0.016
 # Share of the way round from the edge beside the face to the middle of the back, then the height the hair reaches
-# there: above the shoulder beside the neck, down the back behind it.
+# there: to the collar beside the neck, down the back behind it.
 HAIR_EDGE = (
     (0.0, (1.490,)),
-    (0.08, (1.480,)),
-    (0.40, (1.470,)),
-    (0.50, (1.462,)),
-    (0.58, (1.440,)),
-    (0.66, (1.395,)),
+    (0.08, (1.450,)),
+    (0.40, (1.412,)),
+    (0.50, (1.402,)),
+    (0.58, (1.392,)),
+    (0.66, (1.372,)),
     (0.74, (1.345,)),
     (0.82, (1.335,)),
     (1.0, (1.335,)),
