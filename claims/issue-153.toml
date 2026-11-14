@@ -1,8 +1,0 @@
-claim_id = "5ff9eae03ae44863a45f61cb14e3b390"
-agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
-role = "builder"
-base = "b303fdf4ce1a6ae8b084a13628c9210e7245dcc7"
-branch = "claude/issue-153-a-configured-tool-the-app-does-not-list"
-scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas", "tests"]
-opened_commit = "e499dab15522842a30ac05ac5373eb4e965ea825"
-whole_reason = "the binding rule in decision.py, its use in turning.py, their tests and the documents naming the failure code"
