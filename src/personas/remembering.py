@@ -57,7 +57,7 @@ class Remembering:
         A defect of the store leaves as itself and ends the runner.
         """
         store = self._store
-        assert store is not None  # noqa: S101 - a turn looks only where the configuration has a memory, which builds the store
+        assert store is not None  # noqa: S101 - only a configuration with a memory hands out the lookup and builds the store
         try:
             found = await store.search(search)
         except StoreUnavailable as unavailable:
