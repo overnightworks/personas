@@ -40,7 +40,18 @@ from tests.support.history import (
     written_turns,
 )
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import CALL, ISSUER, LISTEN, PLAY_TOOL, READ, SAY_TOOL, a_picture, active, base64_of
+from tests.support.hopin import (
+    CALL,
+    ISSUER,
+    LISTEN,
+    PLAY_TOOL,
+    READ,
+    SAY_TOOL,
+    a_picture,
+    a_real_picture,
+    active,
+    base64_of,
+)
 from tests.support.realm import AGENT_NAME
 from tests.support.songmaker import CALLS, CREATE_SONG
 from tests.support.wire import cuts, hangs, hangs_once_entered, refuses_with_a_server_error
@@ -143,8 +154,8 @@ async def test_a_picture_the_app_answered_reaches_the_models_next_request_and_hi
 
 
 def answers_a_picture_that_breaks_the_wire(app):
-    """The app's next call is answered with a real picture's data under a media type the wire does not take."""
-    picture = base64_of(a_picture())
+    """The app's next call is answered with a real JPEG's data under a media type the wire does not take."""
+    picture = base64_of(a_real_picture())
     app.content.add(picture)
 
     async def answers_with_a_png(reply):
