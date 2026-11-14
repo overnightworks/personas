@@ -1,8 +1,0 @@
-claim_id = "194ed0b81c7a48c79e71d9de18dbb971"
-agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
-role = "builder"
-base = "bdf25e009987a092e47d8e035f1e9bf3c334b227"
-branch = "claude/issue-162-a-sentence-ends-with-his-own-line"
-scope = ["README.md", "docs/ARCHITECTURE.md", "pyproject.toml", "src/personas/app_session.py", "src/personas/decision.py", "src/personas/mind.py", "src/personas/task_record.py", "src/personas/turning.py", "src/personas/voice.py", "tests", "uv.lock"]
-opened_commit = "00cf9b11adf906623275011cddea52adec593bb3"
-whole_reason = "the voice's end of a sentence, its pure rule, the mind's take event, the turn's stop handling and the pin move together"
