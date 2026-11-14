@@ -12,7 +12,7 @@ from agents.member import PlaceRef
 from agents.tools import ToolEffect
 from agents.turn import MAX_EVENT_BYTES
 
-from personas.entries import KeptLine, ViewSeen, Visit
+from personas.entries import KeptLine, ViewSeen, Visit, told_bytes, told_entry
 from personas.recall import (
     RECALL_DECLARATION,
     SCOPE_TEXT,
@@ -152,6 +152,16 @@ def test_a_result_within_the_least_bound_holds_no_line_says_more_matched_and_pas
 
     assert json.loads(result) == {"scope": SCOPE_TEXT, "older_dropped": True, "lines": []}
     assert len(result.encode()) <= SMALLEST_RESULT_BYTES
+
+
+def test_a_result_that_says_more_matched_holds_the_newest_line_when_it_fits_that_result_exactly():
+    newest, older = _lines_said(2)
+    bound = SMALLEST_RESULT_BYTES + told_bytes(told_entry(newest)) - 1
+
+    result = lookup_result([newest, older], bound)
+
+    assert json.loads(result) == {"scope": SCOPE_TEXT, "older_dropped": True, "lines": _told(2)[:1]}
+    assert len(result.encode()) == bound
 
 
 def test_a_result_never_passes_what_the_wire_carries_in_one_result_whatever_lookup_bytes_allows():

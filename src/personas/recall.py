@@ -89,9 +89,13 @@ def _result_json(told: list[dict[str, object]], *, older_dropped: bool) -> str:
 SMALLEST_RESULT_BYTES: Final = len(_result_json([], older_dropped=False).encode())
 
 
-def _room_for_lines(result_bytes: int) -> int:
-    """What is left of a result's bytes for lines and their separators, counting the separator the first line lacks."""
-    return min(result_bytes, MAX_EVENT_BYTES) - SMALLEST_RESULT_BYTES + len(_SEPARATOR)
+def _room_for_lines(result_bytes: int, *, older_dropped: bool) -> int:
+    """What is left of a result's bytes for lines and their separators, counting the separator the first line lacks.
+
+    A result that says more matched carries ``true`` where the smallest carries ``false``, which is a byte shorter.
+    """
+    envelope = SMALLEST_RESULT_BYTES - 1 if older_dropped else SMALLEST_RESULT_BYTES
+    return min(result_bytes, MAX_EVENT_BYTES) - envelope + len(_SEPARATOR)
 
 
 def line_search(
@@ -105,7 +109,7 @@ def line_search(
     the rest. An admitted history always holds the entry that woke the turn.
     """
     smallest = told_bytes(told_entry(_SMALLEST_LINE)) + len(_SEPARATOR)
-    fitting = _room_for_lines(result_bytes) // smallest
+    fitting = _room_for_lines(result_bytes, older_dropped=True) // smallest
     return LineSearch(client_id, app, place, text, entry_time(history.entries[0]), fitting + 1)
 
 
@@ -129,9 +133,11 @@ def lookup_result(lines_newest_first: Sequence[KeptLine], result_bytes: int) -> 
     """The result of a lookup: its scope, the newest lines that fit ``result_bytes`` and the wire's bound for one
     result, in the history's line form, and whether more matched."""
     told = [told_entry(each) for each in lines_newest_first]
-    sizes = (told_bytes(each) + len(_SEPARATOR) for each in told)
-    fitting = newest_that_fit(sizes, _room_for_lines(result_bytes))
-    return _result_json(told[:fitting], older_dropped=fitting < len(told))
+    sizes = [told_bytes(each) + len(_SEPARATOR) for each in told]
+    if newest_that_fit(sizes, _room_for_lines(result_bytes, older_dropped=False)) == len(told):
+        return _result_json(told, older_dropped=False)
+    fitting = newest_that_fit(sizes, _room_for_lines(result_bytes, older_dropped=True))
+    return _result_json(told[: min(fitting, len(told) - 1)], older_dropped=True)
 
 
 def swept_before(now: datetime, lines_keep_days: float) -> datetime | None:
