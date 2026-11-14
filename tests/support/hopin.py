@@ -42,7 +42,7 @@ from agents.member import (
     place_view_uri,
     place_window_uri,
 )
-from agents.tools import ToolDeclaration, ToolEffect, ToolOutcome
+from agents.tools import ToolDeclaration, ToolEffect, ToolImage, ToolOutcome
 from agents.turn import JsonObject, Principal
 
 from tests.support.loopback import serving
@@ -97,6 +97,11 @@ _ACCEPT_DECLARATION = ToolDeclaration(
     parameters=AcceptInvitationArguments.model_json_schema(),
     effect=ToolEffect.SIDE_EFFECTING,
 )
+
+
+def a_picture(size: int = 64) -> ToolImage:
+    """A still picture as the library's wire takes it: random bytes behind the JPEG start marker."""
+    return ToolImage(content=b"\xff\xd8\xff" + secrets.token_bytes(size))
 
 
 def invited(
