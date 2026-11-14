@@ -20,7 +20,7 @@ from agents.backend.gateway import GatewayBackend
 from personas.app_session import open_mcp_session
 from personas.clock import SystemClock
 from personas.config import Config, ConfigError, load_config
-from personas.failures import StoreDefect, StoreUnavailable, leaves_of
+from personas.failures import SchemaNotAtHeadError, StoreDefect, StoreUnavailable, leaves_of
 from personas.loop import Boundaries, run_all
 from personas.readiness import FileReadyMarker, ReadinessError, ReadyMarker
 from personas.reporting import log_state_change
@@ -185,8 +185,6 @@ def _memory_target(config: Config, command: str) -> MemoryTarget:
 @contextmanager
 def _stopping_on_store_failure() -> Generator[None]:
     """A failure of the store ends the command with its code or its revisions, and no traceback."""
-    from personas.memory import SchemaNotAtHeadError
-
     try:
         yield
     except (StoreUnavailable, StoreDefect) as error:
@@ -243,6 +241,9 @@ def _run_runner(config: Config, compose: Compose) -> None:
     except* ReadinessError as group:
         sys.stderr.write(f"personas: {next(leaves_of(group))}\n")
         raise SystemExit(READINESS_ERROR_EXIT_CODE) from None
+    except* SchemaNotAtHeadError as group:
+        sys.stderr.write(f"personas: {next(leaves_of(group))}\n")
+        raise SystemExit(STORE_ERROR_EXIT_CODE) from None
 
 
 def main(compose: Compose = real_boundaries, arguments: Sequence[str] = ()) -> None:

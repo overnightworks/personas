@@ -46,6 +46,7 @@ from personas.failures import (
     STORE_DEFECT_CODE,
     STORE_TIMEOUT_CODE,
     STORE_UNREACHABLE_CODE,
+    SchemaNotAtHeadError,
     StoreDefect,
     StoreUnavailable,
     task_is_being_cancelled,
@@ -101,10 +102,6 @@ class KeptVisit:
     lines: int
     first_read_at: datetime
     last_read_at: datetime
-
-
-class SchemaNotAtHeadError(Exception):
-    """The database is not at the newest migration; the message names the field and the revisions, no secret."""
 
 
 def _url(target: MemoryTarget) -> URL:
