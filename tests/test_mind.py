@@ -50,6 +50,28 @@ def test_a_history_read_earlier_does_not_change_when_more_lines_are_taken():
     assert [line.text for line in before.entries] == ["first"]
 
 
+def test_a_take_sets_the_event_read_before_it_and_the_next_take_sets_a_new_one():
+    mind = Mind(size_bytes=1_000)
+    first = mind.next_take()
+
+    mind.take((said(CALL, 1, "first"),))
+    second = mind.next_take()
+
+    assert first.is_set() is True
+    assert second.is_set() is False
+    assert second is not first
+
+
+def test_taking_nothing_leaves_the_event_read_before_unset():
+    mind = Mind(size_bytes=1_000)
+    waiting = mind.next_take()
+
+    mind.take(())
+
+    assert waiting.is_set() is False
+    assert mind.next_take() is waiting
+
+
 def test_the_views_he_read_join_his_lines_in_the_order_read_and_a_revision_he_holds_adds_nothing():
     table = PlaceRef(kind="table", id="table-1")
     mind = Mind(size_bytes=1_000)

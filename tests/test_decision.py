@@ -35,7 +35,6 @@ from personas.decision import (
     BACKOFF_CAP_SECONDS,
     NETWORK_FAILURE_CODE,
     RENEW_BEFORE_EXPIRY_SECONDS,
-    SPOKEN_WAIT_BOUND_SECONDS,
     TURN_CANCELLED_CODE,
     Accept,
     AppPlace,
@@ -79,11 +78,12 @@ from personas.decision import (
     perceive,
     reaction_to,
     released,
+    remaining_seconds,
     renewal_due,
+    sentence_ended,
     sets_where_reading_starts,
     speaks_aloud,
     speech_outcome,
-    spoken_wait_seconds,
     sync_checkpoints,
     sync_turned_revisions,
     turn_call_bound,
@@ -94,7 +94,7 @@ from personas.decision import (
     with_due,
     without_due,
 )
-from personas.entries import Answered, History, KeptLine, Unanswered, ViewSeen
+from personas.entries import Answered, History, KeptLine, Unanswered, ViewSeen, Visit
 from personas.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer
 from personas.recall import EarlierToday, earlier_today
 from personas.secret import Secret
@@ -734,19 +734,6 @@ def test_the_places_of_an_app_are_spoken_only_for_an_agent_with_a_voice_and_an_a
     assert is_voice_app(has_voice, declared) is (has_voice and SPEAK_TOOL in declared_names)
 
 
-@pytest.mark.parametrize(
-    ("duration_ms", "waited"),
-    [(1500, 1.5), (1, 0.001), (int(SPOKEN_WAIT_BOUND_SECONDS * 1000), SPOKEN_WAIT_BOUND_SECONDS)],
-    ids=["a sentence", "the shortest", "exactly the bound"],
-)
-def test_the_voice_waits_as_long_as_a_sentence_plays_up_to_the_bound(duration_ms, waited):
-    assert spoken_wait_seconds(duration_ms) == waited
-
-
-def test_the_voice_waits_no_longer_than_the_bound_whatever_the_app_says():
-    assert spoken_wait_seconds(int(SPOKEN_WAIT_BOUND_SECONDS * 1000) + 1) == SPOKEN_WAIT_BOUND_SECONDS
-
-
 def test_a_turns_call_bound_is_the_sum_of_the_bounds_of_the_apps_whose_tools_it_holds_plus_the_call_it_may_hold_back():
     assert turn_call_bound([4, 5, 2]) == 12
     assert turn_call_bound([4]) == 5
@@ -1348,7 +1335,7 @@ def test_how_a_request_ended_decides_the_outcome_of_the_act_it_made(ended, cance
 @pytest.mark.parametrize(
     ("outcome", "told_outcome"),
     [
-        pytest.param(Spoken(duration_ms=1500), {"answered": True}, id="spoken"),
+        pytest.param(Spoken(spoken=True), {"answered": True}, id="spoken"),
         pytest.param(Written(written=True), {"answered": True, "written": True}, id="written to the place instead"),
         pytest.param(SpeakRefusal.TOO_LONG, {"answered": True, "refused": "too_long"}, id="refused"),
         pytest.param(Unanswered("network"), {"answered": False, "code": "network"}, id="no answer"),
@@ -1407,7 +1394,7 @@ def test_the_bound_counts_a_spoken_sentence_by_the_utf8_bytes_of_its_told_json_w
 @pytest.mark.parametrize(
     ("ended", "cancelling", "expected"),
     [
-        pytest.param(Spoken(duration_ms=900), True, Spoken(duration_ms=900), id="a spoken sentence while cancelled"),
+        pytest.param(Spoken(spoken=True), True, Spoken(spoken=True), id="a spoken sentence while cancelled"),
         pytest.param(Written(written=True), True, Written(written=True), id="a written sentence while cancelled"),
         pytest.param(SpeakRefusal.NOT_ACTIVE, False, SpeakRefusal.NOT_ACTIVE, id="a refusal"),
         pytest.param(StatusFailure(502), True, Unanswered(TURN_CANCELLED_CODE), id="a failure while cancelled"),
@@ -1430,12 +1417,28 @@ def test_a_turn_is_past_its_deadline_once_its_longest_duration_has_gone_by(start
     assert past_deadline(now, started, 30) is past
 
 
+@pytest.mark.parametrize(
+    ("now", "remaining"),
+    [(1000.0, 30.0), (1012.5, 17.5), (1030.0, 0.0), (1100.0, 0.0)],
+    ids=["at the start", "part way", "at the deadline", "long past it"],
+)
+def test_what_is_left_of_a_turns_longest_duration_is_never_below_zero(now, remaining):
+    assert remaining_seconds(now, 1000.0, 30) == remaining
+
+
 def test_the_history_stays_marked_once_it_dropped_older_lines_though_the_next_lines_fit():
     assert history_after(ONCE_DROPPED, (said(1, "one"),), 10_000).older_dropped is True
 
 
 def an_own_line(seq: int, text: str = "mine") -> KeptLine:
     return KeptLine(MORNING, seq, LATER, "Mozart", "message", text, own=True, spoken=False, cut=False, act=False)
+
+
+MORNING_AT = AppPlace(MORNING.app, MORNING.place)
+
+
+def a_spoken_line(seq: int, *, visit: Visit = MORNING, cut: bool = False) -> KeptLine:
+    return KeptLine(visit, seq, LATER, "Mozart", "message", "a sentence", own=True, spoken=True, cut=cut, act=False)
 
 
 def a_view_seen(revision: int, *, size: int | None = None) -> ViewSeen:
@@ -1563,6 +1566,55 @@ def test_what_arrived_when_the_bound_leaves_only_the_newest_entry_taken_during_t
     after = taking(taking(admitted, *between), *during, size_bytes=50)
 
     assert arrived_since(after, admitted) == Arrived(during, older_dropped=older_dropped)
+
+
+@pytest.mark.parametrize("cut", [False, True], ids=["whole", "cut"])
+def test_a_sentence_has_ended_once_his_own_spoken_line_at_its_place_entered_after_it_was_sent(cut):
+    sent = taking(EMPTY_HISTORY, said(1, "before"))
+
+    after = taking(sent, said(2, "theirs"), a_spoken_line(3, cut=cut))
+
+    assert sentence_ended(after, sent.taken, MORNING_AT) is True
+
+
+@pytest.mark.parametrize(
+    "arrivals",
+    [
+        pytest.param((), id="nothing entered"),
+        pytest.param((said(2, "theirs", spoken=True),), id="another's spoken line"),
+        pytest.param((an_own_line(2),), id="his own written line"),
+        pytest.param(
+            (KeptLine(MORNING, 2, LATER, "Mozart", "message", "x", own=True, spoken=False, cut=False, act=True),),
+            id="his own act line",
+        ),
+        pytest.param((a_spoken_line(2, visit=NOON),), id="his own spoken line at another place"),
+        pytest.param(
+            (a_spoken_line(2, visit=replace(MORNING, app="https://other.test/mcp")),),
+            id="his own spoken line at the place of another app",
+        ),
+        pytest.param((a_sentence(),), id="the sentence he sent"),
+        pytest.param((a_view_seen(1),), id="a view"),
+    ],
+)
+def test_a_sentence_has_not_ended_by_anything_but_his_own_spoken_line_at_its_place(arrivals):
+    sent = taking(EMPTY_HISTORY, said(1, "before"))
+
+    assert sentence_ended(taking(sent, *arrivals), sent.taken, MORNING_AT) is False
+
+
+def test_a_sentence_has_not_ended_by_his_own_spoken_line_that_entered_before_it_was_sent():
+    sent = taking(EMPTY_HISTORY, a_spoken_line(1))
+
+    assert sentence_ended(taking(sent, said(2, "theirs")), sent.taken, MORNING_AT) is False
+
+
+def test_a_sentence_ends_by_his_own_line_when_the_bound_left_out_older_entries_than_the_mark(told_one_bytes):
+    sent = taking(EMPTY_HISTORY, *(said(each, "one") for each in range(1, 4)), size_bytes=told_one_bytes + 5)
+
+    after = taking(sent, a_spoken_line(4), size_bytes=2 * told_one_bytes + 5)
+
+    assert after.left_out > 0
+    assert sentence_ended(after, sent.taken, MORNING_AT) is True
 
 
 def told_held(arrived: Arrived) -> dict:

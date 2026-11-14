@@ -66,7 +66,6 @@ from tests.support.hopin import (
     LISTEN,
     READ,
     SAY_TOOL,
-    SPOKEN_DURATION_MS,
     FakeApp,
     a_picture,
     active,
@@ -242,13 +241,13 @@ async def test_an_accept_error_outside_the_record_is_unrecognised(app, bearer, t
         )
 
 
-async def test_a_speak_sends_the_place_and_the_sentence_and_gives_how_long_the_app_says_it_plays(app, bearer):
+async def test_a_speak_sends_the_place_and_the_sentence_and_gives_that_it_starts_to_play(app, bearer):
     sentence = secrets.token_hex(4)
 
     async with opened(app, bearer) as session:
         spoken = await session.speak(PLACE, sentence)
 
-    assert spoken == Spoken(duration_ms=SPOKEN_DURATION_MS)
+    assert spoken == Spoken(spoken=True)
     assert app.spoken == [(SUBJECT, PLACE.id, sentence)]
 
 
@@ -273,19 +272,19 @@ async def test_a_speak_refused_with_a_code_of_the_record_is_told_by_that_code(ap
     "outcome",
     [
         ToolOutcome("not json", is_error=False),
-        ToolOutcome('{"duration_ms": 0}', is_error=False),
+        ToolOutcome('{"spoken": true, "duration_ms": 1500}', is_error=False),
         ToolOutcome(SpeakRefused(refused=SpeakRefusal.TOO_LONG).model_dump_json(), is_error=False),
         ToolOutcome('{"refused": "other"}', is_error=True),
-        ToolOutcome(Spoken(duration_ms=1).model_dump_json(), is_error=True),
+        ToolOutcome(Spoken(spoken=True).model_dump_json(), is_error=True),
         ToolOutcome('{"written": false}', is_error=False),
         ToolOutcome(Written(written=True).model_dump_json(), is_error=True),
     ],
     ids=[
         "no json",
-        "no duration",
+        "a length from before",
         "a refusal that succeeded",
         "an unknown refusal",
-        "a duration that failed",
+        "a start that failed",
         "a sentence not written",
         "a written sentence that failed",
     ],

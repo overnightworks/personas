@@ -39,6 +39,7 @@ from tests.support.hopin import AGENT_SUBJECT, ISSUER, PLAY_TOOL, FakeApp, forma
 from tests.support.realm import TOKEN_ENDPOINT, FakeRealm
 from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG, ToolsOnlyApp
 from tests.support.songmaker import SCOPE as TOOLS_ONLY_SCOPE
+from tests.support.voice import HeldSleeps
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterable, Iterator
@@ -138,6 +139,8 @@ class Harness:
         self.other_apps: list[FakeApp] = []
         self.lines: LineStore | None = None
         self.swept: SweptStore | None = None
+        self.sleeps: HeldSleeps | None = None
+        """The held sleeps of the clock, from the first spoken scenario that needs the wait for his own line gated."""
 
     def remember_in(self, store: LineStore, target: MemoryTarget) -> None:
         """Gives the runner a memory: the store its loops keep and read lines through, and the table that names it."""
@@ -169,7 +172,12 @@ class Harness:
         self.other_apps.append(app)
 
     def give_voice(self, max_duration_seconds: int = PERSONA_MAX_DURATION_SECONDS) -> None:
-        """Turns every agent's voice on and gives the persona this longest duration."""
+        """Turns every agent's voice on and gives the persona this longest duration.
+
+        The wait for a sentence's end is bounded by that duration, which the fake clock would pass before the loop took
+        the app's line, so the clock's sleeps are held from here on unless a test already holds them.
+        """
+        self.sleeps = self.sleeps or HeldSleeps(self)
         self.files.persona_path.write_text(self.files.persona_text(max_duration_seconds), encoding="utf-8")
         persona = load_agent(self.files.persona_path, [])
         self.config = replace(
