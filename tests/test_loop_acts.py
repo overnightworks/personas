@@ -129,7 +129,7 @@ async def test_a_say_the_app_answered_is_told_to_his_next_turn_before_his_own_li
             entry(app, PLACE_ID, AGAIN, seq=3),
         ]
     )
-    assert second.new_seqs == [3]
+    assert second.woke_seqs == [3]
     assert closing not in second.user
 
 

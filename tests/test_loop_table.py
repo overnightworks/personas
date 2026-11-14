@@ -82,11 +82,11 @@ async def test_a_table_that_does_not_wait_is_told_to_his_written_turn_known_from
             entry(app, PLACE_ID, ADDRESSED, at=after_start(90)),
         ]
     )
-    assert written.new_seqs == [1]
+    assert written.woke_seqs == [1]
     assert view_turns(runner) == []
 
 
-async def test_a_view_turn_is_told_the_state_once_in_its_entry_marked_new_and_woke_names_only_why_app_and_place(runner):
+async def test_a_view_turn_is_told_the_state_once_in_its_entry_and_woke_names_its_revision(runner):
     runner.app.stand(SUBJECT, at_table())
     state = waits(runner.app, 1)
     runner.start()
@@ -124,7 +124,7 @@ async def test_a_revision_read_again_with_another_state_keeps_the_state_of_its_f
     assert [each["state"] for each in written.room["history"]["entries"] if each["entry"] == "view"] == [first]
 
 
-async def test_revisions_and_lines_are_told_in_the_order_read_and_only_the_waiting_revision_is_new(runner):
+async def test_revisions_and_lines_are_told_in_the_order_read_and_woke_names_only_the_waiting_revision(runner):
     await restarted_in_the_call(runner)
     runner.app.stand(SUBJECT, active(PLACE_ID), at_table())
     first = await shows(runner.app, 1)
@@ -200,7 +200,7 @@ async def test_a_view_turn_is_told_its_state_alone_when_the_bound_is_below_one_s
 
 
 @pytest.mark.parametrize("earlier_line", [True, False], ids=["an earlier line was said", "no earlier entry"])
-async def test_a_line_that_names_him_and_alone_exceeds_the_bound_is_told_alone_and_new_and_says_what_left(
+async def test_a_line_that_names_him_and_alone_exceeds_the_bound_is_told_alone_for_the_turn_and_says_what_left(
     runner, earlier_line
 ):
     runner.config = bounded_history(runner.config, len(SPEAKER + ADDRESSED) - 1)
@@ -233,7 +233,7 @@ async def test_a_place_that_leaves_and_returns_at_its_held_waiting_revision_gets
     ] * 2
 
 
-async def test_a_table_that_serves_no_view_for_a_while_is_not_read_and_its_earlier_entries_are_told_with_their_age(
+async def test_a_table_that_serves_no_view_for_a_while_is_not_read_and_its_earlier_entries_are_told_with_their_time(
     runner,
 ):
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER), completion("done"))

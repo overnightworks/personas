@@ -83,13 +83,13 @@ async def a_call_turn_beside_a_table_that_waits_for_the_model(runner):
     return running
 
 
-async def test_a_line_that_does_not_name_him_gives_one_turn_told_it_as_new_at_its_place(runner):
+async def test_a_line_that_does_not_name_him_gives_one_turn_woken_for_it_at_its_place(runner):
     await restarted_in_the_call(runner)
     say_in_the_call(runner, "Hello everyone", author=PERSON)
     await runner.gateway.until_turns(1, why="lines")
 
     (turn,) = runner.gateway.openings()
-    assert turn.new_seqs == [1]
+    assert turn.woke_seqs == [1]
     assert turn.room["woke"]["place"] == {"kind": "call", "id": PLACE_ID}
 
 
@@ -101,21 +101,21 @@ async def test_an_act_line_of_someone_else_gives_no_turn_and_is_told_marked_with
     await runner.gateway.until_turns(1, why="lines")
 
     (turn,) = runner.gateway.openings()
-    assert turn.new_seqs == [2]
+    assert turn.woke_seqs == [2]
     assert turn.told("line") == [
         entry(url_of(runner, 0), PLACE_ID, "took a card", seq=1, act=True),
         entry(url_of(runner, 0), PLACE_ID, "Hello everyone", seq=2),
     ]
 
 
-async def test_an_act_line_said_beside_a_line_in_one_read_gives_one_turn_told_both_as_new(runner):
+async def test_an_act_line_said_beside_a_line_in_one_read_gives_one_turn_woken_for_both(runner):
     await restarted_in_the_call(runner)
     say_in_the_call(runner, "took a card", act=True)
     say_in_the_call(runner, "Hello everyone")
     await runner.gateway.until_turns(1, why="lines")
 
     (turn,) = runner.gateway.openings()
-    assert turn.new_seqs == [1, 2]
+    assert turn.woke_seqs == [1, 2]
     assert [(each["seq"], each.get("act", False)) for each in turn.told("line")] == [(1, True), (2, False)]
 
 
@@ -145,7 +145,7 @@ async def test_a_line_said_in_his_call_while_his_table_turn_runs_is_taken_at_onc
     assert turn_order(runner) == [(1, "view"), (0, "lines")]
     table_turn, call_turn = runner.gateway.openings()
     assert [each["entry"] for each in table_turn.room["history"]["entries"]] == ["view"]
-    assert call_turn.new_seqs == [1]
+    assert call_turn.woke_seqs == [1]
     assert [each["entry"] for each in call_turn.room["history"]["entries"]] == ["view", "line"]
 
 
@@ -167,7 +167,7 @@ async def test_a_table_that_starts_waiting_at_another_app_during_his_call_turn_g
         ("view", True),
         ("line", False),
     ]
-    assert call_turn.new_seqs == [2]
+    assert call_turn.woke_seqs == [2]
     assert [(each["entry"], call_turn.is_for(each)) for each in call_turn.room["history"]["entries"]] == [
         ("line", False),
         ("view", False),
@@ -186,7 +186,7 @@ async def test_lines_said_in_three_reads_during_another_apps_turn_are_told_toget
     await settled(runner.app)
 
     (written,) = written_turns(runner)
-    assert written.new_seqs == [1, 2, 3]
+    assert written.woke_seqs == [1, 2, 3]
     assert len(runner.gateway.requests) == 2
 
 
@@ -203,7 +203,7 @@ async def test_a_line_in_his_own_call_while_his_call_turn_runs_enters_the_histor
     assert [
         (each["seq"], first.is_for(each)) for each in first.room["history"]["entries"] if each["entry"] == "line"
     ] == [(1, True)]
-    assert second.new_seqs == [2]
+    assert second.woke_seqs == [2]
 
 
 async def test_the_place_that_waited_longest_goes_first_when_a_table_starts_waiting_before_a_line_is_said(runner):
@@ -217,7 +217,7 @@ async def test_the_place_that_waited_longest_goes_first_when_a_table_starts_wait
 
     assert turn_order(runner) == [(0, "lines"), (0, "view"), (0, "lines")]
     last = runner.gateway.openings()[2]
-    assert last.new_seqs == [2]
+    assert last.woke_seqs == [2]
     assert [each["entry"] for each in last.room["history"]["entries"]] == ["line", "view", "line"]
 
 
@@ -232,7 +232,7 @@ async def test_the_place_that_waited_longest_goes_first_when_a_line_is_read_befo
 
     assert turn_order(runner) == [(0, "lines"), (0, "lines"), (0, "view")]
     second = runner.gateway.openings()[1]
-    assert second.new_seqs == [2]
+    assert second.woke_seqs == [2]
     assert [each.get("state") for each in second.room["history"]["entries"]] == [None, None, state]
 
 
@@ -484,7 +484,7 @@ async def test_a_loop_that_renews_its_token_keeps_its_due_place_and_that_place_g
     await runner.gateway.until_turns(3, why="lines")
 
     assert turn_order(runner) == [(0, "lines"), (1, "lines"), (0, "lines")]
-    assert runner.gateway.openings()[1].new_seqs == [1]
+    assert runner.gateway.openings()[1].woke_seqs == [1]
     assert runner.reports.reported(started=False) == []
 
 
@@ -500,7 +500,7 @@ async def test_a_call_whose_window_the_app_lost_keeps_its_due_and_its_turn_runs_
     await runner.gateway.until_turns(3, why="lines")
 
     assert turn_order(runner) == [(0, "lines"), (1, "lines"), (0, "lines")]
-    assert runner.gateway.openings()[1].new_seqs == [1]
+    assert runner.gateway.openings()[1].woke_seqs == [1]
 
 
 async def test_a_table_whose_view_the_app_no_longer_gives_loses_its_due_and_a_younger_place_goes_instead(runner, other):

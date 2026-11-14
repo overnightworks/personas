@@ -92,7 +92,7 @@ async def test_his_own_line_read_back_and_his_own_act_hold_no_call(runner):
     assert runner.gateway.held_results(3) == []
 
 
-async def test_a_call_after_a_line_of_someone_else_is_held_with_every_arrival_told_new_and_the_next_call_goes_out(
+async def test_a_call_after_a_line_of_someone_else_is_held_with_every_arrival_told_and_the_next_call_goes_out(
     runner,
 ):
     first, held_text, last = words(3)

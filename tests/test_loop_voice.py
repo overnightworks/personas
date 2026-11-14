@@ -69,7 +69,7 @@ async def test_a_line_at_a_voice_place_makes_a_turn_told_aloud_that_holds_every_
 
     (turn,) = runner.gateway.turns()
     assert turn.aloud
-    assert turn.new_seqs == [1]
+    assert turn.woke_seqs == [1]
     assert set(runner.gateway.offered_tools()) == {SAY_TOOL, CREATE_SONG, GENERATE_SONG}
 
 
@@ -269,7 +269,7 @@ async def test_a_sentence_the_app_wrote_to_the_place_instead_is_told_as_written_
     ]
 
 
-async def test_a_line_said_while_he_speaks_is_not_in_the_running_turn_and_is_told_new_to_the_next_one(runner):
+async def test_a_line_said_while_he_speaks_is_not_in_the_running_turn_and_is_told_to_the_next_one(runner):
     sleeps = HeldSleeps(runner)
     await a_voice_call(runner, completion(ANSWER), completion("Second answer."))
     say_in_the_call(runner, ADDRESSED)
@@ -281,7 +281,7 @@ async def test_a_line_said_while_he_speaks_is_not_in_the_running_turn_and_is_tol
     await runner.gateway.until_turns(2)
 
     first, second = runner.gateway.turns()
-    assert first.new_seqs == [1]
+    assert first.woke_seqs == [1]
     assert REMARK in [each["text"] for each in second.own["entries"]]
 
 

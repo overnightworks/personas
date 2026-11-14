@@ -45,7 +45,7 @@ def waits(runner, revision: int, place: PlaceRef = TABLE) -> dict[str, str]:
 
 
 def told_states(runner) -> list[object]:
-    """The state of the view entry each turn is told as new, in the order of the turns."""
+    """The state of the view entry each turn is for, in the order of the turns."""
     return [
         each["state"]
         for opening in runner.gateway.openings()
@@ -409,7 +409,7 @@ PLACES_WITH_A_VIEW = [
 
 
 @pytest.mark.parametrize("place", PLACES_WITH_A_VIEW)
-async def test_the_lines_of_a_place_enter_his_history_before_the_view_of_that_wake_and_only_the_view_is_new(
+async def test_the_lines_of_a_place_enter_his_history_before_the_view_of_that_wake_and_only_the_view_woke_the_turn(
     runner, place
 ):
     said = ("first", "second")

@@ -61,7 +61,7 @@ async def test_a_line_said_in_a_call_of_one_app_is_told_to_his_view_turn_of_anot
     await runner.gateway.until_turns(1, why="view")
 
     (written,) = written_turns(runner)
-    assert written.new_seqs == [1]
+    assert written.woke_seqs == [1]
     (opening,) = view_turns(runner)
     assert opening.room == {
         "you": AGENT_NAME,
@@ -395,9 +395,7 @@ async def test_each_agent_is_told_the_history_of_his_own_places_only(runner):
     }
 
 
-async def test_a_line_that_names_him_starts_his_written_turn_told_it_as_new_and_the_next_view_turn_told_it_too(
-    runner, other
-):
+async def test_a_line_that_names_him_starts_his_written_turn_for_it_and_the_next_view_turn_told_it_too(runner, other):
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
     runner.app.speak(PLACE_ID, PERSON, SPEAKER, ADDRESSED)
@@ -417,7 +415,7 @@ async def test_a_line_that_names_him_starts_his_written_turn_told_it_as_new_and_
     assert told["entries"][0] == entry(url_of(runner, 0), PLACE_ID, ADDRESSED)
 
 
-async def test_lines_said_earlier_in_the_call_are_told_in_the_order_taken_and_only_those_of_the_naming_read_are_new(
+async def test_lines_said_earlier_in_the_call_are_told_in_the_order_taken_and_only_the_naming_read_woke_the_turn(
     runner,
 ):
     await restarted_in_the_call(runner)
@@ -468,7 +466,9 @@ async def test_his_own_line_said_before_a_line_that_names_him_is_told_as_his_own
     )
 
 
-async def test_two_lines_taken_in_one_read_of_which_one_names_him_are_both_new_and_start_one_turn(runner):
+async def test_two_lines_taken_in_one_read_of_which_one_names_him_are_both_what_the_turn_is_for_and_start_one_turn(
+    runner,
+):
     await restarted_in_the_call(runner)
     runner.app.speak(PLACE_ID, PERSON, SPEAKER, REMARK)
     runner.app.speak(PLACE_ID, PERSON, SPEAKER, ADDRESSED)
@@ -476,7 +476,7 @@ async def test_two_lines_taken_in_one_read_of_which_one_names_him_are_both_new_a
     await settled(runner.app)
 
     (written,) = runner.gateway.openings()
-    assert written.new_seqs == [1, 2]
+    assert written.woke_seqs == [1, 2]
     assert len(runner.gateway.requests) == 1
 
 

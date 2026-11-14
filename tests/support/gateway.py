@@ -174,7 +174,7 @@ class TurnOpening:
         return [each for each in self.own["entries"] if each["entry"] in kinds]
 
     @property
-    def new_seqs(self) -> list[int]:
+    def woke_seqs(self) -> list[int]:
         """The seqs of the lines the turn is for."""
         return list(self.own["woke"].get("seqs", []))
 
@@ -293,7 +293,7 @@ class Gateway(FakeGateway):
                     each
                     for each in self.turns("lines")
                     if each.room["woke"]["place"]["id"] == place_id
-                    and seq in each.new_seqs
+                    and seq in each.woke_seqs
                     and user in (None, each.user)
                 ),
                 None,

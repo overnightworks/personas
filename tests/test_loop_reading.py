@@ -22,7 +22,7 @@ async def test_after_a_restart_an_addressed_line_still_in_the_window_is_not_answ
     say_in_the_call(runner, ADDRESSED)
     await runner.app.said_count(1)
 
-    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[2]]
+    assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[2]]
 
 
 async def test_lines_said_during_a_pause_are_not_answered_after_the_resume_and_a_line_after_it_is(runner):
@@ -40,7 +40,7 @@ async def test_lines_said_during_a_pause_are_not_answered_after_the_resume_and_a
     resumed_read.set()
     await runner.app.said_count(1)
 
-    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[2]]
+    assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[2]]
 
 
 async def test_a_pause_and_a_resume_seen_while_a_turn_runs_elsewhere_leave_the_line_said_after_the_resume_to_answer(
@@ -65,7 +65,7 @@ async def test_a_pause_and_a_resume_seen_while_a_turn_runs_elsewhere_leave_the_l
     runner.app.speak(other, PERSON, "Ada", f"{ADDRESSED} After the resume.")
     await runner.app.said_count(2)
 
-    assert [(opening.room["woke"]["place"]["id"], opening.new_seqs) for opening in runner.gateway.openings()] == [
+    assert [(opening.room["woke"]["place"]["id"], opening.woke_seqs) for opening in runner.gateway.openings()] == [
         (PLACE_ID, [1]),
         (other, [2]),
     ]
@@ -93,7 +93,7 @@ async def test_when_the_window_moved_past_his_position_the_turn_is_told_lines_we
     first, second = runner.gateway.openings()
     assert not first.missed
     assert second.missed
-    assert set(first.new_seqs).isdisjoint(second.new_seqs)
+    assert set(first.woke_seqs).isdisjoint(second.woke_seqs)
 
 
 async def test_a_vanished_window_costs_one_more_standing_read_and_restarts_the_place_without_answering_old_lines(
@@ -117,7 +117,7 @@ async def test_a_vanished_window_costs_one_more_standing_read_and_restarts_the_p
     next_window_read.set()
     await runner.app.said_count(1)
 
-    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[2]]
+    assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[2]]
 
 
 async def test_a_place_invited_again_when_its_window_vanished_is_joined_in_that_wake_and_read_from_seq_1(runner):
@@ -137,4 +137,4 @@ async def test_a_place_invited_again_when_its_window_vanished_is_joined_in_that_
     lost_read.set()
     await runner.app.said_count(1)
 
-    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1]]
+    assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[1]]
