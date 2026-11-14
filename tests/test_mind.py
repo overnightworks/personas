@@ -234,6 +234,20 @@ def test_passing_the_history_bound_changes_the_earlier_messages_once_and_later_t
     assert seqs_told(appended[-1]) == [5]
 
 
+def test_a_turn_in_flight_whose_message_left_in_a_step_is_not_told_and_every_entry_is_told_once():
+    mind = Mind(6 * LINE_BYTES, 3 * LINE_BYTES)
+    mind.take((said(CALL, 1, "x"), said(CALL, 2, "x")))
+    in_flight = a_lines_turn(mind, 2)
+    mind.take(tuple(said(CALL, seq, "x") for seq in range(3, 9)))
+    mind.answered(in_flight)
+    mind.take((said(CALL, 9, "x"),))
+
+    sent = turn_messages("Mozart", mind.present, a_lines_turn(mind, 9))
+
+    told = [seq for each in sent[1:] for seq in seqs_told(each)]
+    assert told == [entry.seq for entry in mind.history.entries]
+
+
 def test_a_newest_message_past_the_kept_bytes_loses_its_oldest_entries_and_keeps_its_newest():
     mind = Mind(4 * LINE_BYTES, 2 * LINE_BYTES)
     answer_turn_for(mind, 1)

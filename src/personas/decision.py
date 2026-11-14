@@ -510,7 +510,10 @@ def taken_into(present: Present, new: Iterable[Entry], history_bytes: int, keep_
 
 
 def answered_into(present: Present, turn: TurnTold) -> Present:
-    """The present once ``turn`` was answered: its message is part of every request after it, while it stays."""
+    """The present once ``turn`` was answered: its message is part of every request after it, while it stays. A turn
+    whose entries all left in a step while it ran has no message left to tell."""
+    if turn.through <= present.history.left_out:
+        return present
     return replace(present, told=(*present.told, turn))
 
 
