@@ -1,8 +1,0 @@
-claim_id = "ad6a6f02853c444f90c8bf3096498ba7"
-agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
-role = "builder"
-base = "a0b503a42a71b34b8f00ebbdfa878408682cce22"
-branch = "claude/issue-158-a-picture-in-a-tool-result"
-scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/app_session.py", "src/personas/decision.py", "src/personas/entries.py", "src/personas/reporting.py", "src/personas/turning.py", "tests"]
-opened_commit = "d40ffb118667a93670515992f43febba1f57c7e0"
-whole_reason = "the result path from the app session through the turn to the history, read together"
