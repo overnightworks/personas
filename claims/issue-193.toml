@@ -1,8 +1,0 @@
-claim_id = "ceaf15c0739345b7ac9a9d6bbbf0ab6a"
-agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
-role = "builder"
-base = "1f5a8afb4fa191d19e4337352e9da207c3c9a905"
-branch = "claude/issue-193-four-more-characters-each-on-another-mod"
-scope = ["src/characters", "tests"]
-opened_commit = "09121737a0290602d63eeba3b27ed67f011c4f95"
-whole_reason = "Four new character files and their load proof; one coherent change."
