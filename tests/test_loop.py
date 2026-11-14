@@ -14,7 +14,7 @@ from agents.tools import ToolDeclaration, ToolEffect
 from agents.turn import RejectionCode
 from mcp_types import INVALID_PARAMS
 
-from personas.config import DEFAULT_HISTORY_BYTES, load_config
+from personas.config import DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES, load_config
 from personas.decision import (
     BACKOFF_CAP_SECONDS,
     NETWORK_FAILURE_CODE,
@@ -415,7 +415,11 @@ class ScriptedSessions:
         tokens = FakeTokens(self.clock, [jwt_grant() for _ in range(5)])
         boundaries = Boundaries(tokens, self.open, self.clock, self.reports, FakeReadyMarker(), backend=backend)
         self.loop = AgentLoop(
-            self.config.agents[0], self.config.apps[0], boundaries, Mind(DEFAULT_HISTORY_BYTES), self.config.apps
+            self.config.agents[0],
+            self.config.apps[0],
+            boundaries,
+            Mind(DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES),
+            self.config.apps,
         )
 
     def use_token(self, token) -> None:
@@ -641,7 +645,7 @@ class TurnEndingInTheStepItsPlaceLeaves(TurnAndLifecycle):
 @pytest.mark.parametrize(
     ("ending", "own_reports", "sleeps"),
     [
-        ("stop", [(Event.TURN_ENDED, RejectionCode.BUSY.value)], []),
+        ("stop", [(Event.TURN_ENDED, RejectionCode.BUSY.value)], [backoff_delay(1)]),
         ("completion", [], []),
         ("relayed failure", [], [backoff_delay(1)]),
     ],
@@ -676,7 +680,13 @@ class TokenFetchSwallowingTheCancellation:
         self.fetches = 0
         config = load_config(files.write())
         boundaries = Boundaries(self, self._no_session, FakeClock(), Reports(), FakeReadyMarker())
-        self.loop = AgentLoop(config.agents[0], config.apps[0], boundaries, Mind(DEFAULT_HISTORY_BYTES), config.apps)
+        self.loop = AgentLoop(
+            config.agents[0],
+            config.apps[0],
+            boundaries,
+            Mind(DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES),
+            config.apps,
+        )
 
     async def fetch(self, agent, scope):
         self.fetches += 1

@@ -70,7 +70,6 @@ if TYPE_CHECKING:
     from personas.decision import Checkpoint
     from personas.entries import InputSizes
     from personas.readiness import ReadyMarker
-    from personas.recall import TodayBounds
     from personas.tokens import TokenSource
     from personas.turning import BackendFactory
 
@@ -135,26 +134,25 @@ class AgentLoop:
         boundaries: Boundaries,
         mind: Mind,
         apps: tuple[AppTarget, ...],
-        today: TodayBounds | None = None,
     ) -> None:
         self._agent = agent
         self._app = app
         self._boundaries = boundaries
         self._mind = mind
-        self._remembering = Remembering(boundaries.lines, today, agent.client_id, self._report)
+        self._remembering = Remembering(boundaries.lines, self._report)
         self._turning = Turning(
             agent,
             app,
             apps,
             boundaries.tokens,
             boundaries.open_session,
-            self._remembering,
             mind,
             boundaries.clock,
             self._current_token,
             self._use_current_token,
             self._report,
             self._report_turn_end,
+            self._report_pause,
         )
         self._token: Token | None = None
         self._memory = Memory()
@@ -353,7 +351,8 @@ class AgentLoop:
     def _take_views(self, read: dict[PlaceRef, ViewSeen | None]) -> None:
         """Takes each view read into the agent's history. A revision that waits for him and has no turn yet makes a turn
         due at its place; one that does not wait, and a view the app gives none of, take the place's due away. A
-        revision gets one turn, whatever that turn did. No await stands in it."""
+        revision waiting for him that has had its turn keeps a due that turn left behind by ending without an answer.
+        No await stands in it."""
         for place, seen in read.items():
             at = AppPlace(self._app.mcp_url, place)
             if seen is None:
@@ -362,7 +361,7 @@ class AgentLoop:
             self._mind.take((seen,))
             if view_turn_due(self._turned_revisions.get(place), seen.view):
                 self._mind.due(at, Waiting(seen.view.revision))
-            else:
+            elif not seen.view.awaits_you:
                 self._mind.undue(partial(eq, at))
 
     async def _start_due_turn(self, turns: asyncio.TaskGroup) -> None:
@@ -380,7 +379,7 @@ class AgentLoop:
             self._turned_revisions[at.place] = occasion.revision
         aloud = speaks_aloud(self._voice_app, occasion, self._checkpoints.get(at.place))
         apps = self._mind.held_apps(self._app.mcp_url)
-        admitted = Admitted(facts, at.place, occasion, self._mind.history, self._boundaries.clock.wall(), aloud, apps)
+        admitted = Admitted(facts, at.place, occasion, self._mind.present, self._boundaries.clock.wall(), aloud, apps)
         self._start_turn(turns, setup, at.place, admitted)
 
     def _take_lines(self, place: PlaceRef, window: PlaceWindow, read_at: datetime, *, serves_view: bool) -> None:
@@ -410,6 +409,17 @@ class AgentLoop:
         self._turn = replace(self._turn, end_reported=True)
         self._boundaries.report(
             StateChange(Event.TURN_ENDED, self._agent.client_id, self._app.mcp_url, code, usage=usage, sizes=sizes)
+        )
+
+    def _report_pause(self, seconds: float, code: str) -> None:
+        self._boundaries.report(
+            StateChange(
+                Event.PAUSED,
+                self._agent.client_id,
+                self._app.mcp_url,
+                code,
+                seconds=seconds,
+            )
         )
 
     async def _react(self, failure: CallFailure) -> None:
@@ -469,11 +479,10 @@ async def run_all(config: Config, boundaries: Boundaries) -> NoReturn:
     runner = asyncio.current_task()
     assert runner is not None  # noqa: S101 - run_all runs inside a task
     async with asyncio.TaskGroup() as group:
-        today = None if config.memory is None else config.memory.today
         for agent in config.agents:
-            mind = Mind(config.history_bytes)
+            mind = Mind(config.history_bytes, config.history_keep_bytes, config.budget_pause_cap_seconds)
             for app in config.apps:
                 if app.listens:
-                    loop = AgentLoop(agent, app, boundaries, mind, config.apps, today)
+                    loop = AgentLoop(agent, app, boundaries, mind, config.apps)
                     group.create_task(_run_loop(loop, runner))
     raise AssertionError("a loop ended")  # pragma: no cover

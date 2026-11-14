@@ -11,17 +11,15 @@ import pytest
 from personas.config import (
     CONFIG_ENVIRONMENT_VARIABLE,
     DEFAULT_CALL_SECONDS,
-    DEFAULT_HISTORY_BYTES,
     DEFAULT_LINES_KEEP_DAYS,
     DEFAULT_SWEEP_MINUTES,
-    DEFAULT_TODAY,
     DEFAULT_WRITE_SECONDS,
     ToolBinding,
     Voice,
     load_config,
 )
+from personas.decision import DEFAULT_BUDGET_PAUSE_CAP_SECONDS
 from personas.main import CONFIGURATION_ERROR_EXIT_CODE, main
-from personas.recall import TodayBounds
 from tests.support.configfiles import MAX_TOOL_CALLS, PERSONA_NAME
 from tests.support.realm import API_GROUP
 
@@ -484,19 +482,6 @@ def test_a_memory_table_may_set_the_write_bound_or_leave_a_write_unbounded(files
     assert memory.write_seconds == bound
 
 
-def test_a_memory_table_tells_a_turn_the_default_day_unless_it_sets_how_far_back_and_how_much(files):
-    files.text += files.memory_table()
-    default = load_config(files.write()).memory
-    files.text = files.valid_text() + files.memory_table(today_hours="inf", today_bytes="1024")
-
-    memory = load_config(files.write()).memory
-
-    assert default is not None
-    assert default.today == DEFAULT_TODAY
-    assert memory is not None
-    assert memory.today == TodayBounds(hours=math.inf, size_bytes=1024)
-
-
 @pytest.mark.parametrize(
     ("written", "days", "minutes"),
     [
@@ -517,25 +502,60 @@ def test_a_memory_table_keeps_and_sweeps_by_default_unless_it_sets_either_or_lea
     assert memory.sweep_minutes == minutes
 
 
+def test_the_history_is_bounded_at_49152_bytes_and_a_step_keeps_32768_unless_the_file_says_otherwise(files):
+    config = load_config(files.write())
+
+    assert (config.history_bytes, config.history_keep_bytes) == (49152, 32768)
+
+
 @pytest.mark.parametrize(
-    ("written", "bytes_kept"),
-    [(None, DEFAULT_HISTORY_BYTES), ("1024", 1024)],
-    ids=["absent", "set"],
+    ("bound", "kept"), [(2048, 1024), (1024, 1024)], ids=["a step keeps less", "a step keeps all it may hold"]
 )
-def test_the_history_is_bounded_by_the_default_unless_the_file_sets_history_bytes(files, written, bytes_kept):
-    if written is not None:
-        files.text = f"history_bytes = {written}\n{files.text}"
+def test_the_file_sets_the_history_bound_and_what_a_step_keeps(files, bound, kept):
+    files.text = f"history_bytes = {bound}\nhistory_keep_bytes = {kept}\n{files.text}"
 
-    assert load_config(files.write()).history_bytes == bytes_kept
+    config = load_config(files.write())
+
+    assert (config.history_bytes, config.history_keep_bytes) == (bound, kept)
 
 
+def test_a_step_that_keeps_more_than_the_history_may_hold_stops_the_start_and_names_the_field(
+    files, monkeypatch, capsys
+):
+    files.text = f"history_bytes = 1024\nhistory_keep_bytes = 1025\n{files.text}"
+
+    assert "history_keep_bytes" in fails_at_start(files.write(), monkeypatch, capsys)
+
+
+@pytest.mark.parametrize("field", ["history_bytes", "history_keep_bytes"])
 @pytest.mark.parametrize("written", ["0", "-1", "1.5", '"1024"', "true"])
 def test_a_history_bound_that_is_no_positive_integer_stops_the_start_and_names_the_field(
+    files, monkeypatch, capsys, field, written
+):
+    files.text = f"{field} = {written}\n{files.text}"
+
+    assert field in fails_at_start(files.write(), monkeypatch, capsys)
+
+
+@pytest.mark.parametrize(
+    ("written", "seconds"),
+    [(None, DEFAULT_BUDGET_PAUSE_CAP_SECONDS), ("60.5", 60.5), ("1", 1.0)],
+    ids=["absent", "set", "at the backoff base"],
+)
+def test_the_pause_for_a_spent_budget_is_capped_by_the_default_unless_the_file_sets_its_cap(files, written, seconds):
+    if written is not None:
+        files.text = f"budget_pause_cap_seconds = {written}\n{files.text}"
+
+    assert load_config(files.write()).budget_pause_cap_seconds == seconds
+
+
+@pytest.mark.parametrize("written", ["0", "0.5", "-1", '"60"', "true", "inf", "nan"])
+def test_a_pause_cap_below_the_backoff_base_or_no_number_stops_the_start_and_names_the_field(
     files, monkeypatch, capsys, written
 ):
-    files.text = f"history_bytes = {written}\n{files.text}"
+    files.text = f"budget_pause_cap_seconds = {written}\n{files.text}"
 
-    assert "history_bytes" in fails_at_start(files.write(), monkeypatch, capsys)
+    assert "budget_pause_cap_seconds" in fails_at_start(files.write(), monkeypatch, capsys)
 
 
 def test_a_file_without_a_memory_table_opens_no_store(files):
@@ -556,10 +576,6 @@ def test_a_file_without_a_memory_table_opens_no_store(files):
         ({"write_seconds": "0"}, "memory.write_seconds"),
         ({"write_seconds": '"2"'}, "memory.write_seconds"),
         ({"write_seconds": "nan"}, "memory.write_seconds"),
-        ({"today_hours": "0"}, "memory.today_hours"),
-        ({"today_hours": '"24"'}, "memory.today_hours"),
-        ({"today_hours": "nan"}, "memory.today_hours"),
-        ({"today_bytes": "0"}, "memory.today_bytes"),
         ({"lines_keep_days": "0"}, "memory.lines_keep_days"),
         ({"lines_keep_days": "-3"}, "memory.lines_keep_days"),
         ({"lines_keep_days": '"30"'}, "memory.lines_keep_days"),
@@ -568,7 +584,6 @@ def test_a_file_without_a_memory_table_opens_no_store(files):
         ({"sweep_minutes": "-3"}, "memory.sweep_minutes"),
         ({"sweep_minutes": '"60"'}, "memory.sweep_minutes"),
         ({"sweep_minutes": "nan"}, "memory.sweep_minutes"),
-        ({"today_bytes": "1.5"}, "memory.today_bytes"),
         ({"password": '"in-the-file"'}, "memory.password"),
     ],
     ids=[
@@ -583,10 +598,6 @@ def test_a_file_without_a_memory_table_opens_no_store(files):
         "write bound zero",
         "write bound a string",
         "write bound no number",
-        "day of no hours",
-        "day hours a string",
-        "day hours no number",
-        "day of no bytes",
         "keep period of no days",
         "keep period negative",
         "keep period a string",
@@ -595,7 +606,6 @@ def test_a_file_without_a_memory_table_opens_no_store(files):
         "sweep period negative",
         "sweep period a string",
         "sweep period no number",
-        "day bytes a fraction",
         "password written into the file",
     ],
 )

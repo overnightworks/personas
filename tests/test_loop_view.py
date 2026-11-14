@@ -5,18 +5,18 @@ from __future__ import annotations
 import logging
 import secrets
 from dataclasses import replace
-from http import HTTPStatus
 
 import pytest
-from agents.backend.fake_gateway import Reply, completion, tool_call, tool_round
+from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.member import STANDING_URI, FigureRef, PlaceRef, place_view_uri, place_window_uri
 
 from personas.config import Voice, load_config
-from personas.decision import NO_TURNS_CODE, TURN_CANCELLED_CODE
+from personas.decision import BACKOFF_BASE_SECONDS, NO_TURNS_CODE, TURN_CANCELLED_CODE
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, say_in_the_call
+from tests.support.fakes import SweepClock
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
-from tests.support.history import entry, history_of, said_and_taken, settled, view_entry, woke_at_table
+from tests.support.history import after_start, entry, history_of, said_and_taken, settled, view_entry, woke_at_table
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, READ, SAY_TOOL, active, formatted, invited, paused
 from tests.support.realm import AGENT_NAME
@@ -45,12 +45,12 @@ def waits(runner, revision: int, place: PlaceRef = TABLE) -> dict[str, str]:
 
 
 def told_states(runner) -> list[object]:
-    """The state of the view entry each turn is told as new, in the order of the turns."""
+    """The state of the view entry each turn is for, in the order of the turns."""
     return [
         each["state"]
         for opening in runner.gateway.openings()
-        for each in opening.room["history"]["entries"]
-        if each["entry"] == "view" and each["new"]
+        for each in opening.for_entries
+        if each["entry"] == "view"
     ]
 
 
@@ -183,10 +183,10 @@ async def test_a_view_that_moves_to_a_revision_waiting_for_him_gets_one_turn_tol
         "history": history_of(
             [
                 view_entry(app_url, first_state, revision=1, awaits_you=False),
-                view_entry(app_url, state, revision=2, new=True),
+                view_entry(app_url, state, revision=2),
             ]
         ),
-        "woke": woke_at_table(app_url),
+        "woke": woke_at_table(app_url, 2),
     }
     assert opening.system == runner.files.persona_prompt
     assert sorted(runner.gateway.offered_tools()) == sorted([SAY_TOOL, CREATE_SONG, GENERATE_SONG])
@@ -198,8 +198,6 @@ async def test_a_view_that_moves_to_a_revision_waiting_for_him_gets_one_turn_tol
     [
         pytest.param(says(TABLE.id, ANSWER), False, id="the turn calls a tool that moves nothing"),
         pytest.param([completion("done")], False, id="the turn makes no call"),
-        pytest.param([Reply(status=HTTPStatus.TOO_MANY_REQUESTS)], False, id="the gateway is busy"),
-        pytest.param([BUDGET_SPENT], False, id="the budget is spent"),
         pytest.param(
             [tool_round(tool_call("call-0", SAY_TOOL, {"place": TABLE.id, "text": ANSWER}))],
             True,
@@ -220,6 +218,52 @@ async def test_a_turn_that_ends_and_leaves_its_revision_waiting_gets_no_second_t
     await runner.gateway.until_turns(2)
 
     assert told_states(runner) == [first, second]
+
+
+async def test_a_view_turn_the_budget_ended_runs_again_at_the_same_revision_after_the_pause_with_no_new_event(runner):
+    runner.clock = SweepClock(BACKOFF_BASE_SECONDS)
+    runner.gateway = Gateway(BUDGET_SPENT, completion("done"))
+    await seated_at_a_table_whose_view_waits(runner)
+    await runner.clock.until_waiting(1)
+    held_requests = len(runner.gateway.requests)
+    runner.clock.open_gate()
+    await runner.gateway.until_turns(2, why="view")
+
+    assert held_requests == 1
+    assert [opening.room["woke"] for opening in runner.gateway.openings()] == [
+        woke_at_table(runner.config.apps[0].mcp_url, 1)
+    ] * 2
+    assert len({opening.room["history"]["entries"][-1]["revision"] for opening in runner.gateway.openings()}) == 1
+
+
+async def test_a_newer_revision_during_the_pause_replaces_the_one_that_was_due_and_does_not_end_the_pause(runner):
+    runner.clock = SweepClock(BACKOFF_BASE_SECONDS)
+    runner.gateway = Gateway(BUDGET_SPENT, completion("done"))
+    first = await seated_at_a_table_whose_view_waits(runner)
+    await runner.clock.until_waiting(1)
+    reads = runner.app.view_reads(TABLE)
+    newer = waits(runner, 2)
+    await runner.app.until_view_read(TABLE, reads + 1)
+    held_requests = len(runner.gateway.requests)
+    runner.clock.open_gate()
+    await runner.reports.until_a_turn_completed()
+
+    assert held_requests == 1
+    assert told_states(runner) == [first, newer]
+    assert len(runner.gateway.requests) == 2
+
+
+async def test_a_place_left_during_the_pause_gets_no_turn_and_the_next_place_follows(runner):
+    runner.clock = SweepClock(BACKOFF_BASE_SECONDS)
+    runner.gateway = Gateway(BUDGET_SPENT, completion("done"))
+    first = await seated_at_a_table_whose_view_waits(runner)
+    await runner.clock.until_waiting(1)
+    runner.app.stand(SUBJECT, at_table(OTHER_TABLE))
+    other = waits(runner, 1, OTHER_TABLE)
+    await runner.reports.until_a_turn_completed()
+
+    assert told_states(runner) == [first, other]
+    assert len(runner.gateway.requests) == 2
 
 
 async def test_a_turn_that_moves_the_app_to_a_revision_that_waits_again_starts_that_revision_afresh(runner):
@@ -365,7 +409,7 @@ PLACES_WITH_A_VIEW = [
 
 
 @pytest.mark.parametrize("place", PLACES_WITH_A_VIEW)
-async def test_the_lines_of_a_place_enter_his_history_before_the_view_of_that_wake_and_only_the_view_is_new(
+async def test_the_lines_of_a_place_enter_his_history_before_the_view_of_that_wake_and_only_the_view_woke_the_turn(
     runner, place
 ):
     said = ("first", "second")
@@ -379,7 +423,7 @@ async def test_the_lines_of_a_place_enter_his_history_before_the_view_of_that_wa
     assert opening.room["history"] == history_of(
         [
             *(entry(app, place.id, text, seq=seq, place_kind=place.kind) for seq, text in enumerate(said, 1)),
-            {**view_entry(app, state, revision=1, new=True), "place": {"kind": place.kind, "id": place.id}},
+            {**view_entry(app, state, revision=1), "place": {"kind": place.kind, "id": place.id}},
         ]
     )
     assert opening.room["woke"]["why"] == "view"
@@ -410,7 +454,7 @@ async def test_the_lines_said_between_his_accept_and_the_first_view_are_told_tho
         [
             entry(app, TABLE.id, "said", seq=1, place_kind=TABLE.kind),
             entry(app, TABLE.id, "acted", seq=2, place_kind=TABLE.kind, act=True),
-            {**view_entry(app, state, revision=1, new=True), "place": {"kind": TABLE.kind, "id": TABLE.id}},
+            {**view_entry(app, state, revision=1), "place": {"kind": TABLE.kind, "id": TABLE.id}},
         ]
     )
 
@@ -426,8 +470,8 @@ async def test_a_line_of_someone_else_at_a_place_with_a_view_starts_no_turn_and_
 
     (opening,) = runner.gateway.openings()
     [told] = [each for each in opening.room["history"]["entries"] if each["entry"] == "line"]
-    assert (told["text"], told.get("act", False), told["new"]) == ("a remark", act, False)
-    assert [each["new"] for each in opening.room["history"]["entries"]] == [False, False, True]
+    assert (told["text"], told.get("act", False)) == ("a remark", act)
+    assert [opening.is_for(each) for each in opening.room["history"]["entries"]] == [False, False, True]
 
 
 async def test_a_view_place_with_an_empty_window_is_read_view_first_then_window_with_no_extra_standing_read(runner):
@@ -462,7 +506,9 @@ async def test_a_window_that_fails_at_a_view_place_backs_off_and_the_resume_give
 
     (opening,) = runner.gateway.openings()
     app = runner.config.apps[0].mcp_url
-    assert opening.room["history"] == history_of([view_entry(app, state, revision=1, new=True)])
+    assert opening.room["history"] == history_of(
+        [view_entry(app, state, revision=1, at=after_start(int(BACKOFF_BASE_SECONDS)))]
+    )
 
 
 async def test_the_lines_a_view_place_held_before_a_restart_are_never_taken_and_the_ones_said_after_it_are(runner):

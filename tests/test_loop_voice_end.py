@@ -203,18 +203,25 @@ async def test_a_gateway_that_stops_the_turn_while_a_sentence_is_sent_and_one_is
     runner,
 ):
     await a_voice_call(runner, completion("done"))
+    sleeps = gated(runner)
     reply = runner.gateway.pause_request(1, "First sentence. Second sentence. Thi", "rd.")
     answer = runner.app.hold_next_speak()
     say_in_the_call(runner, ADDRESSED)
     await runner.app.until_called(1)
     reply.cut()
     answer.set()
-    await runner.reports.until(Event.TURN_ENDED)
+    await runner.reports.until(Event.PAUSED)
+    await sleeps.until_began(1)
+    sleeps.let_through()
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.gateway.until_turns(2)
 
     assert sentences_spoken(runner) == ["First sentence."]
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, FailureCode.PROVIDER_ERROR.value)]
+    assert runner.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.TURN_ENDED, FailureCode.PROVIDER_ERROR.value),
+        (Event.PAUSED, FailureCode.PROVIDER_ERROR.value),
+    ]
     (sent,) = runner.gateway.turns()[1].told("speech")
     assert (sent["text"], sent["outcome"]) == ("First sentence.", {"answered": True})
 
@@ -229,12 +236,18 @@ async def test_a_gateway_that_stops_the_turn_while_a_sentence_waits_cancels_its_
     await sleeps.until_began(1)
     reply.cut()
     await sleeps.until_cancelled()
-    await runner.reports.until(Event.TURN_ENDED)
+    await runner.reports.until(Event.PAUSED)
+    await sleeps.until_began(2)
+    sleeps.let_through()
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.gateway.until_turns(2)
 
     assert sentences_spoken(runner) == ["First sentence."]
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, FailureCode.PROVIDER_ERROR.value)]
+    assert runner.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.TURN_ENDED, FailureCode.PROVIDER_ERROR.value),
+        (Event.PAUSED, FailureCode.PROVIDER_ERROR.value),
+    ]
     (sent,) = runner.gateway.turns()[1].told("speech")
     assert (sent["text"], sent["outcome"]) == ("First sentence.", {"answered": True})
 
@@ -256,13 +269,19 @@ async def test_a_turn_past_its_deadline_when_his_line_entered_sends_no_call_or_s
     await sleeps.until_began(1)
     runner.clock.time += PERSONA_MAX_DURATION_SECONDS
     runner.app.end_sentence()
-    await runner.reports.until(Event.TURN_ENDED)
+    await runner.reports.until(Event.PAUSED)
+    await sleeps.until_began(2)
+    sleeps.let_through()
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.gateway.until_turns(2)
 
     assert len(runner.app.spoken) == 1
     assert runner.app.said == []
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, FailureCode.LIMIT_EXCEEDED.value)]
+    assert runner.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.TURN_ENDED, FailureCode.LIMIT_EXCEEDED.value),
+        (Event.PAUSED, FailureCode.LIMIT_EXCEEDED.value),
+    ]
     assert [each["text"] for each in runner.gateway.turns()[1].told("speech")] == sentences_spoken(runner)[:1]
     assert not runner.task.done()
 
@@ -279,13 +298,17 @@ async def test_a_line_that_never_arrives_ends_the_turn_limit_exceeded_once_with_
     assert sleeps.began == [PERSONA_MAX_DURATION_SECONDS]
     runner.clock.time += PERSONA_MAX_DURATION_SECONDS
     sleeps.release.set()
-    await runner.reports.until(Event.TURN_ENDED)
+    await runner.reports.until(Event.PAUSED)
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.gateway.until_turns(2)
 
     assert len(runner.app.spoken) == 1
     assert runner.app.said == []
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, FailureCode.LIMIT_EXCEEDED.value)]
+    assert runner.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.TURN_ENDED, FailureCode.LIMIT_EXCEEDED.value),
+        (Event.PAUSED, FailureCode.LIMIT_EXCEEDED.value),
+    ]
     assert [each["text"] for each in runner.gateway.turns()[1].told("speech")] == sentences_spoken(runner)[:1]
     assert not runner.task.done()
 

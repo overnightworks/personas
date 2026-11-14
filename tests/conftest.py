@@ -15,7 +15,7 @@ from agents.backend.gateway import GatewayBackend
 from agents.turn import Principal
 
 from personas.app_session import READ_SECONDS, open_mcp_session
-from personas.config import DEFAULT_HISTORY_BYTES, Voice, load_config
+from personas.config import DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES, Voice, load_config
 from personas.loop import AgentLoop, Boundaries
 from personas.main import QUIET_LIBRARIES, SweepingBoundaries, configure_logging, run_with_sweep
 from personas.mind import Mind
@@ -76,7 +76,13 @@ class Scenario:
         self.reports = reports
         self.ready = FakeReadyMarker()
         boundaries = Boundaries(tokens, session.open, clock, reports, self.ready)
-        self.loop = AgentLoop(credentials(), app_target(), boundaries, Mind(DEFAULT_HISTORY_BYTES), (app_target(),))
+        self.loop = AgentLoop(
+            credentials(),
+            app_target(),
+            boundaries,
+            Mind(DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES),
+            (app_target(),),
+        )
 
     async def play(self) -> None:
         """Runs the loop until the script is spent, which is when a boundary blocks, then stops it."""

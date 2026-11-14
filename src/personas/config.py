@@ -12,12 +12,13 @@ there. ``call_seconds`` bounds each request a turn of another app makes to an ap
 since one turn holds the tools of several, and no app names ``speak``, the voice's own tool, which is never offered to
 a turn.
 The top-level ``history_bytes`` bounds the history each agent keeps in memory of the lines he took in, the views he
-read and the calls relayed for him at any of his apps and tells every turn.
+read and the calls relayed for him at any of his apps and tells every turn; past it the oldest messages leave in one
+step until what stays fits ``history_keep_bytes``, which is never above ``history_bytes``. The top-level
+``budget_pause_cap_seconds`` is the longest wait between his turns while the gateway refuses them for a spent budget.
 The optional ``[memory]`` table names the Postgres database that keeps every line the agents read: its host, port,
-database, user, the file holding the password, ``write_seconds``, the bound on one write or read, and how far back
-(``today_hours``) and how much (``today_bytes``) a turn is told of the lines he kept that his history does not hold,
-and how long a line is kept (``lines_keep_days``) and how often older ones are swept (``sweep_minutes``); ``inf``
-keeps every line or sweeps once, at the start.
+database, user, the file holding the password, ``write_seconds``, the bound on one write or read, how long a line is
+kept (``lines_keep_days``) and how often older ones are swept (``sweep_minutes``); ``inf`` keeps every line or sweeps
+once, at the start.
 Every value is validated at start and an error names the field or path, never a secret.
 """
 
@@ -43,8 +44,7 @@ from pydantic import (
     model_validator,
 )
 
-from personas.decision import TURN_ROLE
-from personas.recall import TodayBounds
+from personas.decision import BACKOFF_BASE_SECONDS, DEFAULT_BUDGET_PAUSE_CAP_SECONDS, TURN_ROLE
 from personas.secret import Secret
 
 if TYPE_CHECKING:
@@ -53,8 +53,8 @@ if TYPE_CHECKING:
 CONFIG_ENVIRONMENT_VARIABLE: Final = "PERSONAS_CONFIG"
 DEFAULT_CALL_SECONDS: Final = 30.0
 DEFAULT_WRITE_SECONDS: Final = 2.0
-DEFAULT_TODAY: Final = TodayBounds(hours=24.0, size_bytes=32768)
-DEFAULT_HISTORY_BYTES: Final = 32768
+DEFAULT_HISTORY_BYTES: Final = 49152
+DEFAULT_HISTORY_KEEP_BYTES: Final = 32768
 DEFAULT_LINES_KEEP_DAYS: Final = 30.0
 DEFAULT_SWEEP_MINUTES: Final = 60.0
 
@@ -99,8 +99,8 @@ class AgentCredentials:
 
 @dataclass(frozen=True)
 class MemoryTarget:
-    """The database that keeps the lines, how long one write or read of it may take, what a turn is told of the day
-    and how long a line is kept, with how often older ones are swept."""
+    """The database that keeps the lines, how long one write or read of it may take and how long a line is kept, with
+    how often older ones are swept."""
 
     host: str
     port: int
@@ -108,7 +108,6 @@ class MemoryTarget:
     user: str
     password: Secret
     write_seconds: float = DEFAULT_WRITE_SECONDS
-    today: TodayBounds = DEFAULT_TODAY
     lines_keep_days: float = DEFAULT_LINES_KEEP_DAYS
     sweep_minutes: float = DEFAULT_SWEEP_MINUTES
 
@@ -122,6 +121,8 @@ class Config:
     gateway: AgentConfig | None = None
     memory: MemoryTarget | None = None
     history_bytes: int = DEFAULT_HISTORY_BYTES
+    history_keep_bytes: int = DEFAULT_HISTORY_KEEP_BYTES
+    budget_pause_cap_seconds: float = DEFAULT_BUDGET_PAUSE_CAP_SECONDS
 
 
 class _Entry(BaseModel):
@@ -183,8 +184,6 @@ class _MemoryEntry(_Entry):
     user: str = Field(min_length=1)
     password_file: Path
     write_seconds: PositiveFloat = Field(default=DEFAULT_WRITE_SECONDS, strict=True)
-    today_hours: PositiveFloat = Field(default=DEFAULT_TODAY.hours, strict=True)
-    today_bytes: PositiveInt = Field(default=DEFAULT_TODAY.size_bytes, strict=True)
     lines_keep_days: PositiveFloat = Field(default=DEFAULT_LINES_KEEP_DAYS, strict=True)
     sweep_minutes: PositiveFloat = Field(default=DEFAULT_SWEEP_MINUTES, strict=True)
 
@@ -197,6 +196,10 @@ class _FileModel(_Entry):
     gateway: AgentConfig | None = None
     memory: _MemoryEntry | None = None
     history_bytes: PositiveInt = Field(default=DEFAULT_HISTORY_BYTES, strict=True)
+    history_keep_bytes: PositiveInt = Field(default=DEFAULT_HISTORY_KEEP_BYTES, strict=True)
+    budget_pause_cap_seconds: float = Field(
+        default=DEFAULT_BUDGET_PAUSE_CAP_SECONDS, strict=True, ge=BACKOFF_BASE_SECONDS, allow_inf_nan=False
+    )
 
     @model_validator(mode="after")
     def _tools_need_a_gateway_and_personas(self) -> Self:
@@ -205,6 +208,12 @@ class _FileModel(_Entry):
                 raise ValueError("gateway: required when an app binds tools")
             if any(agent.persona_file is None for agent in self.agents):
                 raise ValueError("persona_file: required for every agent when an app binds tools")
+        return self
+
+    @model_validator(mode="after")
+    def _a_step_keeps_no_more_than_the_history_may_hold(self) -> Self:
+        if self.history_keep_bytes > self.history_bytes:
+            raise ValueError("history_keep_bytes: must not be above history_bytes")
         return self
 
     @field_validator("ready_file")
@@ -295,7 +304,6 @@ def _memory_target(entry: _MemoryEntry | None) -> MemoryTarget | None:
     if entry is None:
         return None
     password = _read_secret("memory.password_file", entry.password_file)
-    today = TodayBounds(entry.today_hours, entry.today_bytes)
     return MemoryTarget(
         entry.host,
         entry.port,
@@ -303,7 +311,6 @@ def _memory_target(entry: _MemoryEntry | None) -> MemoryTarget | None:
         entry.user,
         password,
         entry.write_seconds,
-        today,
         entry.lines_keep_days,
         entry.sweep_minutes,
     )
@@ -338,4 +345,6 @@ def load_config(environment: Mapping[str, str]) -> Config:
         gateway=parsed.gateway,
         memory=_memory_target(parsed.memory),
         history_bytes=parsed.history_bytes,
+        history_keep_bytes=parsed.history_keep_bytes,
+        budget_pause_cap_seconds=parsed.budget_pause_cap_seconds,
     )

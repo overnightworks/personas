@@ -292,14 +292,15 @@ async def test_the_call_past_the_turn_bound_of_the_three_apps_ends_the_turn_as_l
     rounds = rounds_spending_every_bound(runner)
     await seated_in_the_call(runner, other, *rounds, tool_round(play(words(1)[0])), completion("done"))
     say_in_the_call(runner, ADDRESSED)
-    await runner.reports.until(Event.TURN_ENDED)
+    await runner.reports.until(Event.PAUSED)
 
     assert runner.gateway.arrivals == len(rounds) + 1
     assert other.calls == [PLAY_TOOL] * runner.config.apps[1].binding.max_tool_calls
     assert len(runner.app.said) == runner.config.apps[0].binding.max_tool_calls
     assert len(songmaker.called) == CALLS
     assert runner.reports.reported(apps=True, started=False) == [
-        (Event.TURN_ENDED, FailureCode.LIMIT_EXCEEDED.value, url_of(runner, 0))
+        (Event.TURN_ENDED, FailureCode.LIMIT_EXCEEDED.value, url_of(runner, 0)),
+        (Event.PAUSED, FailureCode.LIMIT_EXCEEDED.value, url_of(runner, 0)),
     ]
 
 

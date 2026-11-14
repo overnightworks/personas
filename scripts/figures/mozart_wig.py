@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from figures.figure_body import ACROSS
 from figures.figure_head import NECK_BINDER
 from figures.figure_parts import Colour, Material, Part, mixed, part
-from figures.figure_shapes import ellipsoid
+from figures.figure_shapes import add, ellipsoid, scaled, subtract
 from figures.figure_skeleton import EYE_HEIGHT
 from figures.figure_surfaces import arc, interpolated, mirrored, rippled, shell, spread, sweep
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from figures.figure_shapes import Vector
 
 POWDER = (238, 236, 232)
@@ -34,6 +36,16 @@ PROFILE = (
     (math.radians(228.0), (0.144, 0.080)),
     (math.radians(244.0), (0.162, 0.062)),
 )
+# Angle across the head from its middle, then the pitch at which the hair ends there: at the nape in the middle, behind
+# the ear at the sides.
+REAR = (
+    (math.radians(0.0), (math.radians(244.0),)),
+    (math.radians(30.0), (math.radians(242.0),)),
+    (math.radians(55.0), (math.radians(232.0),)),
+    (math.radians(80.0), (math.radians(214.0),)),
+)
+# The pitch over which the hair sinks to its lining before it ends.
+CLOSING = math.radians(36.0)
 ROWS = 32
 COLUMNS = 34
 REACH = math.radians(80.0)
@@ -52,7 +64,7 @@ ROLL_END = math.radians(80.0)
 # The queue from under the gathered hair at the nape, over the collar and down the back, with its radii across and
 # in depth; the bow ties it where it leaves the wig.
 QUEUE = (
-    ((0.0, 1.512, -0.072), (0.028, 0.016)),
+    ((0.0, 1.53, -0.085), (0.026, 0.010)),
     ((0.0, 1.475, -0.082), (0.018, 0.014)),
     ((0.0, 1.44, -0.097), (0.014, 0.013)),
     ((0.0, 1.40, -0.114), (0.015, 0.014)),
@@ -65,8 +77,18 @@ BOW: Vector = (0.0, 1.478, -0.099)
 RIBBON_END = ((0.004, 1.472, -0.103), (0.020, 1.44, -0.087), (0.030, 1.395, -0.106))
 
 
+class _Place(NamedTuple):
+    """A point of the cap: its pitch, its angle across the head and the pitch at which the hair ends there."""
+
+    pitch: float
+    across: float
+    end: float
+
+
 def mozart_wig() -> list[Part]:
-    cap = shell(_cap_rows(1.0, STRAND_DEPTH), _cap_rows(LINING, 0.0))
+    places = _cap_places()
+    lining = _cap_rows(places, LINING, 0.0)
+    cap = shell(_sunk(places, _cap_rows(places, 1.0, STRAND_DEPTH), lining), lining)
     queue = sweep([place for place, _ in QUEUE], [radii for _, radii in QUEUE], ACROSS, 10)
     return [
         part(cap, _powder, Material.HAIR, NECK_BINDER),
@@ -81,16 +103,49 @@ def _powder(position: Vector) -> Colour:
     return mixed(POWDER, SHADE, 0.3 - 0.3 * math.cos(2.0 * math.pi * position[0] / 0.011))
 
 
-def _cap_rows(scale: float, strand_depth: float) -> list[list[Vector]]:
-    """Arcs over the head from ear to ear, from the hairline back to the nape, in strands `strand_depth` deep."""
+def _cap_places() -> list[list[_Place]]:
+    """The cap's grid: rows from the hairline back, each column running to the pitch where the hair ends there."""
+    rows: list[list[_Place]] = []
+    for share in spread(0.0, 1.0, ROWS):
+        row: list[_Place] = []
+        for across in spread(-REACH, REACH, COLUMNS):
+            (end,) = interpolated(REAR, abs(across))
+            row.append(_Place(PROFILE[0][0] + (end - PROFILE[0][0]) * share, across, end))
+        rows.append(row)
+    return rows
+
+
+def _cap_rows(places: Sequence[Sequence[_Place]], scale: float, strand_depth: float) -> list[list[Vector]]:
+    """The cap from ear to ear, from the hairline back to where the hair ends, in strands `strand_depth` deep."""
     rows: list[list[Vector]] = []
-    for pitch in spread(PROFILE[0][0], PROFILE[-1][0], ROWS):
-        radius, half_width = interpolated(PROFILE, pitch)
-        over = (0.0, math.sin(pitch), math.cos(pitch))
-        radii = (half_width * scale, radius * scale)
-        row = arc(CENTRE, ACROSS, over, radii, spread(-REACH, REACH, COLUMNS), SQUARENESS)
+    for row_places in places:
+        row: list[Vector] = []
+        for pitch, across, _ in row_places:
+            radius, half_width = interpolated(PROFILE, pitch)
+            over = (0.0, math.sin(pitch), math.cos(pitch))
+            radii = (half_width * scale, radius * scale)
+            row.append(arc(CENTRE, ACROSS, over, radii, [across], SQUARENESS)[0])
         rows.append(rippled(row, CENTRE, STRANDS, strand_depth))
     return rows
+
+
+def _sunk(
+    places: Sequence[Sequence[_Place]], surface: Sequence[Sequence[Vector]], lining: Sequence[Sequence[Vector]]
+) -> list[list[Vector]]:
+    """The surface drawn down to the lining as the hair ends, so the cap closes in a hairline and has no end face."""
+    return [
+        [
+            add(inside, scaled(subtract(outside, inside), _quarter_circle((end - pitch) / CLOSING)))
+            for (pitch, _, end), outside, inside in zip(row_places, outer_row, inner_row, strict=True)
+        ]
+        for row_places, outer_row, inner_row in zip(places, surface, lining, strict=True)
+    ]
+
+
+def _quarter_circle(share: float) -> float:
+    """0 to 1 over a quarter circle: it stays near 1 until close to 0, then falls away steeply."""
+    clamped = min(1.0, max(0.0, share))
+    return math.sqrt(1.0 - (1.0 - clamped) ** 2)
 
 
 def _rolls() -> list[Part]:
