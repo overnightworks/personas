@@ -1,9 +1,9 @@
 """The memory: a Postgres table of the lines every agent read, verbatim, and the migration that owns its schema.
 
-The runner writes, reads and sweeps through ``PostgresLineStore`` and the ``memory`` commands list and erase through it;
-``migrate`` is the only code that changes the schema. A line is keyed by the agent, the app, the place, the visit and
-its ``seq``, so reading a window again changes nothing and the time of the first read stands. No database
-error reaches a log or a traceback with a parameter or a row in it.
+The runner writes, searches and sweeps through ``PostgresLineStore`` and the ``memory`` commands list and erase through
+it; ``migrate`` is the only code that changes the schema. A line is keyed by the agent, the app, the place, the visit
+and its ``seq``, so reading a window again changes nothing and the time of the first read stands. No database error
+reaches a log or a traceback with a parameter or a row in it.
 """
 
 from __future__ import annotations
@@ -33,6 +33,9 @@ from sqlalchemy import (
     create_engine,
     delete,
     func,
+    literal,
+    literal_column,
+    or_,
     select,
     text,
 )
@@ -40,7 +43,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import InterfaceError, OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
-from personas.entries import Visit
+from personas.entries import KeptLine, Visit
 from personas.failures import (
     STORE_DEFECT_CODE,
     STORE_TIMEOUT_CODE,
@@ -52,13 +55,14 @@ from personas.failures import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Generator
+    from collections.abc import AsyncGenerator, Callable, Generator
     from datetime import datetime
 
     from sqlalchemy import Delete
 
     from personas.config import MemoryTarget
     from personas.entries import WindowRead
+    from personas.recall import LineSearch
 
 MIGRATIONS_DIRECTORY: Final = Path(__file__).parent / "migrations"
 # Serialises concurrent `personas migrate` runs; any constant shared by all of them does.
@@ -69,6 +73,8 @@ MINIMUM_CONNECT_SECONDS: Final = 2
 fraction, so the bound is rounded up."""
 NUL: Final = "\x00"
 REPLACEMENT: Final = "�"
+SIMPLE_CONFIGURATION: Final = literal_column("'simple'::regconfig", Text)
+"""Postgres full text without stemming or stop words: a word is what the parser makes of the text, lower case."""
 
 _LINES: Final = Table(
     "lines",
@@ -205,12 +211,13 @@ class PostgresLineStore:
 
     It opens no connection until the first write, read or sweep, which checks the schema is at its head; a schema
     that is not ends the runner. A pooled connection is not checked before its use: a stale one fails its write or
-    read, and the pool takes another for the next.
+    read, and the pool takes another for the next. ``engine_factory`` makes the engine; a test hands it a driver of its
+    own.
     """
 
-    def __init__(self, target: MemoryTarget) -> None:
+    def __init__(self, target: MemoryTarget, engine_factory: Callable[..., AsyncEngine] = create_async_engine) -> None:
         self._write_bound = _write_bound(target)
-        self._engine: AsyncEngine = create_async_engine(
+        self._engine: AsyncEngine = engine_factory(
             _url(target), hide_parameters=True, connect_args=_connect_arguments(target)
         )
         self._schema_checked = False
@@ -220,6 +227,59 @@ class PostgresLineStore:
         statement = insert(_LINES).values(_rows_of(read)).on_conflict_do_nothing()
         async with self._bounded_transaction() as connection:
             await connection.execute(statement)
+
+    async def search(self, search: LineSearch) -> tuple[KeptLine, ...]:
+        """The lines of the agent's place that hold every word of the text and were first read before the time, newest
+        first, at most the rows asked for; a text without a word matches every line.
+
+        It raises as a write does: ``StoreUnavailable`` or ``StoreDefect`` with a code, never the text searched for.
+        """
+        words = func.plainto_tsquery(SIMPLE_CONFIGURATION, literal(_without_nul(search.text), Text))
+        holds_every_word = func.to_tsvector(SIMPLE_CONFIGURATION, _LINES.c.text).bool_op("@@")(words)
+        statement = (
+            select(
+                _LINES.c.app,
+                _LINES.c.place_kind,
+                _LINES.c.place_id,
+                _LINES.c.generation,
+                _LINES.c.seq,
+                _LINES.c.first_read_at,
+                _LINES.c.speaker,
+                _LINES.c.kind,
+                _LINES.c.text,
+                _LINES.c.own,
+                _LINES.c.spoken,
+                _LINES.c.cut,
+                _LINES.c.act,
+            )
+            .where(
+                _LINES.c.client_id == search.client_id,
+                _LINES.c.app == search.app,
+                _LINES.c.place_kind == _without_nul(search.place.kind),
+                _LINES.c.place_id == _without_nul(search.place.id),
+                _LINES.c.first_read_at < search.first_read_before,
+                or_(func.numnode(words) == 0, holds_every_word),
+            )
+            .order_by(_LINES.c.first_read_at.desc(), _LINES.c.seq.desc())
+            .limit(search.rows)
+        )
+        async with self._bounded_transaction() as connection:
+            rows = (await connection.execute(statement)).all()
+        return tuple(
+            KeptLine(
+                Visit(row.app, PlaceRef(kind=row.place_kind, id=row.place_id), row.generation),
+                int(row.seq),
+                row.first_read_at,
+                row.speaker,
+                row.kind,
+                row.text,
+                own=row.own,
+                spoken=row.spoken,
+                cut=row.cut,
+                act=row.act,
+            )
+            for row in rows
+        )
 
     async def kept_visits(self, client_id: str | None) -> tuple[KeptVisit, ...]:
         """Every agent's visits, or those of one agent, ordered by agent and first read; no line's content."""
@@ -271,9 +331,10 @@ class PostgresLineStore:
                         yield connection
         except TimeoutError:
             raise StoreUnavailable(STORE_TIMEOUT_CODE) from None
-        except StoreUnavailable, StoreDefect:
+        except StoreUnavailable:
             # The driver answers a cancellation with its own cancel request and raises a break of the connection
             # during that wait instead of the cancellation; the time bound has taken back its own request by now.
+            # A defect is no break of the connection: it leaves as itself, so that the turn records it.
             if task_is_being_cancelled():
                 raise asyncio.CancelledError from None
             raise

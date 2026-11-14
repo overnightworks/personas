@@ -30,6 +30,15 @@ from personas.decision import (
 )
 from personas.entries import ActDone, InputSizes, message_bytes, picture_bytes, told_bytes
 from personas.failures import CallFailure, Unreachable, leaves_of, raise_if_cancelled, task_is_being_cancelled
+from personas.recall import (
+    LOOKUPS_SPENT_TEXT,
+    RECALL_DECLARATION,
+    STORE_DID_NOT_ANSWER_TEXT,
+    line_search,
+    lookup_result,
+    search_text,
+    text_refused_text,
+)
 from personas.reporting import Event
 from personas.task_record import (
     RelayFailed,
@@ -57,6 +66,8 @@ if TYPE_CHECKING:
     from personas.decision import Arrived, Occasion, Present, Token
     from personas.entries import History
     from personas.mind import Mind
+    from personas.recall import LookupBounds
+    from personas.remembering import Remembering
     from personas.task_record import TaskRecord
     from personas.tokens import TokenFacts, TokenSource
 
@@ -189,12 +200,14 @@ class Admitted:
 
 class Turning:
     """Runs the turns of one agent in one app, each over a session of its own, holding the tools of every app in the
-    configuration's order: the app's own, those of the apps in ``admitted.apps`` and those of the tools-only apps.
+    configuration's order: the app's own, those of the apps in ``admitted.apps`` and those of the tools-only apps,
+    after the lookup when ``[memory]`` is set.
 
     It holds no state across turns beyond what it records into the agent's mind: each relayed call that passed its
     app's bound, once its request ended. A call is held back, once per turn, when something not his own arrived in
     his history since the turn's admission: it is not sent and the model is told what arrived. The token, its use on
-    a session and the two reports are the loop's, handed over as callables and read at each call.
+    a session and the two reports are the loop's, handed over as callables and read at each call. A lookup reads the
+    memory through the loop's ``Remembering``, takes nothing into the agent's history and is never held back.
     """
 
     def __init__(
@@ -211,6 +224,7 @@ class Turning:
         report: Callable[[Event, str | None, AppTarget | None], None],
         report_turn_end: Callable[[str | None, TurnUsage | None, InputSizes | None], None],
         report_pause: Callable[[float, str], None],
+        remembering: Remembering,
     ) -> None:
         self._agent = agent
         self._app = app
@@ -224,6 +238,7 @@ class Turning:
         self._report = report
         self._report_turn_end = report_turn_end
         self._report_pause = report_pause
+        self._remembering = remembering
 
     async def take(self, setup: TurnSetup, admitted: Admitted, record: TaskRecord) -> None:
         """Runs one turn; whatever way it ends, a defect a request of it met ends the runner loud.
@@ -367,8 +382,9 @@ class Turning:
     async def _hold_tools(
         self, setup: TurnSetup, session: AppSession, record: TaskRecord, admitted: Admitted
     ) -> _HeldTools:
-        """The tools of the place's app, of each app named in the admission and of each tools-only app that answers,
-        in the configuration's order, each app counting its own calls.
+        """The lookup when the configuration has a memory, then the tools of the place's app, of each app named in the
+        admission and of each tools-only app that answers, in the configuration's order, each app counting its own
+        calls.
 
         Of each app only the bound tools it lists now are held, none when it lists none. Another app whose listing
         fails is left out and reported once, and the turn holds the rest.
@@ -377,6 +393,10 @@ class Turning:
         hold = _Hold(admitted.history)
         tools: list[HandTool] = []
         bounds: list[int] = []
+        lookup = self._remembering.lookup
+        if lookup is not None:
+            tools.append(HandTool(RECALL_DECLARATION, partial(self._look, lookup, _Calls(lookup.calls), admitted)))
+            bounds.append(lookup.calls)
         for app, binding in self._apps:
             calls = _Calls(binding.max_tool_calls)
             if app.mcp_url == self._app.mcp_url:
@@ -389,6 +409,27 @@ class Turning:
                 tools.extend(lent)
                 bounds.append(calls.bound)
         return _HeldTools(tuple(tools), turn_call_bound(bounds))
+
+    async def _look(
+        self, lookup: LookupBounds, calls: _Calls, admitted: Admitted, _principal: Principal, arguments: JsonObject
+    ) -> ToolOutcome:
+        """Looks up what the agent's own place held before its history: nothing enters the history, and a lookup is
+        never held back."""
+        if not calls.take():
+            return ToolOutcome(LOOKUPS_SPENT_TEXT, is_error=True)
+        text = search_text(arguments, lookup.result_bytes)
+        if text is None:
+            return ToolOutcome(text_refused_text(lookup.result_bytes), is_error=True)
+        search = line_search(
+            self._agent.client_id, self._app.mcp_url, admitted.place, admitted.history, text, lookup.result_bytes
+        )
+        try:
+            found = await self._remembering.search(search)
+        except Exception as error:
+            raise RelayFailed(error) from None
+        if found is None:
+            return ToolOutcome(STORE_DID_NOT_ANSWER_TEXT, is_error=True)
+        return ToolOutcome(lookup_result(found, lookup.result_bytes), is_error=False)
 
     async def _list_elsewhere(
         self, app: AppTarget, binding: ToolBinding, calls: _Calls, hold: _Hold, record: TaskRecord

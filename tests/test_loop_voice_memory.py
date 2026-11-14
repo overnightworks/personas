@@ -1,4 +1,4 @@
-"""The whole runner, the spoken turn against the real store: what it keeps and what it is told of the day."""
+"""The whole runner, the spoken turn against the real store: what it keeps and the lookup it is handed."""
 
 from __future__ import annotations
 
@@ -8,14 +8,16 @@ from typing import TYPE_CHECKING
 
 import pytest
 from agents.backend.fake_gateway import completion
+from agents.tools import ToolEffect
 
 from personas.failures import STORE_TIMEOUT_CODE
 from personas.memory import PostgresLineStore
+from personas.recall import RECALL_TOOL
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import LIMIT_SECONDS, active
+from tests.support.hopin import LIMIT_SECONDS, SAY_TOOL, active
 from tests.support.postgres import kept_lines, lines_table_locked
 
 if TYPE_CHECKING:
@@ -85,3 +87,20 @@ async def test_a_write_cut_as_a_timeout_lets_the_turn_speak_and_is_logged_once(r
 
     assert runner.app.spoken == [(SUBJECT, PLACE_ID, ANSWER)]
     assert runner.reports.reported().count((Event.STORE_FAILED, STORE_TIMEOUT_CODE)) == 1
+
+
+async def test_a_spoken_turn_with_a_memory_is_handed_the_lookup_first_declared_read_only_before_the_apps_tools(
+    runner, database
+):
+    store = WatchedStore(database)
+    runner.remember_in(store, database)
+    runner.give_voice()
+    runner.gateway = Gateway(completion(ANSWER))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED, spoken=True)
+    await runner.app.spoken_count(1)
+    await store.close()
+
+    (handed,) = runner.handed
+    assert runner.gateway.offered_tools() == [RECALL_TOOL, SAY_TOOL]
+    assert (handed[0].declaration.name, handed[0].declaration.effect) == (RECALL_TOOL, ToolEffect.READ_ONLY)

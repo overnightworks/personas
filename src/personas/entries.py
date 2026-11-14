@@ -114,6 +114,15 @@ class SaidAloud:
 type Entry = KeptLine | ViewSeen | ActDone | SaidAloud
 
 
+def entry_time(entry: Entry) -> datetime:
+    """The wall time an entry was first read, seen or done."""
+    if isinstance(entry, KeptLine):
+        return entry.first_read_at
+    if isinstance(entry, ViewSeen):
+        return entry.read_at
+    return entry.at
+
+
 def told_time(at: datetime) -> str:
     """A wall time as a turn is told it: UTC, whole seconds."""
     return at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")

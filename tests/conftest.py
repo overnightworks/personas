@@ -82,6 +82,7 @@ class Scenario:
             boundaries,
             Mind(DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES),
             (app_target(),),
+            None,
         )
 
     async def play(self) -> None:
@@ -145,6 +146,8 @@ class Harness:
         self.other_apps: list[FakeApp] = []
         self.lines: LineStore | None = None
         self.swept: SweptStore | None = None
+        self.handed: list[tuple[HandTool, ...]] = []
+        """The tools each turn's backend was handed, in the order handed."""
         self.sleeps: HeldSleeps | None = None
         """The held sleeps of the clock, from the first spoken scenario that needs the wait for his own line gated."""
 
@@ -230,7 +233,9 @@ class Harness:
 
     def _backend(self, tools: Iterable[HandTool]) -> AgentBackend:
         assert self.config.gateway is not None
-        return GatewayBackend(self.config.gateway, tools=tools, transport=self.gateway)
+        handed = tuple(tools)
+        self.handed.append(handed)
+        return GatewayBackend(self.config.gateway, tools=handed, transport=self.gateway)
 
     def secrets_and_content(self) -> list[str]:
         return [
