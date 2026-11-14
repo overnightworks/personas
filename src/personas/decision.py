@@ -74,8 +74,6 @@ TURN_ROLE: Final[AgentRole] = "user"
 TURN_CANCELLED_CODE: Final = "cancelled"
 """The code of a turn the loop cancelled because its place left the standing, and of an act whose call was cut while it
 was in flight, by that or by the turn's deadline."""
-SPOKEN_WAIT_BOUND_SECONDS: Final = 30.0
-"""The longest the voice waits after a sentence, whatever length the app says it plays."""
 EARLIER_TODAY_KEY: Final = "earlier_today"
 
 
@@ -264,14 +262,15 @@ def _voice_is_unavailable(checkpoint: Checkpoint | None) -> bool:
     return isinstance(checkpoint, Reading) and checkpoint.voice_state is VoiceState.UNAVAILABLE
 
 
-def spoken_wait_seconds(duration_ms: int) -> float:
-    """How long the voice waits after a sentence the app says plays for ``duration_ms``."""
-    return min(duration_ms / 1000, SPOKEN_WAIT_BOUND_SECONDS)
+def remaining_seconds(now: float, started: float, max_duration_seconds: float) -> float:
+    """What is left of the longest duration of a turn that started at ``started``, at ``now`` on one monotonic scale;
+    never below zero."""
+    return max(0.0, max_duration_seconds - (now - started))
 
 
 def past_deadline(now: float, started: float, max_duration_seconds: float) -> bool:
-    """Whether a turn that started at ``started`` has used its longest duration at ``now``, on one monotonic scale."""
-    return now - started >= max_duration_seconds
+    """Whether a turn that started at ``started`` has used its longest duration at ``now``."""
+    return remaining_seconds(now, started, max_duration_seconds) <= 0.0
 
 
 def is_defect(leaf: BaseException) -> bool:
@@ -467,12 +466,30 @@ class Arrived:
     older_dropped: bool
 
 
+def _entered_since(current: History, taken: int) -> tuple[Entry, ...]:
+    """The entries of ``current`` that were appended after the first ``taken`` ones that were ever appended."""
+    return current.entries[max(0, taken - current.left_out) :]
+
+
 def arrived_since(current: History, admitted: History) -> Arrived | None:
     """What entered ``current`` since ``admitted``, an earlier value of the same history, when any of it is not his own;
     otherwise ``None``. His own lines, his acts and his spoken sentences alone arrive as nothing."""
     if current.heard == admitted.heard:
         return None
-    return Arrived(current.entries[max(0, admitted.taken - current.left_out) :], current.left_out > admitted.taken)
+    return Arrived(_entered_since(current, admitted.taken), current.left_out > admitted.taken)
+
+
+def sentence_ended(history: History, mark: int, at: AppPlace) -> bool:
+    """Whether a sentence sent when ``history`` had taken ``mark`` entries has ended: his own spoken line at ``at`` has
+    entered since, whole or cut. A sentence is in flight alone, so the first such line is its own."""
+    return any(
+        isinstance(entry, KeptLine)
+        and entry.own
+        and entry.spoken
+        and entry.visit.app == at.app
+        and entry.visit.place == at.place
+        for entry in _entered_since(history, mark)
+    )
 
 
 @dataclass(frozen=True)

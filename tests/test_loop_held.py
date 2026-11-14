@@ -35,7 +35,7 @@ from tests.support.history import (
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, ISSUER, LIST_TOOLS, PLAY_TOOL, READ, SAY_TOOL, active
 from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG
-from tests.support.voice import HeldSleeps, a_voice_call
+from tests.support.voice import HeldSleeps, a_voice_call, holding_sentence_ends
 from tests.support.wire import answers_with, cuts, hangs, hangs_once_entered, refuses_with_a_server_error
 
 pytestmark = pytest.mark.anyio
@@ -477,8 +477,10 @@ async def test_a_call_to_the_table_while_it_is_not_his_move_is_the_tables_to_ans
     assert runner.reports.reported(apps=True, started=False) == []
 
 
-async def test_a_sentence_before_a_call_to_a_held_app_is_spoken_and_waited_for_before_the_call_goes_out(runner, other):
-    sleeps = HeldSleeps(runner)
+async def test_a_sentence_before_a_call_to_a_held_app_is_spoken_and_his_line_for_it_awaited_before_the_call_goes_out(
+    runner, other
+):
+    sleeps = holding_sentence_ends(runner)
     spoken, played = "Okay, der Bube.", words(1)[0]
     other.stand(SUBJECT, at_table())
     await a_voice_call(runner, tool_round(play(played), content=spoken), completion("done"))
@@ -487,8 +489,10 @@ async def test_a_sentence_before_a_call_to_a_held_app_is_spoken_and_waited_for_b
 
     assert runner.app.spoken == [(SUBJECT, PLACE_ID, spoken)]
     assert other.calls == []
-    sleeps.release.set()
+    runner.app.end_sentence()
     await other.said_count(1)
+    await runner.app.spoken_count(2)
+    runner.app.end_sentence()
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.gateway.until_turns(2)
 

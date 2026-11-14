@@ -34,6 +34,7 @@ from personas.task_record import (
     ending_loud_when_cancelled,
     ending_with_recorded_defect,
     failure_held_by,
+    failures_leaving_with,
     unreachable_unless_cancelling,
 )
 from personas.voice import Speaking
@@ -249,9 +250,9 @@ class Turning:
             held = failure_held_by(stopped)
             if held is None and record.defect is None:
                 self._report_turn_end(stopped.code.value, None, sizing.sizes())
-            # What left the session beside the stop (a late answer) still goes to the group, to be judged there.
-            rest: list[BaseException] = [held] if held is not None else []
-            rest.extend(leaf for leaf in leaves if leaf is not stopped)
+            # What left the session beside the stop (a late answer, the failure another stop holds) still goes to the
+            # group, to be judged there.
+            rest = failures_leaving_with(stopped, held, leaves)
             if len(rest) == 1:
                 raise rest[0] from None
             if rest:
@@ -315,7 +316,7 @@ class Turning:
                     setup.persona.max_duration_seconds,
                     partial(self._use_current_token, session),
                     lambda event, code: self._report(event, code, None),
-                    self._mind.take,
+                    self._mind,
                 )
                 final = await self._speak_along(events, speaking)
             else:
@@ -326,10 +327,10 @@ class Turning:
     async def _speak_along(self, events: AsyncIterator[TurnEvent], speaking: Speaking) -> FinalEvent | None:
         """Reads the turn's events while the sentences they release are spoken beside them.
 
-        A call is relayed only when the events are asked for again, so it goes out after every sentence before it was
-        spoken. When the events end in an error, the sentence in flight is answered and entered before it is raised;
-        only a cancel cuts the speech. The turn ends once the speech has, and its final event, if it had one, is
-        returned.
+        A call is relayed only when the events are asked for again, so it goes out after his own line for every
+        sentence before it has entered. When the events end in an error, the sentence in flight is answered and entered
+        before it is raised; only a cancel cuts the speech. The turn ends once the speech has, and its final event, if
+        it had one, is returned.
         """
         async with asyncio.TaskGroup() as group:
             group.create_task(speaking.play())

@@ -27,18 +27,27 @@ class Mind:
         self._turns = Turns()
         self._placed = frozenset[str]()
         self._wake_events: list[asyncio.Event] = []
+        self._next_take = asyncio.Event()
 
     @property
     def history(self) -> History:
         return self._history
 
     def take(self, entries: Iterable[Entry]) -> None:
-        """Appends the lines, spoken sentences, views and acts taken, in order; taking nothing leaves the history as
-        it is."""
+        """Appends the lines, spoken sentences, views and acts taken, in order, and sets the event ``next_take`` gave
+        before; taking nothing leaves the history and that event as they are."""
         taken = tuple(entries)
         if not taken:
             return
-        self._history = history_after(self._history, taken, self._size_bytes)
+        history = history_after(self._history, taken, self._size_bytes)
+        this_take, self._next_take = self._next_take, asyncio.Event()
+        self._history = history
+        this_take.set()
+
+    def next_take(self) -> asyncio.Event:
+        """The event the next take sets. A waiter reads it in the same synchronous step as the history it judges, so a
+        take made after that step sets it."""
+        return self._next_take
 
     def stand_at(self, app: str, *, holds: bool) -> None:
         """Records whether he holds an active place at ``app``, as its loop last read his standing."""

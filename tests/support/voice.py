@@ -22,6 +22,7 @@ class HeldSleeps:
         self.cancelled = asyncio.Event()
         self._began = asyncio.Event()
         runner.clock.sleep = self._sleep
+        runner.sleeps = self
 
     async def _sleep(self, seconds: float) -> None:
         self.began.append(seconds)
@@ -38,9 +39,26 @@ class HeldSleeps:
                 self._began.clear()
                 await self._began.wait()
 
+    def let_through(self) -> None:
+        """The sleeps that wait now return; the ones that begin later are held again."""
+        self.release.set()
+        self.release.clear()
+
     async def until_cancelled(self) -> None:
         async with asyncio.timeout(LIMIT_SECONDS):
             await self.cancelled.wait()
+
+
+def gated(runner) -> HeldSleeps:
+    """The runner's held sleeps, made once."""
+    return runner.sleeps or HeldSleeps(runner)
+
+
+def holding_sentence_ends(runner) -> HeldSleeps:
+    """The app's voiced sentences end only when the test calls ``runner.app.end_sentence()``, and the bound of the
+    wait for that end, which is the turn's deadline, passes only when the test releases the returned sleeps."""
+    runner.app.sentence_ends_held = True
+    return gated(runner)
 
 
 async def ended_by(task):
