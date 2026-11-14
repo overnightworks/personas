@@ -1,8 +1,0 @@
-claim_id = "58ac2681de9a4ec4afbcca41708399ca"
-agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
-role = "builder"
-base = "e687025039d25ae29f26430e260255694033e99b"
-branch = "claude/issue-189-an-agent-s-model-is-set-in-the-configura"
-scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/config.py", "src/personas/loop.py", "src/personas/reporting.py", "tests"]
-opened_commit = "eaea085a9283031ed34d294318d5d0db57ab498a"
-whole_reason = "One optional field from the TOML to the turn and the startup line; it does not split."
