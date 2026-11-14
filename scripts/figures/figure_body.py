@@ -105,13 +105,19 @@ def trunk(course: Sequence[Key], rings: int) -> Shape:
 def open_rows(course: Sequence[Key], rings: int, columns: int, grown: float = 0.0) -> list[list[Vector]]:
     """Rows around the trunk from the bottom up that stay open down the front; the course gives the (half width, front,
     back) radii and the angle from the middle at which the edges part, by height, and `grown` moves the rows outward."""
-    rows: list[list[Vector]] = []
-    for height in spread(course[0][0], course[-1][0], rings):
-        half_width, front, back, opening = interpolated(course, height)
-        radii = (half_width + grown, front + grown, back + grown)
-        angles = spread(opening, 2.0 * math.pi - opening, columns)
-        rows.append(arc((0.0, height, 0.0), ACROSS, AHEAD, radii, angles, TRUNK_POWER))
-    return rows
+    return [
+        [open_point(course, height, column / columns, grown) for column in range(columns + 1)]
+        for height in spread(course[0][0], course[-1][0], rings)
+    ]
+
+
+def open_point(course: Sequence[Key], height: float, share: float, grown: float = 0.0) -> Vector:
+    """A point on an open trunk at a height and a share of the way round from one edge, 0, to the other, 1; `course`
+    and `grown` are as for `open_rows`."""
+    half_width, front, back, opening = interpolated(course, height)
+    radii = (half_width + grown, front + grown, back + grown)
+    angle = opening + (2.0 * math.pi - 2.0 * opening) * share
+    return arc((0.0, height, 0.0), ACROSS, AHEAD, radii, [angle], TRUNK_POWER)[0]
 
 
 def band(course: Sequence[Key], low: float, high: float, swell: float) -> Shape:
