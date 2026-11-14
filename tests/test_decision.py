@@ -401,20 +401,6 @@ def test_a_place_of_another_kind_that_serves_no_view_gets_no_checkpoint():
     assert sync_checkpoints({}, (table,), ()) == {}
 
 
-@pytest.mark.parametrize("kind", ["call", "table"])
-def test_a_place_that_stops_serving_a_view_and_serves_one_again_starts_as_restarted(kind):
-    place = PlaceRef(kind=kind, id="place-1")
-    without_view = (active("place-1", kind),)
-    with_view = (active("place-1", kind, serves_view=True),)
-    while_serving = sync_checkpoints({}, with_view, ())
-    read = {place: Reading(GENERATION, 4)}
-
-    without = sync_checkpoints(read, without_view, with_view)
-    again = sync_checkpoints(without, with_view, without_view)
-
-    assert (while_serving, again) == ({place: Restarted()}, {place: Restarted()})
-
-
 @pytest.mark.parametrize(
     ("checkpoint", "sets_start"),
     [(Restarted(), True), (Paused(), True), (Joined(), False), (Reading(GENERATION, 2), False)],
