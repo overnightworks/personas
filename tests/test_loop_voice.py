@@ -121,6 +121,7 @@ async def test_a_sentence_a_call_and_a_sentence_go_out_in_that_order_and_the_nex
     assert runner.app.calls == [SPEAK, SAY_TOOL, SPEAK]
     assert runner.gateway.tool_results(2) == ["said"]
     told = runner.gateway.turns()[1].told("speech", "act")
+    assert runner.gateway.turns()[1].told_own("speech", "act") == told
     assert [(each["entry"], each.get("text") or each["tool"]) for each in told] == [
         ("speech", "Before."),
         ("act", SAY_TOOL),

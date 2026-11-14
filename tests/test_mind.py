@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
+import json
 import secrets
 from datetime import UTC, datetime
 
 from agents.member import PlaceRef, PlaceView
 
-from personas.decision import BACKOFF_BASE_SECONDS, BACKOFF_CAP_SECONDS, AppPlace, Lines, TurnTold, Waiting
-from personas.entries import KeptLine, ViewSeen, Visit
+from personas.decision import (
+    BACKOFF_BASE_SECONDS,
+    BACKOFF_CAP_SECONDS,
+    AppPlace,
+    Lines,
+    TurnTold,
+    Waiting,
+    turn_messages,
+)
+from personas.entries import KeptLine, ViewSeen, Visit, entry_size
 from personas.mind import Mind
 
 READ_AT = datetime(2026, 11, 11, 20, 0, tzinfo=UTC)
@@ -181,3 +190,65 @@ def test_he_holds_the_apps_where_he_has_an_active_place_other_than_the_one_askin
     mind.stand_at("https://third.test/mcp", holds=False)
 
     assert mind.held_apps(CALL.app) == frozenset()
+
+
+LINE_BYTES = entry_size(said(CALL, 1, "x"))
+
+
+def a_lines_turn(mind: Mind, *seqs: int) -> TurnTold:
+    return TurnTold(
+        READ_AT,
+        CALL.app,
+        CALL.place,
+        Lines(CALL.generation, frozenset(seqs), missed=False),
+        aloud=False,
+        through=mind.history.taken,
+    )
+
+
+def answer_turn_for(mind: Mind, first_seq: int) -> list[str]:
+    """Takes one line, has the turn for it answered and returns the messages that turn was sent."""
+    mind.take((said(CALL, first_seq, "x"),))
+    turn = a_lines_turn(mind, first_seq)
+    sent = turn_messages("Mozart", mind.present, turn)
+    mind.answered(turn)
+    return list(sent)
+
+
+def seqs_told(message: str) -> list[int]:
+    return [each["seq"] for each in json.loads(message)["entries"]]
+
+
+def test_passing_the_history_bound_changes_the_earlier_messages_once_and_later_turns_append_again():
+    mind = Mind(3 * LINE_BYTES, 2 * LINE_BYTES)
+    for seq in (1, 2, 3):
+        sent = answer_turn_for(mind, seq)
+    third_as_sent = sent[-1]
+
+    stepped = answer_turn_for(mind, 4)
+    appended = answer_turn_for(mind, 5)
+
+    assert [json.loads(stepped[0])["older_dropped"], stepped[1]] == [True, third_as_sent]
+    assert [seqs_told(each) for each in stepped[1:]] == [[3], [4]]
+    assert appended[:-1] == stepped
+    assert seqs_told(appended[-1]) == [5]
+
+
+def test_a_newest_message_past_the_kept_bytes_loses_its_oldest_entries_and_keeps_its_newest():
+    mind = Mind(4 * LINE_BYTES, 2 * LINE_BYTES)
+    answer_turn_for(mind, 1)
+    mind.take(tuple(said(CALL, seq, "x") for seq in range(2, 7)))
+
+    sent = turn_messages("Mozart", mind.present, a_lines_turn(mind, 6))
+
+    assert [seqs_told(each) for each in sent[1:]] == [[5, 6]]
+    assert json.loads(sent[0])["older_dropped"] is True
+
+
+def test_the_newest_entry_stays_when_it_alone_is_past_the_kept_bytes():
+    mind = Mind(4 * LINE_BYTES, 1)
+    mind.take(tuple(said(CALL, seq, "x") for seq in range(1, 6)))
+
+    sent = turn_messages("Mozart", mind.present, a_lines_turn(mind, 5))
+
+    assert [seqs_told(each) for each in sent[1:]] == [[5]]

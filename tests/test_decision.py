@@ -35,6 +35,7 @@ from personas.app_session import READ_SECONDS
 from personas.decision import (
     BACKOFF_BASE_SECONDS,
     BACKOFF_CAP_SECONDS,
+    EMPTY_PRESENT,
     NETWORK_FAILURE_CODE,
     RENEW_BEFORE_EXPIRY_SECONDS,
     SPOKEN_WAIT_BOUND_SECONDS,
@@ -62,6 +63,7 @@ from personas.decision import (
     active_view_places,
     active_window_places,
     after_refusal,
+    answered_into,
     arrived_since,
     backoff_delay,
     bound_declarations,
@@ -96,6 +98,7 @@ from personas.decision import (
     told_turn,
     turn_call_bound,
     turn_invalid,
+    turn_messages,
     view_turn_due,
     wakes_him,
     with_due,
@@ -779,6 +782,46 @@ def test_the_header_tells_his_name_and_whether_older_entries_left_the_history(le
     history = History((), left_out=left_out, heard=0)
 
     assert json.loads(told_header("Mozart", history)) == {"you": "Mozart", "older_dropped": left_out > 0}
+
+
+def a_lines_turn(*seqs: int, through: int) -> TurnTold:
+    lines = Lines(MORNING.generation, frozenset(seqs), missed=False)
+    return TurnTold(LATER, APP, MORNING.place, lines, aloud=False, through=through)
+
+
+def present_with_a_turn_told(line_seq: int) -> Present:
+    """The present after one line was taken and the turn at the table for it was answered."""
+    present = taken_into(EMPTY_PRESENT, (said(line_seq, "one"),), ROOMY_BYTES, ROOMY_BYTES)
+    return answered_into(present, TurnTold(LATER, APP, TABLE, Waiting(1), aloud=False, through=present.history.taken))
+
+
+def test_the_messages_before_the_last_do_not_change_with_the_clock_a_turn_is_composed_at():
+    present = present_with_a_turn_told(1)
+    next_turn = a_lines_turn(1, through=1)
+
+    early = turn_messages("Mozart", present, next_turn)
+    late = turn_messages("Mozart", present, replace(next_turn, at=LATER + timedelta(hours=3)))
+
+    assert early[:-1] == late[:-1]
+    assert early[-1] != late[-1]
+
+
+def test_a_line_another_places_turn_told_first_is_named_by_the_woke_seqs_of_the_turn_it_is_for():
+    present = present_with_a_turn_told(1)
+
+    *_, own = (json.loads(each) for each in turn_messages("Mozart", present, a_lines_turn(1, through=1)))
+
+    assert (own["entries"], own["woke"]["seqs"]) == ([], [1])
+
+
+def test_a_view_another_places_turn_told_first_is_named_by_the_woke_revision_of_the_turn_it_is_for():
+    view = ViewSeen(APP, TABLE, PlaceView(revision=2, awaits_you=True, state={"hand": []}), LATER)
+    present = answered_into(taken_into(EMPTY_PRESENT, (view,), ROOMY_BYTES, ROOMY_BYTES), a_lines_turn(through=1))
+    for_the_view = TurnTold(LATER, APP, TABLE, Waiting(2), aloud=False, through=1)
+
+    *_, own = (json.loads(each) for each in turn_messages("Mozart", present, for_the_view))
+
+    assert (own["entries"], own["woke"]["revision"]) == ([], 2)
 
 
 @pytest.mark.parametrize("has_voice", [True, False])

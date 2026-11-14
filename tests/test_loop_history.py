@@ -10,11 +10,12 @@ import pytest
 from agents.backend.fake_gateway import completion
 from agents.turn import Principal, person_fingerprint
 
+from personas.decision import BACKOFF_BASE_SECONDS
 from personas.failures import STORE_UNREACHABLE_CODE, StoreUnavailable
 from personas.reporting import Event
-from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call
-from tests.support.fakes import memory_target
-from tests.support.gateway import Gateway, says, says_after_a_hold
+from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
+from tests.support.fakes import SweepClock, memory_target
+from tests.support.gateway import BUDGET_SPENT, Gateway, says, says_after_a_hold
 from tests.support.history import (
     OTHER_CALL_ID,
     REMARK,
@@ -537,3 +538,71 @@ async def test_no_line_state_or_name_of_the_history_reaches_a_log_line(runner, o
     assert not [value for value in state.values() if value in caplog.text]
     assert name not in caplog.text
     assert REMARK not in caplog.text
+
+
+async def test_a_later_turn_sends_all_the_messages_of_the_earlier_one_byte_for_byte_and_one_more(runner):
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER, ANSWER))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.reports.until_a_turn_completed()
+    say_in_the_call(runner, f"{ADDRESSED} Again.")
+    await runner.reports.until_a_turn_completed(count=2)
+
+    earlier, later = runner.gateway.openings()
+    assert len(earlier.texts) == 2
+    assert later.texts[: len(earlier.texts)] == earlier.texts
+    assert len(later.texts) == len(earlier.texts) + 1
+
+
+async def test_his_act_and_a_line_that_arrived_during_a_held_call_are_each_told_once_in_the_next_message(runner):
+    runner.gateway = Gateway(*says_after_a_hold(PLACE_ID, ANSWER))
+    running = runner.gateway.hold_request(1)
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.gateway.until_requested(1)
+    await said_and_taken(runner.app, PLACE_ID, REMARK)
+    running.set()
+    await runner.gateway.until_turns(2)
+
+    earlier, later = runner.gateway.openings()
+    kinds_texts = [(each["entry"], each.get("text") or each["tool"]) for each in later.own["entries"]]
+    assert kinds_texts == [("line", REMARK), ("act", "say"), ("line", ANSWER)]
+    assert [message.count(REMARK) for message in later.texts[1:]] == [0, 1]
+    assert [message.count('"entry": "act"') for message in later.texts[1:]] == [0, 1]
+    assert [each["text"] for each in earlier.own["entries"]] == [ADDRESSED]
+
+
+async def test_a_turn_refused_for_a_spent_budget_adds_no_message_and_the_next_turn_tells_its_entries(runner):
+    runner.clock = SweepClock(BACKOFF_BASE_SECONDS)
+    runner.gateway = Gateway(BUDGET_SPENT, *says(PLACE_ID, ANSWER))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, f"{ADDRESSED} First.")
+    await runner.clock.until_waiting(1)
+    say_in_the_call(runner, f"{ADDRESSED} Second.")
+    await runner.app.until_window_read(PLACE_ID, count=2)
+    runner.clock.open_gate()
+    await runner.app.said_count(1)
+
+    refused, retried = runner.gateway.openings()
+    assert len(refused.texts) == len(retried.texts) == 2
+    assert [each["seq"] for each in retried.own["entries"]] == [1, 2]
+
+
+async def test_a_turn_cancelled_with_its_place_adds_no_message_and_the_next_turn_tells_its_entries(runner):
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    runner.gateway.hold_request(1)
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, f"{ADDRESSED} First.")
+    await runner.gateway.until_requested(1)
+    runner.app.stand(SUBJECT, paused(PLACE_ID))
+    await runner.reports.until(Event.TURN_ENDED)
+    resumed_read = runner.app.hold_next_window_read()
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    await runner.app.until_window_read_held()
+    say_in_the_call(runner, f"{ADDRESSED} Second.")
+    resumed_read.set()
+    await runner.gateway.until_turns(1)
+
+    (next_turn,) = runner.gateway.openings()
+    assert len(next_turn.texts) == 2
+    assert [each["text"] for each in next_turn.own["entries"]] == [f"{ADDRESSED} First.", f"{ADDRESSED} Second."]
