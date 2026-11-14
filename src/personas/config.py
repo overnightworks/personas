@@ -181,9 +181,7 @@ class _AgentEntry(_Entry):
 
     @field_validator("model")
     @classmethod
-    def _model_is_a_text_model_of_an_agent_file(cls, model: str | None, info: ValidationInfo) -> str | None:
-        if model is None:
-            return None
+    def _model_is_a_text_model_of_an_agent_file(cls, model: str, info: ValidationInfo) -> str:
         if model_kind_of(model) is not ModelKind.TEXT:
             raise ValueError(f"must start with {ModelKind.TEXT}/")
         if info.data.get("persona_file") is None:
