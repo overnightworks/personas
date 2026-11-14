@@ -7,7 +7,7 @@ from http import HTTPStatus
 
 import anyio
 import pytest
-from agents.backend.fake_gateway import Reply
+from agents.backend.fake_gateway import Reply, completion
 from agents.member import (
     STANDING_URI,
     place_window_uri,
@@ -21,7 +21,7 @@ from mcp_types import (
 
 from personas import app_session
 from personas.config import load_config
-from personas.decision import NETWORK_FAILURE_CODE, TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE, jsonrpc_code
+from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE, jsonrpc_code
 from personas.failures import (
     Unreachable,
     leaves_of,
@@ -38,6 +38,7 @@ from tests.support.hopin import (
     LIST_TOOLS,
     LISTEN,
     READ,
+    SAY_TOOL,
     active,
     formatted,
     invited,
@@ -272,15 +273,20 @@ async def test_a_tool_that_answers_gone_shows_the_model_that_and_leaves_the_life
     assert runner.clock.slept == []
 
 
-async def test_a_bound_tool_the_app_declares_no_more_ends_the_turn_with_a_code(runner):
+async def test_a_turn_binds_the_tools_the_app_lists_right_now_and_a_missing_one_is_no_failure(runner):
     async def lists_no_tools(reply):
         await reply.result(ListToolsResult(tools=[]))
 
+    runner.gateway = Gateway(completion("done"), completion("done"))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.reports.until_a_turn_completed()
     runner.app.script(LIST_TOOLS, lists_no_tools)
+    say_in_the_call(runner, f"{ADDRESSED} Once more.")
+    await runner.gateway.until_requested(2)
 
-    await a_turn_ended_short(runner, TOOL_NOT_DECLARED_CODE)
-
-    assert runner.gateway.requests == []
+    assert runner.gateway.offered_tools(1) == [SAY_TOOL]
+    assert runner.gateway.offered_tools(2) == []
 
 
 async def refuses_the_token(reply):

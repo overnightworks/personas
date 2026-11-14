@@ -71,8 +71,6 @@ SUSPENDED_RETRY_SECONDS: Final = 30.0
 """How often a suspended loop asks the realm and then the app again."""
 TURN_ROLE: Final[AgentRole] = "user"
 """The app role a turn acts under: an agent holds no admin right."""
-TOOL_NOT_DECLARED_CODE: Final = "tool_not_declared"
-"""The code of a turn that ends because the app no longer declares a tool the configuration binds."""
 TURN_CANCELLED_CODE: Final = "cancelled"
 """The code of a turn the loop cancelled because its place left the standing, and of an act whose call was cut while it
 was in flight, by that or by the turn's deadline."""
@@ -510,18 +508,19 @@ def wakes_him(new: Iterable[PlaceEntry], *, serves_view: bool) -> bool:
     return not serves_view and any(not (line.own or line.act) for line in new)
 
 
-def bound_declarations(declared: Sequence[ToolDeclaration], names: Sequence[str]) -> tuple[ToolDeclaration, ...] | None:
-    """The declarations of the bound tools in binding order, or ``None`` when the app declares one no more."""
+def bound_declarations(declared: Sequence[ToolDeclaration], names: Sequence[str]) -> tuple[ToolDeclaration, ...]:
+    """The declarations of the bound tools the app lists, in binding order; a bound tool it does not list is left out
+    and a listed tool that is not bound never enters."""
     by_name = {declaration.name: declaration for declaration in declared}
-    if not all(name in by_name for name in names):
-        return None
-    return tuple(by_name[name] for name in names)
+    return tuple(by_name[name] for name in names if name in by_name)
 
 
-def turn_call_bound(bounds: Iterable[int]) -> int:
-    """The calls one turn may make: the sum of the bounds of the apps whose tools it holds, plus one. The library counts
-    every call of a model reply, so the call a turn holds back counts beside the calls it makes."""
-    return sum(bounds) + 1
+def turn_call_bound(bounds: Iterable[int]) -> int | None:
+    """The calls one turn may make: the sum of the bounds of the apps whose tools it holds, plus one, and none when it
+    holds no tool. The library counts every call of a model reply, so the call a turn holds back counts beside the
+    calls it makes."""
+    held = tuple(bounds)
+    return sum(held) + 1 if held else None
 
 
 def call_within_bound(made: int, bound: int) -> bool:

@@ -33,7 +33,7 @@ So while he is in a call and sits at a table, a turn at either can answer in the
 Every revision he reads of a view is an entry of his history too, once however often he reads it, so in a call he knows the table, his hand and the game as far back as his history reaches; what he says of it is his persona's.
 No table state is kept in the store, but a table's lines are kept like a call's: after a restart he knows a table's state from its first read and what was said there from the store.
 It has no instruction; what to do at a table is the persona's to say.
-The turn holds the bound tools of its app, of every other app where he holds an active place when the turn starts, and of the tools-only apps, and it ends with its place, as a written turn does.
+The turn holds the bound tools of its app that the app lists when the turn starts (one it does not list is left out, none is no failure), of every other app where he holds an active place when the turn starts, and of the tools-only apps, and it ends with its place, as a written turn does.
 It reads the day like a written turn and stores nothing.
 A waiting revision gets one turn, and no second one at that revision, however the turn ended: with a tool call that moves nothing, with no call, with a refused call or with a failed relay.
 The runner does not ask again by itself; an app that wants him to act again moves the revision.

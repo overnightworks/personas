@@ -15,7 +15,7 @@ from agents.tools import ToolOutcome
 from agents.turn import FailureCode, Principal, person_fingerprint
 from mcp_types import ListToolsResult
 
-from personas.decision import NETWORK_FAILURE_CODE, TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE, status_code
+from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE, status_code
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, play, say, words
@@ -218,16 +218,19 @@ async def test_a_failed_call_to_a_held_app_is_an_error_that_spends_its_bound_and
     assert runner.reports.reported(apps=True, started=False) == [(Event.HELD_APP_FAILED, code, url_of(runner, 1))]
 
 
-@pytest.mark.parametrize(
-    ("arrange", "code"),
-    [
-        (lambda app: app.script(LIST_TOOLS, cuts), NETWORK_FAILURE_CODE),
-        (lambda app: app.script(LIST_TOOLS, lists_nothing), TOOL_NOT_DECLARED_CODE),
-    ],
-    ids=["a listing that fails", "a bound tool declared no more"],
-)
-async def test_a_held_app_whose_tools_cannot_be_listed_is_left_out_and_reported_once(runner, other, arrange, code):
-    arrange(other)
+async def test_a_held_app_that_lists_none_of_its_bound_tools_holds_none_and_is_no_failure(runner, other, songmaker):
+    other.script(LIST_TOOLS, lists_nothing)
+    await seated_in_the_call(runner, other, completion("done"))
+    say_in_the_call(runner, ADDRESSED)
+    await runner.gateway.until_requested(1)
+
+    assert runner.gateway.offered_tools() == [SAY_TOOL, CREATE_SONG, GENERATE_SONG]
+    assert runner.reports.reported(apps=True, started=False) == []
+
+
+async def test_a_held_app_whose_tools_cannot_be_listed_is_left_out_and_reported_once(runner, other):
+    other.script(LIST_TOOLS, cuts)
+    code = NETWORK_FAILURE_CODE
     written = words(1)[0]
     await seated_in_the_call(runner, other, tool_round(say(written)), completion("done"))
     say_in_the_call(runner, ADDRESSED)

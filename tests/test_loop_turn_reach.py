@@ -14,7 +14,7 @@ from mcp_types import ListToolsResult, Tool
 
 from personas import app_session
 from personas.config import load_config
-from personas.decision import NETWORK_FAILURE_CODE, TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE, status_code
+from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE, status_code
 from personas.failures import Unreachable, leaves_of
 from personas.reporting import Event
 from personas.tokens import HttpTokenSource
@@ -129,7 +129,9 @@ async def test_a_tools_only_app_whose_listing_fails_at_turn_start_is_absent_and_
     assert not runner.task.done()
 
 
-async def test_a_tools_only_app_that_declares_one_bound_tool_no_more_is_absent_as_a_whole(runner, songmaker):
+async def test_a_tools_only_app_that_lists_one_of_its_two_bound_tools_lends_that_one_and_is_no_failure(
+    runner, songmaker
+):
     async def lists_one_of_the_two(reply):
         await reply.result(
             ListToolsResult(
@@ -143,10 +145,8 @@ async def test_a_tools_only_app_that_declares_one_bound_tool_no_more_is_absent_a
     await addressed_in_the_call(runner)
     await runner.app.said_count(1)
 
-    assert runner.gateway.offered_tools() == [SAY_TOOL]
-    assert runner.reports.reported(apps=True, started=False) == [
-        (Event.TOOLS_ONLY_APP_FAILED, TOOL_NOT_DECLARED_CODE, songmaker_url(runner))
-    ]
+    assert runner.gateway.offered_tools() == [SAY_TOOL, CREATE_SONG]
+    assert runner.reports.reported(apps=True, started=False) == []
 
 
 async def a_call_that_fails_and_a_turn_that_goes_on(runner, songmaker, code, *, call_seconds=None):
