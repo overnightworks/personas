@@ -579,9 +579,11 @@ async def test_a_search_on_a_schema_behind_its_head_raises_what_a_write_raises(u
     store = PostgresLineStore(unmigrated_database)
     search = a_search()
 
-    with pytest.raises(SchemaNotAtHeadError) as behind:
-        await store.search(search)
-    await store.close()
+    try:
+        with pytest.raises(SchemaNotAtHeadError) as behind:
+            await store.search(search)
+    finally:
+        await store.close()
 
     assert unmigrated_database.password.reveal() not in str(behind.value)
 

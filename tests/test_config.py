@@ -516,7 +516,7 @@ def test_a_memory_table_keeps_and_sweeps_by_default_unless_it_sets_either_or_lea
     ],
     ids=["defaults", "set", "the least"],
 )
-def test_a_memory_table_lets_a_turn_look_up_twice_within_a_result_of_bytes_unless_it_sets_either(
+def test_a_memory_table_lets_a_turn_look_up_twice_within_8192_bytes_unless_it_sets_either(
     files, written, calls, result_bytes
 ):
     files.text += files.memory_table(**written)
