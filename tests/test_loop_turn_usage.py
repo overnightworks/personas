@@ -30,7 +30,7 @@ def counted(prompt: int, cached: int, written: int, completed: int) -> dict[str,
 
 
 _SIZES = r" tools_bytes=(\d+) told_bytes=(\d+) results_bytes=(\d+) images_bytes=(\d+)"
-_COUNTS = r"(?P<counts>(?: input=\d+ cache_read=\d+ cache_write=\d+ output=\d+)?)"
+_COUNTS = r"(?P<counts>(?: input=\d+ cache_read=\d+ cache_write=\d+ output=\d+ requests=\d+)?)"
 _LINE = re.compile(rf"turn_ended client_id=\S+ app=\S+ code=(?P<code>\S+)(?:{_SIZES})?{_COUNTS}")
 
 
@@ -50,13 +50,13 @@ def the_turn_ended_line(caplog) -> re.Match[str]:
     [
         pytest.param(
             (tool_round(say(ANSWER), usage=counted(100, 40, 10, 5)), completion("done", usage=counted(150, 100, 0, 3))),
-            " input=250 cache_read=140 cache_write=10 output=8",
-            id="two rounds with usage give the library's sum once",
+            " input=250 cache_read=140 cache_write=10 output=8 requests=2",
+            id="a turn with one tool round gives the library's sum once and two requests",
         ),
         pytest.param(
             (tool_round(say(ANSWER)), completion("done")),
             "",
-            id="rounds without usage give none of the four fields",
+            id="rounds without usage give none of the five fields",
         ),
         pytest.param(
             (tool_round(say(ANSWER), usage=counted(100, 40, 10, 5)), completion("done")),
