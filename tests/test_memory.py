@@ -16,9 +16,10 @@ import pytest
 from agents.member import PlaceEntry, PlaceRef, PlaceWindow
 from sqlalchemy.exc import IntegrityError
 
-from personas.entries import Visit, WindowRead
+from personas.entries import KeptLine, Visit, WindowRead
 from personas.failures import STORE_TIMEOUT_CODE, STORE_UNREACHABLE_CODE, StoreDefect, StoreUnavailable
 from personas.memory import PostgresLineStore, SchemaNotAtHeadError
+from personas.recall import LineSearch
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import WALL_START, line, window_of
@@ -38,6 +39,7 @@ from tests.support.realm import AGENT_NAME
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+    from datetime import datetime
 
     from personas.config import MemoryTarget
 
@@ -445,3 +447,174 @@ async def test_every_line_first_read_before_the_time_is_erased_of_every_agent_wh
 
     assert erased == 2
     assert kept_lines(database, "text") == [("Younger",), ("Exactly at the time",)]
+
+
+def a_search(
+    text: str = "",
+    *,
+    place: PlaceRef | None = None,
+    first_read_before: datetime | None = None,
+    rows: int = 50,
+    client_id: str = AGENT,
+    app: str = APP,
+) -> LineSearch:
+    return LineSearch(
+        client_id,
+        app,
+        place or PlaceRef(kind="call", id=PLACE_ID),
+        text,
+        first_read_before or WALL_START + timedelta(days=1),
+        rows,
+    )
+
+
+def texts_found(found: tuple[KeptLine, ...]) -> list[str]:
+    return [each.text for each in found]
+
+
+async def test_a_search_gives_the_lines_of_this_agents_room_across_its_visits_and_the_line_as_it_was_kept(store):
+    await store.keep(a_read_in(a_visit("morning"), line(1, "From the morning"), hours_after_start=1))
+    await store.keep(a_read_in(a_visit("noon"), line(1, "From the noon"), hours_after_start=2))
+
+    found = await store.search(a_search())
+
+    assert found == (
+        KeptLine(
+            a_visit("noon"),
+            1,
+            WALL_START + timedelta(hours=2),
+            "Ada",
+            "message",
+            "From the noon",
+            own=False,
+            spoken=False,
+            cut=False,
+            act=False,
+        ),
+        KeptLine(
+            a_visit("morning"),
+            1,
+            WALL_START + timedelta(hours=1),
+            "Ada",
+            "message",
+            "From the morning",
+            own=False,
+            spoken=False,
+            cut=False,
+            act=False,
+        ),
+    )
+
+
+async def test_a_search_gives_no_line_of_another_place_kind_app_or_agent_whatever_its_text_holds(store):
+    room = PlaceRef(kind="call", id=PLACE_ID)
+    await store.keep(a_read_in(a_visit("here"), line(1, "Said here"), hours_after_start=1))
+    await store.keep(a_read_in(Visit(APP, PlaceRef(kind="call", id="room-9"), "g"), line(1, "Said elsewhere")))
+    await store.keep(a_read_in(Visit(APP, PlaceRef(kind="table", id=PLACE_ID), "g"), line(1, "Said at a table")))
+    await store.keep(a_read_in(Visit("https://other.test/mcp", room, "g"), line(1, "Said in another app")))
+    await store.keep(a_read_in(a_visit("g"), line(1, "Said to another agent"), client_id=SECOND_AGENT))
+
+    everything = await store.search(a_search())
+    by_their_words = await store.search(a_search("Said"))
+    other_agent = await store.search(a_search(client_id=SECOND_AGENT))
+
+    assert texts_found(everything) == texts_found(by_their_words) == ["Said here"]
+    assert texts_found(other_agent) == ["Said to another agent"]
+
+
+@pytest.mark.parametrize(
+    ("words", "found"),
+    [
+        ("red fox", ["the Fox is red", "The red fox jumps"]),
+        ("FOX", ["the Fox is red", "The red fox jumps"]),
+        ("red dog fox", []),
+        ("foxes", []),
+        ("", ["a red dog", "the Fox is red", "The red fox jumps"]),
+        ("?! ...", ["a red dog", "the Fox is red", "The red fox jumps"]),
+    ],
+    ids=["every word", "any case", "a word missing", "no stemming", "no word", "only marks"],
+)
+async def test_a_line_is_found_when_it_holds_every_word_and_a_text_without_a_word_gives_every_line_newest_first(
+    store, words, found
+):
+    await store.keep(a_read_in(a_visit("v"), line(1, "The red fox jumps"), hours_after_start=1))
+    await store.keep(a_read_in(a_visit("v"), line(2, "the Fox is red"), hours_after_start=2))
+    await store.keep(a_read_in(a_visit("v"), line(3, "a red dog"), hours_after_start=3))
+
+    assert texts_found(await store.search(a_search(words))) == found
+
+
+async def test_a_line_first_read_at_or_after_the_time_is_not_found_and_the_newest_rows_come_first_up_to_the_bound(
+    store,
+):
+    await store.keep(a_read_in(a_visit("v"), line(1, "one"), line(2, "two"), hours_after_start=1))
+    await store.keep(a_read_in(a_visit("v"), line(3, "three"), hours_after_start=2))
+    await store.keep(a_read_in(a_visit("v"), line(4, "four"), hours_after_start=3))
+    two_hours = WALL_START + timedelta(hours=2)
+
+    before_two_hours = await store.search(a_search(first_read_before=two_hours))
+    newest_two = await store.search(a_search(rows=2))
+
+    assert texts_found(before_two_hours) == ["two", "one"]
+    assert texts_found(newest_two) == ["four", "three"]
+
+
+async def test_a_u0000_in_the_text_or_in_the_places_key_is_replaced_as_a_write_replaces_it_and_the_lines_are_found(
+    store,
+):
+    place = PlaceRef(kind="ca\x00ll", id="room\x00")
+    window = PlaceWindow(generation="visit", starts_at=1, entries=(line(1, "before\x00after"),))
+    await store.keep(WindowRead(AGENT, APP, place, window, WALL_START))
+
+    by_the_words = await store.search(a_search("before\x00after", place=place))
+    by_nothing_but_the_character = await store.search(a_search("\x00", place=place))
+
+    assert texts_found(by_the_words) == texts_found(by_nothing_but_the_character) == ["before�after"]
+
+
+async def test_a_search_on_a_schema_behind_its_head_raises_what_a_write_raises(unmigrated_database):
+    store = PostgresLineStore(unmigrated_database)
+
+    with pytest.raises(SchemaNotAtHeadError) as behind:
+        await store.search(a_search())
+    await store.close()
+
+    assert unmigrated_database.password.reveal() not in str(behind.value)
+
+
+async def test_a_search_met_by_a_database_error_that_is_no_outage_raises_a_defect_that_holds_no_search_text(
+    store, database
+):
+    await store.keep(a_read(line(1, "Kept before")))
+    run_sql(database, "ALTER TABLE lines RENAME COLUMN text TO body")
+    secret_words = "words-" + secrets.token_hex(8)
+
+    with pytest.raises(StoreDefect) as defect:
+        await store.search(a_search(secret_words))
+
+    shown = "".join(traceback.format_exception(defect.value))
+    for held in (secret_words, database.password.reveal()):
+        assert held not in shown
+        assert held not in repr(defect.value)
+
+
+async def test_a_search_waiting_on_a_lock_ends_within_the_write_bound_as_a_timeout(database):
+    store = PostgresLineStore(replace(database, write_seconds=BOUND_SECONDS))
+    await store.keep(a_read(line(1, "Before the lock")))
+    try:
+        with lines_table_locked(database):
+            started = time.monotonic()
+            async with asyncio.timeout(LIMIT_SECONDS):
+                with pytest.raises(StoreUnavailable) as cut:
+                    await store.search(a_search())
+            elapsed = time.monotonic() - started
+            still_waiting = waiting_statements(database)
+
+        after_the_lock = await store.search(a_search())
+    finally:
+        await store.close()
+
+    assert cut.value.code == STORE_TIMEOUT_CODE
+    assert still_waiting == 0
+    assert BOUND_SECONDS <= elapsed < BOUND_SECONDS + MARGIN_SECONDS
+    assert texts_found(after_the_lock) == ["Before the lock"]

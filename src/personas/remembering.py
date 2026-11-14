@@ -10,23 +10,29 @@ from personas.reporting import StoreOutage
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from personas.entries import WindowRead
+    from personas.entries import KeptLine, WindowRead
+    from personas.recall import LineSearch
     from personas.reporting import Event
 
 
 class LineStore(Protocol):
-    """Keeps the lines of the windows the loops read; it owns the time one write may take."""
+    """Keeps the lines of the windows the loops read and searches them; it owns the time one write or read may take."""
 
     async def keep(self, read: WindowRead) -> None:
         """Keeps every line of the window once; raises ``StoreUnavailable`` when it cannot now."""
         ...
 
+    async def search(self, search: LineSearch) -> tuple[KeptLine, ...]:
+        """The lines the search asks for, newest first; raises ``StoreUnavailable`` when it cannot answer now."""
+        ...
+
 
 class Remembering:
-    """One loop's way to the store: it keeps each window it reads.
+    """One loop's way to the store: it keeps each window it reads and searches the lines kept for a turn's lookup.
 
-    Without a store there is nothing kept. A store that fails is reported once per outage, and the loop goes on without
-    memory meanwhile; the report goes through ``report_state``, which names the loop's agent and app.
+    Without a store there is nothing kept, and no turn looks. A store that fails a write or a search is reported once
+    per outage, shared by both, and the loop goes on without memory meanwhile; the report goes through
+    ``report_state``, which names the loop's agent and app.
     """
 
     def __init__(self, store: LineStore | None, report_state: Callable[[Event, str | None], None]) -> None:
@@ -44,3 +50,18 @@ class Remembering:
             self._outage.failed(unavailable.code)
         else:
             self._outage.answered()
+
+    async def search(self, search: LineSearch) -> tuple[KeptLine, ...] | None:
+        """The lines a turn's lookup asked for, or ``None`` after the report of a store that could not answer.
+
+        A defect of the store leaves as itself and ends the runner.
+        """
+        store = self._store
+        assert store is not None  # noqa: S101 - a turn looks only where the configuration has a memory, which builds the store
+        try:
+            found = await store.search(search)
+        except StoreUnavailable as unavailable:
+            self._outage.failed(unavailable.code)
+            return None
+        self._outage.answered()
+        return found
