@@ -1,8 +1,0 @@
-claim_id = "4d7146849e204978974e31c5490db09c"
-agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
-role = "builder"
-base = "a0b503a42a71b34b8f00ebbdfa878408682cce22"
-branch = "claude/issue-161-follow-ups-of-the-154-and-153-landings"
-scope = ["README.md", "src/personas/failures.py", "src/personas/main.py", "src/personas/memory.py", "tests/support/fakes.py", "tests/test_decision.py", "tests/test_loop_turn.py", "tests/test_loop_turn_cancel.py", "tests/test_loop_turns.py", "tests/test_main.py", "tests/test_memory.py"]
-opened_commit = "65ec76a415347ce219a0747be4b1a708eaa487e0"
-whole_reason = "small test and text follow-ups of two landings, each a few lines"
