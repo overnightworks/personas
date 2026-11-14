@@ -1,0 +1,8 @@
+claim_id = "e6521e22bcf64139ac740b05608995bf"
+agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
+role = "builder"
+base = "e687025039d25ae29f26430e260255694033e99b"
+branch = "claude/issue-185-he-looks-up-what-was-said-earlier-in-thi"
+scope = ["README.md", "docs/ARCHITECTURE.md", "src/characters/leonardo.md", "src/characters/mozart.md", "src/personas/config.py", "src/personas/entries.py", "src/personas/loop.py", "src/personas/memory.py", "src/personas/recall.py", "src/personas/remembering.py", "src/personas/turning.py", "tests"]
+opened_commit = "e2bb11fdcc2ae388c755bec5f2f90178c961c647"
+whole_reason = "one read path from the store into a turn: the tool, its room rule, its store read and its bounds cannot land apart without a tool that gives lines where they must not go or a read no turn reaches"
