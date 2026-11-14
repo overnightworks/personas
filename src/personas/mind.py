@@ -49,6 +49,7 @@ class Mind:
         self._turns = Turns()
         self._placed = frozenset[str]()
         self._wake_events: list[asyncio.Event] = []
+        self._next_take = asyncio.Event()
 
     @property
     def present(self) -> Present:
@@ -59,12 +60,19 @@ class Mind:
         return self._present.history
 
     def take(self, entries: Iterable[Entry]) -> None:
-        """Appends the lines, spoken sentences, views and acts taken, in order; taking nothing leaves the history as
-        it is."""
+        """Appends the lines, spoken sentences, views and acts taken, in order, and sets the event ``next_take`` gave
+        before; taking nothing leaves the history and that event as they are."""
         taken = tuple(entries)
         if not taken:
             return
+        previous, self._next_take = self._next_take, asyncio.Event()
         self._present = taken_into(self._present, taken, self._history_bytes, self._history_keep_bytes)
+        previous.set()
+
+    def next_take(self) -> asyncio.Event:
+        """The event the next take sets. A waiter reads it in the same synchronous step as the history it judges, so a
+        take made after that step sets it."""
+        return self._next_take
 
     def unanswered(self, *, budget_spent: bool) -> float:
         """A turn of his ended without an answer, refused for a spent budget or not; the seconds his turns wait now."""
