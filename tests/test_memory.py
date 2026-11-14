@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 import secrets
 import time
@@ -13,15 +14,16 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 import pytest
+from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.member import PlaceEntry, PlaceRef, PlaceWindow
 from sqlalchemy.exc import IntegrityError
 
 from personas.entries import KeptLine, Visit, WindowRead
 from personas.failures import STORE_TIMEOUT_CODE, STORE_UNREACHABLE_CODE, StoreDefect, StoreUnavailable
 from personas.memory import PostgresLineStore, SchemaNotAtHeadError
-from personas.recall import LineSearch
+from personas.recall import RECALL_TOOL, LineSearch
 from personas.reporting import Event
-from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
+from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import WALL_START, line, window_of
 from tests.support.gateway import Gateway, says
 from tests.support.history import (
@@ -618,3 +620,74 @@ async def test_a_search_waiting_on_a_lock_ends_within_the_write_bound_as_a_timeo
     assert still_waiting == 0
     assert BOUND_SECONDS <= elapsed < BOUND_SECONDS + MARGIN_SECONDS
     assert texts_found(after_the_lock) == ["Before the lock"]
+
+
+RESTART_LINE = "Said before the restart."
+PAUSE_LINE = "Said during the pause."
+
+
+async def until_rows(store: ObservedStore, database: MemoryTarget, count: int) -> None:
+    """The store holds this many lines, once the writes in flight have finished."""
+    while len(kept_lines(database, "seq")) < count:
+        await store.until_finished(store.finished + 1)
+
+
+async def said_in_a_pause(runner, store: ObservedStore, database: MemoryTarget, text: str, rows: int) -> None:
+    """A line said while his place was paused, read when it is active again, and kept."""
+    pause_seen = runner.app.hold_next_read()
+    runner.app.stand(SUBJECT, paused(PLACE_ID))
+    await runner.app.until_read_held()
+    say_in_the_call(runner, text)
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    pause_seen.set()
+    await until_rows(store, database, rows)
+
+
+def told_lines(opening) -> list[str]:
+    return [each["text"] for each in opening.told("line")]
+
+
+async def test_a_line_a_window_held_at_a_restart_and_one_said_in_a_pause_are_told_to_no_turn_and_a_lookup_gives_them(
+    runner, store, database
+):
+    runner.remember_in(store, database)
+    runner.gateway = Gateway(tool_round(tool_call("call-0", RECALL_TOOL, {"text": ""})), completion("done"))
+    runner.app.speak(PLACE_ID, PERSON, "Ada", RESTART_LINE)
+    await restarted_in_the_call(runner)
+    await until_rows(store, database, 1)
+    runner.clock.time += 60
+    await said_in_a_pause(runner, store, database, PAUSE_LINE, 2)
+    runner.clock.time += 3600
+    say_in_the_call(runner, ADDRESSED)
+    await runner.reports.until_a_turn_completed()
+
+    (opening,) = runner.gateway.openings()
+    found = json.loads(runner.gateway.tool_results(2)[0])
+    assert [each["text"] for each in found["lines"]] == [PAUSE_LINE, RESTART_LINE]
+    assert told_lines(opening) == [ADDRESSED]
+
+
+async def test_a_lookup_gives_none_of_the_lines_kept_in_a_pause_while_the_first_entry_of_his_history_is_older(
+    runner, store, database
+):
+    runner.remember_in(store, database)
+    runner.gateway = Gateway(
+        *says(PLACE_ID, ANSWER), tool_round(tool_call("call-1", RECALL_TOOL, {"text": ""})), completion("done")
+    )
+    runner.app.speak(PLACE_ID, PERSON, "Ada", RESTART_LINE)
+    await restarted_in_the_call(runner)
+    await until_rows(store, database, 1)
+    runner.clock.time += 3600
+    say_in_the_call(runner, ADDRESSED)
+    await runner.reports.until_a_turn_completed()
+    await until_rows(store, database, 3)
+    runner.clock.time += 3600
+    await said_in_a_pause(runner, store, database, PAUSE_LINE, 4)
+    runner.clock.time += 3600
+    say_in_the_call(runner, f"{ADDRESSED} Again.")
+    await runner.reports.until_a_turn_completed(count=2)
+
+    _first, second = runner.gateway.openings()
+    found = json.loads(runner.gateway.tool_results(4)[0])
+    assert [each["text"] for each in found["lines"]] == [RESTART_LINE]
+    assert PAUSE_LINE not in told_lines(second)
