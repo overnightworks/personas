@@ -385,6 +385,36 @@ async def test_the_lines_of_a_place_enter_his_history_before_the_view_of_that_wa
     assert opening.room["woke"]["why"] == "view"
 
 
+async def test_the_lines_said_between_his_accept_and_the_first_view_are_told_though_the_place_showed_active_without_it(
+    runner,
+):
+    runner.app.stand(SUBJECT, invited(TABLE.id, "inv-3", kind=TABLE.kind))
+    runner.start()
+    await runner.reports.until(Event.JOINED)
+    runner.app.stand(SUBJECT, active(TABLE.id, TABLE.kind))
+    await settled(runner.app)
+    runner.app.speak(TABLE.id, PERSON, "Ada", "said", spoken=False)
+    runner.app.speak(TABLE.id, PERSON, "Ada", "acted", act=True)
+    assert runner.gateway.openings() == []
+    assert runner.app.window_reads(TABLE.id, TABLE.kind) == 0
+    assert runner.app.view_reads(TABLE) == 0
+
+    runner.app.stand(SUBJECT, at_table())
+    state = waits(runner, 1)
+    await runner.gateway.until_turns(1, why="view")
+    await settled(runner.app)
+
+    (opening,) = runner.gateway.openings()
+    app = runner.config.apps[0].mcp_url
+    assert opening.room["history"] == history_of(
+        [
+            entry(app, TABLE.id, "said", seq=1, place_kind=TABLE.kind),
+            entry(app, TABLE.id, "acted", seq=2, place_kind=TABLE.kind, act=True),
+            {**view_entry(app, state, revision=1, new=True), "place": {"kind": TABLE.kind, "id": TABLE.id}},
+        ]
+    )
+
+
 @pytest.mark.parametrize("act", [False, True], ids=["a line said", "an act line"])
 async def test_a_line_of_someone_else_at_a_place_with_a_view_starts_no_turn_and_is_told_with_the_next_one(runner, act):
     joined_at(runner, TABLE)
