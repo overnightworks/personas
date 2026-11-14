@@ -625,11 +625,8 @@ class _DriverAnsweringACancellationWithADefect:
         return None
 
 
-async def test_a_search_met_by_a_defect_while_its_task_is_being_cancelled_raises_the_defect(database, monkeypatch):
-    monkeypatch.setattr(
-        "personas.memory.create_async_engine", lambda *_a, **_k: _DriverAnsweringACancellationWithADefect()
-    )
-    store = PostgresLineStore(database)
+async def test_a_search_met_by_a_defect_while_its_task_is_being_cancelled_raises_the_defect(database):
+    store = PostgresLineStore(database, lambda *_arguments, **_options: _DriverAnsweringACancellationWithADefect())
 
     try:
         searching = asyncio.create_task(store.search(a_search()))

@@ -55,7 +55,7 @@ from personas.failures import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Generator
+    from collections.abc import AsyncGenerator, Callable, Generator
     from datetime import datetime
 
     from sqlalchemy import Delete
@@ -211,12 +211,13 @@ class PostgresLineStore:
 
     It opens no connection until the first write, read or sweep, which checks the schema is at its head; a schema
     that is not ends the runner. A pooled connection is not checked before its use: a stale one fails its write or
-    read, and the pool takes another for the next.
+    read, and the pool takes another for the next. ``engine_factory`` makes the engine; a test hands it a driver of its
+    own.
     """
 
-    def __init__(self, target: MemoryTarget) -> None:
+    def __init__(self, target: MemoryTarget, engine_factory: Callable[..., AsyncEngine] = create_async_engine) -> None:
         self._write_bound = _write_bound(target)
-        self._engine: AsyncEngine = create_async_engine(
+        self._engine: AsyncEngine = engine_factory(
             _url(target), hide_parameters=True, connect_args=_connect_arguments(target)
         )
         self._schema_checked = False
