@@ -22,7 +22,7 @@ from personas.config import (
 )
 from personas.decision import DEFAULT_BUDGET_PAUSE_CAP_SECONDS
 from personas.main import CONFIGURATION_ERROR_EXIT_CODE, main
-from personas.recall import RECALL_TOOL
+from personas.recall import RECALL_TOOL, SMALLEST_RESULT_BYTES
 from tests.support.configfiles import MAX_TOOL_CALLS, PERSONA_NAME
 from tests.support.realm import API_GROUP
 
@@ -512,7 +512,7 @@ def test_a_memory_table_keeps_and_sweeps_by_default_unless_it_sets_either_or_lea
     [
         ({}, DEFAULT_LOOKUP_CALLS, DEFAULT_LOOKUP_BYTES),
         ({"lookup_calls": "5", "lookup_bytes": "300"}, 5, 300),
-        ({"lookup_calls": "1", "lookup_bytes": "1"}, 1, 1),
+        ({"lookup_calls": "1", "lookup_bytes": str(SMALLEST_RESULT_BYTES)}, 1, SMALLEST_RESULT_BYTES),
     ],
     ids=["defaults", "set", "the least"],
 )
@@ -535,6 +535,14 @@ def test_a_lookup_bound_that_is_no_positive_integer_stops_the_start_and_names_th
     files.text += files.memory_table(**{field: written})
 
     assert f"memory.{field}" in fails_at_start(files.write(), monkeypatch, capsys)
+
+
+def test_a_result_bound_too_small_for_a_result_without_a_line_stops_the_start_and_names_the_field(
+    files, monkeypatch, capsys
+):
+    files.text += files.memory_table(lookup_bytes=str(SMALLEST_RESULT_BYTES - 1))
+
+    assert "memory.lookup_bytes" in fails_at_start(files.write(), monkeypatch, capsys)
 
 
 def test_the_history_is_bounded_at_49152_bytes_and_a_step_keeps_32768_unless_the_file_says_otherwise(files):
