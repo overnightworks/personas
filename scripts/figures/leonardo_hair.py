@@ -5,11 +5,11 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING
 
-from figures.figure_body import ACROSS, AHEAD, open_rows
+from figures.figure_body import ACROSS, AHEAD, open_point
 from figures.figure_head import NECK_BINDER, face_point, level_height, skin_point
 from figures.figure_parts import Colour, Layer, Material, Part, mixed, part
-from figures.figure_shapes import add, scaled
-from figures.figure_surfaces import arc, interpolated, patch, rippled, shell, smoothstep, spread
+from figures.figure_shapes import add, scaled, subtract
+from figures.figure_surfaces import arc, interpolated, patch, shell, smoothstep, spread
 
 if TYPE_CHECKING:
     from figures.figure_head import Face
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 SILVER = (230, 226, 216)
 ASH = (152, 148, 144)
 # Height, then the hair's half width, front depth and back depth there and how far from the middle it parts: it leaves
-# the face free, sinks into the shoulders beside the neck and falls on down the back.
+# the face free and falls on down the back; HAIR_EDGE gives where it ends.
 HAIR = (
     (1.335, (0.126, 0.050, 0.124, math.radians(84.0))),
     (1.40, (0.118, 0.060, 0.120, math.radians(80.0))),
@@ -30,9 +30,26 @@ HAIR = (
     (1.69, (0.074, 0.080, 0.098, math.radians(34.0))),
     (1.715, (0.060, 0.064, 0.082, math.radians(20.0))),
 )
-HAIR_ROWS = 30
-HAIR_COLUMNS = 48
+HAIR_ROWS = 36
+HAIR_COLUMNS = 96
 HAIR_THICKNESS = 0.016
+# Share of the way round from the edge beside the face to the middle of the back, then the height the hair reaches
+# there: above the shoulder beside the neck, down the back behind it.
+HAIR_EDGE = (
+    (0.0, (1.490,)),
+    (0.08, (1.480,)),
+    (0.40, (1.470,)),
+    (0.50, (1.462,)),
+    (0.58, (1.440,)),
+    (0.66, (1.395,)),
+    (0.74, (1.345,)),
+    (0.82, (1.335,)),
+    (1.0, (1.335,)),
+)
+# The height over which a lock thins to its tip, and how far a furrow between two locks ends above their tips, at most
+# twice this.
+HAIR_END = 0.05
+HAIR_TIPS = 0.008
 LOCKS = 13.0
 # Height, then the hanging beard's half width, how far forward its middle lies, how far it stands out from there and
 # how far round it closes: on the chest it hangs as one closed lock, at the jaw it opens to the reach of the cheeks.
@@ -96,14 +113,42 @@ def _strands(position: Vector) -> Colour:
 
 
 def _locks() -> Part:
-    """The hair as one sheet with thickness, waved into locks that deepen towards their ends."""
-    outer: list[list[Vector]] = []
-    for row in open_rows(HAIR, HAIR_ROWS, HAIR_COLUMNS):
-        height = row[0][1]
-        depth = 0.015 + 0.025 * smoothstep(1.60, 1.40, height)
-        outer.append(rippled(row, (0.0, height, 0.0), LOCKS, depth, 2.4 * math.sin(34.0 * height)))
-    inner = open_rows(HAIR, HAIR_ROWS, HAIR_COLUMNS, -HAIR_THICKNESS)
+    """The hair as one sheet with thickness: each column falls from the crown to its own edge, waved into locks that
+    deepen towards their ends and thin to a tip there."""
+    top = HAIR[-1][0]
+    outer: list[list[Vector]] = [[] for _ in range(HAIR_ROWS + 1)]
+    inner: list[list[Vector]] = [[] for _ in range(HAIR_ROWS + 1)]
+    for column in range(HAIR_COLUMNS + 1):
+        edge = _lock_edge(column)
+        for row, height in enumerate(spread(edge, top, HAIR_ROWS)):
+            lining, surface = _lock_point(column, height, edge)
+            inner[row].append(lining)
+            outer[row].append(surface)
     return part(shell(outer, inner), _strands, Material.HAIR, NECK_BINDER)
+
+
+def _lock_turn(column: int, height: float) -> float:
+    """The phase of the lock wave at a column and a height; the wave turns as it falls."""
+    return 2.0 * math.pi * LOCKS * column / (HAIR_COLUMNS + 1) + 2.4 * math.sin(34.0 * height)
+
+
+def _lock_edge(column: int) -> float:
+    """The height where the lock at a column ends: its keyed height, lifted by up to twice HAIR_TIPS with its wave."""
+    across = column / HAIR_COLUMNS
+    (keyed,) = interpolated(HAIR_EDGE, 1.0 - abs(2.0 * across - 1.0))
+    return keyed + HAIR_TIPS * (1.0 - math.cos(_lock_turn(column, keyed)))
+
+
+def _lock_point(column: int, height: float, edge: float) -> tuple[Vector, Vector]:
+    """The lining and the waved surface of the hair at a column and a height; towards its edge the surface sinks to the
+    lining, so the sheet ends in a tip without an end face."""
+    across = column / HAIR_COLUMNS
+    lining = open_point(HAIR, height, across, -HAIR_THICKNESS)
+    x, _, z = open_point(HAIR, height, across)
+    depth = 0.015 + 0.025 * smoothstep(1.60, 1.40, height)
+    wave = 1.0 + depth * math.cos(_lock_turn(column, height))
+    waved = (x * wave, height, z * wave)
+    return lining, add(lining, scaled(subtract(waved, lining), smoothstep(edge, edge + HAIR_END, height)))
 
 
 def _beard(face: Face) -> Part:
