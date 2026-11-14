@@ -1,0 +1,8 @@
+claim_id = "3bff9b81c69943ccb76dc053f4b47062"
+agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
+role = "builder"
+base = "cdef8e755f375735db7a2255d828249761c191b1"
+branch = "claude/issue-172-a-spent-budget-pauses-the-agent"
+scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas", "tests"]
+opened_commit = "20e261d11613608ed672bd86b815f170d8f3cffc"
+whole_reason = "the rule in decision.py, its use in loop.py and turning.py and the cap's field in config.py are one behaviour, tested and documented together"
