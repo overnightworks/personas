@@ -172,7 +172,7 @@ class AgentLoop:
         )
 
     async def run(self) -> NoReturn:
-        self._report(Event.STARTED)
+        self._report(Event.STARTED, model=None if self._turn_setup is None else self._turn_setup.persona.model)
         while True:
             raise_if_cancelled()
             try:
@@ -458,10 +458,18 @@ class AgentLoop:
         self._mind.stand_at(self._app.mcp_url, holds=False)
 
     def _report(
-        self, event: Event, code: str | None = None, app: AppTarget | None = None, *, place_kind: str | None = None
+        self,
+        event: Event,
+        code: str | None = None,
+        app: AppTarget | None = None,
+        *,
+        place_kind: str | None = None,
+        model: str | None = None,
     ) -> None:
         self._boundaries.report(
-            StateChange(event, self._agent.client_id, (app or self._app).mcp_url, code, place_kind=place_kind)
+            StateChange(
+                event, self._agent.client_id, (app or self._app).mcp_url, code, place_kind=place_kind, model=model
+            )
         )
 
 

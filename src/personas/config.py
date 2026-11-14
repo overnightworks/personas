@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Final, Self
 from agents.agent_file import AgentDefinition, AgentFileError, load_agent
 from agents.config import AgentConfig  # noqa: TC002 - pydantic resolves the field's type at run time
 from agents.member import SPEAK_TOOL, FigureRef, VoiceName
+from agents.turn import GatewayModelName, ModelKind, model_kind_of
 from pydantic import (
     AnyHttpUrl,
     BaseModel,
@@ -40,6 +41,7 @@ from pydantic import (
     PositiveFloat,
     PositiveInt,
     ValidationError,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -173,8 +175,20 @@ class _AgentEntry(_Entry):
     client_id: str = Field(min_length=1)
     secret_file: Path
     persona_file: Path | None = None
+    model: GatewayModelName | None = None
     figure: FigureRef | None = None
     voice: _VoiceEntry | None = None
+
+    @field_validator("model")
+    @classmethod
+    def _model_is_a_text_model_of_an_agent_file(cls, model: str | None, info: ValidationInfo) -> str | None:
+        if model is None:
+            return None
+        if model_kind_of(model) is not ModelKind.TEXT:
+            raise ValueError(f"must start with {ModelKind.TEXT}/")
+        if info.data.get("persona_file") is None:
+            raise ValueError("needs a persona_file, whose agent it names the model of")
+        return model
 
 
 class _MemoryEntry(_Entry):
@@ -277,7 +291,7 @@ def _read_secret(field_name: str, path: Path) -> Secret:
     return Secret(secret)
 
 
-def _read_persona(index: int, path: Path | None) -> AgentDefinition | None:
+def _read_persona(index: int, path: Path | None, model: GatewayModelName | None) -> AgentDefinition | None:
     if path is None:
         return None
     field_name = f"agents.{index}.persona_file"
@@ -297,7 +311,7 @@ def _read_persona(index: int, path: Path | None) -> AgentDefinition | None:
         raise ConfigError(
             f"{field_name}: voice: the voice is set in the agent's [agents.voice] table, not in the persona file"
         )
-    return persona
+    return persona if model is None else persona.model_copy(update={"model": model})
 
 
 def _memory_target(entry: _MemoryEntry | None) -> MemoryTarget | None:
@@ -336,7 +350,7 @@ def load_config(environment: Mapping[str, str]) -> Config:
             AgentCredentials(
                 agent.client_id,
                 _read_secret(f"agents.{index}.secret_file", agent.secret_file),
-                _read_persona(index, agent.persona_file),
+                _read_persona(index, agent.persona_file, agent.model),
                 agent.figure,
                 None if agent.voice is None else Voice(agent.voice.name),
             )

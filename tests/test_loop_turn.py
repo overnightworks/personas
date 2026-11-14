@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from http import HTTPStatus
 
 import anyio
@@ -549,3 +550,19 @@ async def test_a_refused_and_an_answered_turn_log_a_code_and_no_secret_or_conten
 
     logged = formatted(caplog.get_records("call"))
     assert Event.TURN_ENDED.value in logged
+
+
+async def test_the_started_line_names_the_model_each_agent_runs_on(runner, caplog):
+    runner.config = replace(
+        runner.config, agents=(replace(runner.config.agents[0], persona=replace_model(runner, "text/sonnet-low")),)
+    )
+
+    await restarted_in_the_call(runner)
+
+    started = [line for line in formatted(caplog.get_records("call")).splitlines() if line.startswith("started ")]
+    assert started
+    assert all(line.endswith(" model=text/sonnet-low") for line in started)
+
+
+def replace_model(runner, model):
+    return runner.config.agents[0].persona.model_copy(update={"model": model})
