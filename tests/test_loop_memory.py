@@ -465,11 +465,26 @@ async def test_a_lookup_adds_no_event_and_no_content_to_the_log_and_turn_ended_c
     await runner.reports.until_a_turn_completed()
 
     logged = formatted(caplog.get_records("call"))
-    tools, results = (
-        int(each) for each in re.search(r" tools_bytes=(\d+) told_bytes=\d+ results_bytes=(\d+)", logged).groups()
-    )
+    results = int(re.search(r" results_bytes=(\d+)", logged).group(1))
     assert runner.reports.reported() == [(Event.STARTED, None), *stored]
     assert needle not in logged
     assert not [line for line in found if line.text in logged]
     assert results >= len(runner.gateway.tool_results(2)[0].encode())
-    assert tools >= len(RECALL_DECLARATION.description) + len(json.dumps(RECALL_DECLARATION.parameters))
+
+
+async def test_a_turn_counts_the_lookups_declaration_in_its_tools_bytes(runner, caplog):
+    await looking_in_the_call(runner, ScriptedStore(), completion("done"))
+    await runner.reports.until_a_turn_completed()
+    runner.task.cancel()
+    await asyncio.gather(runner.task, return_exceptions=True)
+    runner.config = replace(runner.config, memory=None)
+    runner.gateway = Gateway(completion("done"))
+    await restarted_in_the_call(runner)
+    await settled(runner.app)
+    say_in_the_call(runner, f"{ADDRESSED} Once more.")
+    await runner.reports.until_a_turn_completed(count=2)
+
+    with_lookup, without = (
+        int(each) for each in re.findall(r" tools_bytes=(\d+)", formatted(caplog.get_records("call")))
+    )
+    assert with_lookup - without >= len(RECALL_DECLARATION.description) + len(json.dumps(RECALL_DECLARATION.parameters))
