@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import math
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -12,7 +10,6 @@ import pytest
 from personas.failures import STORE_TIMEOUT_CODE, STORE_UNREACHABLE_CODE, StoreUnavailable
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
-from tests.support.fakes import memory_target
 from tests.support.gateway import Gateway, says
 from tests.support.history import TABLE, a_state, at_table
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
@@ -21,7 +18,7 @@ from tests.support.hopin import LIMIT_SECONDS
 if TYPE_CHECKING:
     from datetime import datetime
 
-    from personas.entries import KeptLine, WindowRead
+    from personas.entries import WindowRead
 
 pytestmark = pytest.mark.anyio
 
@@ -34,7 +31,6 @@ class ScriptedStore:
     def __init__(self) -> None:
         self.kept: list[WindowRead] = []
         self.failure: StoreUnavailable | None = None
-        self.read_failure: StoreUnavailable | None = None
         self.waiting = asyncio.Event()
         self.release: asyncio.Event | None = None
         self.attempts = 0
@@ -59,11 +55,6 @@ class ScriptedStore:
         if self.failure is not None:
             raise self.failure
         self.kept.append(read)
-
-    async def kept_since(self, client_id: str, since: datetime) -> tuple[KeptLine, ...]:
-        if self.read_failure is not None:
-            raise self.read_failure
-        return ()
 
     async def erase_before(self, first_read_before: datetime) -> int:
         raise AssertionError("a test about the loop swept")
@@ -125,23 +116,3 @@ async def test_a_write_that_ends_in_a_timeout_is_reported_by_its_code_and_the_tu
 
     assert (Event.STORE_FAILED, STORE_TIMEOUT_CODE) in runner.reports.reported()
     assert not OUTAGE_EVENTS & {event for event, _ in runner.reports.reported()}
-
-
-async def test_a_store_that_cannot_be_read_when_a_turn_starts_costs_no_answer_and_is_reported_once(runner):
-    store = ScriptedStore()
-    store.read_failure = StoreUnavailable(STORE_UNREACHABLE_CODE)
-    runner.remember_in(store, replace(memory_target(), lines_keep_days=math.inf))
-    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
-    await restarted_in_the_call(runner)
-    say_in_the_call(runner, ADDRESSED)
-    await runner.app.said_count(1)
-    await runner.gateway.until_requested(2)
-    await runner.reports.until(Event.STORE_RESUMED)
-
-    assert runner.app.said == [(runner.app_principal.sub, PLACE_ID, ANSWER)]
-    assert "earlier_today" not in runner.gateway.openings()[0].room
-    assert runner.reports.reported() == [
-        (Event.STARTED, None),
-        (Event.STORE_FAILED, STORE_UNREACHABLE_CODE),
-        (Event.STORE_RESUMED, None),
-    ]

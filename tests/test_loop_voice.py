@@ -69,7 +69,7 @@ async def test_a_line_at_a_voice_place_makes_a_turn_told_aloud_that_holds_every_
 
     (turn,) = runner.gateway.turns()
     assert turn.aloud
-    assert turn.new_seqs == [1]
+    assert turn.woke_seqs == [1]
     assert set(runner.gateway.offered_tools()) == {SAY_TOOL, CREATE_SONG, GENERATE_SONG}
 
 
@@ -121,6 +121,7 @@ async def test_a_sentence_a_call_and_a_sentence_go_out_in_that_order_and_the_nex
     assert runner.app.calls == [SPEAK, SAY_TOOL, SPEAK]
     assert runner.gateway.tool_results(2) == ["said"]
     told = runner.gateway.turns()[1].told("speech", "act")
+    assert runner.gateway.turns()[1].told_own("speech", "act") == told
     assert [(each["entry"], each.get("text") or each["tool"]) for each in told] == [
         ("speech", "Before."),
         ("act", SAY_TOOL),
@@ -268,7 +269,7 @@ async def test_a_sentence_the_app_wrote_to_the_place_instead_is_told_as_written_
     ]
 
 
-async def test_a_line_said_while_he_speaks_is_not_in_the_running_turn_and_is_told_new_to_the_next_one(runner):
+async def test_a_line_said_while_he_speaks_is_not_in_the_running_turn_and_is_told_to_the_next_one(runner):
     sleeps = HeldSleeps(runner)
     await a_voice_call(runner, completion(ANSWER), completion("Second answer."))
     say_in_the_call(runner, ADDRESSED)
@@ -280,8 +281,8 @@ async def test_a_line_said_while_he_speaks_is_not_in_the_running_turn_and_is_tol
     await runner.gateway.until_turns(2)
 
     first, second = runner.gateway.turns()
-    assert first.new_seqs == [1]
-    assert REMARK in [each["text"] for each in second.room["history"]["entries"] if each["new"]]
+    assert first.woke_seqs == [1]
+    assert REMARK in [each["text"] for each in second.own["entries"]]
 
 
 async def test_a_call_reaches_the_app_only_after_the_sentence_before_it_was_answered_and_its_length_has_passed(runner):
@@ -340,8 +341,8 @@ async def test_two_agents_in_one_place_make_no_turn_of_their_own_spoken_lines_an
 
     mozarts, bachs = ([turn for turn in runner.gateway.turns() if turn.user == user] for user in (mozart, bach))
     assert (len(mozarts), len(bachs)) == (3, 3)
-    assert "Mozart answers." in [each["text"] for each in bachs[1].room["history"]["entries"] if each["new"]]
-    assert "Bach answers." in [each["text"] for each in mozarts[1].room["history"]["entries"] if each["new"]]
+    assert "Mozart answers." in [each["text"] for each in bachs[1].own["entries"]]
+    assert "Bach answers." in [each["text"] for each in mozarts[1].own["entries"]]
 
 
 async def test_a_window_that_lost_older_lines_makes_a_turn_told_it_missed_lines(runner, monkeypatch):
@@ -379,7 +380,7 @@ async def test_a_line_heard_while_he_speaks_holds_the_call_after_the_sentence_on
     assert [(each["text"], each["spoken"]) for each in arrived if each["entry"] == "line" and not each["own"]] == [
         ("Anyone there?", True)
     ]
-    assert [(each["text"], each["new"]) for each in arrived if each["entry"] == "speech"] == [(ANSWER, False)]
+    assert [each["text"] for each in arrived if each["entry"] == "speech"] == [ANSWER]
     assert runner.app.said == [(SUBJECT, PLACE_ID, "Written.")]
     assert sentences_spoken(runner) == [ANSWER]
 
@@ -397,7 +398,7 @@ async def test_the_next_turn_is_told_which_lines_were_said_aloud_and_that_his_ow
         (ANSWER, True, True),
         (ADDRESSED, False, False),
     ]
-    assert [(each["text"], each["new"]) for each in second.told("speech")] == [(ANSWER, False)]
+    assert [each["text"] for each in second.told("speech")] == [ANSWER]
 
 
 async def test_the_next_turn_is_told_a_line_the_app_marked_as_cut_as_cut_with_the_part_heard(runner):

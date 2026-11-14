@@ -30,7 +30,7 @@ from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import SweepClock
 from tests.support.gateway import BUDGET_SPENT, Gateway, says, says_after_a_hold
-from tests.support.history import act_entry, unanswered, url_of, woke_at_lines
+from tests.support.history import act_entry, after_start, unanswered, url_of, woke_at_lines
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import (
     CALL,
@@ -61,7 +61,7 @@ async def test_an_addressed_line_gets_exactly_one_say_under_the_agents_own_finge
 
     assert runner.app.said == [(SUBJECT, PLACE_ID, ANSWER)]
     assert len(runner.gateway.requests) == 2
-    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1]]
+    assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[1]]
     assert runner.gateway.openings()[0].system == runner.files.persona_prompt
     assert runner.gateway.users() == {person_fingerprint(runner.app_principal)}
     assert runner.reports.reported() == [(Event.STARTED, None)]
@@ -78,7 +78,7 @@ async def test_his_own_line_naming_him_starts_no_turn(runner):
     read.set()
     await runner.app.said_count(1)
 
-    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[2]]
+    assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[2]]
 
 
 async def test_an_unaddressed_line_makes_no_gateway_call(runner):
@@ -92,7 +92,7 @@ async def test_an_unaddressed_line_makes_no_gateway_call(runner):
     read.set()
     await runner.app.said_count(1)
 
-    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[2]]
+    assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[2]]
 
 
 async def test_after_his_own_accept_reading_starts_at_seq_1(runner):
@@ -107,7 +107,7 @@ async def test_after_his_own_accept_reading_starts_at_seq_1(runner):
     runner.start()
     await runner.app.said_count(1)
 
-    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1]]
+    assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[1]]
 
 
 async def test_a_place_he_joins_again_is_read_from_seq_1_of_the_new_window_and_nothing_of_the_old_one_is_answered(
@@ -128,7 +128,7 @@ async def test_a_place_he_joins_again_is_read_from_seq_1_of_the_new_window_and_n
     runner.app.stand(SUBJECT, invited(PLACE_ID, "inv-3"))
     await runner.app.said_count(2)
 
-    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [1]]
+    assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[1], [1]]
 
 
 async def test_a_duplicate_pulse_or_a_re_read_starts_no_second_turn_for_a_line(runner):
@@ -146,7 +146,7 @@ async def test_a_duplicate_pulse_or_a_re_read_starts_no_second_turn_for_a_line(r
     read.set()
     await runner.app.said_count(2)
 
-    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [3]]
+    assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[1], [3]]
 
 
 async def test_a_line_said_while_a_turn_ran_is_answered_once_that_turn_ends_though_nothing_else_wakes_the_loop(runner):
@@ -166,8 +166,8 @@ async def test_a_line_said_while_a_turn_ran_is_answered_once_that_turn_ends_thou
     await runner.app.said_count(1)
     await runner.gateway.until_requested(3)
 
-    assert runner.gateway.round_sizes() == [2, 2, 4]
-    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [1, 2]]
+    assert runner.gateway.round_sizes() == [3, 3, 5]
+    assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[1], [1, 2]]
     assert runner.reports.reported()[:3] == [
         (Event.STARTED, None),
         (Event.JOINED, None),
@@ -193,8 +193,8 @@ async def test_a_line_said_while_a_turn_ran_is_read_at_once_and_answered_after_a
     await runner.app.said_count(2)
     await runner.gateway.until_requested(5)
 
-    assert runner.gateway.round_sizes() == [2, 4, 6, 2, 4]
-    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [2]]
+    assert runner.gateway.round_sizes() == [3, 5, 7, 4, 6]
+    assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[1], [2]]
 
 
 async def test_every_line_addressed_to_him_gets_its_own_turn_one_after_the_other(runner):
@@ -260,7 +260,7 @@ async def test_a_turn_refused_for_a_spent_budget_waits_the_backoff_base_before_h
     await runner.app.said_count(1)
 
     assert held_requests == 1
-    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [1, 2, 3, 4]]
+    assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[1], [1, 2, 3, 4]]
     assert [
         (change.event, change.code, change.seconds) for change in runner.reports.changes if change.event is Event.PAUSED
     ] == [(Event.PAUSED, RejectionCode.BUDGET_SPENT.value, BACKOFF_BASE_SECONDS)]
@@ -277,9 +277,9 @@ async def test_a_lines_turn_the_gateway_failed_runs_again_after_the_wait_with_it
     await runner.app.said_count(1)
 
     assert held_requests == 1
-    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [1]]
+    assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[1], [1]]
     assert [opening.room["woke"] for opening in runner.gateway.openings()] == [
-        woke_at_lines(url_of(runner, 0), PLACE_ID)
+        woke_at_lines(url_of(runner, 0), PLACE_ID, [1])
     ] * 2
 
 
@@ -377,7 +377,7 @@ async def test_a_turn_whose_session_fails_before_the_model_is_asked_leads_to_one
     await runner.app.said_count(1)
 
     assert runner.reports.reported() == events
-    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[2]]
+    assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[2]]
     assert len(runner.realm.issued) == (2 if fails is refuses_the_token else 1)
 
 
@@ -428,7 +428,7 @@ async def test_a_turn_failure_cancelling_a_lifecycle_that_unwinds_with_a_late_an
         (Event.BACKOFF, NETWORK_FAILURE_CODE),
         (Event.RESUMED, None),
     ]
-    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[2]]
+    assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[2]]
 
 
 async def relayed_say_fails(runner, fails):
@@ -462,8 +462,8 @@ async def test_a_relayed_call_that_fails_ends_the_turn_after_one_round_and_leads
     await runner.gateway.until_requested(3)
 
     assert runner.reports.reported() == events
-    assert runner.gateway.round_sizes() == [2, 2, 4]
-    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [2]]
+    assert runner.gateway.round_sizes() == [3, 3, 5]
+    assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[1], [2]]
     assert len(runner.realm.issued) == issued
 
 
@@ -513,13 +513,13 @@ async def test_a_deadline_during_a_relayed_call_ends_the_turn_as_limit_exceeded_
         (Event.TURN_ENDED, FailureCode.LIMIT_EXCEEDED.value),
         (Event.PAUSED, FailureCode.LIMIT_EXCEEDED.value),
     ]
-    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [1, 2]]
+    assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[1], [1, 2]]
     assert runner.gateway.openings()[1].room["history"]["entries"][1] == act_entry(
         url_of(runner, 0),
         "say",
         {"place": PLACE_ID, "text": ANSWER},
         unanswered(TURN_CANCELLED_CODE),
-        seconds_ago=int(BACKOFF_BASE_SECONDS),
+        at=after_start(0),
     )
     assert runner.task is not None
     assert not runner.task.done()

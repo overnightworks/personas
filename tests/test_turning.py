@@ -7,8 +7,8 @@ import pytest
 from agents.member import PlaceRef, PlaceView
 from agents.turn import Principal
 
-from personas.decision import Lines, Waiting, history_after
-from personas.entries import ActDone, Answered, History, KeptLine, ViewSeen, Visit
+from personas.decision import EMPTY_PRESENT, Lines, Present, Waiting, taken_into
+from personas.entries import ActDone, Answered, KeptLine, ViewSeen, Visit
 from personas.tokens import TokenFacts
 from personas.turning import Admitted, _Hold
 
@@ -27,12 +27,12 @@ def lines_occasion(_marker: str) -> Lines:
 
 
 @pytest.fixture
-def marked_history() -> tuple[str, History]:
+def marked_present() -> tuple[str, Present]:
     marker = secrets.token_hex(8)
     view = ViewSeen(VISIT.app, PLACE, PlaceView(revision=1, awaits_you=True, state={"hand": marker}), TAKEN_AT)
     act = ActDone(VISIT.app, "say", {"text": marker}, Answered(marker, is_error=False), TAKEN_AT)
     line = KeptLine(VISIT, 1, TAKEN_AT, marker, "message", marker, own=False, spoken=False, cut=False, act=False)
-    return marker, history_after(History((), left_out=0, heard=0), (line, view, act), size_bytes=10_000)
+    return marker, taken_into(EMPTY_PRESENT, (line, view, act), 10_000, 10_000)
 
 
 @pytest.mark.parametrize(
@@ -40,18 +40,18 @@ def marked_history() -> tuple[str, History]:
     [view_occasion, lines_occasion],
     ids=["a view turn whose history holds a state with the marker", "the lines a window gave"],
 )
-def test_an_admission_repr_shows_neither_a_view_state_nor_a_line_nor_an_act_of_the_history(occasion_of, marked_history):
-    marker, history = marked_history
+def test_an_admission_repr_shows_neither_a_view_state_nor_a_line_nor_an_act_of_the_history(occasion_of, marked_present):
+    marker, present = marked_present
     occasion = occasion_of(marker)
 
-    admission = repr(Admitted(FACTS, PLACE, occasion, history, TAKEN_AT, aloud=False, apps=frozenset()))
+    admission = repr(Admitted(FACTS, PLACE, occasion, present, TAKEN_AT, aloud=False, apps=frozenset()))
 
     assert "Admitted(" in admission
     assert marker not in admission
     assert marker not in repr(occasion)
 
 
-def test_a_hold_repr_shows_neither_a_view_state_nor_a_line_nor_an_act_of_the_history(marked_history):
-    marker, history = marked_history
+def test_a_hold_repr_shows_neither_a_view_state_nor_a_line_nor_an_act_of_the_history(marked_present):
+    marker, present = marked_present
 
-    assert marker not in repr(_Hold(history))
+    assert marker not in repr(_Hold(present.history))

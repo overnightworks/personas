@@ -38,14 +38,13 @@ from tests.support.realm import FakeRealm
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterable
-    from datetime import datetime
 
     from agents.agent_file import TurnRequest
     from agents.backend import AgentBackend, TurnEvent, TurnPerson
     from agents.tools import HandTool
 
     from personas.config import AppTarget, Config
-    from personas.entries import KeptLine, WindowRead
+    from personas.entries import WindowRead
     from personas.readiness import ReadyMarker
     from personas.remembering import LineStore
     from personas.reporting import StateChange
@@ -175,9 +174,6 @@ class StoreBehindHead:
     BEHIND = "memory: the database is at revision none but personas needs head; run personas migrate"
 
     async def keep(self, read: WindowRead) -> None:
-        raise SchemaNotAtHeadError(self.BEHIND)
-
-    async def kept_since(self, client_id: str, since: datetime) -> tuple[KeptLine, ...]:
         raise SchemaNotAtHeadError(self.BEHIND)
 
 

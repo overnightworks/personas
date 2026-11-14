@@ -70,7 +70,6 @@ if TYPE_CHECKING:
     from personas.decision import Checkpoint
     from personas.entries import InputSizes
     from personas.readiness import ReadyMarker
-    from personas.recall import TodayBounds
     from personas.tokens import TokenSource
     from personas.turning import BackendFactory
 
@@ -135,20 +134,18 @@ class AgentLoop:
         boundaries: Boundaries,
         mind: Mind,
         apps: tuple[AppTarget, ...],
-        today: TodayBounds | None = None,
     ) -> None:
         self._agent = agent
         self._app = app
         self._boundaries = boundaries
         self._mind = mind
-        self._remembering = Remembering(boundaries.lines, today, agent.client_id, self._report)
+        self._remembering = Remembering(boundaries.lines, self._report)
         self._turning = Turning(
             agent,
             app,
             apps,
             boundaries.tokens,
             boundaries.open_session,
-            self._remembering,
             mind,
             boundaries.clock,
             self._current_token,
@@ -382,7 +379,7 @@ class AgentLoop:
             self._turned_revisions[at.place] = occasion.revision
         aloud = speaks_aloud(self._voice_app, occasion, self._checkpoints.get(at.place))
         apps = self._mind.held_apps(self._app.mcp_url)
-        admitted = Admitted(facts, at.place, occasion, self._mind.history, self._boundaries.clock.wall(), aloud, apps)
+        admitted = Admitted(facts, at.place, occasion, self._mind.present, self._boundaries.clock.wall(), aloud, apps)
         self._start_turn(turns, setup, at.place, admitted)
 
     def _take_lines(self, place: PlaceRef, window: PlaceWindow, read_at: datetime, *, serves_view: bool) -> None:
@@ -482,11 +479,10 @@ async def run_all(config: Config, boundaries: Boundaries) -> NoReturn:
     runner = asyncio.current_task()
     assert runner is not None  # noqa: S101 - run_all runs inside a task
     async with asyncio.TaskGroup() as group:
-        today = None if config.memory is None else config.memory.today
         for agent in config.agents:
-            mind = Mind(config.history_bytes, config.budget_pause_cap_seconds)
+            mind = Mind(config.history_bytes, config.history_keep_bytes, config.budget_pause_cap_seconds)
             for app in config.apps:
                 if app.listens:
-                    loop = AgentLoop(agent, app, boundaries, mind, config.apps, today)
+                    loop = AgentLoop(agent, app, boundaries, mind, config.apps)
                     group.create_task(_run_loop(loop, runner))
     raise AssertionError("a loop ended")  # pragma: no cover

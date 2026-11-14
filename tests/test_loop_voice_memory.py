@@ -67,36 +67,7 @@ async def test_a_line_heard_in_a_voice_place_is_kept_once_with_the_sentence_he_s
     ]
 
 
-async def test_back_after_a_restart_his_first_turn_at_the_voice_place_is_told_the_lines_of_the_day_in_order(
-    runner, database
-):
-    welcome_back = f"{ADDRESSED} Back again?"
-    store = WatchedStore(database)
-    runner.remember_in(store, database)
-    runner.give_voice()
-    runner.gateway = Gateway(completion(ANSWER), completion("Welcome."))
-    await restarted_in_the_call(runner)
-    say_in_the_call(runner, ADDRESSED, spoken=True, cut=True)
-    await runner.app.spoken_count(1)
-    await store.until_kept(2)
-    runner.task.cancel()
-    await asyncio.gather(runner.task, return_exceptions=True)
-    reads_before = runner.app.window_reads(PLACE_ID)
-    runner.start()
-    await runner.app.until_window_read(PLACE_ID, reads_before + 1)
-    say_in_the_call(runner, welcome_back, spoken=True)
-    await runner.app.spoken_count(2)
-    await store.close()
-
-    first, second = runner.gateway.turns()
-    assert first.room["earlier_today"] == {"older_dropped": False, "visits": []}
-    (visit,) = second.room["earlier_today"]["visits"]
-    assert [(each["text"], each["spoken"]) for each in visit["lines"]] == [(ADDRESSED, True), (ANSWER, True)]
-    assert [each.get("cut", False) for each in visit["lines"]] == [True, False]
-    assert [each["text"] for each in second.room["history"]["entries"] if each["new"]] == [welcome_back]
-
-
-async def test_a_store_that_cannot_be_read_lets_the_turn_speak_without_the_day_and_is_logged_once(runner, database):
+async def test_a_write_cut_as_a_timeout_lets_the_turn_speak_and_is_logged_once(runner, database):
     bounded = replace(database, write_seconds=BOUND_SECONDS)
     store = WatchedStore(bounded)
     runner.remember_in(store, bounded)
@@ -113,5 +84,4 @@ async def test_a_store_that_cannot_be_read_lets_the_turn_speak_without_the_day_a
         await store.close()
 
     assert runner.app.spoken == [(SUBJECT, PLACE_ID, ANSWER)]
-    assert "earlier_today" not in runner.gateway.turns()[0].room
     assert runner.reports.reported().count((Event.STORE_FAILED, STORE_TIMEOUT_CODE)) == 1

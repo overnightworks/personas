@@ -92,7 +92,7 @@ async def test_his_own_line_read_back_and_his_own_act_hold_no_call(runner):
     assert runner.gateway.held_results(3) == []
 
 
-async def test_a_call_after_a_line_of_someone_else_is_held_with_every_arrival_told_new_and_the_next_call_goes_out(
+async def test_a_call_after_a_line_of_someone_else_is_held_with_every_arrival_told_and_the_next_call_goes_out(
     runner,
 ):
     first, held_text, last = words(3)
@@ -113,8 +113,7 @@ async def test_a_call_after_a_line_of_someone_else_is_held_with_every_arrival_to
     assert held["sent"] is False
     assert held["arrived"]["older_dropped"] is False
     assert sorted(each["entry"] for each in arrived) == ["act", "line", "line"]
-    assert all(each["new"] for each in arrived)
-    assert arrived[-1] == entry(url_of(runner, 0), PLACE_ID, REMARK, seq=3, name=SPEAKER, new=True)
+    assert arrived[-1] == entry(url_of(runner, 0), PLACE_ID, REMARK, seq=3, name=SPEAKER)
     assert [each["own"] for each in arrived if each["entry"] == "line"] == [True, False]
 
 
@@ -146,7 +145,7 @@ async def test_two_calls_of_one_reply_after_news_hold_the_first_and_send_the_sec
 
     assert [text for _, _, text in other.said] == [sent_text]
     (held,) = runner.gateway.held_results(2)
-    assert held["arrived"]["entries"] == [entry(url_of(runner, 0), PLACE_ID, REMARK, name=SPEAKER, new=True)]
+    assert held["arrived"]["entries"] == [entry(url_of(runner, 0), PLACE_ID, REMARK, name=SPEAKER)]
     assert runner.gateway.tool_results(2)[1] == "said"
 
 
@@ -222,7 +221,7 @@ async def test_a_failure_of_the_call_that_follows_a_hold_ends_the_turn_with_one_
     await runner.gateway.until_turns(2, why="lines")
 
     assert runner.reports.reported() == [STARTED, (Event.BACKOFF, NETWORK_FAILURE_CODE), (Event.RESUMED, None)]
-    assert runner.gateway.round_sizes() == [2, 4, 2]
+    assert runner.gateway.round_sizes() == [3, 5, 3]
     acts = [each for each in runner.gateway.turns()[1].room["history"]["entries"] if each["entry"] == "act"]
     assert [each["outcome"] for each in acts] == [{"answered": False, "code": NETWORK_FAILURE_CODE}]
 
@@ -301,7 +300,6 @@ async def test_the_table_state_his_own_card_caused_holds_his_next_call_once_and_
     (held,) = runner.gateway.held_results(3)
     kinds = sorted(each["entry"] for each in held["arrived"]["entries"])
     assert kinds == ["act", "line", "view"]
-    assert all(each["new"] for each in held["arrived"]["entries"])
     assert len(runner.gateway.held_results(4)) == 1
 
 
@@ -318,7 +316,7 @@ async def test_an_act_line_of_someone_else_at_his_table_holds_the_first_call_of_
     await runner.gateway.until_requested(3)
 
     (held,) = json.loads(runner.gateway.tool_results(2)[0])["arrived"]["entries"]
-    assert held == entry(url_of(runner, 1), TABLE.id, REMARK, new=True, place_kind=TABLE.kind, act=True)
+    assert held == entry(url_of(runner, 1), TABLE.id, REMARK, place_kind=TABLE.kind, act=True)
     assert [text for _, _, text in other.said] == [ANSWER]
 
 
