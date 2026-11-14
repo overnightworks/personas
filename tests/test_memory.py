@@ -8,6 +8,7 @@ import math
 import secrets
 import time
 import traceback
+from collections import Counter
 from dataclasses import replace
 from datetime import timedelta
 from typing import TYPE_CHECKING
@@ -79,11 +80,12 @@ REFUSE_EVERY_NEW_ROW = "ALTER TABLE lines ADD CONSTRAINT refuses_every_row CHECK
 
 
 class ObservedStore(PostgresLineStore):
-    """The real store, which tells how many writes have finished, whatever way they ended."""
+    """The real store, which tells how many writes have finished, in all and per agent, whatever way they ended."""
 
     def __init__(self, target: MemoryTarget) -> None:
         super().__init__(target)
         self.finished = 0
+        self._finished_by_client_id = Counter[str]()
         self._finishing = asyncio.Event()
 
     async def keep(self, read: WindowRead) -> None:
@@ -91,11 +93,18 @@ class ObservedStore(PostgresLineStore):
             await super().keep(read)
         finally:
             self.finished += 1
+            self._finished_by_client_id[read.client_id] += 1
             self._finishing.set()
 
     async def until_finished(self, count: int) -> None:
         async with asyncio.timeout(LIMIT_SECONDS):
             while self.finished < count:
+                self._finishing.clear()
+                await self._finishing.wait()
+
+    async def until_finished_for(self, client_id: str) -> None:
+        async with asyncio.timeout(LIMIT_SECONDS):
+            while not self._finished_by_client_id[client_id]:
                 self._finishing.clear()
                 await self._finishing.wait()
 
@@ -202,7 +211,8 @@ async def test_two_agents_in_one_place_keep_each_their_own_rows_under_their_own_
     runner.start()
     await runner.app.until_window_read(PLACE_ID, 2)
     say_in_the_call(runner, "Hello both")
-    await store.until_finished(2)
+    await store.until_finished_for(runner.agent.client_id)
+    await store.until_finished_for(SECOND_AGENT)
 
     assert kept_lines(database, "client_id, app, seq, text") == [
         (SECOND_AGENT, runner.app_url, 1, "Hello both"),

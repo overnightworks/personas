@@ -69,6 +69,10 @@ class StoreDefect(Exception):  # noqa: N818
     """A database error that is no outage; the message holds a code and no parameter, row or secret."""
 
 
+class SchemaNotAtHeadError(Exception):
+    """The database is not at the newest migration; the message names the field and the revisions, no secret."""
+
+
 def leaves_of(error: BaseException) -> Iterator[BaseException]:
     """The errors an exception group holds, however deep; any other error is its own leaf."""
     if isinstance(error, BaseExceptionGroup):
