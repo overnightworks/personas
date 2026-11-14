@@ -514,7 +514,7 @@ def answered_into(present: Present, turn: TurnTold) -> Present:
     whose entries all left in a step while it ran has no message left to tell."""
     if turn.through <= present.history.left_out:
         return present
-    return replace(present, told=(*present.told, turn))
+    return Present(present.history, (*present.told, turn))
 
 
 @dataclass(frozen=True)
