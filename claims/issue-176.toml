@@ -1,8 +1,0 @@
-claim_id = "140ffe64442041d0b02447ee7c6f7066"
-agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
-role = "builder"
-base = "1fdf6ff60de344e4cd23ac1ce174c7d7ccf578db"
-branch = "claude/issue-176-a-turn-without-an-answer-makes-its-place"
-scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/decision.py", "src/personas/loop.py", "src/personas/mind.py", "src/personas/turning.py", "tests"]
-opened_commit = "0417f4e06ce82b483c4abf056580b25895622cf0"
-whole_reason = "one retry rule: the decision, the mind's due list and the turn's end cannot land apart without a half-retried turn"
