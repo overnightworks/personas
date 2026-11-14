@@ -395,6 +395,16 @@ def test_the_standing_decides_which_checkpoints_exist(checkpoints, standings, ex
     assert sync_checkpoints(checkpoints, standings, ()) == expected
 
 
+@pytest.mark.parametrize(
+    ("kind", "place"), [("call", PLACE), ("table", A_TABLE)], ids=["a call place", "a table place"]
+)
+def test_a_place_that_serves_a_view_again_after_an_active_read_without_one_starts_as_restarted(kind, place):
+    before = (Standing(place=place, state=StandingState.ACTIVE),)
+    now = (Standing(place=place, state=StandingState.ACTIVE, serves_view=True),)
+
+    assert sync_checkpoints({place: Reading(GENERATION, 4)}, now, before) == {place: Restarted()}
+
+
 def test_a_place_of_another_kind_that_serves_no_view_gets_no_checkpoint():
     table = Standing(place=PlaceRef(kind="table", id="table-1"), state=StandingState.ACTIVE)
 
