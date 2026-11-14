@@ -9,6 +9,8 @@ from functools import partial
 from operator import eq
 from typing import TYPE_CHECKING, Final, Literal, NoReturn
 
+from agents.turn import RejectionCode
+
 from personas.decision import (
     NO_TURNS_CODE,
     SUSPENDED_RETRY_SECONDS,
@@ -155,6 +157,7 @@ class AgentLoop:
             self._use_current_token,
             self._report,
             self._report_turn_end,
+            self._report_pause,
         )
         self._token: Token | None = None
         self._memory = Memory()
@@ -412,6 +415,17 @@ class AgentLoop:
             StateChange(Event.TURN_ENDED, self._agent.client_id, self._app.mcp_url, code, usage=usage, sizes=sizes)
         )
 
+    def _report_pause(self, seconds: float) -> None:
+        self._boundaries.report(
+            StateChange(
+                Event.PAUSED,
+                self._agent.client_id,
+                self._app.mcp_url,
+                RejectionCode.BUDGET_SPENT.value,
+                seconds=seconds,
+            )
+        )
+
     async def _react(self, failure: CallFailure) -> None:
         match reaction_to(failure, already_renewed=self._renewed_after_401):
             case Reaction.RENEW:
@@ -471,7 +485,7 @@ async def run_all(config: Config, boundaries: Boundaries) -> NoReturn:
     async with asyncio.TaskGroup() as group:
         today = None if config.memory is None else config.memory.today
         for agent in config.agents:
-            mind = Mind(config.history_bytes)
+            mind = Mind(config.history_bytes, config.budget_pause_cap_seconds)
             for app in config.apps:
                 if app.listens:
                     loop = AgentLoop(agent, app, boundaries, mind, config.apps, today)

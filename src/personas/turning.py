@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Final
 from agents.agent_file import TurnRequest
 from agents.backend import TurnPerson, TurnStopped
 from agents.tools import HandTool, ToolOutcome
-from agents.turn import Turn, TurnMessage, TurnRole
+from agents.turn import RejectionCode, Turn, TurnMessage, TurnRole
 from agents.turn_events import FinalEvent, ToolCallEvent
 
 from personas.decision import (
@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from agents.backend import AgentBackend, TurnEvent
     from agents.member import PlaceRef
     from agents.tools import ToolDeclaration
-    from agents.turn import JsonObject, Principal, TurnUsage
+    from agents.turn import FailureCode, JsonObject, Principal, TurnUsage
 
     from personas.app_session import AppSession, SessionOpener
     from personas.clock import Clock
@@ -205,6 +205,7 @@ class Turning:
         use_current_token: Callable[[AppSession], Awaitable[None]],
         report: Callable[[Event, str | None, AppTarget | None], None],
         report_turn_end: Callable[[str | None, TurnUsage | None, InputSizes | None], None],
+        report_pause: Callable[[float], None],
     ) -> None:
         self._agent = agent
         self._app = app
@@ -218,6 +219,7 @@ class Turning:
         self._use_current_token = use_current_token
         self._report = report
         self._report_turn_end = report_turn_end
+        self._report_pause = report_pause
 
     async def take(self, setup: TurnSetup, admitted: Admitted, record: TaskRecord) -> None:
         """Runs one turn; whatever way it ends, a defect a request of it met ends the runner loud.
@@ -249,6 +251,7 @@ class Turning:
             held = failure_held_by(stopped)
             if held is None and record.defect is None:
                 self._report_turn_end(stopped.code.value, None, sizing.sizes())
+                await self._pause_when_budget_spent(stopped.code)
             # What left the session beside the stop (a late answer) still goes to the group, to be judged there.
             rest: list[BaseException] = [held] if held is not None else []
             rest.extend(leaf for leaf in leaves if leaf is not stopped)
@@ -256,6 +259,16 @@ class Turning:
                 raise rest[0] from None
             if rest:
                 raise BaseExceptionGroup("the turn's session failed", rest) from None
+
+    async def _pause_when_budget_spent(self, code: RejectionCode | FailureCode) -> None:
+        """A turn the gateway refused for a spent budget holds his one turn slot for the wait, so the lines that arrive
+        meanwhile are taken into his history and make one turn after it; a turn ended otherwise ends the wait."""
+        if code is not RejectionCode.BUDGET_SPENT:
+            self._mind.budget_not_spent()
+            return
+        seconds = self._mind.budget_spent()
+        self._report_pause(seconds)
+        await self._clock.sleep(seconds)
 
     async def _run_turn(self, setup: TurnSetup, admitted: Admitted, record: TaskRecord, sizing: _Sizing) -> None:
         told = await self._told(admitted)
@@ -322,6 +335,7 @@ class Turning:
                 final = await _final_event_of(events)
         if final is not None:
             self._report_turn_end(None, final.usage, sizing.sizes())
+            self._mind.budget_not_spent()
 
     async def _speak_along(self, events: AsyncIterator[TurnEvent], speaking: Speaking) -> FinalEvent | None:
         """Reads the turn's events while the sentences they release are spoken beside them.

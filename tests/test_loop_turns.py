@@ -446,11 +446,16 @@ async def test_a_loop_that_backs_off_or_suspends_drops_its_due_places_and_holds_
 
 
 @pytest.mark.parametrize(
-    "reply",
-    [Reply(status=HTTPStatus.TOO_MANY_REQUESTS), BUDGET_SPENT],
+    ("reply", "reported"),
+    [
+        (Reply(status=HTTPStatus.TOO_MANY_REQUESTS), [Event.TURN_ENDED]),
+        (BUDGET_SPENT, [Event.TURN_ENDED, Event.PAUSED]),
+    ],
     ids=["rate limited", "budget spent"],
 )
-async def test_a_turn_that_ends_short_is_reported_and_the_turn_due_at_another_app_follows(runner, other, reply):
+async def test_a_turn_that_ends_short_is_reported_and_the_turn_due_at_another_app_follows(
+    runner, other, reply, reported
+):
     runner.gateway = Gateway(reply, completion("done"))
     running = runner.gateway.hold_request(1)
     other.stand(SUBJECT, active(OTHER_CALL_ID))
@@ -464,7 +469,7 @@ async def test_a_turn_that_ends_short_is_reported_and_the_turn_due_at_another_ap
     await runner.gateway.until_turns(2, why="lines")
 
     assert turn_order(runner) == [(0, "lines"), (1, "lines")]
-    assert [event for event, _ in runner.reports.reported(started=False)] == [Event.TURN_ENDED]
+    assert [event for event, _ in runner.reports.reported(started=False)] == reported
 
 
 async def test_a_loop_that_renews_its_token_keeps_its_due_place_and_that_place_goes_before_a_younger_one(runner, other):
