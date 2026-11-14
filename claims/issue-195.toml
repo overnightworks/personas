@@ -1,0 +1,8 @@
+claim_id = "861e18aed33c411280a4e4af670f80e6"
+agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
+role = "builder"
+base = "39db249333c5789afeeb35045841537125099184"
+branch = "claude/issue-195-an-accept-names-its-voice-as-voices-on-a"
+scope = ["README.md", "docs/ARCHITECTURE.md", "pyproject.toml", "src/personas", "tests", "uv.lock"]
+opened_commit = "21d11799348766e88703157cac6135454242387f"
+whole_reason = "the pin and the accept's voice field it changes, with the documents naming it"
