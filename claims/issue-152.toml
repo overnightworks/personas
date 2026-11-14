@@ -1,0 +1,8 @@
+claim_id = "2671522d88bd4bfda64a946620da2c79"
+agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
+role = "builder"
+base = "68a630da6d6dbc81488d639181ffa02fb5c9e5a5"
+branch = "claude/issue-152-turn-ended-counts-a-turn-s-model-request"
+scope = ["README.md", "docs/ARCHITECTURE.md", "pyproject.toml", "src/personas", "tests", "uv.lock"]
+opened_commit = "70f6e9352ff68cab34e1356888a49a53f973be45"
+whole_reason = "the pin, the field it adds to turn_ended and the documents naming it"
