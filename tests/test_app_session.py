@@ -930,9 +930,11 @@ async def test_a_picture_that_breaks_the_wire_is_an_unusable_answer_and_no_valid
     app.script(CALL, answers_with_a_bad_picture)
     app.content.update(block["data"] for block in answer["content"] if block["type"] == "image")
 
+    said = {"place": "room-7", "text": secrets.token_hex(4)}
+
     async with opened(app, bearer) as session:
         with pytest.raises(UnusableAnswer) as failure:
-            await session.invoke(SAY_TOOL, {"place": "room-7", "text": secrets.token_hex(4)})
+            await session.invoke(SAY_TOOL, said)
 
     assert failure.value.code == INVALID_ANSWER_CODE
 
