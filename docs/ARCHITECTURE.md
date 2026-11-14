@@ -26,7 +26,7 @@ flowchart LR
     loop -- "every window read, verbatim" --> store["memory: Postgres table of lines"]
     migrate["personas migrate"] -- "schema" --> store
     commands["personas memory list, erase"] -- "visits listed, lines deleted" --> store
-    dispatch["Operator dispatches release.yml with YYYY.MM.DD.N"] --> gate["quality gate: checks green"]
+    dispatch["An agent dispatches release.yml with YYYY.MM.DD.N"] --> gate["quality gate: checks green"]
     gate --> image["Dockerfile: image of the runner"]
     characters["src/characters: one agent file per agent"] --> image
     generator["scripts/write_figures.py"] -- "writes" --> figures["src/characters: one VRM figure per agent"]
