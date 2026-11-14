@@ -27,6 +27,7 @@ from personas.failures import (
     leaves_of,
 )
 from personas.reporting import Event
+from personas.task_record import RelayFailed
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import BUDGET_SPENT, Gateway, says, says_after_a_hold
 from tests.support.history import act_entry, unanswered, url_of
@@ -438,6 +439,26 @@ async def test_a_relayed_call_that_fails_beside_a_defect_of_the_turns_teardown_e
     assert sorted(type(leaf).__name__ for leaf in leaves_of(ended)) == [RuntimeError.__name__, Unreachable.__name__]
     assert runner.reports.reported() == [(Event.STARTED, None)]
     assert len(runner.gateway.requests) == 1
+
+
+async def test_two_relayed_calls_that_fail_in_one_turn_end_the_runner_loud_with_both_failures_and_no_stop(
+    runner, monkeypatch
+):
+    first, second = ValueError("first"), ValueError("second")
+
+    async def fail_twice(self, *arguments):
+        raise BaseExceptionGroup("the session body", [RelayFailed(first), RelayFailed(second)])
+
+    monkeypatch.setattr("personas.turning.Turning._run_session_body", fail_twice)
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED)
+    assert runner.task is not None
+    async with asyncio.timeout(LIMIT_SECONDS):
+        (ended,) = await asyncio.gather(runner.task, return_exceptions=True)
+
+    assert list(leaves_of(ended)) == [first, second]
+    assert runner.reports.reported() == [(Event.STARTED, None)]
 
 
 async def test_a_deadline_during_a_relayed_call_ends_the_turn_as_limit_exceeded_and_gives_no_reaction(runner):
