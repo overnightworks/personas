@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 from agents.member import PlaceRef, PlaceView
 
-from personas.decision import AppPlace, Lines, Waiting
+from personas.decision import BACKOFF_BASE_SECONDS, BACKOFF_CAP_SECONDS, AppPlace, Lines, Waiting
 from personas.entries import KeptLine, ViewSeen, Visit
 from personas.mind import Mind
 
@@ -79,6 +79,43 @@ def test_one_turn_runs_at_a_time_and_the_next_goes_to_the_place_that_waited_long
     mind.release()
 
     assert mind.claim(TABLE_AT_A.app) == (TABLE_AT_A, Waiting(2))
+
+
+def test_a_turn_without_an_answer_is_due_again_once_the_running_turn_ends_and_a_newer_occasion_stays():
+    mind = Mind(size_bytes=1_000)
+    mind.due(TABLE_AT_A, Waiting(1))
+    assert mind.claim(TABLE_AT_A.app) == (TABLE_AT_A, Waiting(1))
+
+    mind.due(TABLE_AT_A, Waiting(2))
+    mind.due_again(TABLE_AT_A, Waiting(1))
+    mind.due_again(CALL_AT_B, Waiting(1))
+    assert mind.claim(TABLE_AT_A.app) is None
+    mind.release()
+
+    assert mind.claim(TABLE_AT_A.app) == (TABLE_AT_A, Waiting(2))
+    mind.release()
+    assert mind.claim(CALL_AT_B.app) == (CALL_AT_B, Waiting(1))
+
+
+def test_the_wait_after_turns_without_an_answer_doubles_per_turn_in_a_row_and_starts_over_after_an_answer():
+    mind = Mind(size_bytes=1_000, budget_pause_cap_seconds=BACKOFF_CAP_SECONDS * 4)
+
+    waits = [mind.unanswered(budget_spent=False) for _ in range(2)]
+    mind.answered()
+    waits.append(mind.unanswered(budget_spent=True))
+
+    assert waits == [BACKOFF_BASE_SECONDS, 2 * BACKOFF_BASE_SECONDS, BACKOFF_BASE_SECONDS]
+
+
+def test_the_wait_after_a_spent_budget_reaches_its_cap_and_after_any_other_stop_the_backoff_cap():
+    cap = BACKOFF_CAP_SECONDS * 4
+    mind = Mind(size_bytes=1_000, budget_pause_cap_seconds=cap)
+
+    other_stops = [mind.unanswered(budget_spent=False) for _ in range(10)]
+    mind.answered()
+    budget_stops = [mind.unanswered(budget_spent=True) for _ in range(10)]
+
+    assert (max(other_stops), max(budget_stops)) == (BACKOFF_CAP_SECONDS, cap)
 
 
 def test_the_end_of_a_turn_wakes_every_loop_of_the_agent():

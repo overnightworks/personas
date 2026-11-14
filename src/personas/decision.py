@@ -391,7 +391,8 @@ def sync_turned_revisions(turned: Mapping[PlaceRef, int], standings: tuple[Stand
 def view_turn_due(turned_revision: int | None, view: PlaceView) -> bool:
     """A turn is due while the view waits for the agent at a revision no turn has been started for yet.
 
-    The turn's own outcome does not count: an app that wants him to act again moves the revision.
+    The turn's own outcome does not count, except that a turn ended without an answer makes its place due again
+    (``due_again``): an app that wants him to act again moves the revision.
     """
     return view.awaits_you and turned_revision != view.revision
 
@@ -591,6 +592,17 @@ def with_due(turns: Turns, at: AppPlace, occasion: Occasion) -> Turns:
     """A turn due at ``at`` for ``occasion``: a place already due keeps its position, lines of one generation join, and
     lines of another generation or a newer view revision replace what was due."""
     return Turns(turns.running, {**turns.due, at: _joined(turns.due.get(at), occasion)})
+
+
+def due_again(turns: Turns, at: AppPlace, occasion: Occasion) -> Turns:
+    """A turn due again at ``at`` for ``occasion``, which a turn ended without an answer: a place due meanwhile keeps
+    what is newer, except that lines of the same generation join; any other place goes to the back of the order."""
+    held = turns.due.get(at)
+    if held is None or (
+        isinstance(held, Lines) and isinstance(occasion, Lines) and held.generation == occasion.generation
+    ):
+        return with_due(turns, at, occasion)
+    return turns
 
 
 def without_due(turns: Turns, leaving: Callable[[AppPlace], bool]) -> Turns:

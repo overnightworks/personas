@@ -30,7 +30,7 @@ from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import SweepClock
 from tests.support.gateway import BUDGET_SPENT, Gateway, says, says_after_a_hold
-from tests.support.history import act_entry, unanswered, url_of
+from tests.support.history import act_entry, unanswered, url_of, woke_at_lines
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import (
     CALL,
@@ -167,7 +167,7 @@ async def test_a_line_said_while_a_turn_ran_is_answered_once_that_turn_ends_thou
     await runner.gateway.until_requested(3)
 
     assert runner.gateway.round_sizes() == [2, 2, 4]
-    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [2]]
+    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [1, 2]]
     assert runner.reports.reported()[:3] == [
         (Event.STARTED, None),
         (Event.JOINED, None),
@@ -215,14 +215,14 @@ async def test_every_line_addressed_to_him_gets_its_own_turn_one_after_the_other
 
 
 async def a_turn_ended_short(runner, code):
-    """Runs the runner on one addressed line until its turn reported this code."""
+    """Runs the runner on one addressed line until its turn reported this code and began the wait before its retry."""
+    runner.clock = SweepClock(BACKOFF_BASE_SECONDS)
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
-    await runner.reports.until(Event.TURN_ENDED)
+    await runner.clock.until_waiting(1)
 
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, code)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, code), (Event.PAUSED, code)]
     assert runner.app.said == []
-    assert runner.clock.slept == []
     assert not runner.task.done()
     assert runner.app.log.count(LISTEN) == 1
 
@@ -260,10 +260,27 @@ async def test_a_turn_refused_for_a_spent_budget_waits_the_backoff_base_before_h
     await runner.app.said_count(1)
 
     assert held_requests == 1
-    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [2, 3, 4]]
+    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [1, 2, 3, 4]]
     assert [
         (change.event, change.code, change.seconds) for change in runner.reports.changes if change.event is Event.PAUSED
     ] == [(Event.PAUSED, RejectionCode.BUDGET_SPENT.value, BACKOFF_BASE_SECONDS)]
+
+
+async def test_a_lines_turn_the_gateway_failed_runs_again_after_the_wait_with_its_seqs_in_its_woke(runner):
+    runner.clock = SweepClock(BACKOFF_BASE_SECONDS)
+    runner.gateway = Gateway(Reply(status=HTTPStatus.SERVICE_UNAVAILABLE), *says(PLACE_ID, ANSWER))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.clock.until_waiting(1)
+    held_requests = len(runner.gateway.requests)
+    runner.clock.open_gate()
+    await runner.app.said_count(1)
+
+    assert held_requests == 1
+    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [1]]
+    assert [opening.room["woke"] for opening in runner.gateway.openings()] == [
+        woke_at_lines(url_of(runner, 0), PLACE_ID)
+    ] * 2
 
 
 async def test_the_wait_after_a_spent_budget_doubles_and_starts_over_after_a_turn_that_is_not_refused_for_it(runner):
@@ -381,6 +398,7 @@ async def test_a_turn_ended_short_beside_a_late_answer_is_reported_and_costs_one
     assert runner.reports.reported() == [
         (Event.STARTED, None),
         (Event.TURN_ENDED, RejectionCode.BUSY.value),
+        (Event.PAUSED, RejectionCode.BUSY.value),
         (Event.BACKOFF, NETWORK_FAILURE_CODE),
         (Event.RESUMED, None),
     ]
@@ -490,12 +508,19 @@ async def test_a_deadline_during_a_relayed_call_ends_the_turn_as_limit_exceeded_
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.gateway.until_requested(2)
 
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, FailureCode.LIMIT_EXCEEDED.value)]
-    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [2]]
+    assert runner.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.TURN_ENDED, FailureCode.LIMIT_EXCEEDED.value),
+        (Event.PAUSED, FailureCode.LIMIT_EXCEEDED.value),
+    ]
+    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [1, 2]]
     assert runner.gateway.openings()[1].room["history"]["entries"][1] == act_entry(
-        url_of(runner, 0), "say", {"place": PLACE_ID, "text": ANSWER}, unanswered(TURN_CANCELLED_CODE)
+        url_of(runner, 0),
+        "say",
+        {"place": PLACE_ID, "text": ANSWER},
+        unanswered(TURN_CANCELLED_CODE),
+        seconds_ago=int(BACKOFF_BASE_SECONDS),
     )
-    assert runner.clock.slept == []
     assert runner.task is not None
     assert not runner.task.done()
 

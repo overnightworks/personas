@@ -641,7 +641,7 @@ class TurnEndingInTheStepItsPlaceLeaves(TurnAndLifecycle):
 @pytest.mark.parametrize(
     ("ending", "own_reports", "sleeps"),
     [
-        ("stop", [(Event.TURN_ENDED, RejectionCode.BUSY.value)], []),
+        ("stop", [(Event.TURN_ENDED, RejectionCode.BUSY.value)], [backoff_delay(1)]),
         ("completion", [], []),
         ("relayed failure", [], [backoff_delay(1)]),
     ],
