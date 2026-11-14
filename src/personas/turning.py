@@ -15,7 +15,6 @@ from agents.turn import Turn, TurnMessage, TurnRole
 from agents.turn_events import FinalEvent, ToolCallEvent
 
 from personas.decision import (
-    TOOL_NOT_DECLARED_CODE,
     TURN_ROLE,
     act_outcome,
     arrived_since,
@@ -94,7 +93,7 @@ class _Sizing:
     relayed back to the model, held and refused calls included. Only bytes are kept."""
 
     def __init__(self) -> None:
-        self._request: tuple[int, int] | None = None
+        self._request = (0, 0)
         self._results = 0
 
     def request_built(self, declarations: Iterable[ToolDeclaration], told: str) -> None:
@@ -111,10 +110,7 @@ class _Sizing:
 
         return HandTool(tool.declaration, handler)
 
-    def sizes(self) -> InputSizes | None:
-        """``None`` while no request was built."""
-        if self._request is None:
-            return None
+    def sizes(self) -> InputSizes:
         return InputSizes(self._request[0], self._request[1], self._results)
 
 
@@ -158,7 +154,7 @@ class _HeldTools:
     """What a turn holds: the hand tools of every app that answered, and the calls the turn may make in all."""
 
     tools: tuple[HandTool, ...]
-    max_tool_calls: int
+    max_tool_calls: int | None
 
     @property
     def declarations(self) -> tuple[ToolDeclaration, ...]:
@@ -294,9 +290,6 @@ class Turning:
     ) -> None:
         raise_if_cancelled()
         held = await self._hold_tools(setup, session, record, admitted)
-        if held is None:
-            self._report_turn_end(TOOL_NOT_DECLARED_CODE, None, None)
-            return
         request = TurnRequest(
             agent=setup.persona.name,
             turn=Turn(system=setup.persona.prompt, messages=[TurnMessage(role=TurnRole.USER, text=told)]),
@@ -358,16 +351,14 @@ class Turning:
 
     async def _hold_tools(
         self, setup: TurnSetup, session: AppSession, record: TaskRecord, admitted: Admitted
-    ) -> _HeldTools | None:
+    ) -> _HeldTools:
         """The tools of the place's app, of each app named in the admission and of each tools-only app that answers,
         in the configuration's order, each app counting its own calls.
 
-        ``None`` when the place's app declares a bound tool no more. Another app that fails or declares one no more
-        is left out and reported once, and the turn holds the rest.
+        Of each app only the bound tools it lists now are held, none when it lists none. Another app whose listing
+        fails is left out and reported once, and the turn holds the rest.
         """
         own = bound_declarations(await session.declared_tools(), setup.binding.tools)
-        if own is None:
-            return None
         hold = _Hold(admitted.history)
         tools: list[HandTool] = []
         bounds: list[int] = []
@@ -379,7 +370,7 @@ class Turning:
                 lent = await self._list_elsewhere(app, binding, calls, hold, record)
             else:
                 continue
-            if lent is not None:
+            if lent:
                 tools.extend(lent)
                 bounds.append(calls.bound)
         return _HeldTools(tuple(tools), turn_call_bound(bounds))
@@ -387,14 +378,12 @@ class Turning:
     async def _list_elsewhere(
         self, app: AppTarget, binding: ToolBinding, calls: _Calls, hold: _Hold, record: TaskRecord
     ) -> list[HandTool] | None:
-        """The hand tools of another app's bound tools, or ``None`` after the one report of why it lends none."""
+        """The hand tools of the bound tools another app lists, or ``None`` after the report of its failed listing."""
         declared = await self._ask_elsewhere(app, lambda session: session.declared_tools(), record)
         if isinstance(declared, CallFailure):
             self._report(_failure_event(app), failure_code(declared), app)
             return None
-        if (listed := bound_declarations(declared, binding.tools)) is None:
-            self._report(_failure_event(app), TOOL_NOT_DECLARED_CODE, app)
-            return None
+        listed = bound_declarations(declared, binding.tools)
         return [HandTool(each, partial(self._relay_elsewhere, app, each.name, calls, hold, record)) for each in listed]
 
     def _held(self, hold: _Hold) -> ToolOutcome | None:

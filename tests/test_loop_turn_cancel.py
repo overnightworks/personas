@@ -8,19 +8,18 @@ from http import HTTPStatus
 
 import anyio
 import pytest
-from agents.backend.fake_gateway import Reply
+from agents.backend.fake_gateway import Reply, completion
 from agents.member import STANDING_URI
-from mcp_types import ListToolsResult
 
 from personas import app_session
-from personas.decision import TOOL_NOT_DECLARED_CODE, TURN_CANCELLED_CODE, status_code
+from personas.decision import TURN_CANCELLED_CODE, status_code
 from personas.failures import Unreachable, leaves_of
 from personas.reporting import Event
 from personas.task_record import UnrequestedCancellationError
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, says
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import DISCOVER, LIMIT_SECONDS, LIST_TOOLS, READ, active, paused
+from tests.support.hopin import DISCOVER, LIMIT_SECONDS, READ, active, paused
 from tests.support.transport import (
     ClosingHold,
     transport_closing_with_late_answers,
@@ -142,12 +141,9 @@ async def test_while_a_cancelled_turn_still_unwinds_a_new_addressed_line_starts_
 
 
 async def test_a_turn_that_reported_its_end_and_meets_the_cancel_in_its_teardown_reports_no_cancel(runner, monkeypatch):
-    async def lists_no_tools(reply):
-        await reply.result(ListToolsResult(tools=[]))
-
     closing = ClosingHold()
     monkeypatch.setattr(app_session, "streamable_http_client", closing.transport())
-    runner.app.script(LIST_TOOLS, lists_no_tools)
+    runner.gateway = Gateway(completion("done"))
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
     try:
@@ -163,7 +159,7 @@ async def test_a_turn_that_reported_its_end_and_meets_the_cancel_in_its_teardown
     finally:
         closing.release.set()
 
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, TOOL_NOT_DECLARED_CODE)]
+    assert runner.reports.reported() == [(Event.STARTED, None)]
     assert not runner.task.done()
 
 

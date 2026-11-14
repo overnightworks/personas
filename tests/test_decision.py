@@ -652,8 +652,21 @@ def test_the_bound_tools_are_declared_in_the_order_they_are_bound():
     assert bound_declarations(declared, ["c", "a"]) == (declared[2], declared[0])
 
 
-def test_a_bound_tool_the_app_declares_no_more_leaves_no_declarations():
-    assert bound_declarations([_declaration("a")], ["a", "gone"]) is None
+@pytest.mark.parametrize(
+    ("listed", "bound", "expected"),
+    [
+        (["a", "b"], ["a", "b"], ["a", "b"]),
+        (["c", "a", "b"], ["b", "a"], ["b", "a"]),
+        (["a", "c"], ["a", "b", "c"], ["a", "c"]),
+        ([], ["a", "b"], []),
+        (["a", "extra"], ["a"], ["a"]),
+    ],
+    ids=["all listed", "binding order", "a subset", "none listed", "an unbound tool stays out"],
+)
+def test_a_turn_binds_the_bound_tools_the_app_lists_in_binding_order(listed, bound, expected):
+    declared = {name: _declaration(name) for name in {*listed, *bound}}
+
+    assert bound_declarations([declared[name] for name in listed], bound) == tuple(declared[name] for name in expected)
 
 
 ONCE_DROPPED = History((), left_out=1, heard=0)
@@ -741,6 +754,10 @@ def test_the_voice_waits_no_longer_than_the_bound_whatever_the_app_says():
 def test_a_turns_call_bound_is_the_sum_of_the_bounds_of_the_apps_whose_tools_it_holds_plus_the_call_it_may_hold_back():
     assert turn_call_bound([4, 5, 2]) == 12
     assert turn_call_bound([4]) == 5
+
+
+def test_a_turn_that_holds_no_tool_has_no_call_bound():
+    assert turn_call_bound([]) is None
 
 
 @pytest.mark.parametrize(("made", "within"), [(0, True), (2, True), (3, False), (4, False)])

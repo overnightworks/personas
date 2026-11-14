@@ -8,13 +8,12 @@ from http import HTTPStatus
 import pytest
 from agents.backend.fake_gateway import Reply, completion, tool_round
 from agents.tools import ToolOutcome
-from mcp_types import ListToolsResult
 
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, say, words
 from tests.support.history import REMARK, said_and_taken
-from tests.support.hopin import LIST_TOOLS, formatted
+from tests.support.hopin import formatted
 from tests.support.voice import a_voice_call
 
 pytestmark = pytest.mark.anyio
@@ -137,18 +136,4 @@ async def test_a_turn_that_fails_after_its_request_logs_its_sizes_and_no_usage(r
 
     ended = the_turn_ended_line(caplog)
     assert ended.group(2) is not None
-    assert ended.group("counts") == ""
-
-
-async def test_a_turn_that_ends_before_any_request_logs_none_of_the_sizes(runner, caplog):
-    async def lists_no_tools(reply):
-        await reply.result(ListToolsResult(tools=[]))
-
-    runner.app.script(LIST_TOOLS, lists_no_tools)
-    await restarted_in_the_call(runner)
-    say_in_the_call(runner, ADDRESSED)
-    await runner.reports.until(Event.TURN_ENDED)
-
-    ended = the_turn_ended_line(caplog)
-    assert ended.group(2) is None
     assert ended.group("counts") == ""
