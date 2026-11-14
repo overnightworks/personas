@@ -260,9 +260,13 @@ async def test_a_round_after_a_hold_that_passes_the_deadline_ends_the_turn_as_li
     await runner.gateway.until_requested(1)
     await said_and_taken(runner.app, PLACE_ID, REMARK)
     first.set()
-    await runner.reports.until(Event.TURN_ENDED)
+    await runner.reports.until(Event.PAUSED)
 
-    assert runner.reports.reported() == [STARTED, (Event.TURN_ENDED, FailureCode.LIMIT_EXCEEDED.value)]
+    assert runner.reports.reported() == [
+        STARTED,
+        (Event.TURN_ENDED, FailureCode.LIMIT_EXCEEDED.value),
+        (Event.PAUSED, FailureCode.LIMIT_EXCEEDED.value),
+    ]
     assert runner.app.said == []
     assert runner.app.log.count(CALL) == 0
 

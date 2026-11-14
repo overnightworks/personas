@@ -10,8 +10,10 @@ from typing import TYPE_CHECKING
 from personas.decision import (
     DEFAULT_BUDGET_PAUSE_CAP_SECONDS,
     Turns,
+    backoff_delay,
     budget_pause,
     claimed,
+    due_again,
     held_apps,
     history_after,
     released,
@@ -34,7 +36,7 @@ class Mind:
     def __init__(self, size_bytes: int, budget_pause_cap_seconds: float = DEFAULT_BUDGET_PAUSE_CAP_SECONDS) -> None:
         self._size_bytes = size_bytes
         self._budget_pause_cap_seconds = budget_pause_cap_seconds
-        self._budget_refusals = 0
+        self._unanswered_turns = 0
         self._history = History((), left_out=0, heard=0)
         self._turns = Turns()
         self._placed = frozenset[str]()
@@ -52,14 +54,16 @@ class Mind:
             return
         self._history = history_after(self._history, taken, self._size_bytes)
 
-    def budget_spent(self) -> float:
-        """A turn of his was refused for a spent budget; the seconds his turns wait now."""
-        self._budget_refusals += 1
-        return budget_pause(self._budget_refusals, self._budget_pause_cap_seconds)
+    def unanswered(self, *, budget_spent: bool) -> float:
+        """A turn of his ended without an answer, refused for a spent budget or not; the seconds his turns wait now."""
+        self._unanswered_turns += 1
+        if budget_spent:
+            return budget_pause(self._unanswered_turns, self._budget_pause_cap_seconds)
+        return backoff_delay(self._unanswered_turns)
 
-    def budget_not_spent(self) -> None:
-        """A turn of his ended and was not refused for the budget: the wait starts over."""
-        self._budget_refusals = 0
+    def answered(self) -> None:
+        """A turn of his ended with an answer: the wait starts over."""
+        self._unanswered_turns = 0
 
     def stand_at(self, app: str, *, holds: bool) -> None:
         """Records whether he holds an active place at ``app``, as its loop last read his standing."""
@@ -77,6 +81,11 @@ class Mind:
 
     def due(self, at: AppPlace, occasion: Occasion) -> None:
         self._turns = with_due(self._turns, at, occasion)
+
+    def due_again(self, at: AppPlace, occasion: Occasion) -> None:
+        """The turn at ``at`` ended without an answer: the place is due for ``occasion`` again unless something newer
+        made it due meanwhile. It waits for the running turn to end."""
+        self._turns = due_again(self._turns, at, occasion)
 
     def undue(self, leaving: Callable[[AppPlace], bool]) -> None:
         """Drops the due places for which ``leaving`` holds; with no turn running a younger place may then go first."""

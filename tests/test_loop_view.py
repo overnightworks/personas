@@ -5,16 +5,16 @@ from __future__ import annotations
 import logging
 import secrets
 from dataclasses import replace
-from http import HTTPStatus
 
 import pytest
-from agents.backend.fake_gateway import Reply, completion, tool_call, tool_round
+from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.member import STANDING_URI, FigureRef, PlaceRef, place_view_uri, place_window_uri
 
 from personas.config import Voice, load_config
-from personas.decision import NO_TURNS_CODE, TURN_CANCELLED_CODE
+from personas.decision import BACKOFF_BASE_SECONDS, NO_TURNS_CODE, TURN_CANCELLED_CODE
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, say_in_the_call
+from tests.support.fakes import SweepClock
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
 from tests.support.history import entry, history_of, said_and_taken, settled, view_entry, woke_at_table
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
@@ -198,8 +198,6 @@ async def test_a_view_that_moves_to_a_revision_waiting_for_him_gets_one_turn_tol
     [
         pytest.param(says(TABLE.id, ANSWER), False, id="the turn calls a tool that moves nothing"),
         pytest.param([completion("done")], False, id="the turn makes no call"),
-        pytest.param([Reply(status=HTTPStatus.TOO_MANY_REQUESTS)], False, id="the gateway is busy"),
-        pytest.param([BUDGET_SPENT], False, id="the budget is spent"),
         pytest.param(
             [tool_round(tool_call("call-0", SAY_TOOL, {"place": TABLE.id, "text": ANSWER}))],
             True,
@@ -220,6 +218,52 @@ async def test_a_turn_that_ends_and_leaves_its_revision_waiting_gets_no_second_t
     await runner.gateway.until_turns(2)
 
     assert told_states(runner) == [first, second]
+
+
+async def test_a_view_turn_the_budget_ended_runs_again_at_the_same_revision_after_the_pause_with_no_new_event(runner):
+    runner.clock = SweepClock(BACKOFF_BASE_SECONDS)
+    runner.gateway = Gateway(BUDGET_SPENT, completion("done"))
+    await seated_at_a_table_whose_view_waits(runner)
+    await runner.clock.until_waiting(1)
+    held_requests = len(runner.gateway.requests)
+    runner.clock.open_gate()
+    await runner.gateway.until_turns(2, why="view")
+
+    assert held_requests == 1
+    assert [opening.room["woke"] for opening in runner.gateway.openings()] == [
+        woke_at_table(runner.config.apps[0].mcp_url)
+    ] * 2
+    assert len({opening.room["history"]["entries"][-1]["revision"] for opening in runner.gateway.openings()}) == 1
+
+
+async def test_a_newer_revision_during_the_pause_replaces_the_one_that_was_due_and_does_not_end_the_pause(runner):
+    runner.clock = SweepClock(BACKOFF_BASE_SECONDS)
+    runner.gateway = Gateway(BUDGET_SPENT, completion("done"))
+    first = await seated_at_a_table_whose_view_waits(runner)
+    await runner.clock.until_waiting(1)
+    reads = runner.app.view_reads(TABLE)
+    newer = waits(runner, 2)
+    await runner.app.until_view_read(TABLE, reads + 1)
+    held_requests = len(runner.gateway.requests)
+    runner.clock.open_gate()
+    await runner.reports.until_a_turn_completed()
+
+    assert held_requests == 1
+    assert told_states(runner) == [first, newer]
+    assert len(runner.gateway.requests) == 2
+
+
+async def test_a_place_left_during_the_pause_gets_no_turn_and_the_next_place_follows(runner):
+    runner.clock = SweepClock(BACKOFF_BASE_SECONDS)
+    runner.gateway = Gateway(BUDGET_SPENT, completion("done"))
+    first = await seated_at_a_table_whose_view_waits(runner)
+    await runner.clock.until_waiting(1)
+    runner.app.stand(SUBJECT, at_table(OTHER_TABLE))
+    other = waits(runner, 1, OTHER_TABLE)
+    await runner.reports.until_a_turn_completed()
+
+    assert told_states(runner) == [first, other]
+    assert len(runner.gateway.requests) == 2
 
 
 async def test_a_turn_that_moves_the_app_to_a_revision_that_waits_again_starts_that_revision_afresh(runner):

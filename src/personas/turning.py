@@ -16,6 +16,7 @@ from agents.turn_events import FinalEvent, ToolCallEvent
 
 from personas.decision import (
     TURN_ROLE,
+    AppPlace,
     act_outcome,
     arrived_since,
     bound_declarations,
@@ -205,7 +206,7 @@ class Turning:
         use_current_token: Callable[[AppSession], Awaitable[None]],
         report: Callable[[Event, str | None, AppTarget | None], None],
         report_turn_end: Callable[[str | None, TurnUsage | None, InputSizes | None], None],
-        report_pause: Callable[[float], None],
+        report_pause: Callable[[float, str], None],
     ) -> None:
         self._agent = agent
         self._app = app
@@ -251,7 +252,8 @@ class Turning:
             held = failure_held_by(stopped)
             if held is None and record.defect is None:
                 self._report_turn_end(stopped.code.value, None, sizing.sizes())
-                await self._pause_when_budget_spent(stopped.code)
+                await self._wait_before_retry(stopped.code)
+                self._mind.due_again(AppPlace(self._app.mcp_url, admitted.place), admitted.occasion)
             # What left the session beside the stop (a late answer) still goes to the group, to be judged there.
             rest: list[BaseException] = [held] if held is not None else []
             rest.extend(leaf for leaf in leaves if leaf is not stopped)
@@ -260,14 +262,11 @@ class Turning:
             if rest:
                 raise BaseExceptionGroup("the turn's session failed", rest) from None
 
-    async def _pause_when_budget_spent(self, code: RejectionCode | FailureCode) -> None:
-        """A turn the gateway refused for a spent budget holds his one turn slot for the wait, so the lines that arrive
-        meanwhile are taken into his history and make one turn after it; a turn ended otherwise ends the wait."""
-        if code is not RejectionCode.BUDGET_SPENT:
-            self._mind.budget_not_spent()
-            return
-        seconds = self._mind.budget_spent()
-        self._report_pause(seconds)
+    async def _wait_before_retry(self, code: RejectionCode | FailureCode) -> None:
+        """A turn that ended without an answer holds his one turn slot for the wait, so the lines that arrive meanwhile
+        are taken into his history and make one turn after it, with the turn's own place."""
+        seconds = self._mind.unanswered(budget_spent=code is RejectionCode.BUDGET_SPENT)
+        self._report_pause(seconds, code.value)
         await self._clock.sleep(seconds)
 
     async def _run_turn(self, setup: TurnSetup, admitted: Admitted, record: TaskRecord, sizing: _Sizing) -> None:
@@ -335,7 +334,7 @@ class Turning:
                 final = await _final_event_of(events)
         if final is not None:
             self._report_turn_end(None, final.usage, sizing.sizes())
-            self._mind.budget_not_spent()
+            self._mind.answered()
 
     async def _speak_along(self, events: AsyncIterator[TurnEvent], speaking: Speaking) -> FinalEvent | None:
         """Reads the turn's events while the sentences they release are spoken beside them.

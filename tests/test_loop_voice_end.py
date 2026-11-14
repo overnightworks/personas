@@ -199,12 +199,16 @@ async def test_a_gateway_that_stops_the_turn_while_a_sentence_is_sent_and_one_is
     await runner.app.until_called(1)
     reply.cut()
     answer.set()
-    await runner.reports.until(Event.TURN_ENDED)
+    await runner.reports.until(Event.PAUSED)
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.gateway.until_turns(2)
 
     assert sentences_spoken(runner) == ["First sentence."]
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, FailureCode.PROVIDER_ERROR.value)]
+    assert runner.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.TURN_ENDED, FailureCode.PROVIDER_ERROR.value),
+        (Event.PAUSED, FailureCode.PROVIDER_ERROR.value),
+    ]
     (sent,) = runner.gateway.turns()[1].told("speech")
     assert (sent["text"], sent["outcome"]) == ("First sentence.", {"answered": True})
 
@@ -223,13 +227,17 @@ async def test_a_turn_past_its_deadline_sends_no_call_and_no_sentence_and_ends_l
     await a_voice_call(runner, *replies, completion("Later."))
     runner.app.speak_duration_ms = LONG_SENTENCE_MS
     say_in_the_call(runner, ADDRESSED)
-    await runner.reports.until(Event.TURN_ENDED)
+    await runner.reports.until(Event.PAUSED)
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.gateway.until_turns(2)
 
     assert sentences_spoken(runner) == spoken
     assert runner.app.said == []
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, FailureCode.LIMIT_EXCEEDED.value)]
+    assert runner.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.TURN_ENDED, FailureCode.LIMIT_EXCEEDED.value),
+        (Event.PAUSED, FailureCode.LIMIT_EXCEEDED.value),
+    ]
     assert [each["text"] for each in runner.gateway.turns()[1].told("speech")] == spoken
 
 

@@ -9,8 +9,6 @@ from functools import partial
 from operator import eq
 from typing import TYPE_CHECKING, Final, Literal, NoReturn
 
-from agents.turn import RejectionCode
-
 from personas.decision import (
     NO_TURNS_CODE,
     SUSPENDED_RETRY_SECONDS,
@@ -356,7 +354,8 @@ class AgentLoop:
     def _take_views(self, read: dict[PlaceRef, ViewSeen | None]) -> None:
         """Takes each view read into the agent's history. A revision that waits for him and has no turn yet makes a turn
         due at its place; one that does not wait, and a view the app gives none of, take the place's due away. A
-        revision gets one turn, whatever that turn did. No await stands in it."""
+        revision waiting for him that has had its turn keeps a due that turn left behind by ending without an answer.
+        No await stands in it."""
         for place, seen in read.items():
             at = AppPlace(self._app.mcp_url, place)
             if seen is None:
@@ -365,7 +364,7 @@ class AgentLoop:
             self._mind.take((seen,))
             if view_turn_due(self._turned_revisions.get(place), seen.view):
                 self._mind.due(at, Waiting(seen.view.revision))
-            else:
+            elif not seen.view.awaits_you:
                 self._mind.undue(partial(eq, at))
 
     async def _start_due_turn(self, turns: asyncio.TaskGroup) -> None:
@@ -415,13 +414,13 @@ class AgentLoop:
             StateChange(Event.TURN_ENDED, self._agent.client_id, self._app.mcp_url, code, usage=usage, sizes=sizes)
         )
 
-    def _report_pause(self, seconds: float) -> None:
+    def _report_pause(self, seconds: float, code: str) -> None:
         self._boundaries.report(
             StateChange(
                 Event.PAUSED,
                 self._agent.client_id,
                 self._app.mcp_url,
-                RejectionCode.BUDGET_SPENT.value,
+                code,
                 seconds=seconds,
             )
         )

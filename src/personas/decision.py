@@ -391,7 +391,8 @@ def sync_turned_revisions(turned: Mapping[PlaceRef, int], standings: tuple[Stand
 def view_turn_due(turned_revision: int | None, view: PlaceView) -> bool:
     """A turn is due while the view waits for the agent at a revision no turn has been started for yet.
 
-    The turn's own outcome does not count: an app that wants him to act again moves the revision.
+    The turn's own outcome does not count, except that a turn ended without an answer makes its place due again
+    (``due_again``): an app that wants him to act again moves the revision.
     """
     return view.awaits_you and turned_revision != view.revision
 

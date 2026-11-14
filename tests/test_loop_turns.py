@@ -448,7 +448,7 @@ async def test_a_loop_that_backs_off_or_suspends_drops_its_due_places_and_holds_
 @pytest.mark.parametrize(
     ("reply", "reported"),
     [
-        (Reply(status=HTTPStatus.TOO_MANY_REQUESTS), [Event.TURN_ENDED]),
+        (Reply(status=HTTPStatus.TOO_MANY_REQUESTS), [Event.TURN_ENDED, Event.PAUSED]),
         (BUDGET_SPENT, [Event.TURN_ENDED, Event.PAUSED]),
     ],
     ids=["rate limited", "budget spent"],
