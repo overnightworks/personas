@@ -29,7 +29,6 @@ from personas.recall import (
     LOOKUPS_SPENT_TEXT,
     RECALL_TOOL,
     SCOPE_TEXT,
-    SMALLEST_RESULT_BYTES,
     STORE_DID_NOT_ANSWER_TEXT,
     text_refused_text,
 )
@@ -343,7 +342,7 @@ async def test_a_lookup_is_not_held_back_by_what_arrived_and_does_not_use_up_the
 
 @pytest.mark.parametrize(
     "arguments",
-    [{}, {"text": 5}, {"text": None}, {"text": "x" * (SMALLEST_RESULT_BYTES + 1)}],
+    [{}, {"text": 5}, {"text": None}, {"text": "x" * 51}],
     ids=["missing", "no string", "null", "longer than lookup bytes"],
 )
 async def test_a_text_that_is_missing_no_string_or_too_long_is_an_error_result_and_the_store_is_not_read(
@@ -355,12 +354,12 @@ async def test_a_text_that_is_missing_no_string_or_too_long_is_an_error_result_a
         store,
         tool_round(tool_call("call-0", RECALL_TOOL, arguments)),
         completion("done"),
-        lookup_bytes=SMALLEST_RESULT_BYTES,
+        lookup_bytes=50,
     )
     await runner.gateway.until_requested(2)
 
     assert store.searches == []
-    assert text_refused_text(SMALLEST_RESULT_BYTES) in runner.gateway.tool_results(2)[0]
+    assert text_refused_text(50) in runner.gateway.tool_results(2)[0]
 
 
 async def test_a_store_that_cannot_answer_gives_an_error_result_and_store_failed_once_and_his_answer_goes_out(runner):

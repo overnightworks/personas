@@ -16,7 +16,6 @@ from personas.entries import KeptLine, ViewSeen, Visit
 from personas.recall import (
     RECALL_DECLARATION,
     SCOPE_TEXT,
-    SMALLEST_RESULT_BYTES,
     line_search,
     lookup_result,
     search_text,
@@ -100,7 +99,7 @@ def _smallest_line(seq: int) -> KeptLine:
     )
 
 
-@pytest.mark.parametrize("result_bytes", [SMALLEST_RESULT_BYTES, 400, 8192, 100_000, MAX_EVENT_BYTES * 3])
+@pytest.mark.parametrize("result_bytes", [1, 400, 8192, 100_000, MAX_EVENT_BYTES * 3])
 def test_a_search_asks_for_one_row_more_than_the_smallest_lines_that_fit_the_result_so_that_no_fitting_line_is_missed(
     result_bytes,
 ):
@@ -147,11 +146,8 @@ def test_a_result_holds_the_newest_lines_that_fit_and_says_when_more_matched():
     assert len(one_byte_short.encode()) <= whole - 1
 
 
-def test_a_result_within_the_least_bound_holds_no_line_says_more_matched_and_passes_no_bound():
-    result = lookup_result(_lines_said(2), SMALLEST_RESULT_BYTES)
-
-    assert json.loads(result) == {"scope": SCOPE_TEXT, "older_dropped": True, "lines": []}
-    assert len(result.encode()) <= SMALLEST_RESULT_BYTES
+def test_a_result_that_cannot_hold_a_line_has_none_and_says_more_matched():
+    assert json.loads(lookup_result(_lines_said(2), 1)) == {"scope": SCOPE_TEXT, "older_dropped": True, "lines": []}
 
 
 def test_a_result_never_passes_what_the_wire_carries_in_one_result_whatever_lookup_bytes_allows():

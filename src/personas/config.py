@@ -19,8 +19,8 @@ The optional ``[memory]`` table names the Postgres database that keeps every lin
 database, user, the file holding the password, ``write_seconds``, the bound on one write or read, how long a line is
 kept (``lines_keep_days``) and how often older ones are swept (``sweep_minutes``); ``inf`` keeps every line or sweeps
 once, at the start. A turn may look up what was said in its place before its history (``lookup_calls``, the lookups one
-turn makes, and ``lookup_bytes``, the bytes of one result and the longest text a lookup accepts); both are integers,
-the calls above 0 and the bytes at least what a result without a line takes, and neither turns the lookup off.
+turn makes, and ``lookup_bytes``, the bytes of one result and the longest text a lookup accepts); both are positive
+integers and neither turns the lookup off.
 Every value is validated at start and an error names the field or path, never a secret.
 """
 
@@ -47,7 +47,7 @@ from pydantic import (
 )
 
 from personas.decision import BACKOFF_BASE_SECONDS, DEFAULT_BUDGET_PAUSE_CAP_SECONDS, TURN_ROLE
-from personas.recall import RECALL_TOOL, SMALLEST_RESULT_BYTES
+from personas.recall import RECALL_TOOL
 from personas.secret import Secret
 
 if TYPE_CHECKING:
@@ -201,7 +201,7 @@ class _MemoryEntry(_Entry):
     lines_keep_days: PositiveFloat = Field(default=DEFAULT_LINES_KEEP_DAYS, strict=True)
     sweep_minutes: PositiveFloat = Field(default=DEFAULT_SWEEP_MINUTES, strict=True)
     lookup_calls: PositiveInt = Field(default=DEFAULT_LOOKUP_CALLS, strict=True)
-    lookup_bytes: int = Field(default=DEFAULT_LOOKUP_BYTES, strict=True, ge=SMALLEST_RESULT_BYTES)
+    lookup_bytes: PositiveInt = Field(default=DEFAULT_LOOKUP_BYTES, strict=True)
 
 
 class _FileModel(_Entry):

@@ -85,13 +85,10 @@ def _result_json(told: list[dict[str, object]], *, older_dropped: bool) -> str:
     return json.dumps({"scope": SCOPE_TEXT, "older_dropped": older_dropped, "lines": told}, ensure_ascii=False)
 
 
-# The least a result holds: its scope and flags with no line. A smaller bound holds no result at all.
-SMALLEST_RESULT_BYTES: Final = len(_result_json([], older_dropped=False).encode())
-
-
 def _room_for_lines(result_bytes: int) -> int:
     """What is left of a result's bytes for lines and their separators, counting the separator the first line lacks."""
-    return min(result_bytes, MAX_EVENT_BYTES) - SMALLEST_RESULT_BYTES + len(_SEPARATOR)
+    empty = _result_json([], older_dropped=False)
+    return min(result_bytes, MAX_EVENT_BYTES) - len(empty.encode()) + len(_SEPARATOR)
 
 
 def line_search(
@@ -99,13 +96,11 @@ def line_search(
 ) -> LineSearch:
     """The room is the turn's own: this agent's, in the admission's app and place, whatever the model asked.
 
-    ``result_bytes`` is at least ``SMALLEST_RESULT_BYTES``, which the configuration enforces.
-
     Only lines first read before the first entry the admitted history still holds are given, since the history tells
     the rest. An admitted history always holds the entry that woke the turn.
     """
     smallest = told_bytes(told_entry(_SMALLEST_LINE)) + len(_SEPARATOR)
-    fitting = _room_for_lines(result_bytes) // smallest
+    fitting = max(0, _room_for_lines(result_bytes)) // smallest
     return LineSearch(client_id, app, place, text, entry_time(history.entries[0]), fitting + 1)
 
 
