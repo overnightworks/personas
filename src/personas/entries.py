@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
     from datetime import datetime
 
+    from agents.tools import ToolImage
     from agents.turn import JsonObject
 
 
@@ -69,6 +70,8 @@ class Answered:
 
     text: str = field(repr=False)
     is_error: bool
+    image_shown: bool = False
+    """Whether the answer carried a picture, which is shown to the model in its turn and never kept."""
 
 
 @dataclass(frozen=True)
@@ -121,16 +124,22 @@ def told_bytes(told: dict[str, object]) -> int:
 @dataclass(frozen=True)
 class InputSizes:
     """The bytes a turn's input is made of: the tool declarations each model request carries, the told message and
-    the tool results relayed back to the model."""
+    the tool results relayed back to the model, their pictures counted apart from their text."""
 
     tools_bytes: int
     told_bytes: int
     results_bytes: int
+    images_bytes: int
 
 
 def message_bytes(role: str, text: str) -> int:
     """The bytes of one chat message of the given role, counted as ``told_bytes`` counts."""
     return told_bytes({"role": role, "content": text})
+
+
+def picture_bytes(image: ToolImage | None) -> int:
+    """The decoded bytes of a tool result's picture, as the library's bound counts them; 0 without one."""
+    return 0 if image is None else len(image.content)
 
 
 def entry_size(entry: Entry) -> int:
@@ -201,7 +210,8 @@ def told_place(place: PlaceRef) -> dict[str, str]:
 
 def told_outcome(outcome: ActOutcome) -> dict[str, object]:
     if isinstance(outcome, Answered):
-        return {"answered": True, "is_error": outcome.is_error, "text": outcome.text}
+        answer: dict[str, object] = {"answered": True, "is_error": outcome.is_error, "text": outcome.text}
+        return answer | {"image": True} if outcome.image_shown else answer
     return {"answered": False, "code": outcome.code}
 
 

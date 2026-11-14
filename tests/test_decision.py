@@ -115,7 +115,7 @@ from tests.support.history import (
     said,
     told_line_bytes,
 )
-from tests.support.hopin import GENERATION, active, invited, paused
+from tests.support.hopin import GENERATION, a_picture, active, invited, paused
 
 TRANSIENT_REFUSALS = [
     AcceptInvitationRefusal.SPONSOR_AWAY,
@@ -1327,6 +1327,12 @@ def test_a_view_turn_marks_no_act_new():
             id="an answer while cancelled",
         ),
         pytest.param(ToolOutcome("gone", is_error=True), False, Answered("gone", is_error=True), id="an error answer"),
+        pytest.param(
+            ToolOutcome("seen", is_error=False, image=a_picture()),
+            False,
+            Answered("seen", is_error=False, image_shown=True),
+            id="an answer with a picture",
+        ),
         pytest.param(StatusFailure(502), True, Unanswered(TURN_CANCELLED_CODE), id="a failure while cancelled"),
         pytest.param(StatusFailure(502), False, Unanswered("http_502"), id="a failure"),
         pytest.param(Unreachable("cut"), False, Unanswered(NETWORK_FAILURE_CODE), id="an unreachable app"),

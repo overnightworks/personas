@@ -7,6 +7,7 @@ the accept tool are scripted. A test may script the answer to a request method t
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import secrets
@@ -42,7 +43,7 @@ from agents.member import (
     place_view_uri,
     place_window_uri,
 )
-from agents.tools import ToolDeclaration, ToolEffect, ToolOutcome
+from agents.tools import ToolDeclaration, ToolEffect, ToolImage, ToolOutcome
 from agents.turn import JsonObject, Principal
 
 from tests.support.loopback import serving
@@ -97,6 +98,28 @@ _ACCEPT_DECLARATION = ToolDeclaration(
     parameters=AcceptInvitationArguments.model_json_schema(),
     effect=ToolEffect.SIDE_EFFECTING,
 )
+
+
+def a_picture(size: int = 64) -> ToolImage:
+    """A still picture as the library's wire takes it: random bytes behind the JPEG start marker."""
+    return ToolImage(content=b"\xff\xd8\xff" + secrets.token_bytes(size))
+
+
+_REAL_JPEG = (
+    "/9j/4AAQSkZJRgABAgAAAQABAAD//gAQTGF2YzYyLjExLjEwMAD/2wBDAAg+Pkk+SVVVVVVVVWRdZGhoaGRkZGRoaGhwcHCDg4Nw"
+    "cHBoaHBwfHyDg4+Tj4eHg4eTk5ubm7q6srLZ2eD/////xABMAAEBAAAAAAAAAAAAAAAAAAAABgEBAQAAAAAAAAAAAAAAAAAABgcQ"
+    "AQAAAAAAAAAAAAAAAAAAAAARAQAAAAAAAAAAAAAAAAAAAAD/wAARCAAIAAgDASIAAhEAAxEA/9oADAMBAAIRAxEAPwCLAE1/f//Z"
+)
+
+
+def a_real_picture() -> ToolImage:
+    """A complete 8 by 8 JPEG file, the shape of a picture a real app answers with."""
+    return ToolImage(content=base64.b64decode(_REAL_JPEG))
+
+
+def base64_of(picture: ToolImage) -> str:
+    """The picture as an image block of a tool result and a data URL of a model request write it."""
+    return base64.b64encode(picture.content).decode("ascii")
 
 
 def invited(
@@ -325,6 +348,12 @@ class FakeApp:
         self.window_read_held.clear()
         return self.held_window_read
 
+    def served(self, outcome: ToolOutcome) -> ToolOutcome:
+        """The outcome, with the picture it carries counted among the content kept out of logs."""
+        if outcome.image is not None:
+            self.content.add(base64_of(outcome.image))
+        return outcome
+
     def hold_next_speak(self) -> asyncio.Event:
         """The next ``speak`` that arrives is answered once the event is set."""
         self.held_speak = asyncio.Event()
@@ -419,7 +448,7 @@ class FakeApp:
 
     async def _say(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
         if self.say_outcomes:
-            return self.say_outcomes.pop(0)
+            return self.served(self.say_outcomes.pop(0))
         place_id, text = str(arguments["place"]), str(arguments["text"])
         self.said.append((request.principal.sub, place_id, text))
         self.said_added.set()

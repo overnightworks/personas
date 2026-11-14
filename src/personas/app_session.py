@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Generator
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Generator, Iterable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from typing import Final, Protocol, cast, override
@@ -26,7 +26,8 @@ from agents.member import (
     place_view_uri,
     place_window_uri,
 )
-from agents.tools import JsonObject, ToolDeclaration, ToolEffect, ToolOutcome
+from agents.tools import JsonObject, ToolDeclaration, ToolEffect, ToolImage, ToolOutcome
+from agents.turn import TOOL_IMAGE_MEDIA_TYPE
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from mcp.client.subscriptions import Subscription, SubscriptionLost, listen
@@ -37,6 +38,7 @@ from mcp_types import (
     REQUEST_TIMEOUT,
     UNSUPPORTED_PROTOCOL_VERSION,
     CallToolResult,
+    ImageContent,
     InputRequiredResult,
     ReadResourceResult,
     TextContent,
@@ -245,7 +247,7 @@ class _McpAppSession:
 
     async def invoke(self, name: str, arguments: JsonObject) -> ToolOutcome:
         result = await self._called(name, arguments)
-        return ToolOutcome(_text_of(result), result.is_error)
+        return ToolOutcome(_text_of(result), result.is_error, _picture_of(result))
 
     async def _called(self, name: str, arguments: JsonObject) -> CallToolResult:
         result = await self._asked(self.session.call_tool(name, arguments, allow_input_required=True))
@@ -301,6 +303,31 @@ def _declaration_of(tool: Tool) -> ToolDeclaration:
 
 def _text_of(result: CallToolResult) -> str:
     return "".join(block.text for block in result.content if isinstance(block, TextContent))
+
+
+class _UnshownToolImage(ToolImage):
+    """A tool image whose representation names no byte of the picture."""
+
+    @override
+    def __repr_args__(self) -> Iterable[tuple[str | None, object]]:
+        return ()
+
+
+def _picture_of(result: CallToolResult) -> ToolImage | None:
+    """The one picture of the result, as the wire carries it; none when the result holds no image block.
+
+    An image block is the wire's picture, so one that breaks the wire, a second one included, is an unusable answer.
+    Audio and resource blocks are not read.
+    """
+    blocks = [block for block in result.content if isinstance(block, ImageContent)]
+    if not blocks:
+        return None
+    if len(blocks) > 1 or blocks[0].mime_type != TOOL_IMAGE_MEDIA_TYPE:
+        raise UnusableAnswer(INVALID_ANSWER_CODE)
+    try:
+        return _UnshownToolImage.model_validate({"content": blocks[0].data})
+    except ValidationError:
+        raise UnusableAnswer(INVALID_ANSWER_CODE) from None
 
 
 def _refusal_of(text: str) -> Refusal:

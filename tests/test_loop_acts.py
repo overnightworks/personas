@@ -11,12 +11,12 @@ from http import HTTPStatus
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.tools import ToolOutcome
-from agents.turn import Principal, person_fingerprint
+from agents.turn import TOOL_IMAGE_MEDIA_TYPE, Principal, person_fingerprint
 from mcp_types import INVALID_PARAMS, CallToolResult, TextContent
 
 from personas.app_session import READ_SECONDS, open_mcp_session
 from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE, jsonrpc_code, status_code
-from personas.failures import Unreachable
+from personas.failures import INVALID_ANSWER_CODE, Unreachable
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, says_after_a_hold
@@ -40,7 +40,18 @@ from tests.support.history import (
     written_turns,
 )
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import CALL, ISSUER, LISTEN, PLAY_TOOL, READ, SAY_TOOL, active
+from tests.support.hopin import (
+    CALL,
+    ISSUER,
+    LISTEN,
+    PLAY_TOOL,
+    READ,
+    SAY_TOOL,
+    a_picture,
+    a_real_picture,
+    active,
+    base64_of,
+)
 from tests.support.realm import AGENT_NAME
 from tests.support.songmaker import CALLS, CREATE_SONG
 from tests.support.wire import cuts, hangs, hangs_once_entered, refuses_with_a_server_error
@@ -125,6 +136,59 @@ async def test_an_error_result_the_app_answers_is_told_as_an_answer_that_is_an_e
     assert second.room["history"]["entries"][1] == a_say(runner, ANSWER, answered("gone", is_error=True))
     assert len(runner.gateway.requests) == 3
     assert runner.app.said == []
+
+
+async def test_a_picture_the_app_answered_reaches_the_models_next_request_and_his_next_turn_is_told_a_mark_only(runner):
+    picture = a_picture()
+    runner.app.say_outcomes.append(ToolOutcome("", is_error=False, image=picture))
+    runner.gateway = Gateway(say_round(ANSWER), completion("done"), completion("again"))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED)
+
+    second = await second_written_turn(runner)
+
+    assert runner.gateway.pictures_in(2) == [f"data:{TOOL_IMAGE_MEDIA_TYPE};base64,{base64_of(picture)}"]
+    assert second.room["history"]["entries"][1] == a_say(runner, ANSWER, answered("", image=True))
+    assert runner.gateway.pictures_in(3) == []
+    assert base64_of(picture) not in runner.gateway.requests[2].content.decode()
+
+
+def answers_a_picture_that_breaks_the_wire(app):
+    """The app's next call is answered with a real JPEG's data under a media type the wire does not take."""
+    picture = base64_of(a_real_picture())
+    app.content.add(picture)
+
+    async def answers_with_a_png(reply):
+        await reply.raw_result(
+            {"resultType": "complete", "content": [{"type": "image", "data": picture, "mimeType": "image/png"}]}
+        )
+
+    app.script(CALL, answers_with_a_png)
+
+
+async def test_a_picture_that_breaks_the_wire_suspends_the_loop_at_the_places_app(runner):
+    answers_a_picture_that_breaks_the_wire(runner.app)
+    runner.gateway = Gateway(say_round(ANSWER), completion("done"))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.reports.until(Event.SUSPENDED)
+
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, INVALID_ANSWER_CODE)]
+
+
+async def test_a_picture_that_breaks_the_wire_is_the_failure_of_the_tools_only_app_that_answered_it(runner, songmaker):
+    answers_a_picture_that_breaks_the_wire(songmaker)
+    runner.gateway = Gateway(song_round(1), say_round(ANSWER), completion("done"), completion("again"))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED)
+
+    second = await second_written_turn(runner)
+
+    acts = [each for each in second.room["history"]["entries"] if each["entry"] == "act"]
+    assert acts[0] == a_song(runner, songmaker_url(runner), unanswered(INVALID_ANSWER_CODE))
+    assert runner.reports.reported(apps=True, started=False) == [
+        (Event.TOOLS_ONLY_APP_FAILED, INVALID_ANSWER_CODE, songmaker_url(runner))
+    ]
 
 
 @pytest.mark.parametrize(

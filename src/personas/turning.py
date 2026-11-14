@@ -26,7 +26,7 @@ from personas.decision import (
     turn_call_bound,
     turn_told,
 )
-from personas.entries import ActDone, InputSizes, message_bytes, told_bytes
+from personas.entries import ActDone, InputSizes, message_bytes, picture_bytes, told_bytes
 from personas.failures import CallFailure, Unreachable, leaves_of, raise_if_cancelled, task_is_being_cancelled
 from personas.reporting import Event
 from personas.task_record import (
@@ -95,6 +95,7 @@ class _Sizing:
     def __init__(self) -> None:
         self._request = (0, 0)
         self._results = 0
+        self._images = 0
 
     def request_built(self, declarations: Iterable[ToolDeclaration], told: str) -> None:
         tools = sum(told_bytes(each.model_dump(mode="json", include=_MODEL_FACING)) for each in declarations)
@@ -106,12 +107,13 @@ class _Sizing:
         async def handler(principal: Principal, arguments: JsonObject) -> ToolOutcome:
             outcome = await tool.handler(principal, arguments)
             self._results += message_bytes(_RESULT_ROLE, outcome.content)
+            self._images += picture_bytes(outcome.image)
             return outcome
 
         return HandTool(tool.declaration, handler)
 
     def sizes(self) -> InputSizes:
-        return InputSizes(self._request[0], self._request[1], self._results)
+        return InputSizes(self._request[0], self._request[1], self._results, self._images)
 
 
 @dataclass

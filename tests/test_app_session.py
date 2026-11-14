@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import secrets
 import subprocess
@@ -31,6 +32,7 @@ from agents.member import (
     Written,
 )
 from agents.tools import ToolEffect, ToolOutcome
+from agents.turn import TOOL_IMAGE_MEDIA_TYPE
 from mcp_types import (
     INVALID_PARAMS,
     BlobResourceContents,
@@ -66,7 +68,9 @@ from tests.support.hopin import (
     SAY_TOOL,
     SPOKEN_DURATION_MS,
     FakeApp,
+    a_picture,
     active,
+    base64_of,
     formatted,
     invited,
 )
@@ -862,6 +866,98 @@ async def test_an_invoked_tool_gives_the_outcome_the_app_answered_an_error_one_t
         invoked = await session.invoke(SAY_TOOL, {"place": "room-7", "text": secrets.token_hex(4)})
 
     assert invoked == outcome
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["", "seen"],
+    ids=["a picture alone", "a picture with text"],
+)
+@pytest.mark.parametrize("is_error", [False, True], ids=["answer", "error"])
+async def test_an_invoked_tool_gives_the_picture_the_app_answered_with_its_text(app, bearer, text, is_error):
+    picture = a_picture()
+    app.say_outcomes.append(ToolOutcome(text, is_error=is_error, image=picture))
+    app.content.add(text)
+
+    async with opened(app, bearer) as session:
+        invoked = await session.invoke(SAY_TOOL, {"place": "room-7", "text": secrets.token_hex(4)})
+
+    assert (invoked.content, invoked.is_error) == (text, is_error)
+    assert invoked.image is not None
+    assert invoked.image.content == picture.content
+
+
+async def test_the_picture_an_invoked_tool_gives_shows_no_byte_in_its_representation(app, bearer):
+    picture = a_picture()
+    app.say_outcomes.append(ToolOutcome("", is_error=False, image=picture))
+
+    async with opened(app, bearer) as session:
+        invoked = await session.invoke(SAY_TOOL, {"place": "room-7", "text": secrets.token_hex(4)})
+
+    shown = repr(invoked)
+    assert repr(picture.content) not in shown
+    assert base64_of(picture) not in shown
+
+
+def a_malformed_picture_answer(**block) -> dict[str, object]:
+    """A tool result whose image block is the picture's with these fields replaced."""
+    picture = {"type": "image", "data": base64_of(a_picture()), "mimeType": TOOL_IMAGE_MEDIA_TYPE}
+    return {"resultType": "complete", "content": [{"type": "text", "text": "seen"}, picture | block]}
+
+
+_NOT_JPEG = base64.b64encode(b"\x00" + secrets.token_bytes(16)).decode("ascii")
+_NOT_CANONICAL = base64_of(a_picture(16)).rstrip("=")
+MALFORMED_PICTURE_ANSWERS = {
+    "non-canonical base64": a_malformed_picture_answer(data=_NOT_CANONICAL),
+    "no JPEG start marker": a_malformed_picture_answer(data=_NOT_JPEG),
+    "empty data": a_malformed_picture_answer(data=""),
+    "another media type": a_malformed_picture_answer(mimeType="image/png"),
+    "two pictures": {
+        "resultType": "complete",
+        "content": [
+            a_malformed_picture_answer()["content"][1],
+            a_malformed_picture_answer()["content"][1],
+        ],
+    },
+}
+
+
+@pytest.mark.parametrize("answer", MALFORMED_PICTURE_ANSWERS.values(), ids=MALFORMED_PICTURE_ANSWERS.keys())
+async def test_a_picture_that_breaks_the_wire_is_an_unusable_answer_and_no_validation_error(app, bearer, answer):
+    async def answers_with_a_bad_picture(reply):
+        await reply.raw_result(answer)
+
+    app.script(CALL, answers_with_a_bad_picture)
+    app.content.update(block["data"] for block in answer["content"] if block["type"] == "image")
+
+    said = {"place": "room-7", "text": secrets.token_hex(4)}
+
+    async with opened(app, bearer) as session:
+        with pytest.raises(UnusableAnswer) as failure:
+            await session.invoke(SAY_TOOL, said)
+
+    assert failure.value.code == INVALID_ANSWER_CODE
+
+
+async def test_audio_and_resource_blocks_of_a_result_are_ignored_beside_its_text(app, bearer):
+    async def answers_with_other_blocks(reply):
+        await reply.raw_result(
+            {
+                "resultType": "complete",
+                "content": [
+                    {"type": "text", "text": "seen"},
+                    {"type": "audio", "data": "AAAA", "mimeType": "audio/wav"},
+                    {"type": "resource_link", "uri": "file:///a", "name": "a"},
+                ],
+            }
+        )
+
+    app.script(CALL, answers_with_other_blocks)
+
+    async with opened(app, bearer) as session:
+        invoked = await session.invoke(SAY_TOOL, {"place": "room-7", "text": secrets.token_hex(4)})
+
+    assert invoked == ToolOutcome("seen", is_error=False)
 
 
 async def test_an_invoked_tool_the_app_refuses_is_a_failure(app, bearer):
