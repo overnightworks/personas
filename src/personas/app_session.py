@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Generator
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Generator, Iterable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from typing import Final, Protocol, cast, override
@@ -305,6 +305,14 @@ def _text_of(result: CallToolResult) -> str:
     return "".join(block.text for block in result.content if isinstance(block, TextContent))
 
 
+class _UnshownToolImage(ToolImage):
+    """A tool image whose representation names no byte of the picture."""
+
+    @override
+    def __repr_args__(self) -> Iterable[tuple[str | None, object]]:
+        return ()
+
+
 def _picture_of(result: CallToolResult) -> ToolImage | None:
     """The one picture of the result, as the wire carries it; none when the result holds no image block.
 
@@ -317,7 +325,7 @@ def _picture_of(result: CallToolResult) -> ToolImage | None:
     if len(blocks) > 1 or blocks[0].mime_type != TOOL_IMAGE_MEDIA_TYPE:
         raise UnusableAnswer(INVALID_ANSWER_CODE)
     try:
-        return ToolImage.model_validate({"content": blocks[0].data})
+        return _UnshownToolImage.model_validate({"content": blocks[0].data})
     except ValidationError:
         raise UnusableAnswer(INVALID_ANSWER_CODE) from None
 

@@ -875,14 +875,28 @@ async def test_an_invoked_tool_gives_the_outcome_the_app_answered_an_error_one_t
 )
 @pytest.mark.parametrize("is_error", [False, True], ids=["answer", "error"])
 async def test_an_invoked_tool_gives_the_picture_the_app_answered_with_its_text(app, bearer, text, is_error):
-    outcome = ToolOutcome(text, is_error=is_error, image=a_picture())
-    app.say_outcomes.append(outcome)
+    picture = a_picture()
+    app.say_outcomes.append(ToolOutcome(text, is_error=is_error, image=picture))
     app.content.add(text)
 
     async with opened(app, bearer) as session:
         invoked = await session.invoke(SAY_TOOL, {"place": "room-7", "text": secrets.token_hex(4)})
 
-    assert invoked == outcome
+    assert (invoked.content, invoked.is_error) == (text, is_error)
+    assert invoked.image is not None
+    assert invoked.image.content == picture.content
+
+
+async def test_the_picture_an_invoked_tool_gives_shows_no_byte_in_its_representation(app, bearer):
+    picture = a_picture()
+    app.say_outcomes.append(ToolOutcome("", is_error=False, image=picture))
+
+    async with opened(app, bearer) as session:
+        invoked = await session.invoke(SAY_TOOL, {"place": "room-7", "text": secrets.token_hex(4)})
+
+    shown = repr(invoked)
+    assert repr(picture.content) not in shown
+    assert base64_of(picture) not in shown
 
 
 def a_malformed_picture_answer(**block) -> dict[str, object]:
