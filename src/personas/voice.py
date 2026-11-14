@@ -10,30 +10,31 @@ from agents.member import SpeakRefusal, Spoken
 from agents.turn import FailureCode
 from agents.voice.reply import ReplyReader
 
-from personas.decision import past_deadline, speech_outcome, spoken_wait_seconds
+from personas.decision import AppPlace, past_deadline, remaining_seconds, sentence_ended, speech_outcome
 from personas.entries import SaidAloud
 from personas.failures import task_is_being_cancelled
 from personas.reporting import Event
 from personas.task_record import RelayFailed
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Iterable
+    from collections.abc import Awaitable, Callable
 
     from agents.backend import TurnEvent
     from agents.member import PlaceRef, SpeakAnswer
 
     from personas.app_session import AppSession
     from personas.clock import Clock
-    from personas.entries import Entry
+    from personas.mind import Mind
 
 
 class Speaking:
     """One spoken turn's speech: the sentences its reply releases, spoken in order, each after the one before has been
-    answered and its length has passed.
+    answered and his own spoken line for it has entered the mind's history.
 
     The turn hands every event to ``hear`` and runs ``play`` beside its events. A sentence is sent only before the
-    turn's deadline; each one sent enters the agent's history as a ``SaidAloud`` however its request ends. A refusal
-    ends the speech and is reported; the turn goes on without it.
+    turn's deadline, and the wait for its line ends at that deadline: a line that has not entered by then ends the
+    turn as ``limit_exceeded``. Each sentence sent enters the agent's history as a ``SaidAloud`` however its request
+    ends. A refusal ends the speech and is reported; the turn goes on without it.
     """
 
     def __init__(
@@ -45,7 +46,7 @@ class Speaking:
         max_duration_seconds: float,
         renew_token: Callable[[], Awaitable[None]],
         report: Callable[[Event, str | None], None],
-        enter: Callable[[Iterable[Entry]], None],
+        mind: Mind,
     ) -> None:
         self._session = session
         self._app = app
@@ -55,7 +56,9 @@ class Speaking:
         self._max_duration_seconds = max_duration_seconds
         self._renew_token = renew_token
         self._report = report
-        self._enter = enter
+        self._mind = mind
+        self._at = AppPlace(app, place)
+        self._sent_at = 0
         self._reader = ReplyReader()
         self._queue: asyncio.Queue[str | None] = asyncio.Queue()
         self._silenced = False
@@ -77,8 +80,8 @@ class Speaking:
         await self._idle.wait()
 
     async def spoken(self) -> None:
-        """Returns once every sentence heard so far is answered and its length has passed; a turn past its deadline by
-        then ends."""
+        """Returns once every sentence heard so far is answered and his own line for it has entered; a turn past its
+        deadline by then ends."""
         await self._queue.join()
         self._stop_past_deadline()
 
@@ -110,7 +113,30 @@ class Speaking:
             self._report(Event.SPEAK_REFUSED, outcome.value)
             self._silenced = True
         elif isinstance(outcome, Spoken) and not self._silenced:
-            await self._clock.sleep(spoken_wait_seconds(outcome.duration_ms))
+            await self._until_ended(self._sent_at)
+
+    async def _until_ended(self, mark: int) -> None:
+        """Returns once his own spoken line for the sentence sent at ``mark`` has entered; the turn's deadline, the one
+        bound of all the waits for that sentence, ends the turn first when it passes before, a tie going to it."""
+        remaining = remaining_seconds(self._clock.now(), self._started, self._max_duration_seconds)
+        if remaining == 0:
+            raise TurnStopped(TurnStopKind.FAILED, FailureCode.LIMIT_EXCEEDED)
+        bound = asyncio.create_task(self._clock.sleep(remaining))
+        try:
+            while True:
+                if bound.done():
+                    bound.result()
+                    raise TurnStopped(TurnStopKind.FAILED, FailureCode.LIMIT_EXCEEDED)
+                taken = self._mind.next_take()
+                if sentence_ended(self._mind.history, mark, self._at):
+                    return
+                woken = asyncio.create_task(taken.wait())
+                try:
+                    await asyncio.wait({bound, woken}, return_when=asyncio.FIRST_COMPLETED)
+                finally:
+                    woken.cancel()
+        finally:
+            bound.cancel()
 
     def _past_deadline(self) -> bool:
         return past_deadline(self._clock.now(), self._started, self._max_duration_seconds)
@@ -131,6 +157,7 @@ class Speaking:
             await self._renew_token()
             if self._silenced or self._past_deadline():
                 return None
+            self._sent_at = self._mind.history.taken
             answer = await self._session.speak(self._place, sentence)
             ended = answer
             return answer
@@ -144,4 +171,4 @@ class Speaking:
             self._idle.set()
             outcome = None if ended is None else speech_outcome(ended, cancelling=task_is_being_cancelled())
             if outcome is not None:
-                self._enter((SaidAloud(self._app, self._place, sentence, outcome, self._clock.wall()),))
+                self._mind.take((SaidAloud(self._app, self._place, sentence, outcome, self._clock.wall()),))
