@@ -286,6 +286,7 @@ async def test_a_line_that_never_arrives_ends_the_turn_limit_exceeded_once_with_
     assert len(runner.app.spoken) == 1
     assert runner.app.said == []
     assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, FailureCode.LIMIT_EXCEEDED.value)]
+    assert [each["text"] for each in runner.gateway.turns()[1].told("speech")] == sentences_spoken(runner)[:1]
     assert not runner.task.done()
 
 

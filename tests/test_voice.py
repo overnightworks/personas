@@ -29,8 +29,8 @@ async def renewed() -> None:
     return None
 
 
-def a_line(*, own: bool, spoken: bool, cut: bool = False, place: PlaceRef = PLACE) -> KeptLine:
-    return KeptLine(Visit(APP, place, "g1"), 1, READ_AT, "Mozart", "message", "x", own, spoken, cut, act=False)
+def a_line(*, own: bool, spoken: bool, place: PlaceRef = PLACE) -> KeptLine:
+    return KeptLine(Visit(APP, place, "g1"), 1, READ_AT, "Mozart", "message", "x", own, spoken, False, act=False)
 
 
 def test_a_speaking_shows_no_sentence_in_its_repr():
@@ -55,7 +55,6 @@ class SpeakingScenario:
         answer: SpeakAnswer | None = None,
         speak_seconds: float = 0,
         line_follows: bool = True,
-        cut: bool = False,
     ) -> None:
         self.answer = Spoken(spoken=True) if answer is None else answer
         self.clock = FakeClock()
@@ -67,7 +66,6 @@ class SpeakingScenario:
         self.renewal_started = asyncio.Event()
         self._speak_seconds = speak_seconds
         self._line_follows = line_follows
-        self._cut = cut
         self.speaking = Speaking(
             self,
             APP,
@@ -86,8 +84,8 @@ class SpeakingScenario:
     def entered(self) -> list[SaidAloud]:
         return [entry for entry in self.mind.history.entries if isinstance(entry, SaidAloud)]
 
-    def his_spoken_line_enters(self, *, cut: bool = False) -> None:
-        self.mind.take((a_line(own=True, spoken=True, cut=cut),))
+    def his_spoken_line_enters(self) -> None:
+        self.mind.take((a_line(own=True, spoken=True),))
 
     async def _renew(self) -> None:
         self.renewal_started.set()
@@ -98,39 +96,8 @@ class SpeakingScenario:
         self.sent.append(sentence)
         self.clock.time += self._speak_seconds
         if self._line_follows:
-            self.his_spoken_line_enters(cut=self._cut)
+            self.his_spoken_line_enters()
         return self.answer
-
-
-@pytest.mark.parametrize("cut", [False, True], ids=["whole", "cut"])
-async def test_each_sentence_is_sent_once_his_own_line_for_the_one_before_has_entered_whole_or_cut(cut):
-    scenario = SpeakingScenario("One. Two. Three.", cut=cut)
-    scenario.renewal_gate.set()
-
-    await scenario.speaking.play()
-
-    assert scenario.sent == ["One.", "Two.", "Three."]
-    assert len(scenario.entered) == 3
-    assert scenario.reported == []
-
-
-async def test_a_sentence_waits_for_his_line_and_the_next_is_sent_only_after_it_entered():
-    scenario = SpeakingScenario("One. Two.", line_follows=False)
-    scenario.renewal_gate.set()
-    sleeps = HeldSleeps(scenario)
-    playing = asyncio.create_task(scenario.speaking.play())
-    await sleeps.until_began(1)
-    await anyio.wait_all_tasks_blocked()
-
-    assert scenario.sent == ["One."]
-
-    scenario.his_spoken_line_enters()
-    await sleeps.until_cancelled()
-    await anyio.wait_all_tasks_blocked()
-    scenario.his_spoken_line_enters()
-    await playing
-
-    assert scenario.sent == ["One.", "Two."]
 
 
 async def test_the_wait_for_his_line_ends_the_sentence_without_waiting_out_the_deadline_and_reports_nothing():
@@ -167,22 +134,6 @@ async def test_what_enters_that_is_not_his_own_spoken_line_at_the_place_does_not
 
     scenario.his_spoken_line_enters()
     await playing
-
-
-async def test_a_line_missing_at_the_deadline_ends_the_turn_limit_exceeded_with_nothing_more_sent():
-    scenario = SpeakingScenario("One. Two.", line_follows=False)
-    scenario.renewal_gate.set()
-    sleeps = HeldSleeps(scenario)
-    playing = asyncio.create_task(scenario.speaking.play())
-    await sleeps.until_began(1)
-
-    sleeps.release.set()
-
-    with pytest.raises(TurnStopped) as stopped:
-        await playing
-    assert stopped.value.code is FailureCode.LIMIT_EXCEEDED
-    assert scenario.sent == ["One."]
-    assert len(scenario.entered) == 1
 
 
 async def test_a_deadline_that_passes_in_the_step_his_line_enters_in_ends_the_turn():
