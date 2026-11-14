@@ -1,8 +1,0 @@
-claim_id = "b147d501f3424115877b75aee636966f"
-agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
-role = "builder"
-base = "1496dba55e01204a8c8d440cc271b993086ebb57"
-branch = "claude/issue-164-lines-before-the-first-view"
-scope = ["docs/ARCHITECTURE.md", "src/personas/decision.py", "src/personas/loop.py", "tests"]
-opened_commit = "cd3f1b25cc8d284de72b8ea53d9fa46c6a543756"
-whole_reason = "the checkpoint rule and its use in the loop, read together"
