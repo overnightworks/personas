@@ -536,7 +536,7 @@ class FakeApp:
                 await self.spoken_added.wait()
 
     async def _accept(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
-        taken = AcceptInvitationArguments.model_validate(arguments)
+        taken = AcceptInvitationArguments.model_validate_json(json.dumps(arguments))
         self.accepted.append(taken)
         self.accepted_on_the_wire.append((request.principal.sub, arguments))
         if self.accept_outcomes:
