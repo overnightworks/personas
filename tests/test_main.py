@@ -17,10 +17,11 @@ from agents.turn_events import FinalEvent
 
 from personas.app_session import open_mcp_session
 from personas.config import CONFIG_ENVIRONMENT_VARIABLE, load_config
-from personas.failures import leaves_of
+from personas.failures import SchemaNotAtHeadError, leaves_of
 from personas.main import (
     QUIET_LIBRARIES,
     READINESS_ERROR_EXIT_CODE,
+    STORE_ERROR_EXIT_CODE,
     SweepingBoundaries,
     configure_logging,
     main,
@@ -37,13 +38,16 @@ from tests.support.realm import FakeRealm
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterable
+    from datetime import datetime
 
     from agents.agent_file import TurnRequest
     from agents.backend import AgentBackend, TurnEvent, TurnPerson
     from agents.tools import HandTool
 
     from personas.config import AppTarget, Config
+    from personas.entries import KeptLine, WindowRead
     from personas.readiness import ReadyMarker
+    from personas.remembering import LineStore
     from personas.reporting import StateChange
     from personas.secret import Secret
     from tests.support.configfiles import Files
@@ -98,6 +102,7 @@ class World:
         self.issued: list[str] = []
         self.app.stand(AGENT_SUBJECT, invited("room-7", "inv-3"))
         self.on_joined: Callable[[], None] = self._stop
+        self.lines: LineStore | None = None
 
     @staticmethod
     def _stop() -> None:
@@ -134,6 +139,7 @@ class World:
                 report=self._report,
                 ready=ready,
                 backend=gateway_backend,
+                lines=self.lines,
             )
 
     def start(self) -> None:
@@ -161,6 +167,36 @@ def test_the_marker_is_created_when_a_loop_is_served_and_stays(world):
         world.start()
 
     assert world.files.ready_path.exists()
+
+
+class StoreBehindHead:
+    """A store whose database is behind the newest migration, which it finds out at its first use."""
+
+    BEHIND = "memory: the database is at revision none but personas needs head; run personas migrate"
+
+    async def keep(self, read: WindowRead) -> None:
+        raise SchemaNotAtHeadError(self.BEHIND)
+
+    async def kept_since(self, client_id: str, since: datetime) -> tuple[KeptLine, ...]:
+        raise SchemaNotAtHeadError(self.BEHIND)
+
+
+def test_a_runner_whose_memory_is_behind_its_head_stops_with_one_line_naming_memory(world, capsys):
+    def addressed_once_joined() -> None:
+        world.app.stand(AGENT_SUBJECT, active("room-7"))
+        world.app.speak("room-7", "visitor-subject", "Ada", "Mozart, are you there?")
+
+    world.on_joined = addressed_once_joined
+    world.lines = StoreBehindHead()
+
+    with pytest.raises(SystemExit) as stopped:
+        world.start()
+
+    assert stopped.value.code == STORE_ERROR_EXIT_CODE
+    assert stopped.value.__cause__ is None
+    error = capsys.readouterr().err
+    assert error.startswith("personas: memory:")
+    assert error.count("\n") == 1
 
 
 def test_a_marker_that_cannot_be_removed_stops_the_start_and_names_its_path(world, capsys):

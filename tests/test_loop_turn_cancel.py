@@ -149,6 +149,7 @@ async def test_a_turn_that_reported_its_end_and_meets_the_cancel_in_its_teardown
     try:
         async with asyncio.timeout(LIMIT_SECONDS):
             await closing.closing.wait()
+        await runner.reports.until_a_turn_completed()
         removal_read = runner.app.hold_next_read()
         runner.app.stand(SUBJECT)
         await runner.app.until_read_held()
