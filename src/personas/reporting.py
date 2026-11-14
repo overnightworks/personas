@@ -40,8 +40,9 @@ class StateChange:
 
     The sweep belongs to no agent and no app, and says how many lines it removed. A turn that sent a model request
     says the bytes of its input; one that ended with a final event says the tokens it used, when the library had
-    them. An invitation the loop leaves out says its place's kind and the reason as the code. A pause of his turns
-    says its reason as the code and its wait in seconds.
+    them. The start says the model the agent's turns run on, when it has a persona. An invitation the loop leaves out
+    says its place's kind and the reason as the code. A pause of his turns says its reason as the code and its wait in
+    seconds.
     """
 
     event: Event
@@ -53,6 +54,7 @@ class StateChange:
     sizes: InputSizes | None = None
     place_kind: str | None = None
     seconds: float | None = None
+    model: str | None = None
 
 
 type Reporter = Callable[[StateChange], None]
@@ -65,8 +67,9 @@ def log_state_change(change: StateChange) -> None:
     used = "" if change.usage is None else _tokens_used(change.usage)
     kind = "" if change.place_kind is None else f" place_kind={change.place_kind}"
     waited = "" if change.seconds is None else f" seconds={change.seconds:g}"
+    model = "" if change.model is None else f" model={change.model}"
     _LOG.info(
-        "%s client_id=%s app=%s code=%s%s%s%s%s%s",
+        "%s client_id=%s app=%s code=%s%s%s%s%s%s%s",
         change.event,
         change.client_id or "-",
         change.app or "-",
@@ -76,6 +79,7 @@ def log_state_change(change: StateChange) -> None:
         used,
         kind,
         waited,
+        model,
     )
 
 

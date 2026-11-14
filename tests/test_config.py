@@ -677,3 +677,26 @@ def test_a_password_file_that_is_unusable_stops_the_start_and_names_the_field(fi
     error = fails_at_start(files.write(), monkeypatch, capsys)
 
     assert "memory.password_file" in error
+
+
+def test_an_agent_entry_with_a_model_runs_on_it_and_one_without_keeps_the_persona_files(files):
+    file_model = load_config(files.write()).agents[0].persona.model
+    files.text += 'model = "text/sonnet-low"\n'
+
+    assert load_config(files.write()).agents[0].persona.model == "text/sonnet-low"
+    assert file_model != "text/sonnet-low"
+
+
+@pytest.mark.parametrize(
+    "name", ["image/painter", "sonnet", "text/", 7], ids=["image", "no kind", "no model", "number"]
+)
+def test_a_model_that_is_no_text_model_stops_the_start_and_names_the_field(files, monkeypatch, capsys, name):
+    files.text += f"model = {name!r}\n".replace("'", '"')
+
+    assert "agents.0.model" in fails_at_start(files.write(), monkeypatch, capsys)
+
+
+def test_a_model_without_a_persona_file_stops_the_start_and_names_the_field(files, monkeypatch, capsys):
+    files.text = files.valid_text(binds_tools=False) + 'model = "text/sonnet-low"\n'
+
+    assert "agents.0.model" in fails_at_start(files.write(), monkeypatch, capsys)
