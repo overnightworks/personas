@@ -90,6 +90,7 @@ def _tokens_used(usage: TurnUsage) -> str:
     return (
         f" input={usage.input_tokens} cache_read={usage.cached_input_tokens}"
         f" cache_write={usage.cache_write_tokens} output={usage.output_tokens}"
+        f" requests={usage.requests}"
     )
 
 
