@@ -34,6 +34,7 @@ from personas.task_record import (
     ending_loud_when_cancelled,
     ending_with_recorded_defect,
     failure_held_by,
+    failures_leaving_with,
     unreachable_unless_cancelling,
 )
 from personas.voice import Speaking
@@ -250,9 +251,8 @@ class Turning:
             if held is None and record.defect is None:
                 self._report_turn_end(stopped.code.value, None, sizing.sizes())
             # What left the session beside the stop (a late answer, the failure another stop holds) still goes to the
-            # group, to be judged there; a plain stop beside the chosen one holds nothing.
-            beside = (failure_held_by(leaf) for leaf in leaves if leaf is not stopped)
-            rest = [failure for failure in (held, *beside) if failure is not None]
+            # group, to be judged there.
+            rest = failures_leaving_with(stopped, leaves)
             if len(rest) == 1:
                 raise rest[0] from None
             if rest:
