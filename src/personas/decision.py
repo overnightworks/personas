@@ -503,7 +503,7 @@ def taken_into(present: Present, new: Iterable[Entry], history_bytes: int, keep_
             heard += _not_his_own(entry)
     grown = History(entries, present.history.left_out, heard)
     if sum(map(entry_size, entries)) <= history_bytes:
-        return replace(present, history=grown)
+        return Present(grown, present.told)
     cut = _step_cut(grown, (each.through for each in present.told), keep_bytes)
     history = History(entries[cut - grown.left_out :], cut, heard)
     return Present(history, tuple(each for each in present.told if each.through > cut))
