@@ -1,0 +1,8 @@
+claim_id = "888e2bff1920476fbf03a212763a4613"
+agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
+role = "builder"
+base = "2423d955a7978dfc06005bdbb071bf367c8446c3"
+branch = "claude/issue-156-soften-hair-edges-and-jaw"
+scope = ["scripts/figures", "src/characters", "tests"]
+opened_commit = "a4eab3b1fad95226c7eb031c7c1cae5596c7aea2"
+whole_reason = "the figure generator, its output and its tests, read together"
