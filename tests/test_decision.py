@@ -405,6 +405,35 @@ def test_a_place_that_serves_a_view_again_after_an_active_read_without_one_start
     assert sync_checkpoints({place: Reading(GENERATION, 4)}, now, before) == {place: Restarted()}
 
 
+@pytest.mark.parametrize(
+    ("place", "now", "before"),
+    [
+        (A_TABLE, (active("table-1", "table"),), (invited("table-1", "inv-3", kind="table"),)),
+        (
+            A_TABLE,
+            (active("table-1", "table", serves_view=True),),
+            (active("table-1", "table"),),
+        ),
+        (
+            PLACE,
+            (active("room-7", serves_view=True),),
+            (active("room-7"),),
+        ),
+    ],
+    ids=[
+        "an active place of another kind without a view",
+        "a place of another kind that serves its view after an active read without one",
+        "a call that serves its view after an active read without one",
+    ],
+)
+def test_the_join_of_an_accepted_place_lasts_until_its_window_is_read_whatever_the_views_it_showed(place, now, before):
+    assert sync_checkpoints({place: Joined()}, now, before) == {place: Joined()}
+
+
+def test_a_join_ends_with_a_pause_of_a_place_of_another_kind_that_serves_no_view():
+    assert sync_checkpoints({A_TABLE: Joined()}, (paused("table-1", "table"),), ()) == {}
+
+
 def test_a_place_of_another_kind_that_serves_no_view_gets_no_checkpoint():
     table = Standing(place=PlaceRef(kind="table", id="table-1"), state=StandingState.ACTIVE)
 

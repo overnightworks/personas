@@ -330,21 +330,25 @@ type Checkpoint = Restarted | Joined | Paused | Reading
 def sync_checkpoints(
     checkpoints: Mapping[PlaceRef, Checkpoint], standings: tuple[Standing, ...], before: tuple[Standing, ...]
 ) -> dict[PlaceRef, Checkpoint]:
-    """The checkpoints after a standing read, given the standing read before it: a window place paused is paused, one
-    active keeps its entry or starts as restarted, one that serves a view again after an active read without one starts
-    as restarted, and a place that is gone, invited again or no window place any more has none."""
+    """The checkpoints after a standing read, given the standing read before it: an active place keeps its join, since
+    the window of an accepted place is not read yet, whether or not it serves a view; a window place paused is paused,
+    one active keeps its entry or starts as restarted, one that serves a view again after an active read without one
+    starts as restarted, and a place that is gone, invited again or no window place any more has none."""
     viewless = frozenset(
         standing.place for standing in before if standing.state is StandingState.ACTIVE and not standing.serves_view
     )
     synced: dict[PlaceRef, Checkpoint] = {}
     for standing in standings:
-        if not _has_window(standing):
+        held = checkpoints.get(standing.place)
+        if standing.state is StandingState.ACTIVE and isinstance(held, Joined):
+            synced[standing.place] = held
+        elif not _has_window(standing):
             continue
-        if standing.state is StandingState.PAUSED:
+        elif standing.state is StandingState.PAUSED:
             synced[standing.place] = Paused()
         elif standing.state is StandingState.ACTIVE:
             returning = standing.serves_view and standing.place in viewless
-            synced[standing.place] = Restarted() if returning else checkpoints.get(standing.place, Restarted())
+            synced[standing.place] = Restarted() if returning else (held or Restarted())
     return synced
 
 
