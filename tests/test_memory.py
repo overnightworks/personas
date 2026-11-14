@@ -576,9 +576,10 @@ async def test_a_u0000_in_the_text_or_in_the_places_key_is_replaced_as_a_write_r
 
 async def test_a_search_on_a_schema_behind_its_head_raises_what_a_write_raises(unmigrated_database):
     store = PostgresLineStore(unmigrated_database)
+    search = a_search()
 
     with pytest.raises(SchemaNotAtHeadError) as behind:
-        await store.search(a_search())
+        await store.search(search)
     await store.close()
 
     assert unmigrated_database.password.reveal() not in str(behind.value)
@@ -590,9 +591,10 @@ async def test_a_search_met_by_a_database_error_that_is_no_outage_raises_a_defec
     await store.keep(a_read(line(1, "Kept before")))
     run_sql(database, "ALTER TABLE lines RENAME COLUMN text TO body")
     secret_words = "words-" + secrets.token_hex(8)
+    search = a_search(secret_words)
 
     with pytest.raises(StoreDefect) as defect:
-        await store.search(a_search(secret_words))
+        await store.search(search)
 
     shown = "".join(traceback.format_exception(defect.value))
     for held in (secret_words, database.password.reveal()):
@@ -603,12 +605,13 @@ async def test_a_search_met_by_a_database_error_that_is_no_outage_raises_a_defec
 async def test_a_search_waiting_on_a_lock_ends_within_the_write_bound_as_a_timeout(database):
     store = PostgresLineStore(replace(database, write_seconds=BOUND_SECONDS))
     await store.keep(a_read(line(1, "Before the lock")))
+    search = a_search()
     try:
         with lines_table_locked(database):
             started = time.monotonic()
             async with asyncio.timeout(LIMIT_SECONDS):
                 with pytest.raises(StoreUnavailable) as cut:
-                    await store.search(a_search())
+                    await store.search(search)
             elapsed = time.monotonic() - started
             still_waiting = waiting_statements(database)
 
