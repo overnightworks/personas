@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import math
 import secrets
@@ -16,7 +17,7 @@ from typing import TYPE_CHECKING
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.member import PlaceEntry, PlaceRef, PlaceWindow
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, ProgrammingError
 
 from personas.entries import KeptLine, Visit, WindowRead
 from personas.failures import STORE_TIMEOUT_CODE, STORE_UNREACHABLE_CODE, StoreDefect, StoreUnavailable
@@ -600,6 +601,41 @@ async def test_a_search_met_by_a_database_error_that_is_no_outage_raises_a_defec
     for held in (secret_words, database.password.reveal()):
         assert held not in shown
         assert held not in repr(defect.value)
+
+
+class _DriverAnsweringACancellationWithADefect:
+    """An engine whose connection takes the cancellation of its task as a driver does on its cancel request, then
+    fails with a database error that is no outage; the task still counts the cancellation."""
+
+    def begin(self) -> _DriverAnsweringACancellationWithADefect:
+        return self
+
+    async def __aenter__(self) -> None:
+        asyncio.current_task().cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await asyncio.sleep(0)
+        raise ProgrammingError("statement", {}, Exception("not an outage"))
+
+    async def __aexit__(self, *_exception) -> None:
+        return None
+
+    async def dispose(self) -> None:
+        return None
+
+
+async def test_a_search_met_by_a_defect_while_its_task_is_being_cancelled_raises_the_defect(database, monkeypatch):
+    monkeypatch.setattr(
+        "personas.memory.create_async_engine", lambda *_a, **_k: _DriverAnsweringACancellationWithADefect()
+    )
+    store = PostgresLineStore(database)
+
+    try:
+        searching = asyncio.create_task(store.search(a_search()))
+        ended = await ended_by(searching)
+    finally:
+        await store.close()
+
+    assert isinstance(ended, StoreDefect)
 
 
 async def test_a_search_waiting_on_a_lock_ends_within_the_write_bound_as_a_timeout(database):

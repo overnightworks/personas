@@ -330,9 +330,10 @@ class PostgresLineStore:
                         yield connection
         except TimeoutError:
             raise StoreUnavailable(STORE_TIMEOUT_CODE) from None
-        except StoreUnavailable, StoreDefect:
+        except StoreUnavailable:
             # The driver answers a cancellation with its own cancel request and raises a break of the connection
             # during that wait instead of the cancellation; the time bound has taken back its own request by now.
+            # A defect is no break of the connection: it leaves as itself, so that the turn records it.
             if task_is_being_cancelled():
                 raise asyncio.CancelledError from None
             raise
