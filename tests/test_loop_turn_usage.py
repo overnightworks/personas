@@ -8,12 +8,13 @@ from http import HTTPStatus
 import pytest
 from agents.backend.fake_gateway import Reply, completion, tool_round
 from agents.tools import ToolOutcome
+from agents.turn import TOOL_IMAGE_MEDIA_TYPE
 
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, say, words
 from tests.support.history import REMARK, said_and_taken
-from tests.support.hopin import formatted
+from tests.support.hopin import a_picture, base64_of, formatted
 from tests.support.voice import a_voice_call
 
 pytestmark = pytest.mark.anyio
@@ -28,7 +29,7 @@ def counted(prompt: int, cached: int, written: int, completed: int) -> dict[str,
     }
 
 
-_SIZES = r" tools_bytes=(\d+) told_bytes=(\d+) results_bytes=(\d+)"
+_SIZES = r" tools_bytes=(\d+) told_bytes=(\d+) results_bytes=(\d+) images_bytes=(\d+)"
 _COUNTS = r"(?P<counts>(?: input=\d+ cache_read=\d+ cache_write=\d+ output=\d+)?)"
 _LINE = re.compile(rf"turn_ended client_id=\S+ app=\S+ code=(?P<code>\S+)(?:{_SIZES})?{_COUNTS}")
 
@@ -79,22 +80,23 @@ async def test_a_turn_that_ends_with_its_final_event_logs_the_tokens_it_used_or_
     assert the_turn_ended_line(caplog).group("counts") == counts
 
 
-async def the_sizes_of_a_turn(runner, caplog, *rounds) -> tuple[int, int, int]:
+async def the_sizes_of_a_turn(runner, caplog, *rounds) -> tuple[int, int, int, int]:
     runner.gateway = Gateway(*rounds)
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
     await runner.reports.until_a_turn_completed()
-    sizes = the_turn_ended_line(caplog).groups()[1:4]
+    sizes = the_turn_ended_line(caplog).groups()[1:5]
     assert None not in sizes
     return tuple(int(each) for each in sizes)
 
 
 async def test_a_turn_with_no_call_results_logs_its_sizes_and_zero_results(runner, caplog):
-    tools, told, results = await the_sizes_of_a_turn(runner, caplog, completion("done"))
+    tools, told, results, images = await the_sizes_of_a_turn(runner, caplog, completion("done"))
 
     assert tools > 0
     assert told > 0
     assert results == 0
+    assert images == 0
 
 
 @pytest.mark.parametrize("calls", [1, 2, 3])
@@ -103,13 +105,41 @@ async def test_a_turn_logs_the_sum_of_its_call_results(runner, caplog, calls):
     runner.app.say_outcomes.extend(ToolOutcome(answer, is_error=False) for _ in range(calls))
     runner.app.content.add(answer)
 
-    _, _, results = await the_sizes_of_a_turn(
+    _, _, results, images = await the_sizes_of_a_turn(
         runner, caplog, tool_round(*(say(ANSWER) for _ in range(calls))), completion("done")
     )
+
+    assert images == 0
 
     assert results % calls == 0
     assert results // calls >= len(answer)
     assert results // calls < 2 * len(answer)
+
+
+@pytest.mark.parametrize("pictures", [1, 2], ids=["one picture", "two pictures"])
+async def test_a_turn_logs_the_decoded_bytes_of_its_pictures_apart_from_its_results(runner, caplog, pictures):
+    answer = "x" * 100
+    shown = [a_picture(size) for size in (5000, 7000)[:pictures]]
+    runner.app.say_outcomes.extend(ToolOutcome(answer, is_error=False, image=each) for each in shown)
+    runner.app.content.add(answer)
+
+    _, _, results, images = await the_sizes_of_a_turn(
+        runner, caplog, tool_round(*(say(ANSWER) for _ in shown)), completion("done")
+    )
+
+    assert images == sum(len(each.content) for each in shown)
+    assert results < pictures * 2 * len(answer)
+
+
+async def test_an_aloud_turn_logs_its_picture_and_sends_it_to_the_model_like_a_written_one(runner, caplog):
+    picture = a_picture()
+    runner.app.say_outcomes.append(ToolOutcome("", is_error=False, image=picture))
+    await a_voice_call(runner, tool_round(say(ANSWER)), completion("done"))
+    say_in_the_call(runner, ADDRESSED, spoken=True)
+    await runner.reports.until_a_turn_completed()
+
+    assert the_turn_ended_line(caplog).group(5) == str(len(picture.content))
+    assert runner.gateway.pictures_in(2) == [f"data:{TOOL_IMAGE_MEDIA_TYPE};base64,{base64_of(picture)}"]
 
 
 async def test_a_turn_counts_the_result_of_a_held_call_among_its_results(runner, caplog):
@@ -124,7 +154,7 @@ async def test_a_turn_counts_the_result_of_a_held_call_among_its_results(runner,
     await runner.reports.until_a_turn_completed()
 
     (held,) = runner.gateway.held_result_texts(3)
-    _, _, results = (int(each) for each in the_turn_ended_line(caplog).groups()[1:4])
+    _, _, results, _ = (int(each) for each in the_turn_ended_line(caplog).groups()[1:5])
     assert results >= len(held)
 
 

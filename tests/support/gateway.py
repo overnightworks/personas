@@ -269,7 +269,7 @@ class Gateway(FakeGateway):
     def told_in(self, request_number: int) -> str:
         """Everything but the system text that the request that arrived as this number (from one) carried."""
         messages = json.loads(self.requests[request_number - 1].content)["messages"]
-        return "\n".join(message["content"] for message in messages[1:])
+        return "\n".join(message["content"] for message in messages[1:] if isinstance(message["content"], str))
 
     def lines_told(self, request_number: int) -> list[JsonObject]:
         """The lines of the last user message of the request that arrived as this number (from one), as written."""
@@ -290,14 +290,30 @@ class Gateway(FakeGateway):
         """The ``user`` the request that arrived as this number (from one) carried."""
         return json.loads(self.requests[request_number - 1].content)["user"]
 
-    def tool_results(self, request_number: int) -> list[str]:
-        """The tool messages the request that arrived as this number (from one) carried, in order."""
+    def tool_results(self, request_number: int) -> list[str | list[JsonObject]]:
+        """The tool messages the request that arrived as this number (from one) carried, in order: the text of one
+        that is only text, the parts of one that holds a picture."""
         messages = json.loads(self.requests[request_number - 1].content)["messages"]
         return [message["content"] for message in messages if message["role"] == "tool"]
 
+    def pictures_in(self, request_number: int) -> list[str]:
+        """The data URL of each picture the tool messages of the request that arrived as this number (from one)
+        carried, in order."""
+        return [
+            part["image_url"]["url"]
+            for result in self.tool_results(request_number)
+            if not isinstance(result, str)
+            for part in result
+            if part["type"] == "image_url"
+        ]
+
     def held_result_texts(self, request_number: int) -> list[str]:
         """The tool results of the request that arrived as this number (from one) that are a held call's, unparsed."""
-        return [each for each in self.tool_results(request_number) if each.startswith('{"sent": false')]
+        return [
+            each
+            for each in self.tool_results(request_number)
+            if isinstance(each, str) and each.startswith('{"sent": false')
+        ]
 
     def held_results(self, request_number: int) -> list[dict]:
         """The tool results of the request that arrived as this number (from one) that are a held call's, as the model

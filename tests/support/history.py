@@ -121,8 +121,9 @@ def view_entry(
     }
 
 
-def answered(text: str, *, is_error: bool = False) -> dict[str, object]:
-    return {"answered": True, "is_error": is_error, "text": text}
+def answered(text: str, *, is_error: bool = False, image: bool = False) -> dict[str, object]:
+    told: dict[str, object] = {"answered": True, "is_error": is_error, "text": text}
+    return told | {"image": True} if image else told
 
 
 def unanswered(code: str) -> dict[str, object]:

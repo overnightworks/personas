@@ -417,7 +417,7 @@ def act_outcome(ended: ToolOutcome | BaseException, *, cancelling: bool) -> ActO
     An answer is an answer even while a cancel is pending.
     """
     if not isinstance(ended, BaseException):
-        return Answered(ended.content, ended.is_error)
+        return Answered(ended.content, ended.is_error, image_shown=ended.image is not None)
     return _unanswered(ended, cancelling=cancelling)
 
 

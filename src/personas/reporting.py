@@ -75,7 +75,10 @@ def log_state_change(change: StateChange) -> None:
 
 
 def _sizes_of(sizes: InputSizes) -> str:
-    return f" tools_bytes={sizes.tools_bytes} told_bytes={sizes.told_bytes} results_bytes={sizes.results_bytes}"
+    return (
+        f" tools_bytes={sizes.tools_bytes} told_bytes={sizes.told_bytes} results_bytes={sizes.results_bytes}"
+        f" images_bytes={sizes.images_bytes}"
+    )
 
 
 def _tokens_used(usage: TurnUsage) -> str:

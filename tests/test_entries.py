@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import secrets
 
+import pytest
 from agents.member import (
     PlaceEntry,
     PlaceView,
 )
 
-from personas.entries import Answered, KeptLine, ViewSeen, taken_lines, told_entry, told_line
+from personas.entries import Answered, KeptLine, ViewSeen, taken_lines, told_entry, told_line, told_outcome
 from tests.support.history import (
     APP,
     LATER,
@@ -54,6 +55,21 @@ def test_a_history_its_lines_and_its_views_show_no_name_no_text_and_no_state_in_
     assert marker not in repr(history_holding((line, view)))
     assert marker not in repr(line)
     assert marker not in repr(view)
+
+
+@pytest.mark.parametrize(
+    ("answered", "told"),
+    [
+        (Answered("seen", is_error=False), {"answered": True, "is_error": False, "text": "seen"}),
+        (
+            Answered("seen", is_error=False, image_shown=True),
+            {"answered": True, "is_error": False, "text": "seen", "image": True},
+        ),
+    ],
+    ids=["no picture, no key", "a picture, told as image"],
+)
+def test_an_answer_is_told_with_the_image_mark_only_when_a_picture_was_shown(answered, told):
+    assert told_outcome(answered) == told
 
 
 def test_an_act_shows_no_arguments_and_no_answer_in_its_repr_nor_in_the_history_that_holds_it():

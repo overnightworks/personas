@@ -50,5 +50,5 @@ class ToolsOnlyApp(FakeApp):
     async def _run(self, name: str, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
         self.called.append((name, request.principal.sub))
         if self.outcomes:
-            return self.outcomes.pop(0)
+            return self.served(self.outcomes.pop(0))
         return ToolOutcome(self.results[name], is_error=False)

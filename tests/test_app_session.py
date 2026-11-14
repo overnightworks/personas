@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import secrets
 import subprocess
@@ -31,7 +32,7 @@ from agents.member import (
     Written,
 )
 from agents.tools import ToolEffect, ToolOutcome
-from agents.turn import TOOL_IMAGE_MEDIA_TYPE, written_base64
+from agents.turn import TOOL_IMAGE_MEDIA_TYPE
 from mcp_types import (
     INVALID_PARAMS,
     BlobResourceContents,
@@ -69,6 +70,7 @@ from tests.support.hopin import (
     FakeApp,
     a_picture,
     active,
+    base64_of,
     formatted,
     invited,
 )
@@ -875,7 +877,7 @@ async def test_an_invoked_tool_gives_the_outcome_the_app_answered_an_error_one_t
 async def test_an_invoked_tool_gives_the_picture_the_app_answered_with_its_text(app, bearer, text, is_error):
     outcome = ToolOutcome(text, is_error=is_error, image=a_picture())
     app.say_outcomes.append(outcome)
-    app.content.update([text, written_base64(outcome.image.content)])
+    app.content.add(text)
 
     async with opened(app, bearer) as session:
         invoked = await session.invoke(SAY_TOOL, {"place": "room-7", "text": secrets.token_hex(4)})
@@ -885,12 +887,12 @@ async def test_an_invoked_tool_gives_the_picture_the_app_answered_with_its_text(
 
 def a_malformed_picture_answer(**block) -> dict[str, object]:
     """A tool result whose image block is the picture's with these fields replaced."""
-    picture = {"type": "image", "data": written_base64(a_picture().content), "mimeType": TOOL_IMAGE_MEDIA_TYPE}
+    picture = {"type": "image", "data": base64_of(a_picture()), "mimeType": TOOL_IMAGE_MEDIA_TYPE}
     return {"resultType": "complete", "content": [{"type": "text", "text": "seen"}, picture | block]}
 
 
-_NOT_JPEG = written_base64(b"\x00" + secrets.token_bytes(16))
-_NOT_CANONICAL = written_base64(b"\xff\xd8\xff" + secrets.token_bytes(16)).rstrip("=")
+_NOT_JPEG = base64.b64encode(b"\x00" + secrets.token_bytes(16)).decode("ascii")
+_NOT_CANONICAL = base64_of(a_picture(16)).rstrip("=")
 MALFORMED_PICTURE_ANSWERS = {
     "non-canonical base64": a_malformed_picture_answer(data=_NOT_CANONICAL),
     "no JPEG start marker": a_malformed_picture_answer(data=_NOT_JPEG),
