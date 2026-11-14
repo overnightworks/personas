@@ -1,4 +1,4 @@
-"""The whole runner, the voice: an agent whose entry has a voice table brings its name to every accept and speaks."""
+"""The whole runner, the voice: an agent whose entry has a voice table brings its name to every accept, as voices."""
 
 from __future__ import annotations
 
@@ -28,8 +28,8 @@ def the_wire_sent(app, subject: str = SUBJECT) -> dict:
     return wire
 
 
-def the_voice_sent(app, subject: str = SUBJECT) -> str | None:
-    return the_wire_sent(app, subject).get("voice")
+def the_voices_sent(app, subject: str = SUBJECT) -> list[str] | None:
+    return the_wire_sent(app, subject).get("voices")
 
 
 async def test_an_agent_with_a_named_voice_brings_it_beside_his_figure_to_a_call_and_to_a_table_of_a_second_app(
@@ -46,18 +46,20 @@ async def test_an_agent_with_a_named_voice_brings_it_beside_his_figure_to_a_call
 
     for app in (runner.app, other):
         wire = the_wire_sent(app)
-        assert wire["voice"] == VOICE_NAME
+        assert wire["voices"] == [VOICE_NAME]
+        assert "voice" not in wire
         assert wire["figure"] == {"url": figure.url, "sha256": figure.sha256}
 
 
 @pytest.mark.parametrize("voice", [Voice(None), None], ids=["a table without a name", "no table"])
-async def test_an_agent_without_a_named_voice_sends_no_voice_key(runner, voice):
+async def test_an_agent_without_a_named_voice_sends_neither_voices_nor_voice(runner, voice):
     runner.config = replace(runner.config, agents=(replace(runner.config.agents[0], voice=voice),))
     runner.app.stand(SUBJECT, invited(PLACE_ID, "inv-3"))
     runner.start()
     await runner.reports.until(Event.JOINED)
 
     [(_, arguments)] = runner.app.accepted_on_the_wire
+    assert "voices" not in arguments
     assert "voice" not in arguments
 
 
@@ -72,8 +74,8 @@ async def test_two_agents_each_bring_their_own_voice_or_none(runner):
     runner.start()
     await runner.reports.until(Event.JOINED, count=2)
 
-    assert the_voice_sent(runner.app) == VOICE_NAME
-    assert the_voice_sent(runner.app, SECOND_SUBJECT) is None
+    assert the_voices_sent(runner.app) == [VOICE_NAME]
+    assert the_voices_sent(runner.app, SECOND_SUBJECT) is None
 
 
 async def test_only_the_turn_of_an_agent_with_a_voice_is_told_aloud(runner):
