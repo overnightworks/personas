@@ -1,0 +1,8 @@
+claim_id = "615db3eb7e2e4db3b27fc97632f6e102"
+agent = "Claude 5a948254-24e9-414b-b5cb-966c3019b778"
+role = "builder"
+base = "68a630da6d6dbc81488d639181ffa02fb5c9e5a5"
+branch = "claude/issue-175-a-turn-reads-its-present-from-the-gatewa"
+scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/config.py", "src/personas/decision.py", "src/personas/entries.py", "src/personas/loop.py", "src/personas/mind.py", "src/personas/recall.py", "src/personas/turning.py", "tests"]
+opened_commit = "1786a5204e8118cf152572611291c4cebf469bd1"
+whole_reason = "one told shape: forms, composer, seal, bound and documents cannot land apart without two shapes in the tree"
