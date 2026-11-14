@@ -47,6 +47,7 @@ from personas.decision import (
 from personas.entries import ViewSeen, Visit, WindowRead, taken_lines
 from personas.failures import CallFailure, leaves_of, raise_if_cancelled
 from personas.mind import Mind
+from personas.recall import LookupBounds
 from personas.remembering import LineStore, Remembering
 from personas.reporting import Event, Reporter, StateChange
 from personas.task_record import (
@@ -134,6 +135,7 @@ class AgentLoop:
         boundaries: Boundaries,
         mind: Mind,
         apps: tuple[AppTarget, ...],
+        lookup: LookupBounds | None,
     ) -> None:
         self._agent = agent
         self._app = app
@@ -153,6 +155,8 @@ class AgentLoop:
             self._report,
             self._report_turn_end,
             self._report_pause,
+            self._remembering,
+            lookup,
         )
         self._token: Token | None = None
         self._memory = Memory()
@@ -478,11 +482,13 @@ async def run_all(config: Config, boundaries: Boundaries) -> NoReturn:
     """One loop for every agent and every app that listens; a loop never ends on its own."""
     runner = asyncio.current_task()
     assert runner is not None  # noqa: S101 - run_all runs inside a task
+    memory = config.memory
+    lookup = None if memory is None else LookupBounds(memory.lookup_calls, memory.lookup_bytes)
     async with asyncio.TaskGroup() as group:
         for agent in config.agents:
             mind = Mind(config.history_bytes, config.history_keep_bytes, config.budget_pause_cap_seconds)
             for app in config.apps:
                 if app.listens:
-                    loop = AgentLoop(agent, app, boundaries, mind, config.apps)
+                    loop = AgentLoop(agent, app, boundaries, mind, config.apps, lookup)
                     group.create_task(_run_loop(loop, runner))
     raise AssertionError("a loop ended")  # pragma: no cover

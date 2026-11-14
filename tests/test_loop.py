@@ -420,6 +420,7 @@ class ScriptedSessions:
             boundaries,
             Mind(DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES),
             self.config.apps,
+            None,
         )
 
     def use_token(self, token) -> None:
@@ -686,6 +687,7 @@ class TokenFetchSwallowingTheCancellation:
             boundaries,
             Mind(DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES),
             config.apps,
+            None,
         )
 
     async def fetch(self, agent, scope):
