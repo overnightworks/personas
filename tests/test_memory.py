@@ -25,6 +25,7 @@ from tests.support.fakes import WALL_START, line, window_of
 from tests.support.gateway import Gateway, says
 from tests.support.history import (
     act_entry,
+    after_start,
     answered,
     entry,
     history_of,
@@ -387,7 +388,7 @@ async def test_back_four_hours_after_a_visit_his_first_turn_is_told_its_history_
                 answered("said"),
             ),
             entry(url_of(runner, 0), PLACE_ID, ANSWER, seq=2, name=AGENT_NAME, own=True),
-            entry(url_of(runner, 0), PLACE_ID, welcome_back),
+            entry(url_of(runner, 0), PLACE_ID, welcome_back, at=after_start(4 * 3600)),
         ]
     )
 
