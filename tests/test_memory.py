@@ -626,6 +626,8 @@ class _DriverAnsweringACancellationWithADefect:
 
 
 async def test_a_search_met_by_a_defect_while_its_task_is_being_cancelled_raises_the_defect(database):
+    """The engine is a fake that never connects: it models a driver defect that asyncpg's real cancel path does not
+    raise, so the test pins how the store treats one."""
     store = PostgresLineStore(database, lambda *_arguments, **_options: _DriverAnsweringACancellationWithADefect())
 
     try:

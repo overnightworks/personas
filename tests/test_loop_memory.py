@@ -27,6 +27,7 @@ from personas.failures import (
 )
 from personas.recall import (
     LOOKUPS_SPENT_TEXT,
+    RECALL_DECLARATION,
     RECALL_TOOL,
     SCOPE_TEXT,
     SMALLEST_RESULT_BYTES,
@@ -471,4 +472,4 @@ async def test_a_lookup_adds_no_event_and_no_content_to_the_log_and_turn_ended_c
     assert needle not in logged
     assert not [line for line in found if line.text in logged]
     assert results >= len(runner.gateway.tool_results(2)[0].encode())
-    assert tools >= len(runner.gateway.offered_tools()[0])
+    assert tools >= len(RECALL_DECLARATION.description) + len(json.dumps(RECALL_DECLARATION.parameters))
