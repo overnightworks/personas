@@ -65,6 +65,7 @@ from personas.decision import (
     budget_pause,
     call_within_bound,
     claimed,
+    due_again,
     decisive_failure,
     failure_code,
     forget_gone,
@@ -606,6 +607,35 @@ def test_lines_of_another_generation_and_a_newer_revision_replace_what_was_due_a
         CALL_AT_A: Lines("g2", frozenset({1}), missed=False),
         TABLE_AT_A: Waiting(2),
         CALL_AT_B: Waiting(5),
+    }
+    assert list(turns.due) == [CALL_AT_A, TABLE_AT_A, CALL_AT_B]
+
+
+def test_a_turn_without_an_answer_makes_its_place_due_again_with_what_it_was_for_at_the_back_of_the_order():
+    turns = _due_in_order((CALL_AT_B, Waiting(1)))
+
+    for occasion in (Waiting(2), Lines("g1", frozenset({3}), missed=True)):
+        again = due_again(turns, CALL_AT_A, occasion)
+
+        assert again.due == {CALL_AT_B: Waiting(1), CALL_AT_A: occasion}
+        assert list(again.due) == [CALL_AT_B, CALL_AT_A]
+
+
+def test_a_place_that_became_due_meanwhile_keeps_its_newer_occasion_and_only_lines_of_its_generation_join_the_retry():
+    turns = _due_in_order(
+        (CALL_AT_A, Lines("g2", frozenset({5}), missed=False)),
+        (TABLE_AT_A, Waiting(3)),
+        (CALL_AT_B, Lines("g1", frozenset({7}), missed=False)),
+    )
+
+    turns = due_again(turns, CALL_AT_A, Lines("g1", frozenset({1}), missed=False))
+    turns = due_again(turns, TABLE_AT_A, Waiting(2))
+    turns = due_again(turns, CALL_AT_B, Lines("g1", frozenset({4}), missed=True))
+
+    assert turns.due == {
+        CALL_AT_A: Lines("g2", frozenset({5}), missed=False),
+        TABLE_AT_A: Waiting(3),
+        CALL_AT_B: Lines("g1", frozenset({4, 7}), missed=True),
     }
     assert list(turns.due) == [CALL_AT_A, TABLE_AT_A, CALL_AT_B]
 

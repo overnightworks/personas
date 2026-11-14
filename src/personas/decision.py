@@ -593,6 +593,17 @@ def with_due(turns: Turns, at: AppPlace, occasion: Occasion) -> Turns:
     return Turns(turns.running, {**turns.due, at: _joined(turns.due.get(at), occasion)})
 
 
+def due_again(turns: Turns, at: AppPlace, occasion: Occasion) -> Turns:
+    """A turn due again at ``at`` for ``occasion``, which a turn ended without an answer: a place due meanwhile keeps
+    what is newer, except that lines of the same generation join; any other place goes to the back of the order."""
+    held = turns.due.get(at)
+    if held is None or (
+        isinstance(held, Lines) and isinstance(occasion, Lines) and held.generation == occasion.generation
+    ):
+        return with_due(turns, at, occasion)
+    return turns
+
+
 def without_due(turns: Turns, leaving: Callable[[AppPlace], bool]) -> Turns:
     """The turns without the due places for which ``leaving`` holds."""
     return Turns(turns.running, {at: occasion for at, occasion in turns.due.items() if not leaving(at)})
