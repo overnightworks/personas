@@ -66,7 +66,8 @@ NO_TURNS_CODE: Final = "no_turns"
 """The reason an invitation is left out: the loop has no way to take turns at the place."""
 BACKOFF_BASE_SECONDS: Final = 1.0
 BACKOFF_CAP_SECONDS: Final = 30.0
-_DOUBLINGS_TO_CAP: Final = math.ceil(math.log2(BACKOFF_CAP_SECONDS / BACKOFF_BASE_SECONDS))
+DEFAULT_BUDGET_PAUSE_CAP_SECONDS: Final = 300.0
+"""The longest wait after a turn the gateway refused for a spent budget, unless the file sets another."""
 SUSPENDED_RETRY_SECONDS: Final = 30.0
 """How often a suspended loop asks the realm and then the app again."""
 TURN_ROLE: Final[AgentRole] = "user"
@@ -206,10 +207,21 @@ def renewal_due(token: Token | None, now: float) -> bool:
     return token is None or now >= token.expires_at - RENEW_BEFORE_EXPIRY_SECONDS
 
 
+def _doubling_wait(count: int, cap_seconds: float) -> float:
+    """The wait after the ``count``-th event in a row (from one): the backoff base, doubling up to ``cap_seconds``."""
+    doublings = min(count - 1, math.ceil(math.log2(cap_seconds / BACKOFF_BASE_SECONDS)))
+    return min(BACKOFF_BASE_SECONDS * 2**doublings, cap_seconds)
+
+
 def backoff_delay(failures: int) -> float:
     """The wait after the ``failures``-th failure in a row (from one): doubling up to a cap."""
-    doublings = min(failures - 1, _DOUBLINGS_TO_CAP)
-    return min(BACKOFF_BASE_SECONDS * 2**doublings, BACKOFF_CAP_SECONDS)
+    return _doubling_wait(failures, BACKOFF_CAP_SECONDS)
+
+
+def budget_pause(refusals: int, cap_seconds: float) -> float:
+    """The wait before his next turn after the ``refusals``-th turn in a row the gateway refused for a spent budget
+    (from one): doubling from the backoff base up to ``cap_seconds``."""
+    return _doubling_wait(refusals, cap_seconds)
 
 
 def status_code(status: int) -> str:

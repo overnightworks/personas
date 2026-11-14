@@ -7,7 +7,17 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from personas.decision import Turns, claimed, held_apps, history_after, released, with_due, without_due
+from personas.decision import (
+    DEFAULT_BUDGET_PAUSE_CAP_SECONDS,
+    Turns,
+    budget_pause,
+    claimed,
+    held_apps,
+    history_after,
+    released,
+    with_due,
+    without_due,
+)
 from personas.entries import History
 
 if TYPE_CHECKING:
@@ -21,8 +31,10 @@ class Mind:
     """Holds one agent's history and turns in memory for the life of the runner; the rules that bound the history and
     move the turns are ``decision``'s. Each method is synchronous, so a loop changes it between its awaits."""
 
-    def __init__(self, size_bytes: int) -> None:
+    def __init__(self, size_bytes: int, budget_pause_cap_seconds: float = DEFAULT_BUDGET_PAUSE_CAP_SECONDS) -> None:
         self._size_bytes = size_bytes
+        self._budget_pause_cap_seconds = budget_pause_cap_seconds
+        self._budget_refusals = 0
         self._history = History((), left_out=0, heard=0)
         self._turns = Turns()
         self._placed = frozenset[str]()
@@ -39,6 +51,15 @@ class Mind:
         if not taken:
             return
         self._history = history_after(self._history, taken, self._size_bytes)
+
+    def budget_spent(self) -> float:
+        """A turn of his was refused for a spent budget; the seconds his turns wait now."""
+        self._budget_refusals += 1
+        return budget_pause(self._budget_refusals, self._budget_pause_cap_seconds)
+
+    def budget_not_spent(self) -> None:
+        """A turn of his ended and was not refused for the budget: the wait starts over."""
+        self._budget_refusals = 0
 
     def stand_at(self, app: str, *, holds: bool) -> None:
         """Records whether he holds an active place at ``app``, as its loop last read his standing."""

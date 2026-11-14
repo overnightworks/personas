@@ -12,7 +12,8 @@ there. ``call_seconds`` bounds each request a turn of another app makes to an ap
 since one turn holds the tools of several, and no app names ``speak``, the voice's own tool, which is never offered to
 a turn.
 The top-level ``history_bytes`` bounds the history each agent keeps in memory of the lines he took in, the views he
-read and the calls relayed for him at any of his apps and tells every turn.
+read and the calls relayed for him at any of his apps and tells every turn. The top-level ``budget_pause_cap_seconds``
+is the longest wait between his turns while the gateway refuses them for a spent budget.
 The optional ``[memory]`` table names the Postgres database that keeps every line the agents read: its host, port,
 database, user, the file holding the password, ``write_seconds``, the bound on one write or read, and how far back
 (``today_hours``) and how much (``today_bytes``) a turn is told of the lines he kept that his history does not hold,
@@ -43,7 +44,7 @@ from pydantic import (
     model_validator,
 )
 
-from personas.decision import TURN_ROLE
+from personas.decision import BACKOFF_BASE_SECONDS, DEFAULT_BUDGET_PAUSE_CAP_SECONDS, TURN_ROLE
 from personas.recall import TodayBounds
 from personas.secret import Secret
 
@@ -122,6 +123,7 @@ class Config:
     gateway: AgentConfig | None = None
     memory: MemoryTarget | None = None
     history_bytes: int = DEFAULT_HISTORY_BYTES
+    budget_pause_cap_seconds: float = DEFAULT_BUDGET_PAUSE_CAP_SECONDS
 
 
 class _Entry(BaseModel):
@@ -197,6 +199,9 @@ class _FileModel(_Entry):
     gateway: AgentConfig | None = None
     memory: _MemoryEntry | None = None
     history_bytes: PositiveInt = Field(default=DEFAULT_HISTORY_BYTES, strict=True)
+    budget_pause_cap_seconds: float = Field(
+        default=DEFAULT_BUDGET_PAUSE_CAP_SECONDS, strict=True, ge=BACKOFF_BASE_SECONDS, allow_inf_nan=False
+    )
 
     @model_validator(mode="after")
     def _tools_need_a_gateway_and_personas(self) -> Self:
@@ -338,4 +343,5 @@ def load_config(environment: Mapping[str, str]) -> Config:
         gateway=parsed.gateway,
         memory=_memory_target(parsed.memory),
         history_bytes=parsed.history_bytes,
+        budget_pause_cap_seconds=parsed.budget_pause_cap_seconds,
     )

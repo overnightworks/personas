@@ -21,13 +21,14 @@ from mcp_types import (
 
 from personas import app_session
 from personas.config import load_config
-from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE, jsonrpc_code
+from personas.decision import BACKOFF_BASE_SECONDS, NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE, jsonrpc_code
 from personas.failures import (
     Unreachable,
     leaves_of,
 )
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
+from tests.support.fakes import SweepClock
 from tests.support.gateway import BUDGET_SPENT, Gateway, says, says_after_a_hold
 from tests.support.history import act_entry, unanswered, url_of
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
@@ -47,6 +48,8 @@ from tests.support.transport import transport_closing_with_late_answers
 from tests.support.wire import cuts, hangs
 
 pytestmark = pytest.mark.anyio
+
+REFUSAL_FREE_ROUND = 3
 
 
 async def test_an_addressed_line_gets_exactly_one_say_under_the_agents_own_fingerprint(runner):
@@ -230,9 +233,8 @@ async def a_turn_ended_short(runner, code):
         (Reply(status=HTTPStatus.TOO_MANY_REQUESTS, headers={"Retry-After": "3"}), RejectionCode.BUSY.value),
         (Reply(status=HTTPStatus.FORBIDDEN), FailureCode.PROVIDER_UNAVAILABLE.value),
         (Reply(status=HTTPStatus.SERVICE_UNAVAILABLE), FailureCode.PROVIDER_UNAVAILABLE.value),
-        (BUDGET_SPENT, RejectionCode.BUDGET_SPENT.value),
     ],
-    ids=["rate limited", "refused", "failing", "budget spent"],
+    ids=["rate limited", "refused", "failing"],
 )
 async def test_a_gateway_refusal_is_silent_logs_one_code_and_leaves_the_lifecycle_untouched(runner, reply, code):
     runner.gateway = Gateway(reply)
@@ -240,6 +242,43 @@ async def test_a_gateway_refusal_is_silent_logs_one_code_and_leaves_the_lifecycl
     await a_turn_ended_short(runner, code)
 
     assert len(runner.gateway.requests) == 1
+
+
+async def test_a_turn_refused_for_a_spent_budget_waits_the_backoff_base_before_his_next_turn_and_logs_the_pause_once(
+    runner,
+):
+    runner.clock = SweepClock(BACKOFF_BASE_SECONDS)
+    runner.gateway = Gateway(BUDGET_SPENT, *says(PLACE_ID, ANSWER))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, f"{ADDRESSED} First.")
+    await runner.clock.until_waiting(1)
+    for each in range(3):
+        say_in_the_call(runner, f"{ADDRESSED} Later {each}.")
+    await runner.app.until_window_read(PLACE_ID, count=2)
+    held_requests = len(runner.gateway.requests)
+    runner.clock.open_gate()
+    await runner.app.said_count(1)
+
+    assert held_requests == 1
+    assert [opening.new_seqs for opening in runner.gateway.openings()] == [[1], [2, 3, 4]]
+    assert [
+        (change.event, change.code, change.seconds) for change in runner.reports.changes if change.event is Event.PAUSED
+    ] == [(Event.PAUSED, RejectionCode.BUDGET_SPENT.value, BACKOFF_BASE_SECONDS)]
+
+
+async def test_the_wait_after_a_spent_budget_doubles_and_starts_over_after_a_turn_that_is_not_refused_for_it(runner):
+    runner.gateway = Gateway(BUDGET_SPENT, BUDGET_SPENT, *says(PLACE_ID, ANSWER), BUDGET_SPENT)
+    await restarted_in_the_call(runner)
+    pauses = 0
+    for round_number in range(1, 5):
+        say_in_the_call(runner, f"{ADDRESSED} Round {round_number}.")
+        if round_number == REFUSAL_FREE_ROUND:
+            await runner.reports.until_a_turn_completed()
+        else:
+            pauses += 1
+            await runner.reports.until(Event.PAUSED, count=pauses)
+
+    assert runner.clock.slept == [BACKOFF_BASE_SECONDS, 2 * BACKOFF_BASE_SECONDS, BACKOFF_BASE_SECONDS]
 
 
 async def test_a_key_the_gateway_cannot_use_ends_the_turn_before_any_gateway_call(runner):

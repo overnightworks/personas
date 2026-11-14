@@ -32,6 +32,7 @@ from mcp_types import INVALID_PARAMS
 
 from personas.app_session import READ_SECONDS
 from personas.decision import (
+    BACKOFF_BASE_SECONDS,
     BACKOFF_CAP_SECONDS,
     NETWORK_FAILURE_CODE,
     RENEW_BEFORE_EXPIRY_SECONDS,
@@ -61,6 +62,7 @@ from personas.decision import (
     arrived_since,
     backoff_delay,
     bound_declarations,
+    budget_pause,
     call_within_bound,
     claimed,
     decisive_failure,
@@ -227,6 +229,25 @@ def test_the_backoff_grows_never_beyond_its_cap_and_is_never_zero():
     assert delays == sorted(delays)
     assert all(0 < delay <= BACKOFF_CAP_SECONDS for delay in delays)
     assert delays[-1] == BACKOFF_CAP_SECONDS
+
+
+@pytest.mark.parametrize(
+    ("refusals", "cap_seconds", "wait"),
+    [
+        (1, 300.0, BACKOFF_BASE_SECONDS),
+        (2, 300.0, 2 * BACKOFF_BASE_SECONDS),
+        (4, 300.0, 8 * BACKOFF_BASE_SECONDS),
+        (9, 300.0, 256 * BACKOFF_BASE_SECONDS),
+        (10, 300.0, 300.0),
+        (10**6, 300.0, 300.0),
+        (3, 2.5, 2.5),
+        (1, BACKOFF_BASE_SECONDS, BACKOFF_BASE_SECONDS),
+        (7, BACKOFF_BASE_SECONDS, BACKOFF_BASE_SECONDS),
+    ],
+    ids=["first", "second", "fourth", "last doubling", "capped", "far past the cap", "odd cap", "cap at base", "base"],
+)
+def test_the_pause_for_a_spent_budget_doubles_from_the_backoff_base_up_to_its_cap(refusals, cap_seconds, wait):
+    assert budget_pause(refusals, cap_seconds) == wait
 
 
 @pytest.mark.parametrize(

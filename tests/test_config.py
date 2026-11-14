@@ -20,6 +20,7 @@ from personas.config import (
     Voice,
     load_config,
 )
+from personas.decision import DEFAULT_BUDGET_PAUSE_CAP_SECONDS
 from personas.main import CONFIGURATION_ERROR_EXIT_CODE, main
 from personas.recall import TodayBounds
 from tests.support.configfiles import MAX_TOOL_CALLS, PERSONA_NAME
@@ -536,6 +537,27 @@ def test_a_history_bound_that_is_no_positive_integer_stops_the_start_and_names_t
     files.text = f"history_bytes = {written}\n{files.text}"
 
     assert "history_bytes" in fails_at_start(files.write(), monkeypatch, capsys)
+
+
+@pytest.mark.parametrize(
+    ("written", "seconds"),
+    [(None, DEFAULT_BUDGET_PAUSE_CAP_SECONDS), ("60.5", 60.5), ("1", 1.0)],
+    ids=["absent", "set", "at the backoff base"],
+)
+def test_the_pause_for_a_spent_budget_is_capped_by_the_default_unless_the_file_sets_its_cap(files, written, seconds):
+    if written is not None:
+        files.text = f"budget_pause_cap_seconds = {written}\n{files.text}"
+
+    assert load_config(files.write()).budget_pause_cap_seconds == seconds
+
+
+@pytest.mark.parametrize("written", ["0", "0.5", "-1", '"60"', "true", "inf", "nan"])
+def test_a_pause_cap_below_the_backoff_base_or_no_number_stops_the_start_and_names_the_field(
+    files, monkeypatch, capsys, written
+):
+    files.text = f"budget_pause_cap_seconds = {written}\n{files.text}"
+
+    assert "budget_pause_cap_seconds" in fails_at_start(files.write(), monkeypatch, capsys)
 
 
 def test_a_file_without_a_memory_table_opens_no_store(files):
