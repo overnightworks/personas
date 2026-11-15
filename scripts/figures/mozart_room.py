@@ -23,7 +23,24 @@ from figures.mozart_furniture import (
     stove_block,
 )
 from figures.room_light import Block, Light, Plane, Window, bake
-from figures.room_shapes import ACROSS, AHEAD, BEHIND, UP, Wall, cuts, panel, piece, placed, turned
+from figures.room_shapes import (
+    ACROSS,
+    AHEAD,
+    BEHIND,
+    UP,
+    Floor,
+    Openings,
+    Wall,
+    along_cuts,
+    cuts,
+    leaf,
+    panel,
+    piece,
+    pierced_panel,
+    placed,
+    tiled_floor,
+    turned,
+)
 
 if TYPE_CHECKING:
     from figures.figure_parts import Colour
@@ -87,6 +104,7 @@ BACK_BAYS = ((0.25, 1.95), (2.25, 4.25), (4.55, 6.25))
 PAINTING = ((2.66, 3.84), (1.68, 2.92))
 DOOR_LEAVES = (1.25, 2.75)
 DOOR_HEAD = 2.7
+DOOR_CELL = 0.4
 ARCHITRAVE = 0.12
 RIGHT_BAYS = ((3.15, 4.95),)
 
@@ -161,38 +179,23 @@ def _light() -> Light:
 def _floor() -> list[Piece]:
     """Square oak panels of a Viennese parquet in two tones, each framed by a dark joint."""
 
-    def tile_cuts(length: float) -> list[float]:
-        stops = [0.0]
-        for tile in range(round(length / TILE)):
-            start = tile * TILE
-            stops += [start + JOINT, start + TILE / 2, start + TILE - JOINT, start + TILE]
-        return stops
-
-    def oak(position: Vector) -> Colour:
-        across, back = position[0] - LEFT_X, FRONT_Z - position[2]
-        column, row = min(int(across / TILE), 9), min(int(back / TILE), 7)
-        inside = min(across - column * TILE, (column + 1) * TILE - across, back - row * TILE, (row + 1) * TILE - back)
-        if inside < JOINT / 2:
-            return JOINT_COLOUR
+    def oak(column: int, row: int) -> Colour:
         shade = ((column * 7 + row * 13) % 5 - 2) * 3
         red, green, blue = OAK[(column + row) % 2]
         return (red + shade, green + shade, blue + shade)
 
-    return [piece(panel((LEFT_X, 0.0, FRONT_Z), ACROSS, BEHIND, tile_cuts(WIDTH), tile_cuts(DEPTH)), oak)]
+    cuts_in_tile = (JOINT, TILE / 2, TILE - JOINT, TILE)
+    floor = Floor((LEFT_X, 0.0, FRONT_Z), WIDTH, DEPTH, TILE, JOINT, JOINT_COLOUR, cuts_in_tile, oak)
+    return [tiled_floor(floor)]
 
 
 def _wall(wall: Wall, length: float) -> list[Piece]:
     """A wall's white dado, its silk and its white frieze, the skirting, the dado rail and the stepped cornice."""
-    openings = WINDOWS if wall is LEFT else ()
-
-    def window_hole(along: float, up: float) -> bool:
-        return SILL < up < HEAD and any(start < along < end for start, end in openings)
-
-    along = cuts(sorted({0.0, length, *(edge for opening in openings for edge in opening)}), WALL_CELL)
-    silk_up = cuts(sorted({RAIL[1], FRIEZE, *((SILL, HEAD) if openings else ())}), WALL_CELL)
+    openings = Openings(WINDOWS, SILL, HEAD) if wall is LEFT else None
+    along = along_cuts(length, openings, WALL_CELL)
     pieces = [
         piece(wall.panel(along, cuts((0.0, RAIL[1]), WALL_CELL)), BOISERIE),
-        piece(wall.panel(along, silk_up, hole=window_hole), SILK),
+        pierced_panel(wall, length, (RAIL[1], FRIEZE), openings, WALL_CELL, SILK),
         piece(wall.panel(along, cuts((FRIEZE, CEILING), WALL_CELL)), BOISERIE),
         piece(wall.box((0.0, length), (0.0, SKIRTING), (0.0, 0.022), TRIM_CELL), SKIRTING_COLOUR),
         piece(wall.box((0.0, length), RAIL, (0.0, 0.03), TRIM_CELL), BOISERIE),
@@ -321,7 +324,7 @@ def _door() -> list[Piece]:
         *_frame(RIGHT, (start + 0.05, end - 0.05), (DOOR_HEAD + 0.3, FRIEZE - 0.1)),
     ]
     for left, right in ((start, middle - 0.004), (middle + 0.004, end)):
-        pieces.append(piece(RIGHT.panel(cuts((left, right), 0.4), cuts((0.0, DOOR_HEAD), 0.4), 0.006), DOOR))
+        pieces.append(leaf(RIGHT, (left, right), DOOR_HEAD, 0.006, DOOR, DOOR_CELL))
         for bottom, top in ((0.22, 0.95), (1.15, 2.45)):
             pieces += _frame(RIGHT, (left + 0.1, right - 0.1), (bottom, top), 0.006)
     for handle in (middle - 0.05, middle + 0.05):

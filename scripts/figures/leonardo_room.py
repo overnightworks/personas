@@ -30,7 +30,26 @@ from figures.leonardo_furniture import (
     wing,
 )
 from figures.room_light import Block, Light, Plane, Window, bake
-from figures.room_shapes import ABOVE, ACROSS, AHEAD, BEHIND, UP, Wall, box, cuts, panel, piece, placed, turned
+from figures.room_shapes import (
+    ABOVE,
+    ACROSS,
+    AHEAD,
+    BEHIND,
+    UP,
+    Floor,
+    Openings,
+    Wall,
+    along_cuts,
+    box,
+    cuts,
+    leaf,
+    panel,
+    piece,
+    pierced_panel,
+    placed,
+    tiled_floor,
+    turned,
+)
 from figures.room_shapes import LEFT as LEFTWARD
 from figures.room_shapes import RIGHT as RIGHTWARD
 
@@ -96,6 +115,7 @@ SHUTTER = 0.6
 DOOR = (5.0, 5.9)
 DOOR_HEAD = 2.2
 DOOR_PLANKS = 4
+DOOR_CELL = 0.4
 
 EASEL_AT: Vector = (-1.6, 0.0, -1.3)
 EASEL_TURN = 0.45
@@ -167,24 +187,13 @@ def _light() -> Light:
 def _floor() -> list[Piece]:
     """Square terracotta tiles in lime mortar, each fired a little differently."""
 
-    def tile_cuts(length: float) -> list[float]:
-        stops = [0.0]
-        for tile in range(round(length / TILE)):
-            start = tile * TILE
-            stops += [start + JOINT, start + TILE - JOINT, start + TILE]
-        return stops
-
-    def cotto(position: Vector) -> Colour:
-        across, back = position[0] - LEFT_X, FRONT_Z - position[2]
-        column, row = min(int(across / TILE), round(WIDTH / TILE) - 1), min(int(back / TILE), round(DEPTH / TILE) - 1)
-        inside = min(across - column * TILE, (column + 1) * TILE - across, back - row * TILE, (row + 1) * TILE - back)
-        if inside < JOINT / 2:
-            return MORTAR
+    def cotto(column: int, row: int) -> Colour:
         shade = ((column * 11 + row * 7) % 7 - 3) * 5
         red, green, blue = COTTO[(column * 3 + row) % 2]
         return (red + shade, green + shade // 2, blue + shade // 2)
 
-    return [piece(panel((LEFT_X, 0.0, FRONT_Z), ACROSS, BEHIND, tile_cuts(WIDTH), tile_cuts(DEPTH)), cotto)]
+    floor = Floor((LEFT_X, 0.0, FRONT_Z), WIDTH, DEPTH, TILE, JOINT, MORTAR, (JOINT, TILE - JOINT, TILE), cotto)
+    return [tiled_floor(floor)]
 
 
 def _ceiling() -> list[Piece]:
@@ -221,17 +230,11 @@ def _plaster(position: Vector) -> Colour:
 
 def _wall(wall: Wall, length: float) -> list[Piece]:
     """A wall's painted band, its stripe and the plaster above, open where the window is."""
-    openings = (WINDOW,) if wall is RIGHT else ()
-
-    def window_hole(along: float, up: float) -> bool:
-        return SILL < up < CROWN and any(start < along < end for start, end in openings)
-
-    along = cuts(sorted({0.0, length, *(edge for opening in openings for edge in opening)}), WALL_CELL)
-    plaster_up = cuts(sorted({STRIPE[1], CEILING, *((SPRING, CROWN) if openings else ())}), WALL_CELL)
+    openings = Openings((WINDOW,), SILL, CROWN, (SPRING,)) if wall is RIGHT else None
     return [
-        piece(wall.panel(along, cuts((0.0, BAND), WALL_CELL)), BAND_COLOUR),
+        piece(wall.panel(along_cuts(length, openings, WALL_CELL), cuts((0.0, BAND), WALL_CELL)), BAND_COLOUR),
         piece(wall.box((0.0, length), STRIPE, (0.0, 0.012), TRIM_CELL), STRIPE_COLOUR),
-        piece(wall.panel(along, plaster_up, hole=window_hole), _plaster),
+        pierced_panel(wall, length, (STRIPE[1], CEILING), openings, WALL_CELL, _plaster),
     ]
 
 
@@ -315,17 +318,13 @@ def _door() -> list[Piece]:
             BACK.box((start - frame - 0.04, end + frame + 0.04), (DOOR_HEAD, DOOR_HEAD + 0.2), (0.0, 0.08), TRIM_CELL),
             STONE,
         ),
-        piece(BACK.panel(cuts((start, end), 0.4), cuts((0.0, DOOR_HEAD), 0.4), 0.02), TIMBER),
+        leaf(BACK, (start, end), DOOR_HEAD, 0.02, TIMBER, DOOR_CELL),
     ]
     for plank in range(DOOR_PLANKS):
         left = start + plank * width
         shade = (plank * 5 % 3 - 1) * 6
         colour = (PLANKS[0] + shade, PLANKS[1] + shade, PLANKS[2] + shade)
-        pieces.append(
-            piece(
-                BACK.panel(cuts((left + 0.006, left + width - 0.006), 0.4), cuts((0.0, DOOR_HEAD), 0.4), 0.03), colour
-            )
-        )
+        pieces.append(leaf(BACK, (left + 0.006, left + width - 0.006), DOOR_HEAD, 0.03, colour, DOOR_CELL))
     for height in (0.35, DOOR_HEAD - 0.35):
         pieces.append(
             piece(BACK.box((start + 0.05, end - 0.05), (height - 0.04, height + 0.04), (0.03, 0.05), TRIM_CELL), OAK)
