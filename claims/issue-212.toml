@@ -1,8 +1,0 @@
-claim_id = "179735eebf5e4be4b48687eb11a483fd"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "9dba5186a38bdefd5c1ddbae9209365749b08c61"
-branch = "claude/issue-212-rooms-share-floor-wall-door"
-scope = ["scripts/figures"]
-opened_commit = "360645dc6de5b208c6c9b465f9041d38d171072b"
-whole_reason = "the room modules and their shared shape helpers, read together"
