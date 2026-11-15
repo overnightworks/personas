@@ -167,6 +167,7 @@ class AgentLoop:
         self._checkpoints: dict[PlaceRef, Checkpoint] = {}
         self._turned_revisions: dict[PlaceRef, int] = {}
         self._turn: ActiveTurn | None = None
+        self._pause_wake: asyncio.Task[None] | None = None
         self._turn_ended = mind.wake_event()
         self._voice_app = False
         persona, binding, backend = agent.persona, app.binding, boundaries.backend
@@ -374,8 +375,10 @@ class AgentLoop:
         if setup is None:
             return
         facts = facts_of((await self._current_token()).value)
-        claim = self._mind.claim(self._app.mcp_url)
+        now = self._boundaries.clock.now()
+        claim = self._mind.claim(self._app.mcp_url, now)
         if claim is None:
+            self._wake_when_pause_over(turns, now)
             return
         at, occasion = claim
         if isinstance(occasion, Waiting):
@@ -384,6 +387,17 @@ class AgentLoop:
         apps = self._mind.held_apps(self._app.mcp_url)
         admitted = Admitted(facts, at.place, occasion, self._mind.present, self._boundaries.clock.wall(), aloud, apps)
         self._start_turn(turns, setup, at.place, admitted)
+
+    def _wake_when_pause_over(self, turns: asyncio.TaskGroup, now: float) -> None:
+        """A pause holds the turn of the place at this app that has waited longest: one waiter of this loop wakes
+        every loop of his when it is over, and a waiter that ended early sees the rest of the pause again."""
+        seconds = self._mind.pause_left(self._app.mcp_url, now)
+        if seconds > 0 and (self._pause_wake is None or self._pause_wake.done()):
+            self._pause_wake = turns.create_task(self._wake_after(seconds))
+
+    async def _wake_after(self, seconds: float) -> None:
+        await self._boundaries.clock.sleep(seconds)
+        self._mind.wake()
 
     def _take_lines(self, place: PlaceRef, window: PlaceWindow, read_at: datetime, *, serves_view: bool) -> None:
         """Moves the place's checkpoint and takes the new lines into the agent's history; ``wakes_him`` decides whether

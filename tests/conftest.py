@@ -16,6 +16,7 @@ from agents.turn import Principal
 
 from personas.app_session import READ_SECONDS, open_mcp_session
 from personas.config import DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES, Voice, load_config
+from personas.decision import DEFAULT_BUDGET_PAUSE_CAP_SECONDS
 from personas.loop import AgentLoop, Boundaries
 from personas.main import QUIET_LIBRARIES, SweepingBoundaries, configure_logging, run_with_sweep
 from personas.mind import Mind
@@ -79,7 +80,7 @@ class Scenario:
             credentials(),
             app_target(),
             boundaries,
-            Mind(DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES),
+            Mind(DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES, DEFAULT_BUDGET_PAUSE_CAP_SECONDS),
             (app_target(),),
             None,
         )

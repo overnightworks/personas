@@ -260,6 +260,7 @@ async def test_a_place_left_during_the_pause_gets_no_turn_and_the_next_place_fol
     await runner.clock.until_waiting(1)
     runner.app.stand(SUBJECT, at_table(OTHER_TABLE))
     other = waits(runner, 1, OTHER_TABLE)
+    runner.clock.open_gate()
     await runner.reports.until_a_turn_completed()
 
     assert told_states(runner) == [first, other]

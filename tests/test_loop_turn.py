@@ -50,8 +50,6 @@ from tests.support.wire import cuts, hangs
 
 pytestmark = pytest.mark.anyio
 
-REFUSAL_FREE_ROUND = 3
-
 
 async def test_an_addressed_line_gets_exactly_one_say_under_the_agents_own_fingerprint(runner):
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
@@ -305,16 +303,40 @@ async def test_a_lines_turn_the_gateway_failed_runs_again_after_the_wait_with_it
 async def test_the_wait_after_a_spent_budget_doubles_and_starts_over_after_a_turn_that_is_not_refused_for_it(runner):
     runner.gateway = Gateway(BUDGET_SPENT, BUDGET_SPENT, *says(PLACE_ID, ANSWER), BUDGET_SPENT)
     await restarted_in_the_call(runner)
-    pauses = 0
-    for round_number in range(1, 5):
-        say_in_the_call(runner, f"{ADDRESSED} Round {round_number}.")
-        if round_number == REFUSAL_FREE_ROUND:
-            await runner.reports.until_a_turn_completed()
-        else:
-            pauses += 1
-            await runner.reports.until(Event.PAUSED, count=pauses)
 
-    assert runner.clock.slept == [BACKOFF_BASE_SECONDS, 2 * BACKOFF_BASE_SECONDS, BACKOFF_BASE_SECONDS]
+    say_in_the_call(runner, f"{ADDRESSED} First.")
+    await runner.app.said_count(1)
+    say_in_the_call(runner, f"{ADDRESSED} Second.")
+    await runner.reports.until(Event.PAUSED, count=3)
+
+    assert [change.seconds for change in runner.reports.changes if change.event is Event.PAUSED] == [
+        BACKOFF_BASE_SECONDS,
+        2 * BACKOFF_BASE_SECONDS,
+        BACKOFF_BASE_SECONDS,
+    ]
+
+
+async def test_a_pause_outlives_the_leaving_of_its_turns_place_and_holds_the_turn_of_another_place_until_it_is_over(
+    runner,
+):
+    other_place = "room-8"
+    runner.clock = SweepClock(BACKOFF_BASE_SECONDS)
+    runner.gateway = Gateway(BUDGET_SPENT, *says(other_place, ANSWER))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.clock.until_waiting(1)
+    runner.app.stand(SUBJECT, active(other_place))
+    await runner.app.until_window_read(other_place)
+    runner.app.speak(other_place, PERSON, "Ada", ADDRESSED)
+    await runner.app.until_window_read(other_place, count=2)
+    for later_read in range(3, 5):
+        runner.app.speak(other_place, PERSON, "Ada", "Hm.")
+        await runner.app.until_window_read(other_place, count=later_read)
+    assert len(runner.gateway.requests) == 1
+    runner.clock.open_gate()
+    await runner.app.said_count(1)
+
+    assert [place for _, place, _ in runner.app.said] == [other_place]
 
 
 async def test_a_key_the_gateway_cannot_use_ends_the_turn_before_any_gateway_call(runner):
