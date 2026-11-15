@@ -904,25 +904,33 @@ def a_malformed_picture_answer(**block) -> dict[str, object]:
     return {"resultType": "complete", "content": [{"type": "text", "text": "seen"}, picture | block]}
 
 
-_NOT_JPEG = base64.b64encode(b"\x00" + secrets.token_bytes(16)).decode("ascii")
-_NOT_CANONICAL = base64_of(a_picture(16)).rstrip("=")
+def a_picture_of_two_blocks() -> dict[str, object]:
+    block = a_malformed_picture_answer()["content"][1]
+    return {"resultType": "complete", "content": [block, block]}
+
+
 MALFORMED_PICTURE_ANSWERS = {
-    "non-canonical base64": a_malformed_picture_answer(data=_NOT_CANONICAL),
-    "no JPEG start marker": a_malformed_picture_answer(data=_NOT_JPEG),
-    "empty data": a_malformed_picture_answer(data=""),
-    "another media type": a_malformed_picture_answer(mimeType="image/png"),
-    "two pictures": {
-        "resultType": "complete",
-        "content": [
-            a_malformed_picture_answer()["content"][1],
-            a_malformed_picture_answer()["content"][1],
-        ],
-    },
+    "non-canonical base64": lambda: a_malformed_picture_answer(data=base64_of(a_picture(16)).rstrip("=")),
+    "no JPEG start marker": lambda: a_malformed_picture_answer(
+        data=base64.b64encode(b"\x00" + secrets.token_bytes(16)).decode("ascii")
+    ),
+    "empty data": lambda: a_malformed_picture_answer(data=""),
+    "another media type": lambda: a_malformed_picture_answer(mimeType="image/png"),
+    "two pictures": a_picture_of_two_blocks,
 }
 
 
-@pytest.mark.parametrize("answer", MALFORMED_PICTURE_ANSWERS.values(), ids=MALFORMED_PICTURE_ANSWERS.keys())
-async def test_a_picture_that_breaks_the_wire_is_an_unusable_answer_and_no_validation_error(app, bearer, answer):
+@pytest.fixture(params=MALFORMED_PICTURE_ANSWERS)
+def malformed_picture_answer(request: pytest.FixtureRequest) -> dict[str, object]:
+    """A tool result whose picture breaks the wire in one of the ways named above, with fresh bytes."""
+    return MALFORMED_PICTURE_ANSWERS[request.param]()
+
+
+async def test_a_picture_that_breaks_the_wire_is_an_unusable_answer_and_no_validation_error(
+    app, bearer, malformed_picture_answer
+):
+    answer = malformed_picture_answer
+
     async def answers_with_a_bad_picture(reply):
         await reply.raw_result(answer)
 

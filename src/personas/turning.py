@@ -276,7 +276,7 @@ class Turning:
                 self._mind.due_again(AppPlace(self._app.mcp_url, admitted.place), admitted.occasion)
             # What left the session beside the stop (a late answer, the failure another stop holds) still goes to the
             # group, to be judged there.
-            rest = failures_leaving_with(stopped, held, leaves)
+            rest = failures_leaving_with(held, (leaf for leaf in leaves if leaf is not stopped))
             if len(rest) == 1:
                 raise rest[0] from None
             if rest:
