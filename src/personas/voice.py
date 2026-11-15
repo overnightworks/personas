@@ -163,11 +163,16 @@ class Speaking:
             if reached():
                 return
             self._stop_past_deadline()
-            woken = asyncio.create_task(taken.wait())
-            try:
-                await asyncio.wait({self._deadline_bound(), woken}, return_when=asyncio.FIRST_COMPLETED)
-            finally:
-                woken.cancel()
+            await self._first_of(taken, self._deadline_bound())
+
+    @staticmethod
+    async def _first_of(taken: asyncio.Event, *ends: asyncio.Task[object]) -> None:
+        """Returns at the mind's next take or once one of ``ends`` is done, whichever comes first."""
+        woken = asyncio.create_task(taken.wait())
+        try:
+            await asyncio.wait({*ends, woken}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            woken.cancel()
 
     def _deadline_bound(self) -> asyncio.Task[None]:
         """The task that ends when the turn's deadline passes, made once for the whole speech."""
@@ -187,13 +192,18 @@ class Speaking:
         self, request: Coroutine[None, None, SpeakAnswer | SpeakRefusal]
     ) -> SpeakAnswer | SpeakRefusal:
         """The answer of the request, which the app holds back while the sentence before plays; a request not answered
-        by the turn's deadline is given up, the turn ending ``limit_exceeded``."""
+        by the turn's deadline is given up, the turn ending ``limit_exceeded``. The lines that enter meanwhile are
+        counted at each take, before the history's bound can drop them."""
         sending = asyncio.create_task(request)
         try:
-            await asyncio.wait({sending, self._deadline_bound()}, return_when=asyncio.FIRST_COMPLETED)
-            if not sending.done():
-                raise TurnStopped(TurnStopKind.FAILED, FailureCode.LIMIT_EXCEEDED)
-            return sending.result()
+            while True:
+                taken = self._mind.next_take()
+                self._fold_lines()
+                if sending.done():
+                    return sending.result()
+                if self._deadline_bound().done():
+                    raise TurnStopped(TurnStopKind.FAILED, FailureCode.LIMIT_EXCEEDED)
+                await self._first_of(taken, sending, self._deadline_bound())
         finally:
             if not sending.done():
                 sending.cancel()

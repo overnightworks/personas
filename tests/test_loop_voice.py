@@ -13,7 +13,7 @@ from agents.turn import Principal, person_fingerprint
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, says, speaks_and_says
-from tests.support.history import REMARK, SPEAKER, said_and_taken, waits
+from tests.support.history import REMARK, SPEAKER, bounded_history, said_and_taken, settled, waits
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import ISSUER, PLAY_TOOL, SAY_TOOL, Line, QuietApp, active
 from tests.support.realm import LIFETIME_SECONDS
@@ -350,6 +350,30 @@ async def test_a_call_reaches_the_app_only_after_the_sentence_before_it_was_answ
 
     assert runner.app.calls == [SPEAK, SAY_TOOL]
     assert runner.app.most_in_flight == 1
+
+
+async def test_his_line_for_the_playing_sentence_that_the_bound_cuts_while_the_next_speak_is_open_is_not_awaited(
+    runner,
+):
+    runner.config = bounded_history(runner.config, 1)
+    holding_sentence_ends(runner)
+    await a_voice_call(runner, completion(TWO_SENTENCES))
+    first_answer = runner.app.hold_next_speak()
+    say_in_the_call(runner, ADDRESSED, spoken=True)
+    await runner.app.until_called(1)
+    first_answer.set()
+    await runner.app.spoken_count(1)
+    second_answer = runner.app.hold_next_speak()
+    await runner.app.until_called(2)
+    runner.app.end_sentence()
+    await settled(runner.app)
+    second_answer.set()
+    await runner.app.spoken_count(2)
+    runner.app.end_sentence()
+
+    await runner.reports.until_a_turn_completed()
+
+    assert runner.reports.reported() == [(Event.STARTED, None)]
 
 
 async def test_a_sentence_dropped_by_a_stop_yields_no_line_and_the_turn_does_not_wait_for_one(runner):
