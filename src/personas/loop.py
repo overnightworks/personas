@@ -56,7 +56,7 @@ from personas.task_record import (
     unrequested_unless_cancelling,
 )
 from personas.tokens import facts_of
-from personas.turning import Admitted, Turning, TurnSetup
+from personas.turning import Admitted, Turning, TurnReports, TurnSetup
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
@@ -155,9 +155,7 @@ class AgentLoop:
             self._current_token,
             self._use_current_token,
             self._report,
-            self._report_request,
-            self._report_turn_end,
-            self._report_pause,
+            TurnReports(self._report_request, self._report_turn_end, self._report_pause),
             self._remembering,
         )
         self._token: Token | None = None

@@ -103,6 +103,16 @@ class TurnSetup:
     backend: BackendFactory
 
 
+@dataclass(frozen=True)
+class TurnReports:
+    """What a turn tells the loop that runs it: the seconds to its first model request, its end and the pause its end
+    leaves."""
+
+    request: Callable[[float], None]
+    ended: Callable[[str | None, TurnUsage | None, InputSizes | None], None]
+    paused: Callable[[float, str], None]
+
+
 class _Measures:
     """What the turn's input weighs: the request's tools and told messages once it is built, and every tool result
     relayed back to the model, held and refused calls included. Only bytes are kept. It also tells how long the
@@ -233,9 +243,7 @@ class Turning:
         current_token: Callable[[], Awaitable[Token]],
         use_current_token: Callable[[AppSession], Awaitable[None]],
         report: Callable[[Event, str | None, AppTarget | None], None],
-        report_request: Callable[[float], None],
-        report_turn_end: Callable[[str | None, TurnUsage | None, InputSizes | None], None],
-        report_pause: Callable[[float, str], None],
+        reports: TurnReports,
         remembering: Remembering,
     ) -> None:
         self._agent = agent
@@ -248,9 +256,7 @@ class Turning:
         self._current_token = current_token
         self._use_current_token = use_current_token
         self._report = report
-        self._report_request = report_request
-        self._report_turn_end = report_turn_end
-        self._report_pause = report_pause
+        self._reports = reports
         self._remembering = remembering
 
     async def take(self, setup: TurnSetup, admitted: Admitted, record: TaskRecord) -> None:
@@ -269,7 +275,7 @@ class Turning:
         A turn the gateway ends short is reported unless a defect was met; a failed relayed call and any other
         error go to the group. Every error of a cancelled turn ends as the cancellation.
         """
-        measures = _Measures(self._clock, self._report_request)
+        measures = _Measures(self._clock, self._reports.request)
         try:
             await self._run_turn(setup, admitted, record, measures)
         except Exception as error:
@@ -282,7 +288,7 @@ class Turning:
             # The stop only carries the failure out of the backend; the failure goes to the group, never the stop.
             held = failure_held_by(stopped)
             if held is None and record.defect is None:
-                self._report_turn_end(stopped.code.value, None, measures.sizes())
+                self._reports.ended(stopped.code.value, None, measures.sizes())
                 self._pause_before_retry(stopped.code)
                 self._mind.due_again(AppPlace(self._app.mcp_url, admitted.place), admitted.occasion)
             # What left the session beside the stop (a late answer, the failure another stop holds) still goes to the
@@ -298,7 +304,7 @@ class Turning:
         arrive meanwhile are taken into his history and make one turn after it, with the turn's own place. The pause
         is the mind's, so it outlives this task."""
         seconds = self._mind.unanswered(budget_spent=code is RejectionCode.BUDGET_SPENT, now=self._clock.now())
-        self._report_pause(seconds, code.value)
+        self._reports.paused(seconds, code.value)
 
     async def _run_turn(self, setup: TurnSetup, admitted: Admitted, record: TaskRecord, measures: _Measures) -> None:
         turn = TurnTold(
@@ -362,7 +368,7 @@ class Turning:
             else:
                 final = await _final_event_of(events)
         if final is not None:
-            self._report_turn_end(None, final.usage, measures.sizes())
+            self._reports.ended(None, final.usage, measures.sizes())
             self._mind.answered(turn)
 
     async def _speak_along(self, events: AsyncIterator[TurnEvent], speaking: Speaking) -> FinalEvent | None:
