@@ -68,6 +68,11 @@ class Reply:
         await self._start(status, None)
         await self.send({"type": "http.response.body", "body": b""})
 
+    async def body(self, status: HTTPStatus, content_type: str | None, content: bytes) -> None:
+        """Answers with the content as it is, of the content type given or of none."""
+        await self._start(status, content_type)
+        await self.send({"type": "http.response.body", "body": content})
+
     async def undecodable(self, status: HTTPStatus) -> None:
         """Answers with a JSON body whose declared gzip encoding does not decode."""
         headers = [(b"content-type", JSON.encode()), (b"content-encoding", b"gzip")]

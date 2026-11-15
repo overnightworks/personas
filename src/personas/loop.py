@@ -45,7 +45,7 @@ from personas.decision import (
     wakes_him,
 )
 from personas.entries import ViewSeen, Visit, WindowRead, taken_lines
-from personas.failures import CallFailure, leaves_of, raise_if_cancelled
+from personas.failures import CallFailure, StatusFailure, leaves_of, raise_if_cancelled
 from personas.mind import Mind
 from personas.recall import LookupBounds
 from personas.remembering import LineStore, Remembering
@@ -464,7 +464,7 @@ class AgentLoop:
         self._park()
         if not self._backing_off:
             self._backing_off = True
-            self._report(Event.BACKOFF, failure_code(failure))
+            self._report(Event.BACKOFF, failure_code(failure), None, failure)
         self._failures += 1
         await self._boundaries.clock.sleep(backoff_delay(self._failures))
 
@@ -479,13 +479,22 @@ class AgentLoop:
         event: Event,
         code: str | None = None,
         app: AppTarget | None = None,
+        failure: CallFailure | None = None,
         *,
         place_kind: str | None = None,
         model: str | None = None,
     ) -> None:
+        status = failure if isinstance(failure, StatusFailure) else None
         self._boundaries.report(
             StateChange(
-                event, self._agent.client_id, (app or self._app).mcp_url, code, place_kind=place_kind, model=model
+                event,
+                self._agent.client_id,
+                (app or self._app).mcp_url,
+                code,
+                place_kind=place_kind,
+                model=model,
+                method=status and status.method,
+                answer=status and status.answer,
             )
         )
 

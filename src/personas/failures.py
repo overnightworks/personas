@@ -32,11 +32,17 @@ class CallFailure(Exception):  # noqa: N818
 
 
 class StatusFailure(CallFailure):
-    """The server answered with an HTTP status that is not success."""
+    """The server answered with an HTTP status that is not success.
 
-    def __init__(self, status: int) -> None:
+    An app's answer says the MCP method that failed and what it carried: a code of the JSON-RPC error, else its
+    content type; never its content.
+    """
+
+    def __init__(self, status: int, method: str | None = None, answer: str | None = None) -> None:
         super().__init__(f"HTTP status {status}")
         self.status = status
+        self.method = method
+        self.answer = answer
 
 
 class TokenStatusFailure(StatusFailure):

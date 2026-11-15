@@ -223,7 +223,7 @@ class Turning:
         clock: Clock,
         current_token: Callable[[], Awaitable[Token]],
         use_current_token: Callable[[AppSession], Awaitable[None]],
-        report: Callable[[Event, str | None, AppTarget | None], None],
+        report: Callable[[Event, str | None, AppTarget | None, CallFailure | None], None],
         report_turn_end: Callable[[str | None, TurnUsage | None, InputSizes | None], None],
         report_pause: Callable[[float, str], None],
         remembering: Remembering,
@@ -344,7 +344,7 @@ class Turning:
                     self._clock,
                     setup.persona.max_duration_seconds,
                     partial(self._use_current_token, session),
-                    lambda event, code: self._report(event, code, None),
+                    lambda event, code: self._report(event, code, None, None),
                     self._mind,
                 )
                 final = await self._speak_along(events, speaking)
@@ -440,7 +440,7 @@ class Turning:
         """The hand tools of the bound tools another app lists, or ``None`` after the report of its failed listing."""
         declared = await self._ask_elsewhere(app, lambda session: session.declared_tools(), record)
         if isinstance(declared, CallFailure):
-            self._report(_failure_event(app), failure_code(declared), app)
+            self._report(_failure_event(app), failure_code(declared), app, declared)
             return None
         listed = bound_declarations(declared, binding.tools)
         return [HandTool(each, partial(self._relay_elsewhere, app, each.name, calls, hold, record)) for each in listed]
@@ -490,7 +490,7 @@ class Turning:
             raise RelayFailed(error) from None
         if isinstance(answer, CallFailure):
             calls.close()
-            self._report(_failure_event(app), failure_code(answer), app)
+            self._report(_failure_event(app), failure_code(answer), app, answer)
             return ToolOutcome(_APP_FAILED_TEXT, is_error=True)
         return answer
 

@@ -34,6 +34,7 @@ from agents.member import (
 from agents.tools import ToolEffect, ToolOutcome
 from agents.turn import TOOL_IMAGE_MEDIA_TYPE
 from mcp_types import (
+    INTERNAL_ERROR,
     INVALID_PARAMS,
     BlobResourceContents,
     ListToolsResult,
@@ -330,6 +331,57 @@ async def test_a_bearer_the_app_does_not_know_is_a_401(app):
         await opens(app, unknown)
 
     assert failure.value.status == HTTPStatus.UNAUTHORIZED
+
+
+HTML_BODY = b"<html>the front's own page</html>"
+
+
+@pytest.mark.parametrize(
+    ("answers", "answer"),
+    [
+        pytest.param(lambda reply: reply.error(INVALID_PARAMS), jsonrpc_code(INVALID_PARAMS), id="invalid params"),
+        pytest.param(lambda reply: reply.error(INTERNAL_ERROR), jsonrpc_code(INTERNAL_ERROR), id="internal error"),
+        pytest.param(
+            lambda reply: reply.body(HTTPStatus.BAD_REQUEST, "text/html; charset=utf-8", HTML_BODY),
+            "text/html",
+            id="html",
+        ),
+        pytest.param(
+            lambda reply: reply.body(HTTPStatus.BAD_REQUEST, "application/json", b'{"detail": "no"}'),
+            "application/json",
+            id="json that is no jsonrpc error",
+        ),
+        pytest.param(lambda reply: reply.body(HTTPStatus.BAD_REQUEST, None, HTML_BODY), None, id="no content type"),
+        pytest.param(
+            lambda reply: reply.body(HTTPStatus.BAD_REQUEST, "not a media type", HTML_BODY), None, id="no media type"
+        ),
+    ],
+)
+async def test_a_status_failure_names_the_method_and_what_the_answer_carried_and_none_of_its_content(
+    app, bearer, answers, answer
+):
+    app.script(LIST_TOOLS, answers)
+
+    async with opened(app, bearer) as session:
+        with pytest.raises(StatusFailure) as failure:
+            await session.declared_tools()
+
+    assert failure.value.status == HTTPStatus.BAD_REQUEST
+    assert failure.value.method == LIST_TOOLS
+    assert failure.value.answer == answer
+    assert "the front" not in repr(failure.value) + str(failure.value)
+
+
+async def test_a_status_failure_of_a_tool_call_names_the_call_method(app, bearer):
+    app.refuse_with = HTTPStatus.SERVICE_UNAVAILABLE
+    app.refused_method = CALL
+
+    async with opened(app, bearer) as session:
+        with pytest.raises(StatusFailure) as failure:
+            await session.speak(PLACE, "A sentence.")
+
+    assert failure.value.method == CALL
+    assert failure.value.answer is None
 
 
 async def test_a_redirect_the_app_answers_is_an_unusable_answer_named_by_its_status(app, bearer):
