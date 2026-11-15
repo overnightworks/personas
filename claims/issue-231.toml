@@ -1,0 +1,7 @@
+claim_id = "f9ee572df74a4a1288f3b87678a47546"
+agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
+role = "builder"
+base = "a1e40c9cbacc7e44483054968214280f2b8255fd"
+branch = "claude/issue-231-pin-2xx-refusal-and-delete-status"
+scope = ["tests/support/hopin.py", "tests/test_app_session.py"]
+opened_commit = "87afe269e59b617b8ad5ee8cc1b6cf407410a2b7"
