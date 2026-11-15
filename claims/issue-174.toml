@@ -1,8 +1,0 @@
-claim_id = "a88a973ef77a4903b73f03c113c5eae3"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "12f25772e453256a79327e267ff8444f61226058"
-branch = "claude/issue-174-follow-ups-of-the-172-landing"
-scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/decision.py", "src/personas/loop.py", "src/personas/mind.py", "src/personas/turning.py", "tests/conftest.py", "tests/support/voice.py", "tests/test_decision.py", "tests/test_loop.py", "tests/test_loop_turn.py", "tests/test_loop_view.py", "tests/test_mind.py", "tests/test_voice.py"]
-opened_commit = "1de74b9fd8776fd0f700a7ee9bcef900523f0394"
-whole_reason = "three small follow-ups of one landing, on the same few files"
