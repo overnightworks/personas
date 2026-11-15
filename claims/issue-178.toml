@@ -1,8 +1,0 @@
-claim_id = "c970bb99fded4132b13bb21ef755a50f"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "44afc8199907efcc7edacb8395547cf92191ff36"
-branch = "claude/issue-178-mozart-has-his-own-room-checked-in-ci"
-scope = [".dockerignore", "README.md", "docs/ARCHITECTURE.md", "scripts/check_figures.sh", "scripts/figures", "scripts/write_figures.py", "src/characters", "tests/scripts"]
-opened_commit = "071195de9d19e99b2cadcfcf04dca413acf5797f"
-whole_reason = "the room writer, its first room, the check that reads it and the documents that name it"
