@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Check the figures under src/characters: scripts/check_figures.sh
+# Check the figures and rooms under src/characters: scripts/check_figures.sh
 #
-# The generator's output must equal the tracked .vrm files, none more and none fewer. Then `figure check` from figure's
-# release runs on each file, after the tarball's sha512 has matched the integrity its release notes print. Needs uv,
-# node (24 or newer, as the release asks), curl, openssl and tar. Bump the version and the integrity together, to the
-# release the apps' figure tile runs.
+# The generator's output must equal the tracked .vrm and .room.glb files, none more and none fewer. Then `figure check`
+# from figure's release runs on each figure, and `figure check --as room` on each room, after the tarball's sha512 has
+# matched the integrity its release notes print. Needs uv, node (24 or newer, as the release asks), curl, openssl and
+# tar. Bump the version and the integrity together, to the release the apps' figure tile runs.
 set -euo pipefail
-# A directory without a figure is a failure, not an empty loop.
+# A directory without a figure or a room is a failure, not an empty loop.
 shopt -s failglob
 
 VERSION='0.8.0'
@@ -19,7 +19,7 @@ trap 'rm -rf "${work}"' EXIT
 
 uv run --no-project --python 3.14 scripts/write_figures.py "${work}/generated"
 if ! diff --recursive --brief --exclude='*.md' "${work}/generated" src/characters; then
-    echo "src/characters/*.vrm differ from the generator's output: run scripts/write_figures.py src/characters" >&2
+    echo "src/characters/*.vrm and *.room.glb differ from the generator's output: run scripts/write_figures.py src/characters" >&2
     exit 1
 fi
 
@@ -41,4 +41,7 @@ mkdir "${work}/release"
 tar --extract --gzip --file "${work}/figure.tgz" --directory "${work}/release"
 for figure in src/characters/*.vrm; do
     node "${work}/release/package/dist/bin.js" check "${figure}"
+done
+for room in src/characters/*.room.glb; do
+    node "${work}/release/package/dist/bin.js" check --as room "${room}"
 done

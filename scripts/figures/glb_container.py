@@ -18,6 +18,7 @@ GLB_VERSION = 2
 JSON_CHUNK = 0x4E4F534A
 BINARY_CHUNK = 0x004E4942
 ACCESSOR_WIDTHS = {"SCALAR": 1, "VEC3": 3, "VEC4": 4, "MAT4": 16}
+SRGB_FULL = 255
 
 
 class ComponentType(IntEnum):
@@ -31,6 +32,12 @@ STRUCT_FORMATS = {
     ComponentType.UNSIGNED_SHORT: "H",
     ComponentType.UNSIGNED_BYTE: "B",
 }
+
+
+def linear(channel: int) -> float:
+    """The linear value, 0 to 1, of an sRGB channel from 0 to 255, as glTF's vertex colours hold it."""
+    value = channel / SRGB_FULL
+    return value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
 
 
 class GlbBuilder:

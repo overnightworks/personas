@@ -1,7 +1,9 @@
 import pytest
 
 from figures.humanoid_figure import build_figure
+from figures.persona_rooms import MOZART as MOZART_ROOM
 from figures.persona_wardrobes import LEONARDO, MOZART
+from figures.room_glb import build_room
 from tests.support.glb import Glb, read_glb
 
 PERSONAS = {wardrobe.name: wardrobe for wardrobe in (MOZART, LEONARDO)}
@@ -15,3 +17,8 @@ def figure_bytes() -> dict[str, bytes]:
 @pytest.fixture(params=sorted(PERSONAS))
 def figure(request: pytest.FixtureRequest, figure_bytes: dict[str, bytes]) -> Glb:
     return read_glb(figure_bytes[request.param])
+
+
+@pytest.fixture(scope="session")
+def mozart_room() -> Glb:
+    return read_glb(build_room(MOZART_ROOM))

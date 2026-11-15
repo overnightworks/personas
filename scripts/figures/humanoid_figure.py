@@ -12,7 +12,7 @@ from figures.figure_mouth import mouth
 from figures.figure_parts import ROUGHNESS, Layer, Material
 from figures.figure_shapes import subtract
 from figures.figure_skeleton import BONE_INDEX, BONE_POSITION, BONES
-from figures.glb_container import ROUNDING, ComponentType, GlbBuilder, JsonObject
+from figures.glb_container import ROUNDING, ComponentType, GlbBuilder, JsonObject, linear
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -104,7 +104,7 @@ def _primitive(builder: GlbBuilder, parts: list[Part], material: int, places: Ma
         base = len(positions)
         positions += part.shape.positions
         normals += part.shape.normals
-        colours += [(_linear(red), _linear(green), _linear(blue), FULL) for red, green, blue in part.colours]
+        colours += [(_byte(red), _byte(green), _byte(blue), FULL) for red, green, blue in part.colours]
         bindings += part.bindings
         indices += [(base + index,) for index in part.shape.indices]
     byte = ComponentType.UNSIGNED_BYTE
@@ -147,10 +147,9 @@ def _weights(binding: Binding) -> tuple[int, int, int, int]:
     return (first, FULL - first, 0, 0)
 
 
-def _linear(channel: int) -> int:
-    """The linear byte of an sRGB channel, as glTF's vertex colours hold it."""
-    value = channel / FULL
-    return round(FULL * (value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4))
+def _byte(channel: int) -> int:
+    """The linear byte of an sRGB channel."""
+    return round(FULL * linear(channel))
 
 
 def _bone_nodes() -> list[JsonObject]:
