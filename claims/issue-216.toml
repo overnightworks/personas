@@ -1,0 +1,7 @@
+claim_id = "3b4ab883f6904fd589b01a42bbe3788b"
+agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
+role = "builder"
+base = "9dba5186a38bdefd5c1ddbae9209365749b08c61"
+branch = "claude/issue-216-count-own-lines-while-speak-open"
+scope = ["src/personas/voice.py", "tests/test_loop_voice.py"]
+opened_commit = "3a3c066cf6022f5d4faa525f54683f565abbf446"
