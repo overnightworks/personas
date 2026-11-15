@@ -252,7 +252,7 @@ _JSONRPC_ERROR_REASONS: Final = {
     -32603: "internal_error",
 }
 _MEDIA_TYPE_REASONS: Final = {"application/json": "json", "text/html": "html", "text/plain": "plain_text"}
-_JSONRPC_CODE: Final = re.compile(r"jsonrpc_(-?[0-9]+)")
+_JSONRPC_CODE: Final = re.compile(r"jsonrpc_(-?\d+)")
 NO_ANSWER_REASON: Final = "no_answer"
 """The reason of an error status that carried neither a JSON-RPC error nor a media type."""
 OTHER_JSONRPC_REASON: Final = "other_jsonrpc_error"
