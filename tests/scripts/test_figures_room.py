@@ -23,14 +23,14 @@ def positions_and_triangles(room: Glb) -> tuple[list[tuple[float, ...]], list[tu
     return positions, triangles
 
 
-def test_nothing_of_the_room_reaches_below_the_floor(mozart_room):
-    positions, _ = positions_and_triangles(mozart_room)
+def test_nothing_of_the_room_reaches_below_the_floor(room):
+    positions, _ = positions_and_triangles(room)
 
     assert min(position[1] for position in positions) >= 0.0
 
 
-def test_nothing_stands_between_the_figure_and_a_camera_in_front_of_him(mozart_room):
-    positions, triangles = positions_and_triangles(mozart_room)
+def test_nothing_stands_between_the_figure_and_a_camera_in_front_of_him(room):
+    positions, triangles = positions_and_triangles(room)
 
     def stands_in_the_lane(triangle: tuple[int, int, int]) -> bool:
         corners = [positions[index] for index in triangle]

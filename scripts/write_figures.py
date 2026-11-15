@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from figures.humanoid_figure import Wardrobe, build_figure
+from figures.persona_rooms import LEONARDO as LEONARDO_ROOM
 from figures.persona_rooms import MOZART as MOZART_ROOM
 from figures.persona_wardrobes import LEONARDO, MOZART
 from figures.room_glb import Room, build_room
@@ -15,7 +16,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 WARDROBES: tuple[Wardrobe, ...] = (MOZART, LEONARDO)
-ROOMS: tuple[Room, ...] = (MOZART_ROOM,)
+ROOMS: tuple[Room, ...] = (MOZART_ROOM, LEONARDO_ROOM)
 
 
 def main(arguments: Sequence[str] | None = None) -> None:
