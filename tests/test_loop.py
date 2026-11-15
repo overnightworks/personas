@@ -17,6 +17,7 @@ from mcp_types import INVALID_PARAMS
 from personas.config import DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES, load_config
 from personas.decision import (
     BACKOFF_CAP_SECONDS,
+    DEFAULT_BUDGET_PAUSE_CAP_SECONDS,
     NETWORK_FAILURE_CODE,
     RENEW_BEFORE_EXPIRY_SECONDS,
     SUSPENDED_RETRY_SECONDS,
@@ -418,7 +419,7 @@ class ScriptedSessions:
             self.config.agents[0],
             self.config.apps[0],
             boundaries,
-            Mind(DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES),
+            Mind(DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES, DEFAULT_BUDGET_PAUSE_CAP_SECONDS),
             self.config.apps,
             None,
         )
@@ -652,7 +653,7 @@ class TurnEndingInTheStepItsPlaceLeaves(TurnAndLifecycle):
 @pytest.mark.parametrize(
     ("ending", "own_reports", "sleeps"),
     [
-        ("stop", [(Event.TURN_ENDED, RejectionCode.BUSY.value)], [backoff_delay(1)]),
+        ("stop", [(Event.TURN_ENDED, RejectionCode.BUSY.value)], []),
         ("completion", [], []),
         ("relayed failure", [], [backoff_delay(1)]),
     ],
@@ -691,7 +692,7 @@ class TokenFetchSwallowingTheCancellation:
             config.agents[0],
             config.apps[0],
             boundaries,
-            Mind(DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES),
+            Mind(DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES, DEFAULT_BUDGET_PAUSE_CAP_SECONDS),
             config.apps,
             None,
         )

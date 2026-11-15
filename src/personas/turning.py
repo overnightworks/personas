@@ -272,7 +272,7 @@ class Turning:
             held = failure_held_by(stopped)
             if held is None and record.defect is None:
                 self._report_turn_end(stopped.code.value, None, sizing.sizes())
-                await self._wait_before_retry(stopped.code)
+                self._pause_before_retry(stopped.code)
                 self._mind.due_again(AppPlace(self._app.mcp_url, admitted.place), admitted.occasion)
             # What left the session beside the stop (a late answer, the failure another stop holds) still goes to the
             # group, to be judged there.
@@ -282,12 +282,12 @@ class Turning:
             if rest:
                 raise BaseExceptionGroup("the turn's session failed", rest) from None
 
-    async def _wait_before_retry(self, code: RejectionCode | FailureCode) -> None:
-        """A turn that ended without an answer holds his one turn slot for the wait, so the lines that arrive meanwhile
-        are taken into his history and make one turn after it, with the turn's own place."""
-        seconds = self._mind.unanswered(budget_spent=code is RejectionCode.BUDGET_SPENT)
+    def _pause_before_retry(self, code: RejectionCode | FailureCode) -> None:
+        """A turn that ended without an answer leaves his mind a pause that holds every turn of his, so the lines that
+        arrive meanwhile are taken into his history and make one turn after it, with the turn's own place. The pause
+        is the mind's, so it outlives this task."""
+        seconds = self._mind.unanswered(budget_spent=code is RejectionCode.BUDGET_SPENT, now=self._clock.now())
         self._report_pause(seconds, code.value)
-        await self._clock.sleep(seconds)
 
     async def _run_turn(self, setup: TurnSetup, admitted: Admitted, record: TaskRecord, sizing: _Sizing) -> None:
         turn = TurnTold(

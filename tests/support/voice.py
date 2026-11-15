@@ -14,9 +14,11 @@ TWO_SENTENCES = "First sentence. Second sentence."
 
 
 class HeldSleeps:
-    """The clock's sleeps wait until released; a test sees when each began and whether one was cancelled."""
+    """The clock's sleeps wait until released and then take their time off the clock; a test sees when each began and
+    whether one was cancelled."""
 
     def __init__(self, runner) -> None:
+        self._clock = runner.clock
         self.began: list[float] = []
         self.release = asyncio.Event()
         self.cancelled = asyncio.Event()
@@ -32,6 +34,7 @@ class HeldSleeps:
         except asyncio.CancelledError:
             self.cancelled.set()
             raise
+        self._clock.time += seconds
 
     async def until_began(self, count: int) -> None:
         async with asyncio.timeout(LIMIT_SECONDS):

@@ -11,6 +11,7 @@ from agents.member import PlaceRef, SpeakAnswer, Spoken, Written
 from agents.turn import FailureCode
 from agents.turn_events import AssistantTextEvent, FinalEvent
 
+from personas.decision import DEFAULT_BUDGET_PAUSE_CAP_SECONDS
 from personas.entries import KeptLine, SaidAloud, Visit
 from personas.mind import Mind
 from personas.voice import Speaking
@@ -35,7 +36,16 @@ def a_line(*, own: bool, spoken: bool, place: PlaceRef = PLACE) -> KeptLine:
 
 def test_a_speaking_shows_no_sentence_in_its_repr():
     marker = secrets.token_hex(8)
-    speaking = Speaking(object(), APP, PLACE, FakeClock(), 30, renewed, lambda event, code: None, Mind(1_000, 1_000))
+    speaking = Speaking(
+        object(),
+        APP,
+        PLACE,
+        FakeClock(),
+        30,
+        renewed,
+        lambda event, code: None,
+        Mind(1_000, 1_000, DEFAULT_BUDGET_PAUSE_CAP_SECONDS),
+    )
 
     speaking.hear(AssistantTextEvent(text=f"{marker}. And one more sentence."))
 
@@ -58,7 +68,7 @@ class SpeakingScenario:
     ) -> None:
         self.answer = Spoken(spoken=True) if answer is None else answer
         self.clock = FakeClock()
-        self.mind = Mind(10_000, 10_000)
+        self.mind = Mind(10_000, 10_000, DEFAULT_BUDGET_PAUSE_CAP_SECONDS)
         self.sent: list[str] = []
         self.reported: list[tuple[object, str | None]] = []
         self.renewal_seconds = renewal_seconds
