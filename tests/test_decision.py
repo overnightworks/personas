@@ -82,6 +82,8 @@ from personas.decision import (
     left_standing,
     lends_tools,
     past_deadline,
+    pause_left,
+    paused_until,
     perceive,
     reaction_to,
     released,
@@ -580,6 +582,7 @@ def test_a_line_wakes_him_unless_it_is_his_own_or_an_act_or_the_place_serves_a_v
 CALL_AT_A = AppPlace("https://a.test/mcp", PlaceRef(kind="call", id="room-1"))
 CALL_AT_B = AppPlace("https://b.test/mcp", PlaceRef(kind="call", id="room-2"))
 TABLE_AT_A = AppPlace("https://a.test/mcp", PlaceRef(kind="table", id="table-1"))
+NOW = 1000.0
 
 
 def _due_in_order(*due: tuple[AppPlace, Lines | Waiting]) -> Turns:
@@ -651,15 +654,33 @@ def test_a_place_that_became_due_meanwhile_keeps_its_newer_occasion_and_only_lin
 def test_the_turn_goes_to_the_place_that_waited_longest_and_only_in_its_app():
     turns = _due_in_order((CALL_AT_B, Waiting(1)), (CALL_AT_A, Waiting(2)))
 
-    assert claimed(turns, CALL_AT_A.app) is None
-    after, at, occasion = claimed(turns, CALL_AT_B.app) or pytest.fail("the oldest place is at its app")
+    assert claimed(turns, CALL_AT_A.app, NOW) is None
+    after, at, occasion = claimed(turns, CALL_AT_B.app, NOW) or pytest.fail("the oldest place is at its app")
     assert (after.running, at, occasion) == (True, CALL_AT_B, Waiting(1))
     assert after.due == {CALL_AT_A: Waiting(2)}
 
 
 def test_no_turn_starts_while_one_runs_or_when_nothing_is_due():
-    assert claimed(replace(_due_in_order((CALL_AT_A, Waiting(1))), running=True), CALL_AT_A.app) is None
-    assert claimed(Turns(), CALL_AT_A.app) is None
+    assert claimed(replace(_due_in_order((CALL_AT_A, Waiting(1))), running=True), CALL_AT_A.app, NOW) is None
+    assert claimed(Turns(), CALL_AT_A.app, NOW) is None
+
+
+def test_a_pause_holds_the_turn_of_the_oldest_place_until_its_end_and_a_release_leaves_it():
+    turns = paused_until(_due_in_order((CALL_AT_A, Waiting(1))), NOW + 4)
+
+    assert claimed(turns, CALL_AT_A.app, NOW + 3) is None
+    assert pause_left(turns, CALL_AT_A.app, NOW + 3) == 1
+    assert pause_left(released(turns), CALL_AT_A.app, NOW + 3) == 1
+    assert claimed(turns, CALL_AT_A.app, NOW + 4) is not None
+    assert pause_left(turns, CALL_AT_A.app, NOW + 4) == 0
+
+
+def test_a_pause_is_left_only_to_the_app_of_the_oldest_place_and_only_while_a_turn_waits_for_it():
+    waiting = paused_until(_due_in_order((CALL_AT_B, Waiting(1))), NOW + 4)
+
+    assert pause_left(waiting, CALL_AT_A.app, NOW) == 0
+    assert pause_left(replace(waiting, running=True), CALL_AT_B.app, NOW) == 0
+    assert pause_left(paused_until(Turns(), NOW + 4), CALL_AT_B.app, NOW) == 0
 
 
 def test_a_released_turn_leaves_what_is_due_and_lets_the_next_one_start():
@@ -669,7 +690,7 @@ def test_a_released_turn_leaves_what_is_due_and_lets_the_next_one_start():
 
     assert after.running is False
     assert after.due == running.due
-    assert claimed(after, CALL_AT_A.app) is not None
+    assert claimed(after, CALL_AT_A.app, NOW) is not None
 
 
 def test_the_places_that_leave_are_no_longer_due_and_the_rest_keep_their_order():

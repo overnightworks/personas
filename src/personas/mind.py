@@ -9,7 +9,6 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from personas.decision import (
-    DEFAULT_BUDGET_PAUSE_CAP_SECONDS,
     EMPTY_PRESENT,
     Turns,
     answered_into,
@@ -18,6 +17,8 @@ from personas.decision import (
     claimed,
     due_again,
     held_apps,
+    pause_left,
+    paused_until,
     released,
     taken_into,
     with_due,
@@ -39,7 +40,7 @@ class Mind:
         self,
         history_bytes: int,
         history_keep_bytes: int,
-        budget_pause_cap_seconds: float = DEFAULT_BUDGET_PAUSE_CAP_SECONDS,
+        budget_pause_cap_seconds: float,
     ) -> None:
         self._history_bytes = history_bytes
         self._history_keep_bytes = history_keep_bytes
@@ -74,12 +75,17 @@ class Mind:
         take made after that step sets it."""
         return self._next_take
 
-    def unanswered(self, *, budget_spent: bool) -> float:
-        """A turn of his ended without an answer, refused for a spent budget or not; the seconds his turns wait now."""
+    def unanswered(self, *, budget_spent: bool, now: float) -> float:
+        """A turn of his ended without an answer, refused for a spent budget or not: no turn of his starts for the
+        seconds this returns, counted from ``now``, whatever becomes of the turn's own task or place meanwhile."""
         self._unanswered_turns += 1
-        if budget_spent:
-            return budget_pause(self._unanswered_turns, self._budget_pause_cap_seconds)
-        return backoff_delay(self._unanswered_turns)
+        seconds = (
+            budget_pause(self._unanswered_turns, self._budget_pause_cap_seconds)
+            if budget_spent
+            else backoff_delay(self._unanswered_turns)
+        )
+        self._turns = paused_until(self._turns, now + seconds)
+        return seconds
 
     def answered(self, turn: TurnTold) -> None:
         """A turn of his ended with an answer: the wait starts over and its message joins the present."""
@@ -95,7 +101,8 @@ class Mind:
         return held_apps(own, self._placed)
 
     def wake_event(self) -> asyncio.Event:
-        """A new event a loop waits on; the end of a turn, and a place dropped while no turn runs, set it."""
+        """A new event a loop waits on; the end of a turn or of a pause sets it, and so does a place dropped while no
+        turn runs."""
         event = asyncio.Event()
         self._wake_events.append(event)
         return event
@@ -114,21 +121,26 @@ class Mind:
         dropped = len(remaining.due) < len(self._turns.due)
         self._turns = remaining
         if dropped and not remaining.running:
-            self._wake()
+            self.wake()
 
-    def claim(self, app: str) -> tuple[AppPlace, Occasion] | None:
-        """Takes the one turn for the place that has waited longest when it is at ``app``."""
-        taken = claimed(self._turns, app)
+    def claim(self, app: str, now: float) -> tuple[AppPlace, Occasion] | None:
+        """Takes the one turn for the place that has waited longest when it is at ``app`` and no pause holds it."""
+        taken = claimed(self._turns, app, now)
         if taken is None:
             return None
         self._turns, at, occasion = taken
         return at, occasion
 
+    def pause_left(self, app: str, now: float) -> float:
+        """The seconds a pause still holds the turn of the place that has waited longest, when it is at ``app``."""
+        return pause_left(self._turns, app, now)
+
     def release(self) -> None:
         """The running turn ended: every loop of his may claim now."""
         self._turns = released(self._turns)
-        self._wake()
+        self.wake()
 
-    def _wake(self) -> None:
+    def wake(self) -> None:
+        """Wakes every loop of his: the end of a pause is as much a reason to claim as the end of a turn."""
         for event in self._wake_events:
             event.set()

@@ -639,11 +639,12 @@ class AppPlace:
 
 @dataclass(frozen=True)
 class Turns:
-    """Whether a turn of one agent runs, and which places have a turn due, in the order they became due, with what the
-    turn is for."""
+    """Whether a turn of one agent runs, which places have a turn due, in the order they became due, with what the
+    turn is for, and until when, on the clock's monotonic scale, no turn of his may start."""
 
     running: bool = False
     due: Mapping[AppPlace, Occasion] = field(default_factory=dict[AppPlace, Occasion])
+    not_before: float = 0.0
 
 
 def _joined(held: Occasion | None, occasion: Occasion) -> Occasion:
@@ -655,7 +656,7 @@ def _joined(held: Occasion | None, occasion: Occasion) -> Occasion:
 def with_due(turns: Turns, at: AppPlace, occasion: Occasion) -> Turns:
     """A turn due at ``at`` for ``occasion``: a place already due keeps its position, lines of one generation join, and
     lines of another generation or a newer view revision replace what was due."""
-    return Turns(turns.running, {**turns.due, at: _joined(turns.due.get(at), occasion)})
+    return replace(turns, due={**turns.due, at: _joined(turns.due.get(at), occasion)})
 
 
 def due_again(turns: Turns, at: AppPlace, occasion: Occasion) -> Turns:
@@ -671,23 +672,41 @@ def due_again(turns: Turns, at: AppPlace, occasion: Occasion) -> Turns:
 
 def without_due(turns: Turns, leaving: Callable[[AppPlace], bool]) -> Turns:
     """The turns without the due places for which ``leaving`` holds."""
-    return Turns(turns.running, {at: occasion for at, occasion in turns.due.items() if not leaving(at)})
+    return replace(turns, due={at: occasion for at, occasion in turns.due.items() if not leaving(at)})
 
 
-def claimed(turns: Turns, app: str) -> tuple[Turns, AppPlace, Occasion] | None:
-    """The turns after a turn starts at the place that has waited longest, with that place and what the turn is for;
-    none while a turn runs or when that place is not in ``app``."""
+def _next_due(turns: Turns, app: str) -> tuple[AppPlace, Occasion] | None:
+    """The place that has waited longest and what its turn is for, when no turn runs and that place is in ``app``."""
     if turns.running or not turns.due:
         return None
     at, occasion = next(iter(turns.due.items()))
-    if at.app != app:
+    return (at, occasion) if at.app == app else None
+
+
+def claimed(turns: Turns, app: str, now: float) -> tuple[Turns, AppPlace, Occasion] | None:
+    """The turns after a turn starts at the place that has waited longest, with that place and what the turn is for;
+    none while a turn runs, while a pause holds his turns at ``now``, or when that place is not in ``app``."""
+    due = _next_due(turns, app)
+    if due is None or now < turns.not_before:
         return None
-    return Turns(True, without_due(turns, lambda each: each == at).due), at, occasion
+    at, occasion = due
+    return replace(without_due(turns, lambda each: each == at), running=True), at, occasion
+
+
+def paused_until(turns: Turns, until: float) -> Turns:
+    """The turns while no turn of his may start before ``until``."""
+    return replace(turns, not_before=until)
+
+
+def pause_left(turns: Turns, app: str, now: float) -> float:
+    """The seconds a pause still holds the turn of the place that has waited longest, when it is in ``app``; zero when
+    that turn waits for something else or for nothing."""
+    return max(0.0, turns.not_before - now) if _next_due(turns, app) is not None else 0.0
 
 
 def released(turns: Turns) -> Turns:
     """The turns once the running turn ended; what is due stays."""
-    return Turns(False, turns.due)
+    return replace(turns, running=False)
 
 
 def left_standing(app: str, standings: tuple[Standing, ...]) -> Callable[[AppPlace], bool]:
