@@ -4,6 +4,7 @@ carry that trace to the app."""
 from __future__ import annotations
 
 from http import HTTPStatus
+from urllib.parse import urlsplit
 
 import pytest
 from agents.backend.fake_gateway import Reply
@@ -71,14 +72,17 @@ async def test_a_failed_step_ends_failed_with_a_closed_reason(runner, caplog):
     assert (setup["outcome"], setup["reason"]) == ("failed", NO_ANSWER_REASON)
 
 
-async def test_the_requests_of_a_turn_carry_its_trace_and_the_requests_of_the_loop_carry_none(runner, written):
+async def test_every_request_of_a_turn_carries_its_trace_and_the_requests_of_the_loop_carry_none(runner, written):
     await a_written_turn(runner)
 
     (ended,) = [line for line in written_by_the_runner(written) if line["event"] == "turn.ended"]
-    carried = {method: header for method, header in runner.app.traceparents if header is not None}
-    assert LIST_TOOLS in carried
-    assert {header.split("-")[1] for header in carried.values() if header is not None} == {ended["trace_id"]}
-    assert runner.app.traceparents[0][1] is None
+    in_the_turn = [header for method, header in runner.app.traceparents if method == LIST_TOOLS]
+    outside_the_turn = [header for method, header in runner.app.traceparents if method == LISTEN]
+    assert in_the_turn
+    assert {header.split("-")[1] for header in in_the_turn if header is not None} == {ended["trace_id"]}
+    assert None not in in_the_turn
+    assert outside_the_turn
+    assert set(outside_the_turn) == {None}
 
 
 async def test_a_turn_that_lists_another_apps_tools_writes_the_steps_of_each_app_and_its_token_request_in_its_trace(
@@ -95,6 +99,23 @@ async def test_a_turn_that_lists_another_apps_tools_writes_the_steps_of_each_app
         at = [line for line in lines if line["event"] == step]
         assert len(at) == 2
         assert {line["trace_id"] for line in at} == {ended["trace_id"]}
+        assert {line["app_id"] for line in at} == {urlsplit(app.mcp_url).hostname for app in runner.config.apps}
     in_the_turn = [line for line in lines if line["event"] == "token_request.ended" and line["trace_id"] is not None]
     assert [line["trace_id"] for line in in_the_turn] == [ended["trace_id"]]
     assert [header.split("-")[1] for header in runner.realm.traceparents if header is not None] == [ended["trace_id"]]
+
+
+async def test_a_failed_listing_of_another_app_ends_its_tool_list_line_failed_and_the_turn_goes_on(
+    runner, songmaker, written
+):
+    songmaker.refuse_with = HTTPStatus.SERVICE_UNAVAILABLE
+    songmaker.refused_method = LIST_TOOLS
+    runner.gateway = Gateway(*says(PLACE_ID, "Here."))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.reports.until_a_turn_ended()
+
+    lines = written_by_the_runner(written)
+    listed = [line for line in lines if line["event"] == "tool_list.ended"]
+    assert sorted(str(line["outcome"]) for line in listed) == ["failed", "ok"]
+    assert [line["event"] for line in lines].count("session_open.ended") == 2
