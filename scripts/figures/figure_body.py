@@ -120,6 +120,12 @@ def open_point(course: Sequence[Key], height: float, share: float, grown: float 
     return arc((0.0, height, 0.0), ACROSS, AHEAD, radii, [angle], TRUNK_POWER)[0]
 
 
+def open_inset(course: Sequence[Key], height: float, inset: float) -> float:
+    """The share `open_point` takes for a place `inset` metres back from the edge, measured on the half width."""
+    half_width, _, _, opening = interpolated(course, height)
+    return inset / half_width / (2.0 * math.pi - 2.0 * opening)
+
+
 def band(course: Sequence[Key], low: float, high: float, swell: float) -> Shape:
     """A belt around a trunk between two heights, standing `swell` off it at its middle."""
     return loft(

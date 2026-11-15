@@ -10,13 +10,14 @@ from figures.figure_body import (
     AHEAD,
     DOWN,
     LEG_SPACING,
-    TRUNK_POWER,
     arm_binder,
     arm_tube,
     both_sides,
     hands,
     leg_binder,
     leg_tube,
+    open_inset,
+    open_point,
     open_rows,
     shoes,
     trunk,
@@ -26,7 +27,7 @@ from figures.figure_head import NECK_BINDER
 from figures.figure_parts import Colour, Material, Part, part
 from figures.figure_shapes import ellipsoid
 from figures.figure_skeleton import SHOULDER_HEIGHT
-from figures.figure_surfaces import arc, interpolated, loft, mirrored, oval, patch, rippled, shell, spread
+from figures.figure_surfaces import interpolated, loft, mirrored, oval, patch, rippled, shell, spread
 
 if TYPE_CHECKING:
     from figures.figure_head import Face
@@ -140,9 +141,7 @@ def _coat() -> list[Part]:
 
 def _coat_front(height: float, inset: float, grown: float = BRAID_RELIEF) -> Vector:
     """A place on the coat's left front where its trim lies, `inset` back from the edge."""
-    half_width, front, back, opening = interpolated(COAT, height)
-    radii = (half_width + grown, front + grown, back + grown)
-    return arc((0.0, height, 0.0), ACROSS, AHEAD, radii, [opening + inset / half_width], TRUNK_POWER)[0]
+    return open_point(COAT, height, open_inset(COAT, height, inset), grown)
 
 
 def _waistcoat() -> list[Part]:
