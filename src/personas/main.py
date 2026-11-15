@@ -258,12 +258,12 @@ def main(compose: Compose = real_boundaries, arguments: Sequence[str] = ()) -> N
     except ConfigError as error:
         sys.stderr.write(f"personas: {error}\n")
         raise SystemExit(CONFIGURATION_ERROR_EXIT_CODE) from None
-    configure_logging()
     if memory_request is not None:
         _memory(config, memory_request)
     elif command:
         _migrate(config)
     else:
+        configure_logging()
         _run_runner(config, compose)
 
 
