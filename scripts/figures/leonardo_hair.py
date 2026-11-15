@@ -74,7 +74,7 @@ BEARD_LINE = (
 )
 BEARD_REACH = math.radians(100.0)
 BEARD_COLUMNS = 56
-BEARD_HANGING_ROWS = 14
+BEARD_HANGING_ROWS = 28
 BEARD_GROWN_ROWS = 22
 # The level where the beard leaves the jaw, and the level below it where it hangs free of the face.
 BEARD_JAW = -0.092
