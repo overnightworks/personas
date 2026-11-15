@@ -2,9 +2,9 @@
 # Check the figures and rooms under src/characters: scripts/check_figures.sh
 #
 # The generator's output must equal the tracked .vrm and .room.glb files, none more and none fewer. Then `figure check`
-# from figure's release runs on each figure, and `figure check --as room` on each room, after the tarball's sha512 has matched the integrity its release notes print. Needs uv,
-# node (24 or newer, as the release asks), curl, openssl and tar. Bump the version and the integrity together, to the
-# release the apps' figure tile runs.
+# from figure's release runs on each figure, and `figure check --as room` on each room, after the tarball's sha512 has
+# matched the integrity its release notes print. Needs uv, node (24 or newer, as the release asks), curl, openssl and
+# tar. Bump the version and the integrity together, to the release the apps' figure tile runs.
 set -euo pipefail
 # A directory without a figure or a room is a failure, not an empty loop.
 shopt -s failglob
