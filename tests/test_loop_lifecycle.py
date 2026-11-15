@@ -373,7 +373,7 @@ async def test_a_pulse_for_a_place_window_is_a_wake_and_a_read_and_no_failure(ru
     runner.start()
     await runner.app.log.until(READ)
 
-    runner.app.changes.changed(runner.app_principal, place_window_uri(CALL_PLACE))
+    await runner.app.changes.changed(runner.app_principal, place_window_uri(CALL_PLACE))
     await runner.app.log.until(READ, 2)
 
     assert runner.reports.reported() == [(Event.STARTED, None)]

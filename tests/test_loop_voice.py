@@ -9,6 +9,7 @@ from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.member import SpeakRefusal, SpeakRefused, VoiceState
 from agents.tools import ToolOutcome
 from agents.turn import Principal, person_fingerprint
+from agents.voice.reply import REPLY_RULES
 
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
@@ -188,6 +189,22 @@ async def test_a_turn_that_stays_silent_says_nothing_relays_nothing_and_logs_not
     assert runner.app.spoken == []
     assert runner.app.said == []
     assert runner.reports.reported() == [(Event.STARTED, None)]
+
+
+async def test_an_aloud_turns_system_text_ends_with_the_reply_rules_and_a_written_turns_lacks_them(runner, quiet):
+    await a_voice_call(runner, completion(ANSWER))
+    say_in_the_call(runner, ADDRESSED)
+    await runner.app.spoken_count(1)
+    await quiet.until_window_read(QUIET_PLACE_ID)
+    quiet.speak(QUIET_PLACE_ID, PERSON, "Ada", ADDRESSED)
+    await runner.gateway.until_turns(2)
+
+    aloud, written = runner.gateway.turns()
+    assert aloud.aloud
+    assert not written.aloud
+    assert aloud.system.endswith(REPLY_RULES)
+    assert aloud.system.startswith(runner.files.persona_prompt)
+    assert REPLY_RULES not in written.system
 
 
 async def test_a_line_at_an_app_that_declares_no_speak_makes_a_turn_not_told_aloud_and_its_text_is_not_spoken(

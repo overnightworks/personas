@@ -13,6 +13,7 @@ from agents.backend import TurnPerson, TurnStopped
 from agents.tools import HandTool, ToolOutcome
 from agents.turn import RejectionCode, Turn, TurnMessage, TurnRole
 from agents.turn_events import FinalEvent, ToolCallEvent
+from agents.voice.reply import REPLY_RULES
 
 from personas.decision import (
     TURN_ROLE,
@@ -319,11 +320,10 @@ class Turning:
     ) -> None:
         raise_if_cancelled()
         held = await self._hold_tools(setup, session, record, admitted)
+        system = f"{setup.persona.prompt}\n\n{REPLY_RULES}" if admitted.aloud else setup.persona.prompt
         request = TurnRequest(
             agent=setup.persona.name,
-            turn=Turn(
-                system=setup.persona.prompt, messages=[TurnMessage(role=TurnRole.USER, text=each) for each in told]
-            ),
+            turn=Turn(system=system, messages=[TurnMessage(role=TurnRole.USER, text=each) for each in told]),
             roles=setup.persona.roles,
             tools=held.declarations,
             model=setup.persona.model,
