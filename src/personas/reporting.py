@@ -172,7 +172,7 @@ class TurnTally:
             case Outcome.FAILED:
                 self.timer.fail(_reason_of(ending))
                 self.timer.end()
-            case Outcome.CANCELLED:
+            case _:  # Outcome.CANCELLED, the last outcome
                 self.timer.end_cancelled()
 
 
