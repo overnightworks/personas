@@ -218,6 +218,23 @@ async def test_a_failed_call_to_a_held_app_is_an_error_that_spends_its_bound_and
     assert runner.reports.reported(apps=True, started=False) == [(Event.HELD_APP_FAILED, code, url_of(runner, 1))]
 
 
+async def test_a_failed_call_to_a_held_app_is_reported_with_the_method_and_the_answer_that_failed(runner, other):
+    async def fails(reply):
+        await reply.body(HTTPStatus.INTERNAL_SERVER_ERROR, "text/html", b"<html>the front</html>")
+
+    other.script(CALL, fails)
+    await seated_in_the_call(runner, other, tool_round(play(words(1)[0])), completion("done"))
+    say_in_the_call(runner, ADDRESSED)
+    await runner.gateway.until_requested(2)
+
+    (change,) = runner.reports.changes_of(Event.HELD_APP_FAILED)
+    assert (change.code, change.method, change.answer) == (
+        status_code(HTTPStatus.INTERNAL_SERVER_ERROR),
+        CALL,
+        "text/html",
+    )
+
+
 async def test_a_held_app_that_lists_none_of_its_bound_tools_holds_none_and_is_no_failure(runner, other, songmaker):
     other.script(LIST_TOOLS, lists_nothing)
     await seated_in_the_call(runner, other, completion("done"))
