@@ -102,12 +102,14 @@ def _defect_of(task: asyncio.Task[object]) -> BaseException | None:
 
 @dataclass(frozen=True)
 class ActiveTurn:
-    """The running turn: its task and place, the loop's request to end it and its end report."""
+    """The running turn: its task and place, the loop's request to end it, its end report and the seconds from its
+    start to its first model request, once it made one."""
 
     task: asyncio.Task[None]
     place: PlaceRef
     cancel_requested: bool = False
     end_reported: bool = False
+    request_seconds: float | None = None
 
 
 class AgentLoop:
@@ -153,6 +155,7 @@ class AgentLoop:
             self._current_token,
             self._use_current_token,
             self._report,
+            self._report_request,
             self._report_turn_end,
             self._report_pause,
             self._remembering,
@@ -417,15 +420,28 @@ class AgentLoop:
     def _turn_over(self, task: asyncio.Task[None]) -> None:
         turn, self._turn = self._turn, None
         if turn is not None and turn.cancel_requested and task.cancelled() and not turn.end_reported:
-            self._report(Event.TURN_ENDED, TURN_CANCELLED_CODE)
+            self._report(Event.TURN_ENDED, TURN_CANCELLED_CODE, request_seconds=turn.request_seconds)
         self._mind.release()
+
+    def _report_request(self, seconds: float) -> None:
+        """The running turn handed its first model request to the backend this long after its start."""
+        assert self._turn is not None  # noqa: S101 - only the running turn's task reports its request
+        self._turn = replace(self._turn, request_seconds=seconds)
 
     def _report_turn_end(self, code: str | None, usage: TurnUsage | None, sizes: InputSizes | None) -> None:
         """A turn reports its end at most once; the record tells the loop, which then reports no cancel."""
         assert self._turn is not None  # noqa: S101 - only the running turn's task reports its end
         self._turn = replace(self._turn, end_reported=True)
         self._boundaries.report(
-            StateChange(Event.TURN_ENDED, self._agent.client_id, self._app.mcp_url, code, usage=usage, sizes=sizes)
+            StateChange(
+                Event.TURN_ENDED,
+                self._agent.client_id,
+                self._app.mcp_url,
+                code,
+                usage=usage,
+                sizes=sizes,
+                request_seconds=self._turn.request_seconds,
+            )
         )
 
     def _report_pause(self, seconds: float, code: str) -> None:
@@ -482,10 +498,17 @@ class AgentLoop:
         *,
         place_kind: str | None = None,
         model: str | None = None,
+        request_seconds: float | None = None,
     ) -> None:
         self._boundaries.report(
             StateChange(
-                event, self._agent.client_id, (app or self._app).mcp_url, code, place_kind=place_kind, model=model
+                event,
+                self._agent.client_id,
+                (app or self._app).mcp_url,
+                code,
+                place_kind=place_kind,
+                model=model,
+                request_seconds=request_seconds,
             )
         )
 

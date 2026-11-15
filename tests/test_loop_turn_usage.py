@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
+from contextlib import asynccontextmanager
 from http import HTTPStatus
 
 import pytest
@@ -10,11 +12,12 @@ from agents.backend.fake_gateway import Reply, completion, tool_round
 from agents.tools import ToolOutcome
 from agents.turn import TOOL_IMAGE_MEDIA_TYPE
 
+from personas.app_session import open_mcp_session
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, say, words
 from tests.support.history import REMARK, said_and_taken
-from tests.support.hopin import a_picture, base64_of, formatted
+from tests.support.hopin import AGENT_SUBJECT, LIMIT_SECONDS, a_picture, active, base64_of, formatted
 from tests.support.voice import a_voice_call
 
 pytestmark = pytest.mark.anyio
@@ -31,7 +34,8 @@ def counted(prompt: int, cached: int, written: int, completed: int) -> dict[str,
 
 _SIZES = r" tools_bytes=(\d+) told_bytes=(\d+) results_bytes=(\d+) images_bytes=(\d+)"
 _COUNTS = r"(?P<counts>(?: input=\d+ cache_read=\d+ cache_write=\d+ output=\d+ requests=\d+)?)"
-_LINE = re.compile(rf"turn_ended client_id=\S+ app=\S+ code=(?P<code>\S+)(?:{_SIZES})?{_COUNTS}")
+_REQUEST = r"(?: request_seconds=(?P<request_seconds>\d+\.\d{3}))?"
+_LINE = re.compile(rf"turn_ended client_id=\S+ app=\S+ code=(?P<code>\S+)(?:{_SIZES})?{_COUNTS}{_REQUEST}")
 
 
 def the_turn_ended_line(caplog) -> re.Match[str]:
@@ -167,3 +171,86 @@ async def test_a_turn_that_fails_after_its_request_logs_its_sizes_and_no_usage(r
     ended = the_turn_ended_line(caplog)
     assert ended.group(2) is not None
     assert ended.group("counts") == ""
+
+
+OPENING_SECONDS = 2.5
+
+
+class SlowOpening:
+    """Session openers whose opening takes the fake clock this long, the turn's own session, after ``arm``, waiting
+    until ``release`` is set when ``held``."""
+
+    def __init__(self, runner, *, held: bool = False) -> None:
+        self._runner = runner
+        self._armed = False
+        self._held = held
+        self.arrived = asyncio.Event()
+        self.release = asyncio.Event()
+
+    def arm(self) -> None:
+        self._armed = True
+
+    @asynccontextmanager
+    async def __call__(self, app, token):
+        if self._armed:
+            self._runner.clock.time += OPENING_SECONDS
+            self.arrived.set()
+            if self._held:
+                await self.release.wait()
+        async with open_mcp_session(app, token) as session:
+            yield session
+
+
+async def a_turn_whose_opening_takes_time(runner, *rounds, held: bool = False) -> SlowOpening:
+    """The runner in the call over a gateway of these rounds, its next session's opening, the turn's, slow."""
+    runner.gateway = Gateway(*rounds)
+    opening = SlowOpening(runner, held=held)
+    runner.app.stand(AGENT_SUBJECT, active(PLACE_ID))
+    runner.start(open_session=opening)
+    await runner.app.until_window_read(PLACE_ID)
+    opening.arm()
+    say_in_the_call(runner, ADDRESSED)
+    return opening
+
+
+def seconds_to_the_request(caplog) -> float | None:
+    seconds = the_turn_ended_line(caplog).group("request_seconds")
+    return None if seconds is None else float(seconds)
+
+
+async def test_a_turn_logs_the_seconds_from_its_start_to_its_first_model_request_and_not_those_after(runner, caplog):
+    await a_turn_whose_opening_takes_time(runner, completion("done"))
+    first = runner.gateway.hold_request(1)
+    await runner.gateway.until_requested(1)
+    runner.clock.time += 100
+    first.set()
+    await runner.reports.until_a_turn_completed()
+
+    assert seconds_to_the_request(caplog) == OPENING_SECONDS
+
+
+async def test_a_turn_that_fails_after_its_request_logs_its_code_and_the_seconds_to_the_request(runner, caplog):
+    await a_turn_whose_opening_takes_time(runner, Reply(status=HTTPStatus.SERVICE_UNAVAILABLE))
+    await runner.reports.until(Event.TURN_ENDED)
+
+    assert seconds_to_the_request(caplog) == OPENING_SECONDS
+
+
+async def test_a_turn_cancelled_after_its_request_logs_the_seconds_to_the_request(runner, caplog):
+    await a_turn_whose_opening_takes_time(runner, completion("done"))
+    runner.gateway.hold_request(1)
+    await runner.gateway.until_requested(1)
+    runner.app.stand(AGENT_SUBJECT)
+    await runner.reports.until(Event.TURN_ENDED)
+
+    assert seconds_to_the_request(caplog) == OPENING_SECONDS
+
+
+async def test_a_turn_cancelled_before_its_request_logs_no_seconds(runner, caplog):
+    opening = await a_turn_whose_opening_takes_time(runner, completion("done"), held=True)
+    async with asyncio.timeout(LIMIT_SECONDS):
+        await opening.arrived.wait()
+    runner.app.stand(AGENT_SUBJECT)
+    await runner.reports.until(Event.TURN_ENDED)
+
+    assert seconds_to_the_request(caplog) is None

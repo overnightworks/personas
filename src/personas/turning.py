@@ -51,7 +51,7 @@ from personas.task_record import (
 from personas.voice import Speaking
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterable
+    from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Coroutine, Iterable
     from contextlib import AbstractAsyncContextManager
     from datetime import datetime
 
@@ -103,11 +103,15 @@ class TurnSetup:
     backend: BackendFactory
 
 
-class _Sizing:
+class _Measures:
     """What the turn's input weighs: the request's tools and told messages once it is built, and every tool result
-    relayed back to the model, held and refused calls included. Only bytes are kept."""
+    relayed back to the model, held and refused calls included. Only bytes are kept. It also tells how long the
+    turn took, on the runner's clock, to hand its first request to the backend."""
 
-    def __init__(self) -> None:
+    def __init__(self, clock: Clock, report_request: Callable[[float], None]) -> None:
+        self._clock = clock
+        self._report_request = report_request
+        self._started = clock.now()
         self._request = (0, 0)
         self._results = 0
         self._images = 0
@@ -126,6 +130,11 @@ class _Sizing:
             return outcome
 
         return HandTool(tool.declaration, handler)
+
+    def handing(self, events: AsyncGenerator[TurnEvent]) -> AsyncGenerator[TurnEvent]:
+        """The events of the request the turn hands to its backend, which it does once: reports how long it took."""
+        self._report_request(self._clock.now() - self._started)
+        return events
 
     def sizes(self) -> InputSizes:
         return InputSizes(self._request[0], self._request[1], self._results, self._images)
@@ -224,6 +233,7 @@ class Turning:
         current_token: Callable[[], Awaitable[Token]],
         use_current_token: Callable[[AppSession], Awaitable[None]],
         report: Callable[[Event, str | None, AppTarget | None], None],
+        report_request: Callable[[float], None],
         report_turn_end: Callable[[str | None, TurnUsage | None, InputSizes | None], None],
         report_pause: Callable[[float, str], None],
         remembering: Remembering,
@@ -238,6 +248,7 @@ class Turning:
         self._current_token = current_token
         self._use_current_token = use_current_token
         self._report = report
+        self._report_request = report_request
         self._report_turn_end = report_turn_end
         self._report_pause = report_pause
         self._remembering = remembering
@@ -258,9 +269,9 @@ class Turning:
         A turn the gateway ends short is reported unless a defect was met; a failed relayed call and any other
         error go to the group. Every error of a cancelled turn ends as the cancellation.
         """
-        sizing = _Sizing()
+        measures = _Measures(self._clock, self._report_request)
         try:
-            await self._run_turn(setup, admitted, record, sizing)
+            await self._run_turn(setup, admitted, record, measures)
         except Exception as error:
             raise_if_cancelled()
             leaves = list(leaves_of(error))
@@ -271,7 +282,7 @@ class Turning:
             # The stop only carries the failure out of the backend; the failure goes to the group, never the stop.
             held = failure_held_by(stopped)
             if held is None and record.defect is None:
-                self._report_turn_end(stopped.code.value, None, sizing.sizes())
+                self._report_turn_end(stopped.code.value, None, measures.sizes())
                 self._pause_before_retry(stopped.code)
                 self._mind.due_again(AppPlace(self._app.mcp_url, admitted.place), admitted.occasion)
             # What left the session beside the stop (a late answer, the failure another stop holds) still goes to the
@@ -289,7 +300,7 @@ class Turning:
         seconds = self._mind.unanswered(budget_spent=code is RejectionCode.BUDGET_SPENT, now=self._clock.now())
         self._report_pause(seconds, code.value)
 
-    async def _run_turn(self, setup: TurnSetup, admitted: Admitted, record: TaskRecord, sizing: _Sizing) -> None:
+    async def _run_turn(self, setup: TurnSetup, admitted: Admitted, record: TaskRecord, measures: _Measures) -> None:
         turn = TurnTold(
             admitted.at,
             self._app.mcp_url,
@@ -302,7 +313,7 @@ class Turning:
         token = await self._current_token()
         async with self._open_session(self._app, token.value) as session:
             try:
-                await self._run_session_body(setup, admitted, turn, told, session, record, sizing)
+                await self._run_session_body(setup, admitted, turn, told, session, record, measures)
             except Exception as error:
                 record.note(error)
                 raise
@@ -315,7 +326,7 @@ class Turning:
         told: tuple[str, ...],
         session: AppSession,
         record: TaskRecord,
-        sizing: _Sizing,
+        measures: _Measures,
     ) -> None:
         raise_if_cancelled()
         held = await self._hold_tools(setup, session, record, admitted)
@@ -330,11 +341,11 @@ class Turning:
             max_duration_seconds=setup.persona.max_duration_seconds,
             max_tool_calls=held.max_tool_calls,
         )
-        sizing.request_built(held.declarations, told)
+        measures.request_built(held.declarations, told)
         person = TurnPerson(admitted.facts.principal, TURN_ROLE, admitted.groups)
         async with (
-            setup.backend(tuple(sizing.measuring(each) for each in held.tools)) as backend,
-            aclosing(backend.run(request, person)) as events,
+            setup.backend(tuple(measures.measuring(each) for each in held.tools)) as backend,
+            aclosing(measures.handing(backend.run(request, person))) as events,
         ):
             if admitted.aloud:
                 speaking = Speaking(
@@ -351,7 +362,7 @@ class Turning:
             else:
                 final = await _final_event_of(events)
         if final is not None:
-            self._report_turn_end(None, final.usage, sizing.sizes())
+            self._report_turn_end(None, final.usage, measures.sizes())
             self._mind.answered(turn)
 
     async def _speak_along(self, events: AsyncIterator[TurnEvent], speaking: Speaking) -> FinalEvent | None:
