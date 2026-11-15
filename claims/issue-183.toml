@@ -1,8 +1,0 @@
-claim_id = "7571fce10589443ea2cf22ecc70b1f11"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "0e8eb88ee0f8a7ce7b4dcb8fc5d589010748b6a5"
-branch = "claude/issue-183-follow-ups-of-the-175-landing"
-scope = ["README.md", "src/personas/decision.py", "tests/test_decision.py", "tests/test_mind.py"]
-opened_commit = "84f4a518847a9093910eb6c8bfbb5a54aa9426a5"
-whole_reason = "small follow-ups of one landing on the same pure decider and its tests"
