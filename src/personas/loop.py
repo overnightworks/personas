@@ -445,17 +445,17 @@ class AgentLoop:
                 self._renewed_after_401 = True
                 self._token = None
             case Suspend(code=code):
-                await self._suspend(code)
+                await self._suspend(code, failure)
             case remaining:
                 # pyright narrows `remaining` to the one reaction left, so a new reaction fails the type check here.
                 _: Literal[Reaction.BACKOFF] = remaining
                 await self._back_off(failure)
 
-    async def _suspend(self, code: str) -> None:
+    async def _suspend(self, code: str, failure: CallFailure) -> None:
         self._park()
         if self._suspension != code:
             self._suspension = code
-            self._report(Event.SUSPENDED, code)
+            self._report(Event.SUSPENDED, code, None, failure)
         self._backing_off = False
         self._token = None
         await self._boundaries.clock.sleep(SUSPENDED_RETRY_SECONDS)
