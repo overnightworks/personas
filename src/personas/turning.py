@@ -279,10 +279,7 @@ class Turning:
             held = failure_held_by(stopped)
             if held is None and record.defect is None:
                 tally.stop_code = stopped.code.value
-                pause = self._pause_before_retry(stopped.code)
-                self._mind.due_again(
-                    AppPlace(self._app.mcp_url, admitted.place), admitted.occasion, time.perf_counter() + pause
-                )
+                self._leave_unanswered(stopped.code, admitted)
             # What left the session beside the stop (a late answer, the failure another stop holds) still goes to the
             # group, to be judged there.
             rest = failures_leaving_with(held, (leaf for leaf in leaves if leaf is not stopped))
@@ -293,13 +290,16 @@ class Turning:
         finally:
             tally.sizes = sizing.sizes()
 
-    def _pause_before_retry(self, code: RejectionCode | FailureCode) -> float:
+    def _leave_unanswered(self, code: RejectionCode | FailureCode, admitted: Admitted) -> None:
         """A turn that ended without an answer leaves his mind a pause that holds every turn of his, so the lines that
-        arrive meanwhile are taken into his history and make one turn after it, with the turn's own place. The pause
-        is the mind's, so it outlives this task. Returns the pause's seconds."""
+        arrive meanwhile are taken into his history and make one turn after it, with the turn's own place, due again
+        from the pause's end on the ``time.perf_counter`` scale of the step timers. The pause is the mind's, so it
+        outlives this task."""
         seconds = self._mind.unanswered(budget_spent=code is RejectionCode.BUDGET_SPENT, now=self._clock.now())
         self._report_pause(seconds, code.value)
-        return seconds
+        self._mind.due_again(
+            AppPlace(self._app.mcp_url, admitted.place), admitted.occasion, time.perf_counter() + seconds
+        )
 
     async def _run_turn(
         self, setup: TurnSetup, admitted: Admitted, record: TaskRecord, sizing: _Sizing, tally: TurnTally

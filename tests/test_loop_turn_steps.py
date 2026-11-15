@@ -3,6 +3,7 @@ carry that trace to the app."""
 
 from __future__ import annotations
 
+import time
 from http import HTTPStatus
 from urllib.parse import urlsplit
 
@@ -137,3 +138,26 @@ async def test_a_failed_step_of_another_app_is_written_as_a_handled_failure(runn
         if record.getMessage() == "tool_list.ended" and str(record.outcome) == "failed"
     ]
     assert levels == ["WARNING"]
+
+
+async def test_a_turn_due_again_after_a_pause_waits_from_the_pause_end(runner, caplog, monkeypatch):
+    skew = 0.0
+    real_perf_counter = time.perf_counter
+    real_sleep = runner.clock.sleep
+    passed_after_pause = 5.0
+
+    async def sleeping(seconds: float) -> None:
+        nonlocal skew
+        skew += seconds + passed_after_pause
+        await real_sleep(seconds)
+
+    monkeypatch.setattr(time, "perf_counter", lambda: real_perf_counter() + skew)
+    monkeypatch.setattr(runner.clock, "sleep", sleeping)
+    runner.gateway = Gateway(Reply(status=HTTPStatus.TOO_MANY_REQUESTS), *says(PLACE_ID, "Here."))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.reports.until_a_turn_completed()
+
+    waits = [line["duration_ms"] for line in lines_of(caplog.get_records("call"), "turn_wait.ended")]
+    assert len(waits) == 2
+    assert waits[1] == pytest.approx(passed_after_pause * 1000, abs=1000)
