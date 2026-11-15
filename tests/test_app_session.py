@@ -36,6 +36,7 @@ from agents.turn import TOOL_IMAGE_MEDIA_TYPE
 from mcp_types import (
     INTERNAL_ERROR,
     INVALID_PARAMS,
+    UNSUPPORTED_PROTOCOL_VERSION,
     BlobResourceContents,
     ListToolsResult,
     ReadResourceResult,
@@ -428,6 +429,18 @@ async def test_a_status_failure_of_a_stream_reconnect_names_no_method(app, beare
 
     assert failure.value.status == HTTPStatus.METHOD_NOT_ALLOWED
     assert failure.value.method is None
+
+
+async def test_a_jsonrpc_error_at_a_success_status_is_an_unusable_answer_with_no_method_and_no_answer(app, bearer):
+    app.script(LIST_TOOLS, lambda reply: reply.error(UNSUPPORTED_PROTOCOL_VERSION, status=HTTPStatus.OK))
+
+    async with opened(app, bearer) as session:
+        with pytest.raises(UnusableAnswer) as failure:
+            await session.declared_tools()
+
+    assert failure.value.code == jsonrpc_code(UNSUPPORTED_PROTOCOL_VERSION)
+    assert failure.value.method is None
+    assert failure.value.answer is None
 
 
 async def test_a_redirect_the_app_answers_is_an_unusable_answer_named_by_its_status(app, bearer, place):
