@@ -3,6 +3,6 @@ agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
 role = "builder"
 base = "b8381eb1c613260bf9101d76a8badb90f69aac64"
 branch = "claude/issue-191-next-sentence-while-previous-plays"
-scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/decision.py", "src/personas/voice.py", "tests/support/hopin.py", "tests/test_decision.py", "tests/test_loop_voice.py", "tests/test_loop_voice_end.py", "tests/test_voice.py"]
+scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/decision.py", "src/personas/voice.py", "tests/support/hopin.py", "tests/test_decision.py", "tests/test_loop_held.py", "tests/test_loop_voice.py", "tests/test_loop_voice_end.py", "tests/test_voice.py"]
 opened_commit = "716cd5e32e0758e551ad85a2a41d083313c0dc99"
 whole_reason = "one change to how the voice paces its sentences, with its pure rule, its scripted app and its documents"
