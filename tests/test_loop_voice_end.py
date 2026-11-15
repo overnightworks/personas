@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from http import HTTPStatus
 
+import anyio
 import pytest
 from agents.backend.fake_gateway import completion
 from agents.member import STANDING_URI, place_window_uri
@@ -182,7 +183,7 @@ async def test_a_call_to_the_own_app_that_fails_after_a_sentence_ends_the_turn_i
     runner.app.refused_method = CALL
     runner.app.refused_tool = SAY_TOOL
     say_in_the_call(runner, ADDRESSED)
-    await sleeps.until_began(1)
+    await runner.app.spoken_count(1)
     runner.app.end_sentence()
     await runner.reports.until(Event.BACKOFF)
     await sleeps.until_began(2)
@@ -211,32 +212,6 @@ async def test_a_gateway_that_stops_the_turn_while_a_sentence_is_sent_and_one_is
     reply.cut()
     answer.set()
     await runner.reports.until(Event.PAUSED)
-    await sleeps.until_began(1)
-    sleeps.let_through()
-    say_in_the_call(runner, f"{ADDRESSED} Again.")
-    await runner.gateway.until_turns(2)
-
-    assert sentences_spoken(runner) == ["First sentence."]
-    assert runner.reports.reported() == [
-        (Event.STARTED, None),
-        (Event.TURN_ENDED, FailureCode.PROVIDER_ERROR.value),
-        (Event.PAUSED, FailureCode.PROVIDER_ERROR.value),
-    ]
-    (sent,) = runner.gateway.turns()[1].told("speech")
-    assert (sent["text"], sent["outcome"]) == ("First sentence.", {"answered": True})
-
-
-async def test_a_gateway_that_stops_the_turn_while_a_sentence_waits_cancels_its_wait_and_enters_the_sentence_answered(
-    runner,
-):
-    sleeps = holding_sentence_ends(runner)
-    await a_voice_call(runner, completion("done"))
-    reply = runner.gateway.pause_request(1, "First sentence. Second sentence. Thi", "rd.")
-    say_in_the_call(runner, ADDRESSED)
-    await sleeps.until_began(1)
-    reply.cut()
-    await sleeps.until_cancelled()
-    await runner.reports.until(Event.PAUSED)
     await sleeps.until_began(2)
     sleeps.let_through()
     say_in_the_call(runner, f"{ADDRESSED} Again.")
@@ -252,21 +227,63 @@ async def test_a_gateway_that_stops_the_turn_while_a_sentence_waits_cancels_its_
     assert (sent["text"], sent["outcome"]) == ("First sentence.", {"answered": True})
 
 
+async def test_a_gateway_that_stops_the_turn_while_a_sentence_is_open_waits_for_its_answer_and_enters_it_answered(
+    runner,
+):
+    sleeps = holding_sentence_ends(runner)
+    await a_voice_call(runner, completion("done"))
+    reply = runner.gateway.pause_request(1, "First sentence. Second sentence. Thi", "rd.")
+    say_in_the_call(runner, ADDRESSED)
+    await runner.app.until_called(2)
+    reply.cut()
+    runner.app.end_sentence()
+    await sleeps.until_cancelled()
+    await runner.reports.until(Event.PAUSED)
+    await sleeps.until_began(2)
+    sleeps.let_through()
+    say_in_the_call(runner, f"{ADDRESSED} Again.")
+    await runner.gateway.until_turns(2)
+
+    assert sentences_spoken(runner) == ["First sentence.", "Second sentence."]
+    assert runner.reports.reported() == [
+        (Event.STARTED, None),
+        (Event.TURN_ENDED, FailureCode.PROVIDER_ERROR.value),
+        (Event.PAUSED, FailureCode.PROVIDER_ERROR.value),
+    ]
+    assert [(each["text"], each["outcome"]) for each in runner.gateway.turns()[1].told("speech")] == [
+        ("First sentence.", {"answered": True}),
+        ("Second sentence.", {"answered": True}),
+    ]
+
+
 AFTER_THE_FIRST_SENTENCE = [
-    pytest.param(speaks_and_says(PLACE_ID, ANSWER, "Written."), id="a call waits on the only sentence"),
-    pytest.param(speaks_and_says(PLACE_ID, TWO_SENTENCES, "Written."), id="a call waits on two sentences"),
-    pytest.param([completion("One. Two. Three.")], id="the speech after the final event"),
+    pytest.param(speaks_and_says(PLACE_ID, ANSWER, "Written."), [ANSWER], id="a call waits on the only sentence"),
+    pytest.param(
+        speaks_and_says(PLACE_ID, TWO_SENTENCES, "Written."),
+        ["First sentence.", "Second sentence."],
+        id="a call waits on two sentences",
+    ),
+    pytest.param([completion("One. Two. Three.")], ["One.", "Two."], id="the speech after the final event"),
 ]
+"""Each reply with the sentences sent before the deadline: the first is answered as spoken and the next one is open."""
 
 
-@pytest.mark.parametrize("replies", AFTER_THE_FIRST_SENTENCE)
+async def sentences_playing_with_the_next_open(runner, sent):
+    """Returns once the first sentence plays, its answer has reached the runner and, when more were sent, the next
+    one's request is open."""
+    await runner.app.spoken_count(1)
+    await runner.app.until_called(len(sent))
+    await anyio.wait_all_tasks_blocked()
+
+
+@pytest.mark.parametrize(("replies", "sent"), AFTER_THE_FIRST_SENTENCE)
 async def test_a_turn_past_its_deadline_when_his_line_entered_sends_no_call_or_sentence_and_ends_limit_exceeded_once(
-    runner, replies
+    runner, replies, sent
 ):
     sleeps = holding_sentence_ends(runner)
     await a_voice_call(runner, *replies, completion("Later."))
     say_in_the_call(runner, ADDRESSED)
-    await sleeps.until_began(1)
+    await sentences_playing_with_the_next_open(runner, sent)
     runner.clock.time += PERSONA_MAX_DURATION_SECONDS
     runner.app.end_sentence()
     await runner.reports.until(Event.PAUSED)
@@ -275,25 +292,25 @@ async def test_a_turn_past_its_deadline_when_his_line_entered_sends_no_call_or_s
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.gateway.until_turns(2)
 
-    assert len(runner.app.spoken) == 1
+    assert sentences_spoken(runner) == sent
     assert runner.app.said == []
     assert runner.reports.reported() == [
         (Event.STARTED, None),
         (Event.TURN_ENDED, FailureCode.LIMIT_EXCEEDED.value),
         (Event.PAUSED, FailureCode.LIMIT_EXCEEDED.value),
     ]
-    assert [each["text"] for each in runner.gateway.turns()[1].told("speech")] == sentences_spoken(runner)[:1]
+    assert [each["text"] for each in runner.gateway.turns()[1].told("speech")] == sentences_spoken(runner)
     assert not runner.task.done()
 
 
-@pytest.mark.parametrize("replies", AFTER_THE_FIRST_SENTENCE)
-async def test_a_line_that_never_arrives_ends_the_turn_limit_exceeded_once_with_no_defect_and_no_more_speech(
-    runner, replies
+@pytest.mark.parametrize(("replies", "sent"), AFTER_THE_FIRST_SENTENCE)
+async def test_a_line_or_answer_that_never_arrives_ends_the_turn_limit_exceeded_once_with_no_defect_and_no_more_speech(
+    runner, replies, sent
 ):
     sleeps = holding_sentence_ends(runner)
     await a_voice_call(runner, *replies, completion("Later."))
     say_in_the_call(runner, ADDRESSED)
-    await sleeps.until_began(1)
+    await sentences_playing_with_the_next_open(runner, sent)
 
     assert sleeps.began == [PERSONA_MAX_DURATION_SECONDS]
     runner.clock.time += PERSONA_MAX_DURATION_SECONDS
@@ -302,14 +319,18 @@ async def test_a_line_that_never_arrives_ends_the_turn_limit_exceeded_once_with_
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.gateway.until_turns(2)
 
-    assert len(runner.app.spoken) == 1
+    assert sentences_spoken(runner) == sent[:1]
     assert runner.app.said == []
     assert runner.reports.reported() == [
         (Event.STARTED, None),
         (Event.TURN_ENDED, FailureCode.LIMIT_EXCEEDED.value),
         (Event.PAUSED, FailureCode.LIMIT_EXCEEDED.value),
     ]
-    assert [each["text"] for each in runner.gateway.turns()[1].told("speech")] == sentences_spoken(runner)[:1]
+    told = runner.gateway.turns()[1].told("speech")
+    assert [(each["text"], each["outcome"]) for each in told] == [
+        (sent[0], {"answered": True}),
+        *[(text, {"answered": False, "code": FailureCode.LIMIT_EXCEEDED.value}) for text in sent[1:]],
+    ]
     assert not runner.task.done()
 
 
