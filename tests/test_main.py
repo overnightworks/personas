@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterable
 
     from agents.agent_file import TurnRequest
-    from agents.backend import AgentBackend, TurnEvent, TurnPerson
+    from agents.backend import TurnEvent, TurnPerson
     from agents.tools import HandTool
 
     from personas.config import AppTarget, Config
@@ -80,8 +80,14 @@ class Stop(Exception):  # noqa: N818 - a test's way to end a runner whose loops 
 class StopsAfterTheAnswer:
     """The gateway backend, which raises ``Stop`` once the turn has its final answer."""
 
-    def __init__(self, inner: AgentBackend) -> None:
+    def __init__(self, inner: GatewayBackend) -> None:
         self._inner = inner
+
+    async def __aenter__(self) -> StopsAfterTheAnswer:
+        return self
+
+    async def __aexit__(self, *error: object) -> None:
+        await self._inner.aclose()
 
     async def run(self, request: TurnRequest, person: TurnPerson) -> AsyncIterator[TurnEvent]:
         async for event in self._inner.run(request, person):
@@ -117,7 +123,7 @@ class World:
         realm = FakeRealm(self.app, config.agents[0], AGENT_SUBJECT, config.apps[0].scope)
         self.issued = realm.issued
 
-        def gateway_backend(tools: Iterable[HandTool]) -> AgentBackend:
+        def gateway_backend(tools: Iterable[HandTool]) -> StopsAfterTheAnswer:
             assert config.gateway is not None
             return StopsAfterTheAnswer(GatewayBackend(config.gateway, tools=tools, transport=self.gateway))
 

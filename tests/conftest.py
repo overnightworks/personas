@@ -34,7 +34,7 @@ from tests.support.fakes import (
     credentials,
     grant,
 )
-from tests.support.gateway import Gateway
+from tests.support.gateway import Gateway, RoundBackend
 from tests.support.hopin import AGENT_SUBJECT, ISSUER, PLAY_TOOL, FakeApp, formatted
 from tests.support.realm import TOKEN_ENDPOINT, FakeRealm
 from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG, ToolsOnlyApp
@@ -45,7 +45,6 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterable, Iterator
     from pathlib import Path
 
-    from agents.backend import AgentBackend
     from agents.member import MemberStanding
     from agents.tools import HandTool
 
@@ -148,6 +147,8 @@ class Harness:
         self.swept: SweptStore | None = None
         self.handed: list[tuple[HandTool, ...]] = []
         """The tools each turn's backend was handed, in the order handed."""
+        self.backends: list[RoundBackend] = []
+        """The backend of each turn, in the order opened."""
         self.sleeps: HeldSleeps | None = None
         """The held sleeps of the clock, from the first spoken scenario that needs the wait for his own line gated."""
 
@@ -231,11 +232,13 @@ class Harness:
         )
         self.task = asyncio.create_task(run_with_sweep(self.config, boundaries))
 
-    def _backend(self, tools: Iterable[HandTool]) -> AgentBackend:
+    def _backend(self, tools: Iterable[HandTool]) -> RoundBackend:
         assert self.config.gateway is not None
         handed = tuple(tools)
         self.handed.append(handed)
-        return GatewayBackend(self.config.gateway, tools=handed, transport=self.gateway)
+        backend = RoundBackend(GatewayBackend(self.config.gateway, tools=handed, transport=self.gateway))
+        self.backends.append(backend)
+        return backend
 
     def secrets_and_content(self) -> list[str]:
         return [

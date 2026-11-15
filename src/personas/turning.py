@@ -52,6 +52,7 @@ from personas.voice import Speaking
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterable
+    from contextlib import AbstractAsyncContextManager
     from datetime import datetime
 
     from agents.agent_file import AgentDefinition
@@ -71,7 +72,8 @@ if TYPE_CHECKING:
     from personas.task_record import TaskRecord
     from personas.tokens import TokenFacts, TokenSource
 
-type BackendFactory = Callable[[Iterable[HandTool]], AgentBackend]
+# The backend a turn runs on, which it closes when the turn ends.
+type BackendFactory = Callable[[Iterable[HandTool]], AbstractAsyncContextManager[AgentBackend]]
 
 _CALL_BOUND_TEXT: Final = "this app takes no more calls in this turn"
 _APP_FAILED_TEXT: Final = "the app did not answer"
@@ -330,9 +332,10 @@ class Turning:
         )
         sizing.request_built(held.declarations, told)
         person = TurnPerson(admitted.facts.principal, TURN_ROLE, admitted.groups)
-        async with aclosing(
-            setup.backend(tuple(sizing.measuring(each) for each in held.tools)).run(request, person)
-        ) as events:
+        async with (
+            setup.backend(tuple(sizing.measuring(each) for each in held.tools)) as backend,
+            aclosing(backend.run(request, person)) as events,
+        ):
             if admitted.aloud:
                 speaking = Speaking(
                     session,

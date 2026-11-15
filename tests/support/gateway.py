@@ -18,8 +18,33 @@ from tests.support.hopin import LIMIT_SECONDS, PLAY_TOOL, SAY_TOOL
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+    from types import TracebackType
 
+    from agents.agent_file import TurnRequest
+    from agents.backend import TurnEvent, TurnPerson
+    from agents.backend.gateway import GatewayBackend
     from agents.tools import JsonObject
+
+
+class RoundBackend:
+    """A gateway backend that notes when its host closes it."""
+
+    def __init__(self, inner: GatewayBackend) -> None:
+        self._inner = inner
+        self.closed = asyncio.Event()
+
+    def run(self, request: TurnRequest, person: TurnPerson) -> AsyncIterator[TurnEvent]:
+        return self._inner.run(request, person)
+
+    async def __aenter__(self) -> RoundBackend:
+        return self
+
+    async def __aexit__(
+        self, error_type: type[BaseException] | None, error: BaseException | None, trace: TracebackType | None
+    ) -> None:
+        await self._inner.aclose()
+        self.closed.set()
+
 
 MESSAGES_OF_A_FIRST_ROUND = 2
 """A turn's first round holds at least its header and its own message after the persona."""

@@ -589,6 +589,12 @@ class _TurnThatEnds:
         self._tools = tools
         self._relays = relays
 
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *error):
+        return None
+
     async def run(self, request, person):
         if self._relays:
             await self._tools[0].handler(person.principal, {})
