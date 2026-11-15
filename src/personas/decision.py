@@ -491,6 +491,11 @@ def _step_cut(history: History, boundaries: Iterable[int], keep_bytes: int) -> i
     return min((end for end in boundaries if oldest_that_fits <= end < history.taken), default=oldest_that_fits)
 
 
+def _stays_told(turn: TurnTold, left_out: int) -> bool:
+    """Whether the message of ``turn`` has an entry left to tell once the history has dropped the first ``left_out``."""
+    return turn.through > left_out
+
+
 def taken_into(present: Present, new: Iterable[Entry], history_bytes: int, keep_bytes: int) -> Present:
     """The present with ``new`` appended, a view revision it already holds adding nothing and an act always added. Past
     ``history_bytes`` the oldest whole messages leave in one step until what stays fits ``keep_bytes``; only the newest
@@ -506,13 +511,13 @@ def taken_into(present: Present, new: Iterable[Entry], history_bytes: int, keep_
         return Present(grown, present.told)
     cut = _step_cut(grown, (each.through for each in present.told), keep_bytes)
     history = History(entries[cut - grown.left_out :], cut, heard)
-    return Present(history, tuple(each for each in present.told if each.through > cut))
+    return Present(history, tuple(each for each in present.told if _stays_told(each, cut)))
 
 
 def answered_into(present: Present, turn: TurnTold) -> Present:
     """The present once ``turn`` was answered: its message is part of every request after it, while it stays. A turn
     whose entries all left in a step while it ran has no message left to tell."""
-    if turn.through <= present.history.left_out:
+    if not _stays_told(turn, present.history.left_out):
         return present
     return Present(present.history, (*present.told, turn))
 
