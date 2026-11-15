@@ -37,8 +37,10 @@ from personas.app_session import READ_SECONDS
 from personas.decision import (
     BACKOFF_BASE_SECONDS,
     BACKOFF_CAP_SECONDS,
+    DEFECT_REASON,
     EMPTY_PRESENT,
     NETWORK_FAILURE_CODE,
+    NO_FINAL_EVENT_REASON,
     RENEW_BEFORE_EXPIRY_SECONDS,
     TURN_CANCELLED_CODE,
     Accept,
@@ -55,6 +57,7 @@ from personas.decision import (
     Restarted,
     Suspend,
     Token,
+    TurnEnding,
     Turns,
     TurnTold,
     UnrecognisedRefusal,
@@ -103,9 +106,9 @@ from personas.decision import (
     told_header,
     told_turn,
     turn_call_bound,
+    turn_ending,
     turn_invalid,
     turn_messages,
-    turn_outcome,
     view_turn_due,
     wakes_him,
     with_due,
@@ -917,16 +920,56 @@ def test_a_failure_logs_a_closed_reason_that_never_holds_a_value_the_app_chose(f
 
 
 @pytest.mark.parametrize(
-    ("code", "outcome"),
+    ("ended", "ending"),
     [
-        (None, Outcome.OK),
-        (TURN_CANCELLED_CODE, Outcome.CANCELLED),
-        (RejectionCode.BUDGET_SPENT.value, Outcome.REFUSED),
-        (FailureCode.PROVIDER_UNAVAILABLE.value, Outcome.FAILED),
+        pytest.param({"answered": True}, TurnEnding(Outcome.OK), id="an answer"),
+        pytest.param({}, TurnEnding(Outcome.FAILED, NO_FINAL_EVENT_REASON), id="events that end without a final event"),
+        pytest.param(
+            {"error": Unreachable("down")}, TurnEnding(Outcome.FAILED, NETWORK_FAILURE_CODE), id="a failed call"
+        ),
+        pytest.param(
+            {"error": BaseExceptionGroup("session", [Unreachable("down"), StatusFailure(502)])},
+            TurnEnding(Outcome.FAILED, NETWORK_FAILURE_CODE),
+            id="failed calls in a group",
+        ),
+        pytest.param({"error": RuntimeError("bug")}, TurnEnding(Outcome.FAILED, DEFECT_REASON), id="a defect"),
+        pytest.param(
+            {"error": ExceptionGroup("session", [Unreachable("down"), RuntimeError("bug")])},
+            TurnEnding(Outcome.FAILED, DEFECT_REASON),
+            id="a defect beside a failed call",
+        ),
+        pytest.param(
+            {"stop_code": RejectionCode.BUDGET_SPENT.value},
+            TurnEnding(Outcome.REFUSED, RejectionCode.BUDGET_SPENT.value),
+            id="a stop the gateway refused",
+        ),
+        pytest.param(
+            {"stop_code": FailureCode.LIMIT_EXCEEDED.value},
+            TurnEnding(Outcome.FAILED, FailureCode.LIMIT_EXCEEDED.value),
+            id="a stop that failed",
+        ),
+        pytest.param(
+            {"stop_code": RejectionCode.BUSY.value, "error": Unreachable("late answer")},
+            TurnEnding(Outcome.REFUSED, RejectionCode.BUSY.value),
+            id="a reported stop beside the failure that left with it",
+        ),
+        pytest.param({"cancelled": True}, TurnEnding(Outcome.CANCELLED), id="a cancellation"),
+        pytest.param(
+            {"cancelled": True, "answered": True},
+            TurnEnding(Outcome.OK),
+            id="a cancellation in the teardown of an answered turn",
+        ),
+        pytest.param(
+            {"error": RuntimeError("bug"), "answered": True},
+            TurnEnding(Outcome.OK),
+            id="an error in the teardown of an answered turn",
+        ),
     ],
 )
-def test_a_turn_ends_as_its_code_says(code, outcome):
-    assert turn_outcome(code) is outcome
+def test_a_turn_ends_with_the_outcome_and_reason_its_ending_gives(ended, ending):
+    given = {"cancelled": False, "error": None, "stop_code": None, "answered": False} | ended
+
+    assert turn_ending(**given) == ending
 
 
 OTHER_TABLE = PlaceRef(kind="table", id="table-2")

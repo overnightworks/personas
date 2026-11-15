@@ -20,7 +20,6 @@ from personas.app_session import open_mcp_session
 from personas.config import CONFIG_ENVIRONMENT_VARIABLE, load_config
 from personas.failures import SchemaNotAtHeadError, leaves_of
 from personas.main import (
-    QUIET_LIBRARIES,
     READINESS_ERROR_EXIT_CODE,
     STORE_ERROR_EXIT_CODE,
     SweepingBoundaries,
@@ -34,7 +33,7 @@ from personas.reporting import Event, log_state_change
 from personas.tokens import HttpTokenSource
 from tests.support.fakes import FakeClock
 from tests.support.gateway import Gateway, says
-from tests.support.hopin import AGENT_SUBJECT, FakeApp, active, configure_logging_into, invited
+from tests.support.hopin import AGENT_SUBJECT, FakeApp, active, invited
 from tests.support.realm import FakeRealm
 
 if TYPE_CHECKING:
@@ -51,18 +50,6 @@ if TYPE_CHECKING:
     from personas.reporting import StateChange
     from personas.secret import Secret
     from tests.support.configfiles import Files
-
-
-@pytest.mark.parametrize("library", QUIET_LIBRARIES)
-def test_an_info_record_of_a_library_the_runner_uses_reaches_no_log_line_and_its_error_does(
-    library, restored_logging, caplog: pytest.LogCaptureFixture
-):
-    configure_logging_into(caplog)
-
-    logging.getLogger(f"{library}.client.streamable_http").info("a response body")
-    logging.getLogger(library).error("a failure")
-
-    assert [record.getMessage() for record in caplog.records] == ["a failure"]
 
 
 def test_every_line_the_entry_point_configures_is_one_json_object_of_the_runner_on_stdout(

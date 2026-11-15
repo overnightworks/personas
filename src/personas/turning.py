@@ -40,7 +40,7 @@ from personas.recall import (
     search_text,
     text_refused_text,
 )
-from personas.reporting import Event
+from personas.reporting import Event, TurnTally
 from personas.task_record import (
     RelayFailed,
     ending_loud_when_cancelled,
@@ -60,7 +60,7 @@ if TYPE_CHECKING:
     from agents.backend import AgentBackend, TurnEvent
     from agents.member import PlaceRef
     from agents.tools import ToolDeclaration
-    from agents.turn import FailureCode, JsonObject, Principal, TurnUsage
+    from agents.turn import FailureCode, JsonObject, Principal
 
     from personas.app_session import AppSession, SessionOpener
     from personas.clock import Clock
@@ -86,11 +86,13 @@ def _failure_event(app: AppTarget) -> Event:
     return Event.HELD_APP_FAILED if app.listens else Event.TOOLS_ONLY_APP_FAILED
 
 
-async def _final_event_of(events: AsyncIterator[TurnEvent]) -> FinalEvent | None:
-    """Reads the turn's events to their end and returns its final event, if it had one."""
+async def _final_event_of(events: AsyncIterator[TurnEvent], tally: TurnTally) -> FinalEvent | None:
+    """Reads the turn's events to their end, counting its tool calls, and returns its final event, if it had one."""
     final = None
     async for event in events:
-        if isinstance(event, FinalEvent):
+        if isinstance(event, ToolCallEvent):
+            tally.tool_call_count += 1
+        elif isinstance(event, FinalEvent):
             final = event
     return final
 
@@ -109,7 +111,7 @@ class _Sizing:
     relayed back to the model, held and refused calls included. Only bytes are kept."""
 
     def __init__(self) -> None:
-        self._request = (0, 0)
+        self._request: tuple[int, int] | None = None
         self._results = 0
         self._images = 0
 
@@ -128,7 +130,10 @@ class _Sizing:
 
         return HandTool(tool.declaration, handler)
 
-    def sizes(self) -> InputSizes:
+    def sizes(self) -> InputSizes | None:
+        """The weights, or none while the request is not built."""
+        if self._request is None:
+            return None
         return InputSizes(self._request[0], self._request[1], self._results, self._images)
 
 
@@ -225,7 +230,6 @@ class Turning:
         current_token: Callable[[], Awaitable[Token]],
         use_current_token: Callable[[AppSession], Awaitable[None]],
         report: Callable[[Event, str | None, AppTarget | None, CallFailure | None], None],
-        report_turn_end: Callable[[str | None, TurnUsage | None, InputSizes | None], None],
         report_pause: Callable[[float, str], None],
         remembering: Remembering,
     ) -> None:
@@ -239,29 +243,28 @@ class Turning:
         self._current_token = current_token
         self._use_current_token = use_current_token
         self._report = report
-        self._report_turn_end = report_turn_end
         self._report_pause = report_pause
         self._remembering = remembering
 
-    async def take(self, setup: TurnSetup, admitted: Admitted, record: TaskRecord) -> None:
+    async def take(self, setup: TurnSetup, admitted: Admitted, record: TaskRecord, tally: TurnTally) -> None:
         """Runs one turn; whatever way it ends, a defect a request of it met ends the runner loud.
 
         A session whose close cuts a request short can lose the defect from what leaves, so the turn's record
         joins it. A cancelled turn ends as the cancellation unless a defect was met or nobody cancelled it.
         """
         await ending_loud_when_cancelled(
-            ending_with_recorded_defect(self._judge_turn(setup, admitted, record), record), record.loud_end
+            ending_with_recorded_defect(self._judge_turn(setup, admitted, record, tally), record), record.loud_end
         )
 
-    async def _judge_turn(self, setup: TurnSetup, admitted: Admitted, record: TaskRecord) -> None:
+    async def _judge_turn(self, setup: TurnSetup, admitted: Admitted, record: TaskRecord, tally: TurnTally) -> None:
         """Runs one turn over its own session.
 
-        A turn the gateway ends short is reported unless a defect was met; a failed relayed call and any other
+        A turn the gateway ends short is told to the tally unless a defect was met; a failed relayed call and any other
         error go to the group. Every error of a cancelled turn ends as the cancellation.
         """
         sizing = _Sizing()
         try:
-            await self._run_turn(setup, admitted, record, sizing)
+            await self._run_turn(setup, admitted, record, sizing, tally)
         except Exception as error:
             raise_if_cancelled()
             leaves = list(leaves_of(error))
@@ -272,7 +275,7 @@ class Turning:
             # The stop only carries the failure out of the backend; the failure goes to the group, never the stop.
             held = failure_held_by(stopped)
             if held is None and record.defect is None:
-                self._report_turn_end(stopped.code.value, None, sizing.sizes())
+                tally.stop_code = stopped.code.value
                 self._pause_before_retry(stopped.code)
                 self._mind.due_again(AppPlace(self._app.mcp_url, admitted.place), admitted.occasion)
             # What left the session beside the stop (a late answer, the failure another stop holds) still goes to the
@@ -282,6 +285,8 @@ class Turning:
                 raise rest[0] from None
             if rest:
                 raise BaseExceptionGroup("the turn's session failed", rest) from None
+        finally:
+            tally.sizes = sizing.sizes()
 
     def _pause_before_retry(self, code: RejectionCode | FailureCode) -> None:
         """A turn that ended without an answer leaves his mind a pause that holds every turn of his, so the lines that
@@ -290,7 +295,9 @@ class Turning:
         seconds = self._mind.unanswered(budget_spent=code is RejectionCode.BUDGET_SPENT, now=self._clock.now())
         self._report_pause(seconds, code.value)
 
-    async def _run_turn(self, setup: TurnSetup, admitted: Admitted, record: TaskRecord, sizing: _Sizing) -> None:
+    async def _run_turn(
+        self, setup: TurnSetup, admitted: Admitted, record: TaskRecord, sizing: _Sizing, tally: TurnTally
+    ) -> None:
         turn = TurnTold(
             admitted.at,
             self._app.mcp_url,
@@ -303,7 +310,7 @@ class Turning:
         token = await self._current_token()
         async with self._open_session(self._app, token.value) as session:
             try:
-                await self._run_session_body(setup, admitted, turn, told, session, record, sizing)
+                await self._run_session_body(setup, admitted, turn, told, session, record, sizing, tally)
             except Exception as error:
                 record.note(error)
                 raise
@@ -317,6 +324,7 @@ class Turning:
         session: AppSession,
         record: TaskRecord,
         sizing: _Sizing,
+        tally: TurnTally,
     ) -> None:
         raise_if_cancelled()
         held = await self._hold_tools(setup, session, record, admitted)
@@ -346,15 +354,19 @@ class Turning:
                     partial(self._use_current_token, session),
                     lambda event, code: self._report(event, code, None, None),
                     self._mind,
+                    tally,
                 )
-                final = await self._speak_along(events, speaking)
+                final = await self._speak_along(events, speaking, tally)
             else:
-                final = await _final_event_of(events)
+                final = await _final_event_of(events, tally)
         if final is not None:
-            self._report_turn_end(None, final.usage, sizing.sizes())
+            tally.answered = True
+            tally.usage = final.usage
             self._mind.answered(turn)
 
-    async def _speak_along(self, events: AsyncIterator[TurnEvent], speaking: Speaking) -> FinalEvent | None:
+    async def _speak_along(
+        self, events: AsyncIterator[TurnEvent], speaking: Speaking, tally: TurnTally
+    ) -> FinalEvent | None:
         """Reads the turn's events while the sentences they release are spoken beside them.
 
         A call is relayed only when the events are asked for again, so it goes out after his own line for every
@@ -364,15 +376,18 @@ class Turning:
         """
         async with asyncio.TaskGroup() as group:
             group.create_task(speaking.play())
-            hearing = group.create_task(self._hear_events(events, speaking))
+            hearing = group.create_task(self._hear_events(events, speaking, tally))
         return hearing.result()
 
-    async def _hear_events(self, events: AsyncIterator[TurnEvent], speaking: Speaking) -> FinalEvent | None:
+    async def _hear_events(
+        self, events: AsyncIterator[TurnEvent], speaking: Speaking, tally: TurnTally
+    ) -> FinalEvent | None:
         final = None
         try:
             async for event in events:
                 speaking.hear(event)
                 if isinstance(event, ToolCallEvent):
+                    tally.tool_call_count += 1
                     await speaking.spoken()
                 elif isinstance(event, FinalEvent):
                     final = event

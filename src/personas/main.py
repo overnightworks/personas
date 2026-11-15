@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv
-import logging
 import os
 import signal
 import sys
@@ -44,9 +43,6 @@ type Compose = Callable[[Config, ReadyMarker], AbstractAsyncContextManager[Sweep
 CONFIGURATION_ERROR_EXIT_CODE: Final = 2
 READINESS_ERROR_EXIT_CODE: Final = 3
 STORE_ERROR_EXIT_CODE: Final = 4
-QUIET_LIBRARIES: Final = ("mcp", "sqlalchemy.dialects.postgresql")
-"""Their INFO records carry content (the SDK's, the database's server notices); capped at WARNING until logline caps
-them in ``configure``."""
 MIGRATE_COMMAND: Final = "migrate"
 MEMORY_COMMAND: Final = "memory"
 LIST_COMMAND: Final = "list"
@@ -132,8 +128,6 @@ async def _run(config: Config, ready: ReadyMarker, compose: Compose) -> None:
 
 def configure_logging() -> None:
     configure("personas")
-    for name in QUIET_LIBRARIES:
-        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 class _MemoryArgumentParser(argparse.ArgumentParser):

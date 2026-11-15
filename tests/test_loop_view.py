@@ -11,10 +11,10 @@ from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.member import STANDING_URI, FigureRef, PlaceRef, place_view_uri, place_window_uri
 
 from personas.config import Voice, load_config
-from personas.decision import BACKOFF_BASE_SECONDS, NO_TURNS_CODE, TURN_CANCELLED_CODE
+from personas.decision import BACKOFF_BASE_SECONDS, NO_TURNS_CODE
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, say_in_the_call
-from tests.support.fakes import SweepClock
+from tests.support.fakes import CANCELLED_TURN, SweepClock
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
 from tests.support.history import after_start, entry, history_of, said_and_taken, settled, view_entry, woke_at_table
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
@@ -303,11 +303,11 @@ async def test_a_place_that_leaves_the_standing_during_its_turn_cancels_it_and_i
     await runner.gateway.until_requested(1)
 
     runner.app.stand(SUBJECT)
-    await runner.reports.until(Event.TURN_ENDED)
+    await runner.reports.until_a_turn_ended()
     runner.app.stand(SUBJECT, at_table())
     await runner.gateway.until_turns(1)
 
-    assert [code for event, code in runner.reports.reported() if event is Event.TURN_ENDED] == [TURN_CANCELLED_CODE]
+    assert runner.reports.turn_endings == [CANCELLED_TURN]
     assert told_states(runner) == [state]
 
 

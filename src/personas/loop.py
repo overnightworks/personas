@@ -9,10 +9,11 @@ from functools import partial
 from operator import eq
 from typing import TYPE_CHECKING, Final, Literal, NoReturn
 
+from logline import unit_trace
+
 from personas.decision import (
     NO_TURNS_CODE,
     SUSPENDED_RETRY_SECONDS,
-    TURN_CANCELLED_CODE,
     AppPlace,
     Joined,
     Lines,
@@ -40,6 +41,7 @@ from personas.decision import (
     speaks_aloud,
     sync_checkpoints,
     sync_turned_revisions,
+    turn_ending,
     turn_invalid,
     view_turn_due,
     wakes_him,
@@ -49,7 +51,7 @@ from personas.failures import CallFailure, leaves_of, raise_if_cancelled
 from personas.mind import Mind
 from personas.recall import LookupBounds
 from personas.remembering import LineStore, Remembering
-from personas.reporting import Event, Reporter, StateChange
+from personas.reporting import Event, Reporter, StateChange, TurnTally, start_turn_tally
 from personas.task_record import (
     TaskRecord,
     ending_loud_when_cancelled,
@@ -63,13 +65,11 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from agents.member import PlaceRef, PlaceWindow, Standing
-    from agents.turn import TurnUsage
 
     from personas.app_session import AppSession, SessionOpener
     from personas.clock import Clock
     from personas.config import AgentCredentials, AppTarget, Config
     from personas.decision import Checkpoint
-    from personas.entries import InputSizes
     from personas.readiness import ReadyMarker
     from personas.tokens import TokenSource
     from personas.turning import BackendFactory
@@ -102,12 +102,12 @@ def _defect_of(task: asyncio.Task[object]) -> BaseException | None:
 
 @dataclass(frozen=True)
 class ActiveTurn:
-    """The running turn: its task and place, the loop's request to end it and its end report."""
+    """The running turn: its task and place, its tally, and the loop's request to end it."""
 
     task: asyncio.Task[None]
     place: PlaceRef
+    tally: TurnTally
     cancel_requested: bool = False
-    end_reported: bool = False
 
 
 class AgentLoop:
@@ -153,7 +153,6 @@ class AgentLoop:
             self._current_token,
             self._use_current_token,
             self._report,
-            self._report_turn_end,
             self._report_pause,
             self._remembering,
         )
@@ -410,23 +409,28 @@ class AgentLoop:
             self._mind.due(AppPlace(self._app.mcp_url, place), lines)
 
     def _start_turn(self, turns: asyncio.TaskGroup, setup: TurnSetup, place: PlaceRef, admitted: Admitted) -> None:
-        task = turns.create_task(self._turning.take(setup, admitted, TaskRecord()))
-        self._turn = ActiveTurn(task, place)
-        task.add_done_callback(self._turn_over)
+        """Starts the turn in a trace of its own, which its task and its done callback share and the loop's own lines
+        do not."""
+        with unit_trace(None):
+            tally = start_turn_tally(self._agent.client_id, self._app.mcp_url)
+            task = turns.create_task(self._turning.take(setup, admitted, TaskRecord(), tally))
+            self._turn = ActiveTurn(task, place, tally)
+            task.add_done_callback(self._turn_over)
 
     def _turn_over(self, task: asyncio.Task[None]) -> None:
+        """The one writer of ``turn.ended``, whatever way the task ended."""
         turn, self._turn = self._turn, None
-        if turn is not None and turn.cancel_requested and task.cancelled() and not turn.end_reported:
-            self._report(Event.TURN_ENDED, TURN_CANCELLED_CODE)
-        self._mind.release()
-
-    def _report_turn_end(self, code: str | None, usage: TurnUsage | None, sizes: InputSizes | None) -> None:
-        """A turn reports its end at most once; the record tells the loop, which then reports no cancel."""
-        assert self._turn is not None  # noqa: S101 - only the running turn's task reports its end
-        self._turn = replace(self._turn, end_reported=True)
-        self._boundaries.report(
-            StateChange(Event.TURN_ENDED, self._agent.client_id, self._app.mcp_url, code, usage=usage, sizes=sizes)
+        assert turn is not None  # noqa: S101 - the loop clears its turn only here and once per task
+        cancelled = task.cancelled()
+        tally = turn.tally
+        ending = turn_ending(
+            cancelled=cancelled,
+            error=None if cancelled else task.exception(),
+            stop_code=tally.stop_code,
+            answered=tally.answered,
         )
+        tally.end(ending)
+        self._mind.release()
 
     def _report_pause(self, seconds: float, code: str) -> None:
         self._boundaries.report(
