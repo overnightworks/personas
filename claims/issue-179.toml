@@ -3,6 +3,6 @@ agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
 role = "builder"
 base = "36e9f1361b455922ff13b890a93f65b32ac7d828"
 branch = "claude/issue-179-an-agent-names-an-ordered-list-of-voices"
-scope = ["README.md", "src/personas/app_session.py", "src/personas/config.py", "src/personas/decision.py", "src/personas/loop.py", "tests"]
+scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/app_session.py", "src/personas/config.py", "src/personas/decision.py", "src/personas/loop.py", "tests"]
 opened_commit = "be1942a6388315dbdde8e3623f8dcb9e44e7687d"
 whole_reason = "the voice table, the accept that carries it, its tests and the README paragraph"
