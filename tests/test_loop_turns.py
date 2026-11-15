@@ -8,11 +8,12 @@ from http import HTTPStatus
 
 import pytest
 from agents.backend.fake_gateway import Reply, completion
-from agents.turn import Principal, person_fingerprint
+from agents.turn import Principal, RejectionCode, person_fingerprint
 
-from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE
+from personas.decision import NETWORK_FAILURE_CODE
 from personas.reporting import Event
 from tests.support.call import ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
+from tests.support.fakes import CANCELLED_TURN, refused_turn
 from tests.support.gateway import BUDGET_SPENT, Gateway, says, says_after_a_hold
 from tests.support.history import (
     OTHER_CALL_ID,
@@ -378,7 +379,9 @@ async def test_while_a_cancelled_turn_still_unwinds_no_turn_of_his_starts_at_ano
         unwinding.release.set()
 
     assert turn_order(runner) == [(1, "lines")]
-    assert runner.reports.reported(started=False) == [(Event.TURN_ENDED, TURN_CANCELLED_CODE)]
+    await runner.reports.until_a_turn_ended()
+    assert runner.reports.reported(started=False) == []
+    assert runner.reports.turn_endings == [CANCELLED_TURN]
 
 
 @pytest.mark.parametrize("leaves", ["gone", "paused"], ids=["the place is gone", "the place is paused"])
@@ -446,16 +449,14 @@ async def test_a_loop_that_backs_off_or_suspends_drops_its_due_places_and_holds_
 
 
 @pytest.mark.parametrize(
-    ("reply", "reported"),
+    ("reply", "ending"),
     [
-        (Reply(status=HTTPStatus.TOO_MANY_REQUESTS), [Event.TURN_ENDED, Event.PAUSED]),
-        (BUDGET_SPENT, [Event.TURN_ENDED, Event.PAUSED]),
+        (Reply(status=HTTPStatus.TOO_MANY_REQUESTS), refused_turn(RejectionCode.BUSY)),
+        (BUDGET_SPENT, refused_turn(RejectionCode.BUDGET_SPENT)),
     ],
     ids=["rate limited", "budget spent"],
 )
-async def test_a_turn_that_ends_short_is_reported_and_the_turn_due_at_another_app_follows(
-    runner, other, reply, reported
-):
+async def test_a_turn_that_ends_short_is_reported_and_the_turn_due_at_another_app_follows(runner, other, reply, ending):
     runner.gateway = Gateway(reply, completion("done"))
     running = runner.gateway.hold_request(1)
     other.stand(SUBJECT, active(OTHER_CALL_ID))
@@ -469,7 +470,8 @@ async def test_a_turn_that_ends_short_is_reported_and_the_turn_due_at_another_ap
     await runner.gateway.until_turns(2, why="lines")
 
     assert turn_order(runner) == [(0, "lines"), (1, "lines")]
-    assert [event for event, _ in runner.reports.reported(started=False)] == reported
+    assert [event for event, _ in runner.reports.reported(started=False)] == [Event.PAUSED]
+    assert runner.reports.turn_endings[0] == ending
 
 
 async def test_a_loop_that_renews_its_token_keeps_its_due_place_and_that_place_goes_before_a_younger_one(runner, other):

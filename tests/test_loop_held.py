@@ -18,6 +18,7 @@ from mcp_types import ListToolsResult
 from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE, status_code
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
+from tests.support.fakes import CANCELLED_TURN, failed_turn
 from tests.support.gateway import Gateway, play, say, words
 from tests.support.history import (
     REMARK,
@@ -315,10 +316,11 @@ async def test_the_call_past_the_turn_bound_of_the_three_apps_ends_the_turn_as_l
     assert other.calls == [PLAY_TOOL] * runner.config.apps[1].binding.max_tool_calls
     assert len(runner.app.said) == runner.config.apps[0].binding.max_tool_calls
     assert len(songmaker.called) == CALLS
+    await runner.reports.until_a_turn_ended()
     assert runner.reports.reported(apps=True, started=False) == [
-        (Event.TURN_ENDED, FailureCode.LIMIT_EXCEEDED.value, url_of(runner, 0)),
         (Event.PAUSED, FailureCode.LIMIT_EXCEEDED.value, url_of(runner, 0)),
     ]
+    assert runner.reports.turn_endings == [failed_turn(FailureCode.LIMIT_EXCEEDED)]
 
 
 async def test_a_turn_whose_place_leaves_while_a_held_apps_call_is_in_flight_ends_cancelled_and_the_act_is_told(
@@ -332,13 +334,12 @@ async def test_a_turn_whose_place_leaves_while_a_held_apps_call_is_in_flight_end
     say_in_the_call(runner, ADDRESSED)
     await entered.wait()
     runner.app.stand(SUBJECT)
-    await runner.reports.until(Event.TURN_ENDED)
+    await runner.reports.until_a_turn_ended()
     waits(other, 1)
     await runner.gateway.until_turns(2)
 
-    assert runner.reports.reported(apps=True, started=False) == [
-        (Event.TURN_ENDED, TURN_CANCELLED_CODE, url_of(runner, 0))
-    ]
+    assert runner.reports.reported(apps=True, started=False) == []
+    assert runner.reports.turn_endings == [CANCELLED_TURN]
     assert runner.gateway.arrivals == 2
     assert runner.gateway.turns("view")[0].told("act") == [played_act(runner, played, unanswered(TURN_CANCELLED_CODE))]
 

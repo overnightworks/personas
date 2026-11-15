@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from agents.backend import TurnStopKind, TurnStopped
 from agents.member import SpeakRefusal, Spoken
 from agents.turn import FailureCode
+from agents.voice import StayedSilent
 from agents.voice.reply import ReplyReader
 
 from personas.decision import (
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
     from personas.app_session import AppSession
     from personas.clock import Clock
     from personas.mind import Mind
+    from personas.reporting import TurnTally
 
 
 class Speaking:
@@ -45,7 +47,8 @@ class Speaking:
     and the end of the speech wait until every owed line has entered, also once a refusal ended the speech. A request is
     sent and its line awaited only before the turn's deadline: a request or line that has not come by then ends the
     turn as ``limit_exceeded``. Each sentence sent enters the agent's history as a ``SaidAloud`` however its request
-    ends. A refusal, a stop included, ends the speech and is reported; the turn goes on without it.
+    ends. A refusal, a stop included, ends the speech and is reported; the turn goes on without it. The turn's tally
+    counts each sentence sent and each silent round.
     """
 
     def __init__(
@@ -58,6 +61,7 @@ class Speaking:
         renew_token: Callable[[], Awaitable[None]],
         report: Callable[[Event, str | None], None],
         mind: Mind,
+        tally: TurnTally,
     ) -> None:
         self._session = session
         self._app = app
@@ -68,6 +72,7 @@ class Speaking:
         self._renew_token = renew_token
         self._report = report
         self._mind = mind
+        self._tally = tally
         self._at = AppPlace(app, place)
         self._mark: int | None = None
         self._answered_spoken = 0
@@ -80,8 +85,11 @@ class Speaking:
         self._deadline: asyncio.Task[None] | None = None
 
     def hear(self, event: TurnEvent) -> None:
-        """Queues the sentences the event completed."""
-        for sentence in self._reader.read(event).sentences:
+        """Queues the sentences the event completed, and counts a round that opened with the silent marker."""
+        reading = self._reader.read(event)
+        if isinstance(reading.opening, StayedSilent):
+            self._tally.silent_count += 1
+        for sentence in reading.sentences:
             self._queue.put_nowait(sentence)
 
     def end(self) -> None:
@@ -223,6 +231,7 @@ class Speaking:
                 return None
             if self._mark is None:
                 self._mark = self._mind.history.taken
+            self._tally.sentence_sent()
             answer = await self._answered_before_the_deadline(self._session.speak(self._place, sentence))
             ended = answer
             return answer

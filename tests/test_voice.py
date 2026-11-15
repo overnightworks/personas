@@ -14,7 +14,7 @@ from agents.turn_events import AssistantTextEvent, FinalEvent
 from personas.decision import DEFAULT_BUDGET_PAUSE_CAP_SECONDS, TURN_CANCELLED_CODE
 from personas.entries import KeptLine, SaidAloud, Unanswered, Visit
 from personas.mind import Mind
-from personas.reporting import Event
+from personas.reporting import Event, start_turn_tally
 from personas.voice import Speaking
 from tests.support.fakes import FakeClock
 from tests.support.voice import HeldSleeps
@@ -22,6 +22,7 @@ from tests.support.voice import HeldSleeps
 pytestmark = pytest.mark.anyio
 
 APP = "https://app.test/mcp"
+AGENT = "mozart"
 PLACE = PlaceRef(kind="call", id="room-7")
 DEADLINE_SECONDS = 30
 READ_AT = datetime(2026, 11, 14, 9, 0, tzinfo=UTC)
@@ -46,6 +47,7 @@ def test_a_speaking_shows_no_sentence_in_its_repr():
         renewed,
         lambda event, code: None,
         Mind(1_000, 1_000, DEFAULT_BUDGET_PAUSE_CAP_SECONDS),
+        start_turn_tally(AGENT, APP),
     )
 
     speaking.hear(AssistantTextEvent(text=f"{marker}. And one more sentence."))
@@ -77,6 +79,7 @@ class SpeakingScenario:
         self._answers_lost = answers_lost
         self.clock = FakeClock()
         self.mind = Mind(10_000, 10_000, DEFAULT_BUDGET_PAUSE_CAP_SECONDS)
+        self.tally = start_turn_tally(AGENT, APP)
         self.sent: list[str] = []
         self.reported: list[tuple[object, str | None]] = []
         self.renewal_seconds = renewal_seconds
@@ -93,6 +96,7 @@ class SpeakingScenario:
             self._renew,
             lambda event, code: self.reported.append((event, code)),
             self.mind,
+            self.tally,
         )
         self.speaking.hear(AssistantTextEvent(text=text))
         self.speaking.hear(FinalEvent(text=text))
@@ -254,6 +258,27 @@ async def test_a_refusal_ends_the_speech_but_a_call_still_waits_for_the_line_of_
     await waiting
     scenario.speaking.end()
     await playing
+
+
+async def test_every_sentence_sent_is_counted_the_refused_one_included_and_a_sentence_after_the_refusal_is_not():
+    scenario = SpeakingScenario("One. Two. Three.", line_follows=False, second_answer=SpeakRefusal.STOPPED, ends=False)
+    scenario.renewal_gate.set()
+    HeldSleeps(scenario)
+    playing = asyncio.create_task(scenario.speaking.play())
+    await anyio.wait_all_tasks_blocked()
+    scenario.his_spoken_line_enters()
+    scenario.speaking.end()
+    await playing
+
+    assert (scenario.sent, scenario.tally.sentence_count) == (["One.", "Two."], 2)
+
+
+async def test_a_round_that_opens_with_the_silent_marker_is_counted_and_sends_no_sentence():
+    scenario = SpeakingScenario("[silent]")
+    scenario.renewal_gate.set()
+    await scenario.speaking.play()
+
+    assert (scenario.tally.silent_count, scenario.tally.sentence_count, scenario.sent) == (1, 0, [])
 
 
 async def test_a_request_not_answered_by_the_deadline_enters_once_as_unanswered_and_ends_the_turn_limit_exceeded():

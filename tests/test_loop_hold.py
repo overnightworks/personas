@@ -10,7 +10,7 @@ from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.turn import FailureCode
 
 from personas.config import load_config
-from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE
+from personas.decision import NETWORK_FAILURE_CODE
 from personas.reporting import Event
 from tests.support.call import (
     ADDRESSED,
@@ -19,6 +19,7 @@ from tests.support.call import (
     restarted_in_the_call,
     say_in_the_call,
 )
+from tests.support.fakes import CANCELLED_TURN, failed_turn
 from tests.support.gateway import Gateway, play, say, says_after_a_hold, words
 from tests.support.history import (
     REMARK,
@@ -242,9 +243,13 @@ async def test_a_place_that_leaves_while_the_round_after_a_hold_is_pending_cance
     await runner.gateway.until_requested(2)
 
     runner.app.stand(SUBJECT)
-    await runner.reports.until(Event.TURN_ENDED)
+    await runner.reports.until_a_turn_ended()
 
-    assert runner.reports.reported() == [STARTED, (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
+    await runner.reports.until_a_turn_ended()
+
+    assert runner.reports.reported() == [STARTED]
+
+    assert runner.reports.turn_endings == [CANCELLED_TURN]
     assert runner.app.said == []
     assert runner.app.log.count(CALL) == 0
 
@@ -261,11 +266,12 @@ async def test_a_round_after_a_hold_that_passes_the_deadline_ends_the_turn_as_li
     first.set()
     await runner.reports.until(Event.PAUSED)
 
+    await runner.reports.until_a_turn_ended()
     assert runner.reports.reported() == [
         STARTED,
-        (Event.TURN_ENDED, FailureCode.LIMIT_EXCEEDED.value),
         (Event.PAUSED, FailureCode.LIMIT_EXCEEDED.value),
     ]
+    assert runner.reports.turn_endings == [failed_turn(FailureCode.LIMIT_EXCEEDED)]
     assert runner.app.said == []
     assert runner.app.log.count(CALL) == 0
 

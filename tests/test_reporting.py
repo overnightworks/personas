@@ -7,12 +7,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 from agents.turn import FailureCode, RejectionCode, TurnUsage
+from logline import Outcome
 from logline.testing import configured
 
-from personas.decision import TURN_CANCELLED_CODE
+from personas.decision import TurnEnding
 from personas.entries import InputSizes
 from personas.failures import StatusFailure, Unreachable
-from personas.reporting import Event, StateChange, log_state_change
+from personas.reporting import Event, StateChange, log_state_change, start_turn_tally
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -102,12 +103,41 @@ def test_the_sweep_belongs_to_no_agent_and_no_app_and_says_its_line_count(writte
     assert not {"agent_id", "app_id"} & line.keys()
 
 
-def test_a_turn_that_used_tokens_and_sent_a_request_says_its_counts_and_bytes(written):
+@pytest.fixture
+def turn_line(capsys: pytest.CaptureFixture[str]) -> Callable[..., dict[str, object]]:
+    """Ends a turn's tally under the entry point's logging and returns the one JSON line it wrote."""
+
+    def end(ending: TurnEnding, **counted: object) -> dict[str, object]:
+        with configured("personas"):
+            tally = start_turn_tally(AGENT, APP_URL)
+            for name, value in counted.items():
+                setattr(tally, name, value)
+            tally.end(ending)
+        return json.loads(capsys.readouterr().out)
+
+    return end
+
+
+def test_a_turn_says_its_counts_tokens_and_input_bytes_beside_its_duration(turn_line):
     usage = TurnUsage(input_tokens=250, cached_input_tokens=140, cache_write_tokens=10, output_tokens=8, requests=2)
 
-    line = written(of(Event.TURN_ENDED, usage=usage, sizes=InputSizes(1, 2, 3, 4)))
+    line = turn_line(
+        TurnEnding(Outcome.OK),
+        usage=usage,
+        sizes=InputSizes(1, 2, 3, 4),
+        sentence_count=3,
+        silent_count=1,
+        tool_call_count=2,
+    )
 
-    assert line["outcome"] == "ok"
+    assert (line["event"], line["outcome"], line["agent_id"], line["app_id"]) == (
+        "turn.ended",
+        "ok",
+        AGENT,
+        "hopin.example",
+    )
+    assert isinstance(line["duration_ms"], float)
+    assert (line["sentence_count"], line["silent_count"], line["tool_call_count"]) == (3, 1, 2)
     assert {key: line[key] for key in ("input_tokens", "cached_input_tokens", "cache_write_tokens")} == {
         "input_tokens": 250,
         "cached_input_tokens": 140,
@@ -117,18 +147,37 @@ def test_a_turn_that_used_tokens_and_sent_a_request_says_its_counts_and_bytes(wr
     assert [line[key] for key in ("tools_bytes", "told_bytes", "results_bytes", "images_bytes")] == [1, 2, 3, 4]
 
 
+def test_a_turn_that_sent_nothing_says_zero_counts_and_no_first_output_tokens_or_sizes(turn_line):
+    line = turn_line(TurnEnding(Outcome.OK))
+
+    assert (line["sentence_count"], line["silent_count"], line["tool_call_count"]) == (0, 0, 0)
+    assert not {"first_output_ms", "input_tokens", "tools_bytes"} & line.keys()
+
+
+def test_the_first_sentence_sent_marks_the_first_output(capsys):
+    with configured("personas"):
+        tally = start_turn_tally(AGENT, APP_URL)
+        tally.sentence_sent()
+        tally.sentence_sent()
+        tally.end(TurnEnding(Outcome.OK))
+    line = json.loads(capsys.readouterr().out)
+
+    assert (line["sentence_count"], isinstance(line["first_output_ms"], float)) == (2, True)
+
+
 @pytest.mark.parametrize(
-    ("code", "outcome", "level"),
+    ("ending", "outcome", "level", "reason"),
     [
-        (None, "ok", "info"),
-        (TURN_CANCELLED_CODE, "cancelled", "info"),
-        (RejectionCode.BUDGET_SPENT.value, "refused", "info"),
-        (FailureCode.PROVIDER_ERROR.value, "failed", "error"),
+        (TurnEnding(Outcome.OK), "ok", "info", None),
+        (TurnEnding(Outcome.CANCELLED), "cancelled", "info", None),
+        (TurnEnding(Outcome.REFUSED, RejectionCode.BUDGET_SPENT.value), "refused", "info", "budget_spent"),
+        (TurnEnding(Outcome.FAILED, FailureCode.PROVIDER_ERROR.value), "failed", "error", "provider_error"),
     ],
     ids=["answered", "cancelled", "refused by the gateway", "failed"],
 )
-def test_a_turn_ends_with_the_outcome_its_code_means_and_an_error_only_when_it_failed(written, code, outcome, level):
-    line = written(of(Event.TURN_ENDED, code))
+def test_a_turn_ends_with_its_outcome_its_reason_when_it_has_one_and_an_error_only_when_it_failed(
+    turn_line, ending, outcome, level, reason
+):
+    line = turn_line(ending)
 
-    assert (line["outcome"], line["level"]) == (outcome, level)
-    assert line.get("reason") == code
+    assert (line["outcome"], line["level"], line.get("reason")) == (outcome, level, reason)

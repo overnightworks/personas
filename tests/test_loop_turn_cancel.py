@@ -12,11 +12,12 @@ from agents.backend.fake_gateway import Reply, completion
 from agents.member import STANDING_URI
 
 from personas import app_session
-from personas.decision import TURN_CANCELLED_CODE, status_code
+from personas.decision import status_code
 from personas.failures import Unreachable, leaves_of
 from personas.reporting import Event
 from personas.task_record import UnrequestedCancellationError
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
+from tests.support.fakes import CANCELLED_TURN, COMPLETED_TURN
 from tests.support.gateway import Gateway, says
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import DISCOVER, LIMIT_SECONDS, READ, active, paused
@@ -56,9 +57,13 @@ async def test_a_turn_whose_place_left_the_standing_is_cancelled_with_no_further
     await a_turn_in_its_first_round(runner)
 
     runner.app.stand(SUBJECT)
-    await runner.reports.until(Event.TURN_ENDED)
+    await runner.reports.until_a_turn_ended()
 
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
+    await runner.reports.until_a_turn_ended()
+
+    assert runner.reports.reported() == [(Event.STARTED, None)]
+
+    assert runner.reports.turn_endings == [CANCELLED_TURN]
     assert runner.gateway.requests == []
     assert runner.app.said == []
     assert not runner.task.done()
@@ -69,7 +74,7 @@ async def test_a_turn_paused_mid_way_is_cancelled_and_after_the_resume_the_old_l
     say_in_the_call(runner, f"{ADDRESSED} While the turn ran.")
 
     runner.app.stand(SUBJECT, paused(PLACE_ID))
-    await runner.reports.until(Event.TURN_ENDED)
+    await runner.reports.until_a_turn_ended()
     say_in_the_call(runner, f"{ADDRESSED} During the pause.")
     resumed_read = runner.app.hold_next_window_read()
     runner.app.stand(SUBJECT, active(PLACE_ID))
@@ -78,7 +83,11 @@ async def test_a_turn_paused_mid_way_is_cancelled_and_after_the_resume_the_old_l
     resumed_read.set()
     await runner.app.said_count(1)
 
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
+    await runner.reports.until_a_turn_ended()
+
+    assert runner.reports.reported() == [(Event.STARTED, None)]
+
+    assert runner.reports.turn_endings == [CANCELLED_TURN]
     assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[4]]
 
 
@@ -92,12 +101,16 @@ async def test_a_cancelled_turn_whose_session_leaves_with_late_answers_alone_giv
     await a_turn_in_its_first_round(runner)
 
     runner.app.stand(SUBJECT)
-    await runner.reports.until(Event.TURN_ENDED)
+    await runner.reports.until_a_turn_ended()
     later_read = runner.app.hold_next_read()
     runner.app.stand(SUBJECT, active(PLACE_ID))
     await runner.app.until_read_held()
 
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
+    await runner.reports.until_a_turn_ended()
+
+    assert runner.reports.reported() == [(Event.STARTED, None)]
+
+    assert runner.reports.turn_endings == [CANCELLED_TURN]
     assert runner.app.log.count("subscriptions/listen") == 1
     assert not runner.task.done()
     later_read.set()
@@ -137,7 +150,9 @@ async def test_while_a_cancelled_turn_still_unwinds_a_new_addressed_line_starts_
         unwinding.release.set()
 
     assert runner.app.said == [(SUBJECT, OTHER_PLACE_ID, "There.")]
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
+    await runner.reports.until_a_turn_ended()
+    assert runner.reports.reported() == [(Event.STARTED, None)]
+    assert runner.reports.turn_endings == [CANCELLED_TURN]
 
 
 async def test_a_turn_that_reported_its_end_and_meets_the_cancel_in_its_teardown_reports_no_cancel(runner, monkeypatch):
@@ -149,7 +164,6 @@ async def test_a_turn_that_reported_its_end_and_meets_the_cancel_in_its_teardown
     try:
         async with asyncio.timeout(LIMIT_SECONDS):
             await closing.closing.wait()
-        await runner.reports.until_a_turn_completed()
         removal_read = runner.app.hold_next_read()
         runner.app.stand(SUBJECT)
         await runner.app.until_read_held()
@@ -160,7 +174,9 @@ async def test_a_turn_that_reported_its_end_and_meets_the_cancel_in_its_teardown
     finally:
         closing.release.set()
 
+    await runner.reports.until_a_turn_ended()
     assert runner.reports.reported() == [(Event.STARTED, None)]
+    assert runner.reports.turn_endings == [COMPLETED_TURN]
     assert not runner.task.done()
 
 
@@ -177,7 +193,7 @@ async def test_a_turns_backend_is_closed_once_the_turn_was_cancelled(runner):
     await a_turn_in_its_first_round(runner)
 
     runner.app.stand(SUBJECT)
-    await runner.reports.until(Event.TURN_ENDED)
+    await runner.reports.until_a_turn_ended()
 
     assert runner.backends[0].closed.is_set()
 
@@ -256,12 +272,16 @@ async def test_a_call_failure_in_a_turns_session_body_whose_place_then_leaves_en
     runner, monkeypatch, seam
 ):
     await a_turn_removed_while_its_session_closes(runner, monkeypatch, seam=seam, error=Unreachable("down"))
-    await runner.reports.until(Event.TURN_ENDED)
+    await runner.reports.until_a_turn_ended()
     later_read = runner.app.hold_next_read()
     runner.app.stand(SUBJECT, active(PLACE_ID))
     await runner.app.until_read_held()
 
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
+    await runner.reports.until_a_turn_ended()
+
+    assert runner.reports.reported() == [(Event.STARTED, None)]
+
+    assert runner.reports.turn_endings == [CANCELLED_TURN]
     assert not runner.task.done()
     later_read.set()
 
@@ -271,12 +291,16 @@ async def test_a_gateway_stop_in_a_turns_session_body_whose_place_then_leaves_en
 ):
     gateway = Gateway(Reply(status=HTTPStatus.SERVICE_UNAVAILABLE))
     await a_turn_removed_while_its_session_closes(runner, monkeypatch, gateway=gateway)
-    await runner.reports.until(Event.TURN_ENDED)
+    await runner.reports.until_a_turn_ended()
     later_read = runner.app.hold_next_read()
     runner.app.stand(SUBJECT, active(PLACE_ID))
     await runner.app.until_read_held()
 
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
+    await runner.reports.until_a_turn_ended()
+
+    assert runner.reports.reported() == [(Event.STARTED, None)]
+
+    assert runner.reports.turn_endings == [CANCELLED_TURN]
     assert not runner.task.done()
     later_read.set()
 
@@ -312,12 +336,16 @@ async def test_a_removal_that_reaches_a_turn_while_its_session_opens_with_late_a
 ):
     async with a_turn_opening_its_session(runner, monkeypatch, only_close=1, echo=echo):
         runner.app.stand(SUBJECT)
-        await runner.reports.until(Event.TURN_ENDED)
+        await runner.reports.until_a_turn_ended()
         later_read = runner.app.hold_next_read()
         runner.app.stand(SUBJECT, active(PLACE_ID))
         await runner.app.until_read_held()
 
-        assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
+        await runner.reports.until_a_turn_ended()
+
+        assert runner.reports.reported() == [(Event.STARTED, None)]
+
+        assert runner.reports.turn_endings == [CANCELLED_TURN]
         assert not runner.task.done()
         later_read.set()
 

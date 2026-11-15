@@ -25,6 +25,7 @@ from personas.decision import (
 from personas.failures import INVALID_ANSWER_CODE, Unreachable
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
+from tests.support.fakes import CANCELLED_TURN
 from tests.support.gateway import Gateway, says_after_a_hold
 from tests.support.history import (
     OTHER_CALL_ID,
@@ -320,7 +321,7 @@ async def a_call_waiting_for_its_app_while_its_place_leaves(runner, songmaker, *
     async with asyncio.timeout(10):
         await entered.wait()
     runner.app.stand(SUBJECT, active(OTHER_CALL_ID))
-    await runner.reports.until(Event.TURN_ENDED)
+    await runner.reports.until_a_turn_ended()
     runner.app.speak(OTHER_CALL_ID, PERSON, SPEAKER, ADDRESSED)
     await runner.gateway.until_turns(2)
     return act, written_turns(runner)[1]
@@ -339,7 +340,9 @@ async def test_a_call_cut_in_flight_because_its_place_left_is_told_cancelled_to_
             entry(url_of(runner, 0), OTHER_CALL_ID, ADDRESSED),
         ]
     )
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
+    await runner.reports.until_a_turn_ended()
+    assert runner.reports.reported() == [(Event.STARTED, None)]
+    assert runner.reports.turn_endings == [CANCELLED_TURN]
 
 
 async def test_a_call_cut_in_flight_whose_request_ends_as_a_transport_failure_is_told_cancelled_not_network(
@@ -367,7 +370,9 @@ async def test_a_call_cut_in_flight_whose_request_ends_as_a_transport_failure_is
     )
 
     assert second.room["history"]["entries"][1] == act
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
+    await runner.reports.until_a_turn_ended()
+    assert runner.reports.reported() == [(Event.STARTED, None)]
+    assert runner.reports.turn_endings == [CANCELLED_TURN]
 
 
 async def test_a_say_whose_only_effect_is_an_act_starts_no_further_turn_once_his_own_line_is_read(runner):

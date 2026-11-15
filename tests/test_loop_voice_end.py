@@ -20,6 +20,7 @@ from personas.reporting import Event
 from personas.task_record import UnrequestedCancellationError
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PLACE_ID, say_in_the_call
 from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
+from tests.support.fakes import CANCELLED_TURN, failed_turn
 from tests.support.gateway import Gateway, speaks_and_says
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, LIMIT_SECONDS, LISTEN, READ, SAY_TOOL, active, paused
@@ -47,10 +48,12 @@ async def test_a_place_removed_or_paused_while_a_sentence_waits_cancels_the_turn
 
     leaves(runner)
     await sleeps.until_cancelled()
-    await runner.reports.until(Event.TURN_ENDED)
+    await runner.reports.until_a_turn_ended()
 
     assert sentences_spoken(runner) == ["First sentence."]
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
+    await runner.reports.until_a_turn_ended()
+    assert runner.reports.reported() == [(Event.STARTED, None)]
+    assert runner.reports.turn_endings == [CANCELLED_TURN]
     assert not runner.task.done()
 
 
@@ -218,11 +221,12 @@ async def test_a_gateway_that_stops_the_turn_while_a_sentence_is_sent_and_one_is
     await runner.gateway.until_turns(2)
 
     assert sentences_spoken(runner) == ["First sentence."]
+    await runner.reports.until_a_turn_ended()
     assert runner.reports.reported() == [
         (Event.STARTED, None),
-        (Event.TURN_ENDED, FailureCode.PROVIDER_ERROR.value),
         (Event.PAUSED, FailureCode.PROVIDER_ERROR.value),
     ]
+    assert runner.reports.turn_endings == [failed_turn(FailureCode.PROVIDER_ERROR)]
     (sent,) = runner.gateway.turns()[1].told("speech")
     assert (sent["text"], sent["outcome"]) == ("First sentence.", {"answered": True})
 
@@ -245,11 +249,12 @@ async def test_a_gateway_that_stops_the_turn_while_a_sentence_is_open_waits_for_
     await runner.gateway.until_turns(2)
 
     assert sentences_spoken(runner) == ["First sentence.", "Second sentence."]
+    await runner.reports.until_a_turn_ended()
     assert runner.reports.reported() == [
         (Event.STARTED, None),
-        (Event.TURN_ENDED, FailureCode.PROVIDER_ERROR.value),
         (Event.PAUSED, FailureCode.PROVIDER_ERROR.value),
     ]
+    assert runner.reports.turn_endings == [failed_turn(FailureCode.PROVIDER_ERROR)]
     assert [(each["text"], each["outcome"]) for each in runner.gateway.turns()[1].told("speech")] == [
         ("First sentence.", {"answered": True}),
         ("Second sentence.", {"answered": True}),
@@ -294,11 +299,12 @@ async def test_a_turn_past_its_deadline_when_his_line_entered_sends_no_call_or_s
 
     assert sentences_spoken(runner) == sent
     assert runner.app.said == []
+    await runner.reports.until_a_turn_ended()
     assert runner.reports.reported() == [
         (Event.STARTED, None),
-        (Event.TURN_ENDED, FailureCode.LIMIT_EXCEEDED.value),
         (Event.PAUSED, FailureCode.LIMIT_EXCEEDED.value),
     ]
+    assert runner.reports.turn_endings == [failed_turn(FailureCode.LIMIT_EXCEEDED)]
     assert [each["text"] for each in runner.gateway.turns()[1].told("speech")] == sentences_spoken(runner)
     assert not runner.task.done()
 
@@ -321,11 +327,12 @@ async def test_a_line_or_answer_that_never_arrives_ends_the_turn_limit_exceeded_
 
     assert sentences_spoken(runner) == sent[:1]
     assert runner.app.said == []
+    await runner.reports.until_a_turn_ended()
     assert runner.reports.reported() == [
         (Event.STARTED, None),
-        (Event.TURN_ENDED, FailureCode.LIMIT_EXCEEDED.value),
         (Event.PAUSED, FailureCode.LIMIT_EXCEEDED.value),
     ]
+    assert runner.reports.turn_endings == [failed_turn(FailureCode.LIMIT_EXCEEDED)]
     told = runner.gateway.turns()[1].told("speech")
     assert [(each["text"], each["outcome"]) for each in told] == [
         (sent[0], {"answered": True}),

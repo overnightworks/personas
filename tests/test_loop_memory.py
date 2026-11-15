@@ -35,7 +35,7 @@ from personas.recall import (
 )
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PLACE_ID, restarted_in_the_call, say_in_the_call
-from tests.support.fakes import memory_target
+from tests.support.fakes import failed_turn, memory_target
 from tests.support.gateway import Gateway, play, say, says
 from tests.support.history import (
     MORNING,
@@ -257,10 +257,11 @@ async def test_a_turns_call_total_is_his_apps_bounds_plus_his_lookups_and_the_on
     await runner.reports.until(Event.PAUSED)
 
     assert runner.gateway.arrivals == len(total) + 1
+    await runner.reports.until_a_turn_ended()
     assert runner.reports.reported(started=False) == [
-        (Event.TURN_ENDED, FailureCode.LIMIT_EXCEEDED.value),
         (Event.PAUSED, FailureCode.LIMIT_EXCEEDED.value),
     ]
+    assert runner.reports.turn_endings == [failed_turn(FailureCode.LIMIT_EXCEEDED)]
 
 
 @pytest.mark.parametrize("at_a_view", [False, True], ids=["written turn", "turn at a view"])

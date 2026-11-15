@@ -14,12 +14,13 @@ from mcp_types import INVALID_PARAMS, UNSUPPORTED_PROTOCOL_VERSION, ListToolsRes
 
 from personas import app_session
 from personas.config import load_config
-from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE, jsonrpc_code, status_code
+from personas.decision import NETWORK_FAILURE_CODE, jsonrpc_code, status_code
 from personas.failures import Unreachable, leaves_of
 from personas.reporting import Event
 from personas.tokens import HttpTokenSource
 from personas.turning import Turning
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
+from tests.support.fakes import CANCELLED_TURN
 from tests.support.gateway import Gateway
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, DISCOVER, LIMIT_SECONDS, LIST_TOOLS, LISTEN, SAY_TOOL, formatted, lines_of
@@ -392,9 +393,13 @@ async def test_a_turn_whose_place_left_during_a_tools_only_call_stops_with_no_fu
     await a_turn_inside_a_tools_only_call(runner, songmaker)
 
     runner.app.stand(SUBJECT)
-    await runner.reports.until(Event.TURN_ENDED)
+    await runner.reports.until_a_turn_ended()
 
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
+    await runner.reports.until_a_turn_ended()
+
+    assert runner.reports.reported() == [(Event.STARTED, None)]
+
+    assert runner.reports.turn_endings == [CANCELLED_TURN]
     assert len(runner.gateway.requests) == 1
     assert runner.app.said == []
     assert not runner.task.done()
@@ -542,9 +547,13 @@ async def test_a_tools_only_call_whose_cancelled_session_leaves_as_a_failure_sti
     await a_turn_inside_a_tools_only_call(runner, songmaker)
 
     runner.app.stand(SUBJECT)
-    await runner.reports.until(Event.TURN_ENDED)
+    await runner.reports.until_a_turn_ended()
 
-    assert runner.reports.reported() == [(Event.STARTED, None), (Event.TURN_ENDED, TURN_CANCELLED_CODE)]
+    await runner.reports.until_a_turn_ended()
+
+    assert runner.reports.reported() == [(Event.STARTED, None)]
+
+    assert runner.reports.turn_endings == [CANCELLED_TURN]
     assert len(runner.gateway.requests) == 1
     assert runner.app.said == []
 

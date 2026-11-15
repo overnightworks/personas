@@ -595,7 +595,7 @@ async def test_a_turn_cancelled_with_its_place_adds_no_message_and_the_next_turn
     say_in_the_call(runner, f"{ADDRESSED} First.")
     await runner.gateway.until_requested(1)
     runner.app.stand(SUBJECT, paused(PLACE_ID))
-    await runner.reports.until(Event.TURN_ENDED)
+    await runner.reports.until_a_turn_ended()
     resumed_read = runner.app.hold_next_window_read()
     runner.app.stand(SUBJECT, active(PLACE_ID))
     await runner.app.until_window_read_held()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 import anyio
@@ -12,6 +13,7 @@ from agents.backend.gateway import GatewayBackend
 from agents.member import AcceptInvitationRefusal, PlaceRef
 from agents.tools import ToolDeclaration, ToolEffect
 from agents.turn import RejectionCode
+from logline.testing import configured
 from mcp_types import INVALID_PARAMS
 
 from personas.config import DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES, load_config
@@ -19,6 +21,7 @@ from personas.decision import (
     BACKOFF_CAP_SECONDS,
     DEFAULT_BUDGET_PAUSE_CAP_SECONDS,
     NETWORK_FAILURE_CODE,
+    NO_FINAL_EVENT_REASON,
     RENEW_BEFORE_EXPIRY_SECONDS,
     SUSPENDED_RETRY_SECONDS,
     Accept,
@@ -35,10 +38,12 @@ from tests.support.fakes import (
     FakeReadyMarker,
     FakeTokens,
     Reports,
+    TurnEnded,
     grant,
     jwt_grant,
     line,
     read_of,
+    refused_turn,
     window_of,
 )
 from tests.support.gateway import Gateway, says
@@ -651,29 +656,31 @@ class TurnEndingInTheStepItsPlaceLeaves(TurnAndLifecycle):
 
 
 @pytest.mark.parametrize(
-    ("ending", "own_reports", "sleeps"),
+    ("ending", "own_endings", "sleeps"),
     [
-        ("stop", [(Event.TURN_ENDED, RejectionCode.BUSY.value)], []),
-        ("completion", [], []),
-        ("relayed failure", [], [backoff_delay(1)]),
+        ("stop", [refused_turn(RejectionCode.BUSY)], []),
+        ("events without a final event", [TurnEnded("failed", NO_FINAL_EVENT_REASON)], []),
+        ("relayed failure", [TurnEnded("failed", NETWORK_FAILURE_CODE)], [backoff_delay(1)]),
     ],
-    ids=["a stop it reported", "a completion", "a failed relayed call"],
+    ids=["a stop it reported", "events without a final event", "a failed relayed call"],
 )
 async def test_a_turn_that_ends_on_its_own_in_the_step_its_place_leaves_reports_only_its_own_end(
-    files, ending, own_reports, sleeps
+    files, ending, own_endings, sleeps
 ):
     together = TurnEndingInTheStepItsPlaceLeaves(files, ending)
-    task = asyncio.create_task(together.loop.run())
-    try:
-        async with asyncio.timeout(LIMIT_SECONDS):
-            await together.lifecycle_waiting.wait()
-            together.release.set()
-            await together.reopened.wait()
-    finally:
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
+    with configured("personas"):
+        together.reports.attach_to(logging.getLogger())
+        task = asyncio.create_task(together.loop.run())
+        try:
+            async with asyncio.timeout(LIMIT_SECONDS):
+                await together.lifecycle_waiting.wait()
+                together.release.set()
+                await together.reopened.wait()
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
-    assert [event for event in together.reports.reported() if event[0] is Event.TURN_ENDED] == own_reports
+    assert together.reports.turn_endings == own_endings
     assert together.clock.slept == sleeps
 
 

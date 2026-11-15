@@ -19,7 +19,7 @@ from personas.app_session import READ_SECONDS, open_mcp_session
 from personas.config import DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES, Voice, load_config
 from personas.decision import DEFAULT_BUDGET_PAUSE_CAP_SECONDS
 from personas.loop import AgentLoop, Boundaries
-from personas.main import QUIET_LIBRARIES, SweepingBoundaries, run_with_sweep
+from personas.main import SweepingBoundaries, run_with_sweep
 from personas.mind import Mind
 from personas.readiness import FileReadyMarker
 from personas.reporting import log_state_change
@@ -141,6 +141,7 @@ class Harness:
         self.realm = FakeRealm(self.app, self.agent, AGENT_SUBJECT, SCOPE)
         self.clock = FakeClock()
         self.reports = Reports()
+        self.reports.attach_to(logging.getLogger())
         self.token_client = httpx2.AsyncClient(transport=self.realm.transport())
         self.task: asyncio.Task[object] | None = None
         self.tools_only_apps: list[ToolsOnlyApp] = []
@@ -267,14 +268,9 @@ async def songmaker(runner: Harness) -> AsyncIterator[ToolsOnlyApp]:
 
 @pytest.fixture
 def restored_logging() -> Iterator[None]:
-    """The logging state the entry point configures, put back at the test's end: the root handlers and the levels of
-    the loggers it caps."""
-    loggers = [logging.getLogger(name) for name in QUIET_LIBRARIES]
-    levels = [each.level for each in loggers]
+    """The logging state the entry point configures, put back at the test's end."""
     with configured("personas"):
         yield
-    for each, level in zip(loggers, levels, strict=True):
-        each.setLevel(level)
 
 
 @pytest.fixture

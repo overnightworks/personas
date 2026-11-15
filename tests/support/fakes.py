@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import secrets
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -22,6 +23,8 @@ from tests.support.realm import AGENT_NAME, API_GROUP, jwt_of
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+    from agents.turn import FailureCode, RejectionCode
 
     from personas.reporting import StateChange
 
@@ -241,28 +244,59 @@ class Report(NamedTuple):
     app: str | None
 
 
+class TurnEnded(NamedTuple):
+    """One ``turn.ended`` line as a scenario reads it: its outcome and its reason, if any."""
+
+    outcome: str
+    reason: str | None = None
+
+
+def refused_turn(code: RejectionCode) -> TurnEnded:
+    return TurnEnded("refused", code.value)
+
+
+def failed_turn(code: FailureCode) -> TurnEnded:
+    return TurnEnded("failed", code.value)
+
+
+CANCELLED_TURN = TurnEnded("cancelled")
+COMPLETED_TURN = TurnEnded("ok")
+
+
+class _TurnEndings(logging.Handler):
+    """Collects the runner's ``turn.ended`` lines, which the turn writes itself and no state change carries."""
+
+    def __init__(self, ended: list[TurnEnded], added: asyncio.Event) -> None:
+        super().__init__()
+        self._ended = ended
+        self._added = added
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if record.name == "personas" and record.getMessage() == "turn.ended":
+            fields = vars(record)
+            self._ended.append(TurnEnded(str(fields["outcome"]), fields.get("reason")))
+            self._added.set()
+
+
 class Reports:
     """The state changes a loop reported, in order, and a way to wait for one.
 
-    A turn that ended with its final event is reported with no code; ``reported`` and ``until`` leave it out, so a
-    scenario reads what went wrong or was cut short, and ``until_a_turn_completed`` waits for it.
+    A turn writes its own ``turn.ended`` line: ``turn_endings`` holds each, and ``until_a_turn_ended`` waits for one.
+    ``attach_to`` puts the collector on a logger, which restores its handlers itself.
     """
 
     def __init__(self) -> None:
         self.changes: list[StateChange] = []
+        self.turn_endings: list[TurnEnded] = []
         self._added = asyncio.Event()
+        self._turn_log = _TurnEndings(self.turn_endings, self._added)
+
+    def attach_to(self, logger: logging.Logger) -> None:
+        logger.addHandler(self._turn_log)
 
     def __call__(self, change: StateChange) -> None:
         self.changes.append(change)
         self._added.set()
-
-    @staticmethod
-    def _completes_a_turn(change: StateChange) -> bool:
-        return change.event is Event.TURN_ENDED and change.code is None
-
-    @property
-    def without_completed_turns(self) -> list[StateChange]:
-        return [change for change in self.changes if not self._completes_a_turn(change)]
 
     @overload
     def reported(self, *, apps: Literal[False] = False, started: bool = True) -> list[tuple[Event, str | None]]: ...
@@ -274,14 +308,14 @@ class Reports:
         """Each reported change as its event and code, with the address of the app it names when ``apps``."""
         reports = [
             Report(change.event, change.code, change.app)
-            for change in self.without_completed_turns
+            for change in self.changes
             if started or change.event is not Event.STARTED
         ]
         return reports if apps else [(each.event, each.code) for each in reports]
 
     def of_the_sweep(self) -> list[tuple[Event, str | None]]:
         """The changes that name no agent, the sweep's own, as their event and code."""
-        return [(change.event, change.code) for change in self.without_completed_turns if change.client_id is None]
+        return [(change.event, change.code) for change in self.changes if change.client_id is None]
 
     def lines_removed(self) -> list[int | None]:
         """The line count of each sweep that finished."""
@@ -302,12 +336,18 @@ class Reports:
     async def until(self, event: Event, *, count: int = 1, limit_seconds: float = 10.0) -> None:
         """Returns once this many changes of this event have been reported; fails after the limit."""
         async with asyncio.timeout(limit_seconds):
-            while sum(change.event is event for change in self.without_completed_turns) < count:
+            while sum(change.event is event for change in self.changes) < count:
+                self._added.clear()
+                await self._added.wait()
+
+    async def until_a_turn_ended(self, *, count: int = 1, limit_seconds: float = 10.0) -> None:
+        async with asyncio.timeout(limit_seconds):
+            while len(self.turn_endings) < count:
                 self._added.clear()
                 await self._added.wait()
 
     async def until_a_turn_completed(self, *, count: int = 1, limit_seconds: float = 10.0) -> None:
         async with asyncio.timeout(limit_seconds):
-            while sum(self._completes_a_turn(change) for change in self.changes) < count:
+            while self.turn_endings.count(COMPLETED_TURN) < count:
                 self._added.clear()
                 await self._added.wait()

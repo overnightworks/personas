@@ -48,7 +48,7 @@ from personas.entries import (
     told_place,
     told_time,
 )
-from personas.failures import CallFailure, StatusFailure, TokenStatusFailure, UnusableAnswer
+from personas.failures import CallFailure, StatusFailure, TokenStatusFailure, UnusableAnswer, leaves_of
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -77,8 +77,12 @@ TURN_ROLE: Final[AgentRole] = "user"
 SENTENCES_AHEAD: Final = 1
 """How many sentences he sends ahead of the one playing: the wire answers a sentence at its turn, in the order sent."""
 TURN_CANCELLED_CODE: Final = "cancelled"
-"""The code of a turn the loop cancelled because its place left the standing, and of an act whose call was cut while it
-was in flight, by that or by the turn's deadline."""
+"""The code of an act whose call was cut while it was in flight, by a cancellation of its turn or by the turn's
+deadline."""
+DEFECT_REASON: Final = "defect"
+"""The reason of a turn that an error ended which is no failure of a call."""
+NO_FINAL_EVENT_REASON: Final = "no_final_event"
+"""The reason of a turn whose events ended without a final event and without an error."""
 
 
 class UnrecognisedRefusal(StrEnum):
@@ -286,16 +290,34 @@ def failure_reason(failure: CallFailure) -> str:
     return NETWORK_FAILURE_CODE
 
 
-def turn_outcome(code: str | None) -> Outcome:
-    """How a turn ended, from the code its end reports: none for an answer, else a cancellation, a refusal of the
-    gateway or a failure."""
-    if code is None:
-        return Outcome.OK
-    if code == TURN_CANCELLED_CODE:
-        return Outcome.CANCELLED
-    if code in {each.value for each in RejectionCode}:
-        return Outcome.REFUSED
-    return Outcome.FAILED
+@dataclass(frozen=True)
+class TurnEnding:
+    """How a turn ended: its outcome, and the closed reason of one that did not end ``ok`` or cancelled."""
+
+    outcome: Outcome
+    reason: str | None = None
+
+
+def turn_ending(*, cancelled: bool, error: BaseException | None, stop_code: str | None, answered: bool) -> TurnEnding:
+    """The ending of a turn from what its task ended with and what the turn recorded.
+
+    A turn that got its final event is ok, whatever its teardown then met. Otherwise a cancellation, whoever asked for
+    it and even before the task's first step, is cancelled. A stop the turn reported carries its code: a refusal of
+    the gateway is refused, any other stop failed. An error that reached the task is
+    failed with the reason of the failure that decides the loop's reaction, or a defect. A turn whose events ended
+    without a final event and without an error is failed for it.
+    """
+    if answered:
+        return TurnEnding(Outcome.OK)
+    if cancelled:
+        return TurnEnding(Outcome.CANCELLED)
+    if stop_code is not None:
+        refused = stop_code in {each.value for each in RejectionCode}
+        return TurnEnding(Outcome.REFUSED if refused else Outcome.FAILED, stop_code)
+    if error is not None:
+        failure = decisive_failure(tuple(leaves_of(error)), already_renewed=False)
+        return TurnEnding(Outcome.FAILED, DEFECT_REASON if failure is None else failure_reason(failure))
+    return TurnEnding(Outcome.FAILED, NO_FINAL_EVENT_REASON)
 
 
 def reaction_to(failure: CallFailure, *, already_renewed: bool) -> Reaction | Suspend:

@@ -9,14 +9,15 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING, Final
 from urllib.parse import urlsplit
 
-from logline import Outcome
+from logline import Outcome, StepTimer
 
-from personas.decision import failure_reason, turn_outcome
+from personas.decision import failure_reason
 from personas.failures import StatusFailure
 
 if TYPE_CHECKING:
     from agents.turn import TurnUsage
 
+    from personas.decision import TurnEnding
     from personas.entries import InputSizes
     from personas.failures import CallFailure
 
@@ -31,7 +32,6 @@ class Event(Enum):
     JOINED = auto()
     REFUSED = auto()
     INVITATION_LEFT_OUT = auto()
-    TURN_ENDED = auto()
     PAUSED = auto()
     SPEAK_REFUSED = auto()
     TOOLS_ONLY_APP_FAILED = auto()
@@ -43,14 +43,12 @@ class Event(Enum):
 
 @dataclass(frozen=True)
 class StateChange:
-    """One change of an agent's loop for one app, with the refusal, failure or turn code if any.
+    """One change of an agent's loop for one app, with the refusal or failure code if any.
 
-    The sweep belongs to no agent and no app, and says how many lines it removed. A turn that sent a model request
-    says the bytes of its input; one that ended with a final event says the tokens it used, when the library had
-    them. The start says the model the agent's turns run on, when it has a persona. An invitation the loop leaves out
-    says its place's kind and the reason as the code. A pause of his turns says its reason as the code and its wait in
-    seconds. A call that failed says its failure: the line holds its HTTP status, the MCP method that failed and a
-    closed reason.
+    The sweep belongs to no agent and no app, and says how many lines it removed. The start says the model the agent's
+    turns run on, when it has a persona. An invitation the loop leaves out says its place's kind and the reason as the
+    code. A pause of his turns says its reason as the code and its wait in seconds. A call that failed
+    says its failure: the line holds its HTTP status, the MCP method that failed and a closed reason.
     """
 
     event: Event
@@ -58,8 +56,6 @@ class StateChange:
     app: str | None
     code: str | None = None
     lines: int | None = None
-    usage: TurnUsage | None = None
-    sizes: InputSizes | None = None
     place_kind: str | None = None
     seconds: float | None = None
     model: str | None = None
@@ -77,7 +73,6 @@ _LINE_OF: Final = {
     Event.JOINED: (logging.INFO, "invitation.accepted"),
     Event.REFUSED: (logging.INFO, "invitation.refused"),
     Event.INVITATION_LEFT_OUT: (logging.INFO, "invitation.left_out"),
-    Event.TURN_ENDED: (logging.INFO, "turn.ended"),
     Event.PAUSED: (logging.INFO, "turns.paused"),
     Event.SPEAK_REFUSED: (logging.INFO, "speak.refused"),
     Event.TOOLS_ONLY_APP_FAILED: (logging.WARNING, "tools_only_app.failed"),
@@ -92,19 +87,15 @@ def log_state_change(change: StateChange) -> None:
     """Writes the fields of ``_fields_of`` and nothing else: no secret, token or tool content reaches a line."""
     fields = _fields_of(change)
     level, line = _LINE_OF[change.event]
-    if fields.get("outcome") is Outcome.FAILED:
-        level = logging.ERROR
     _LOG.log(level, line, extra=fields)
 
 
-def _fields_of(change: StateChange) -> dict[str, str | int | float | Outcome]:
-    fields: dict[str, str | int | float | Outcome] = {}
+def _fields_of(change: StateChange) -> dict[str, str | int | float]:
+    fields: dict[str, str | int | float] = {}
     if change.client_id is not None:
         fields["agent_id"] = change.client_id
     if change.app is not None:
         fields["app_id"] = urlsplit(change.app).hostname or ""
-    if change.event is Event.TURN_ENDED:
-        fields["outcome"] = turn_outcome(change.code)
     fields |= _failure_fields(change)
     if change.lines is not None:
         fields["line_count"] = change.lines
@@ -114,21 +105,6 @@ def _fields_of(change: StateChange) -> dict[str, str | int | float | Outcome]:
         fields["pause_ms"] = round(change.seconds * 1000, 3)
     if change.model is not None:
         fields["model"] = change.model
-    if change.sizes is not None:
-        fields |= {
-            "tools_bytes": change.sizes.tools_bytes,
-            "told_bytes": change.sizes.told_bytes,
-            "results_bytes": change.sizes.results_bytes,
-            "images_bytes": change.sizes.images_bytes,
-        }
-    if change.usage is not None:
-        fields |= {
-            "input_tokens": change.usage.input_tokens,
-            "cached_input_tokens": change.usage.cached_input_tokens,
-            "cache_write_tokens": change.usage.cache_write_tokens,
-            "output_tokens": change.usage.output_tokens,
-            "model_request_count": change.usage.requests,
-        }
     return fields
 
 
@@ -142,6 +118,72 @@ def _failure_fields(change: StateChange) -> dict[str, str | int]:
     if failure.method is not None:
         fields["mcp_method"] = failure.method
     return fields
+
+
+@dataclass
+class TurnTally:
+    """What a turn counts while it runs, and its one ``turn.ended`` line: the step timer started with the turn, and the
+    counts, sizes and usage the line carries beside the timer's duration, outcome and reason, never a name or content.
+
+    A sentence counts when it is sent to ``speak``, refused and cut ones included, and the first one marks the
+    timer's first output. A silent round counts when its marker is read, a tool call when the model makes it.
+    ``stop_code`` is the code of a stop the turn reported itself; ``answered`` says its final event came.
+    """
+
+    timer: StepTimer
+    sentence_count: int = 0
+    silent_count: int = 0
+    tool_call_count: int = 0
+    usage: TurnUsage | None = None
+    sizes: InputSizes | None = None
+    stop_code: str | None = None
+    answered: bool = False
+
+    def sentence_sent(self) -> None:
+        self.sentence_count += 1
+        self.timer.first_output()
+
+    def end(self, ending: TurnEnding) -> None:
+        """Writes the line once, at the level its outcome gives; a failed turn is an error."""
+        self.timer.add(
+            sentence_count=self.sentence_count, silent_count=self.silent_count, tool_call_count=self.tool_call_count
+        )
+        if self.sizes is not None:
+            self.timer.add(
+                tools_bytes=self.sizes.tools_bytes,
+                told_bytes=self.sizes.told_bytes,
+                results_bytes=self.sizes.results_bytes,
+                images_bytes=self.sizes.images_bytes,
+            )
+        if self.usage is not None:
+            self.timer.add(
+                input_tokens=self.usage.input_tokens,
+                cached_input_tokens=self.usage.cached_input_tokens,
+                cache_write_tokens=self.usage.cache_write_tokens,
+                output_tokens=self.usage.output_tokens,
+                model_request_count=self.usage.requests,
+            )
+        match ending.outcome:
+            case Outcome.OK:
+                self.timer.end()
+            case Outcome.REFUSED:
+                self.timer.refuse(_reason_of(ending))
+                self.timer.end()
+            case Outcome.FAILED:
+                self.timer.fail(_reason_of(ending))
+                self.timer.end()
+            case Outcome.CANCELLED:
+                self.timer.end_cancelled()
+
+
+def _reason_of(ending: TurnEnding) -> str:
+    assert ending.reason is not None  # noqa: S101 - a refused or failed ending always names its reason
+    return ending.reason
+
+
+def start_turn_tally(client_id: str, app: str) -> TurnTally:
+    """The tally of a turn that starts now; its line carries the agent and the app's host."""
+    return TurnTally(StepTimer("turn.ended", _LOG, agent_id=client_id, app_id=urlsplit(app).hostname or ""))
 
 
 class StoreOutage:
