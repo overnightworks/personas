@@ -100,6 +100,12 @@ async def app():
 
 
 @pytest.fixture
+def front_page():
+    """The page a front in front of the app answers an error status with; no answer of the session shows any of it."""
+    return b"<html>the front's own page</html>"
+
+
+@pytest.fixture
 def bearer(app):
     token = Secret(secrets.token_urlsafe(24))
     app.let_in(token.reveal(), SUBJECT)
@@ -334,41 +340,38 @@ async def test_a_bearer_the_app_does_not_know_is_a_401(app):
     assert failure.value.status == HTTPStatus.UNAUTHORIZED
 
 
-HTML_BODY = b"<html>the front's own page</html>"
-
-
 @pytest.mark.parametrize(
     ("answers", "answer"),
     [
-        pytest.param(lambda reply: reply.error(INVALID_PARAMS), jsonrpc_code(INVALID_PARAMS), id="invalid params"),
-        pytest.param(lambda reply: reply.error(INTERNAL_ERROR), jsonrpc_code(INTERNAL_ERROR), id="internal error"),
+        pytest.param(lambda reply, _: reply.error(INVALID_PARAMS), jsonrpc_code(INVALID_PARAMS), id="invalid params"),
+        pytest.param(lambda reply, _: reply.error(INTERNAL_ERROR), jsonrpc_code(INTERNAL_ERROR), id="internal error"),
         pytest.param(
-            lambda reply: reply.body(HTTPStatus.BAD_REQUEST, "text/html; charset=utf-8", HTML_BODY),
+            lambda reply, page: reply.body(HTTPStatus.BAD_REQUEST, "text/html; charset=utf-8", page),
             "text/html",
             id="html",
         ),
         pytest.param(
-            lambda reply: reply.body(HTTPStatus.BAD_REQUEST, "application/json", b'{"detail": "no"}'),
+            lambda reply, _: reply.body(HTTPStatus.BAD_REQUEST, "application/json", b'{"detail": "no"}'),
             "application/json",
             id="json that is no jsonrpc error",
         ),
         pytest.param(
-            lambda reply: reply.body(
+            lambda reply, _: reply.body(
                 HTTPStatus.BAD_REQUEST, "application/json", b'{"jsonrpc": "2.0", "id": 1, "result": {}}'
             ),
             "application/json",
             id="json that is a jsonrpc result",
         ),
-        pytest.param(lambda reply: reply.body(HTTPStatus.BAD_REQUEST, None, HTML_BODY), None, id="no content type"),
+        pytest.param(lambda reply, page: reply.body(HTTPStatus.BAD_REQUEST, None, page), None, id="no content type"),
         pytest.param(
-            lambda reply: reply.body(HTTPStatus.BAD_REQUEST, "not a media type", HTML_BODY), None, id="no media type"
+            lambda reply, page: reply.body(HTTPStatus.BAD_REQUEST, "not a media type", page), None, id="no media type"
         ),
     ],
 )
 async def test_a_status_failure_names_the_method_and_what_the_answer_carried_and_none_of_its_content(
-    app, bearer, answers, answer
+    app, bearer, front_page, answers, answer
 ):
-    app.script(LIST_TOOLS, answers)
+    app.script(LIST_TOOLS, lambda reply: answers(reply, front_page))
 
     async with opened(app, bearer) as session:
         with pytest.raises(StatusFailure) as failure:
@@ -377,7 +380,7 @@ async def test_a_status_failure_names_the_method_and_what_the_answer_carried_and
     assert failure.value.status == HTTPStatus.BAD_REQUEST
     assert failure.value.method == LIST_TOOLS
     assert failure.value.answer == answer
-    assert "the front" not in repr(failure.value) + str(failure.value)
+    assert front_page.decode() not in repr(failure.value) + str(failure.value)
 
 
 async def test_a_status_failure_of_a_tool_call_names_the_call_method(app, bearer):
