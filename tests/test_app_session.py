@@ -84,11 +84,20 @@ from tests.support.transport import (
 
 pytestmark = pytest.mark.anyio
 
-SHORT_STREAM_SECONDS = 0.3
-POLLING_NAMES = ["agents.wait", "WaitAnswer", "WAIT_TOOL", "WaitToolError", "_cursor"]
-SEARCHED = ["src", "tests", "README.md", "docs"]
-THIS_FILE = ":(exclude)tests/test_app_session.py"
-PLACE = PlaceRef(kind="call", id="room-7")
+
+@pytest.fixture
+def short_stream_seconds():
+    return 0.3
+
+
+@pytest.fixture
+def place():
+    return PlaceRef(kind="call", id="room-7")
+
+
+@pytest.fixture
+def table():
+    return PlaceRef(kind="table", id="table-1")
 
 
 @pytest.fixture
@@ -100,9 +109,14 @@ async def app():
 
 
 @pytest.fixture
-def front_page():
+def front_words():
+    return secrets.token_hex(12)
+
+
+@pytest.fixture
+def front_page(front_words):
     """The page a front in front of the app answers an error status with; no answer of the session shows any of it."""
-    return b"<html>the front's own page</html>"
+    return f"<html>{front_words}</html>".encode()
 
 
 @pytest.fixture
@@ -143,9 +157,9 @@ async def listens_and_reads_on_every_wake(app, bearer, **keywords):
             await session.read_standing()
 
 
-async def accepts_a_place(app, bearer):
+async def accepts_a_place(app, bearer, place):
     async with opened(app, bearer) as session:
-        await session.accept(Accept(PLACE, "inv-3", 0))
+        await session.accept(Accept(place, "inv-3", 0))
 
 
 async def test_a_stream_is_open_once_acknowledged_and_a_change_is_one_wake(app, bearer):
@@ -249,31 +263,31 @@ async def test_an_accept_error_outside_the_record_is_unrecognised(app, bearer, t
         )
 
 
-async def test_a_speak_sends_the_place_and_the_sentence_and_gives_that_it_starts_to_play(app, bearer):
+async def test_a_speak_sends_the_place_and_the_sentence_and_gives_that_it_starts_to_play(app, bearer, place):
     sentence = secrets.token_hex(4)
 
     async with opened(app, bearer) as session:
-        spoken = await session.speak(PLACE, sentence)
+        spoken = await session.speak(place, sentence)
 
     assert spoken == Spoken(spoken=True)
-    assert app.spoken == [(SUBJECT, PLACE.id, sentence)]
+    assert app.spoken == [(SUBJECT, place.id, sentence)]
 
 
-async def test_a_speak_the_app_answers_as_written_to_the_place_instead_is_told_as_written(app, bearer):
+async def test_a_speak_the_app_answers_as_written_to_the_place_instead_is_told_as_written(app, bearer, place):
     app.written_speaks = 1
 
     async with opened(app, bearer) as session:
-        answer = await session.speak(PLACE, "A sentence.")
+        answer = await session.speak(place, "A sentence.")
 
     assert answer == Written(written=True)
 
 
 @pytest.mark.parametrize("refusal", list(SpeakRefusal))
-async def test_a_speak_refused_with_a_code_of_the_record_is_told_by_that_code(app, bearer, refusal):
+async def test_a_speak_refused_with_a_code_of_the_record_is_told_by_that_code(app, bearer, refusal, place):
     app.speak_outcomes.append(ToolOutcome(SpeakRefused(refused=refusal).model_dump_json(), is_error=True))
 
     async with opened(app, bearer) as session:
-        assert await session.speak(PLACE, "A sentence.") is refusal
+        assert await session.speak(place, "A sentence.") is refusal
 
 
 @pytest.mark.parametrize(
@@ -298,24 +312,24 @@ async def test_a_speak_refused_with_a_code_of_the_record_is_told_by_that_code(ap
     ],
 )
 async def test_a_speak_answer_that_is_none_of_the_answers_or_refusals_of_the_record_is_an_unusable_answer(
-    app, bearer, outcome
+    app, bearer, outcome, place
 ):
     app.speak_outcomes.append(outcome)
 
     async with opened(app, bearer) as session:
         with pytest.raises(UnusableAnswer) as failure:
-            await session.speak(PLACE, "A sentence.")
+            await session.speak(place, "A sentence.")
 
     assert failure.value.code == INVALID_ANSWER_CODE
 
 
-async def test_a_speak_the_app_refuses_is_a_failure(app, bearer):
+async def test_a_speak_the_app_refuses_is_a_failure(app, bearer, place):
     app.refuse_with = HTTPStatus.SERVICE_UNAVAILABLE
     app.refused_method = CALL
 
     async with opened(app, bearer) as session:
         with pytest.raises(StatusFailure) as failure:
-            await session.speak(PLACE, "A sentence.")
+            await session.speak(place, "A sentence.")
 
     assert failure.value.status == HTTPStatus.SERVICE_UNAVAILABLE
 
@@ -369,7 +383,7 @@ async def test_a_bearer_the_app_does_not_know_is_a_401(app):
     ],
 )
 async def test_a_status_failure_names_the_method_and_what_the_answer_carried_and_none_of_its_content(
-    app, bearer, front_page, answers, answer
+    app, bearer, front_page, front_words, answers, answer
 ):
     app.script(LIST_TOOLS, lambda reply: answers(reply, front_page))
 
@@ -380,16 +394,17 @@ async def test_a_status_failure_names_the_method_and_what_the_answer_carried_and
     assert failure.value.status == HTTPStatus.BAD_REQUEST
     assert failure.value.method == LIST_TOOLS
     assert failure.value.answer == answer
-    assert front_page.decode() not in repr(failure.value) + str(failure.value)
+    shown = repr(failure.value) + str(failure.value)
+    assert not [start for start in range(len(front_words) - 5) if front_words[start : start + 6] in shown]
 
 
-async def test_a_status_failure_of_a_tool_call_names_the_call_method(app, bearer):
+async def test_a_status_failure_of_a_tool_call_names_the_call_method(app, bearer, place):
     app.refuse_with = HTTPStatus.SERVICE_UNAVAILABLE
     app.refused_method = CALL
 
     async with opened(app, bearer) as session:
         with pytest.raises(StatusFailure) as failure:
-            await session.speak(PLACE, "A sentence.")
+            await session.speak(place, "A sentence.")
 
     assert failure.value.method == CALL
     assert failure.value.answer is None
@@ -415,14 +430,14 @@ async def test_a_status_failure_of_a_stream_reconnect_names_no_method(app, beare
     assert failure.value.method is None
 
 
-async def test_a_redirect_the_app_answers_is_an_unusable_answer_named_by_its_status(app, bearer):
+async def test_a_redirect_the_app_answers_is_an_unusable_answer_named_by_its_status(app, bearer, place):
     async def redirects(reply):
         await reply.status(HTTPStatus.TEMPORARY_REDIRECT)
 
     app.script(CALL, redirects)
 
     with pytest.raises(UnusableAnswer) as failure:
-        await accepts_a_place(app, bearer)
+        await accepts_a_place(app, bearer, place)
 
     assert failure.value.code == status_code(HTTPStatus.TEMPORARY_REDIRECT)
 
@@ -512,29 +527,29 @@ async def test_every_leaf_of_nested_groups_the_body_raises_reaches_the_caller(ap
 
 
 @pytest.mark.parametrize("status", [HTTPStatus.FORBIDDEN, HTTPStatus.SERVICE_UNAVAILABLE])
-async def test_an_error_answer_whose_body_does_not_decode_is_told_by_its_status(app, bearer, status):
+async def test_an_error_answer_whose_body_does_not_decode_is_told_by_its_status(app, bearer, status, place):
     async def answers_undecodably(reply):
         await reply.undecodable(status)
 
     app.script(CALL, answers_undecodably)
 
     with pytest.raises(StatusFailure) as failure:
-        await accepts_a_place(app, bearer)
+        await accepts_a_place(app, bearer, place)
 
     assert failure.value.status == status
 
 
-async def test_an_ok_answer_whose_body_does_not_decode_is_unreachable(app, bearer):
+async def test_an_ok_answer_whose_body_does_not_decode_is_unreachable(app, bearer, place):
     async def answers_undecodably(reply):
         await reply.undecodable(HTTPStatus.OK)
 
     app.script(CALL, answers_undecodably)
 
     with pytest.raises(Unreachable):
-        await accepts_a_place(app, bearer)
+        await accepts_a_place(app, bearer, place)
 
 
-async def test_a_stream_that_outlasts_its_deadline_by_sending_on_is_unreachable(app, bearer):
+async def test_a_stream_that_outlasts_its_deadline_by_sending_on_is_unreachable(app, bearer, short_stream_seconds):
     async def sends_the_next_once_the_last_was_read(reply):
         await reply.open_stream()
         await reply.acknowledge([STANDING_URI])
@@ -547,7 +562,7 @@ async def test_a_stream_that_outlasts_its_deadline_by_sending_on_is_unreachable(
     app.script(LISTEN, sends_the_next_once_the_last_was_read)
 
     with pytest.raises((Unreachable, ExceptionGroup)) as caught:
-        await listens_and_reads_on_every_wake(app, bearer, stream_seconds=SHORT_STREAM_SECONDS)
+        await listens_and_reads_on_every_wake(app, bearer, stream_seconds=short_stream_seconds)
 
     assert all(isinstance(leaf, Unreachable) for leaf in leaves_of(caught.value))
     assert app.log.count(READ) > 1
@@ -670,7 +685,9 @@ async def test_what_the_body_raises_stays_among_the_leaves_when_the_close_then_l
     )
 
 
-async def test_traffic_with_no_acknowledgement_until_past_the_deadline_is_unreachable(app, bearer):
+async def test_traffic_with_no_acknowledgement_until_past_the_deadline_is_unreachable(
+    app, bearer, short_stream_seconds
+):
     talked = []
 
     async def talks_without_acknowledging(reply):
@@ -681,21 +698,22 @@ async def test_traffic_with_no_acknowledgement_until_past_the_deadline_is_unreac
     app.script(LISTEN, talks_without_acknowledging)
 
     with pytest.raises(Unreachable):
-        await listens(app, bearer, stream_seconds=SHORT_STREAM_SECONDS)
+        await listens(app, bearer, stream_seconds=short_stream_seconds)
 
     assert talked[0].keep_alives > 1
 
 
-async def test_an_accept_without_the_tool_is_a_protocol_error_that_is_an_unusable_answer(app, bearer):
+async def test_an_accept_without_the_tool_is_a_protocol_error_that_is_an_unusable_answer(app, bearer, place):
     async def knows_no_such_tool(reply):
         await reply.error(INVALID_PARAMS, status=HTTPStatus.OK)
 
     app.script(CALL, knows_no_such_tool)
 
     with pytest.raises(UnusableAnswer) as failure:
-        await accepts_a_place(app, bearer)
+        await accepts_a_place(app, bearer, place)
 
     assert failure.value.code == jsonrpc_code(INVALID_PARAMS)
+    assert (failure.value.method, failure.value.answer) == (None, None)
 
 
 @pytest.mark.parametrize(
@@ -713,7 +731,7 @@ async def test_an_accept_without_the_tool_is_a_protocol_error_that_is_an_unusabl
         "input required",
     ],
 )
-async def test_an_accept_result_the_sdk_cannot_validate_is_an_unusable_answer(app, bearer, answer):
+async def test_an_accept_result_the_sdk_cannot_validate_is_an_unusable_answer(app, bearer, answer, place):
     schema = {"type": "object", "properties": {"standings": {"type": "array"}}, "required": ["standings"]}
 
     async def lists_a_tool_with_an_output_schema(reply):
@@ -727,12 +745,12 @@ async def test_an_accept_result_the_sdk_cannot_validate_is_an_unusable_answer(ap
     app.script(CALL, answers_wrongly)
 
     with pytest.raises(UnusableAnswer) as failure:
-        await accepts_a_place(app, bearer)
+        await accepts_a_place(app, bearer, place)
 
     assert failure.value.code == INVALID_ANSWER_CODE
 
 
-async def test_a_malformed_notification_of_the_app_logs_none_of_its_content(app, bearer, caplog):
+async def test_a_malformed_notification_of_the_app_logs_none_of_its_content(app, bearer, caplog, place):
     leaked = "content-of-a-malformed-notification"
 
     async def notifies_wrongly_then_answers(reply):
@@ -746,37 +764,37 @@ async def test_a_malformed_notification_of_the_app_logs_none_of_its_content(app,
     app.script(CALL, notifies_wrongly_then_answers)
 
     with pytest.raises(UnusableAnswer):
-        await accepts_a_place(app, bearer)
+        await accepts_a_place(app, bearer, place)
 
     assert leaked not in caplog.text
 
 
-async def test_a_window_holds_the_lines_of_the_place_and_marks_the_members_own(app, bearer):
+async def test_a_window_holds_the_lines_of_the_place_and_marks_the_members_own(app, bearer, place):
     heard, own = secrets.token_hex(4), secrets.token_hex(4)
     app.stand(SUBJECT, active("room-7"))
     app.speak("room-7", "visitor", "Ada", heard)
     app.speak("room-7", SUBJECT, "Mozart", own)
 
     async with opened(app, bearer) as session:
-        window = await session.read_place(PLACE)
+        window = await session.read_place(place)
 
     assert window is not None
     assert [(each.seq, each.text, each.own) for each in window.entries] == [(1, heard, False), (2, own, True)]
 
 
-async def test_a_window_with_an_act_line_is_read_with_the_mark_kept(app, bearer):
+async def test_a_window_with_an_act_line_is_read_with_the_mark_kept(app, bearer, place):
     app.stand(SUBJECT, active("room-7"))
     app.speak("room-7", "visitor", "Ada", "took a card", act=True)
     app.speak("room-7", "visitor", "Ada", "good luck")
 
     async with opened(app, bearer) as session:
-        window = await session.read_place(PLACE)
+        window = await session.read_place(place)
 
     assert window is not None
     assert [(each.text, each.act) for each in window.entries] == [("took a card", True), ("good luck", False)]
 
 
-async def test_a_window_with_a_voice_state_a_cut_line_and_people_talking_over_him_is_read_whole(app, bearer):
+async def test_a_window_with_a_voice_state_a_cut_line_and_people_talking_over_him_is_read_whole(app, bearer, place):
     window = PlaceWindow(
         generation="generation-1",
         starts_at=1,
@@ -795,13 +813,13 @@ async def test_a_window_with_a_voice_state_a_cut_line_and_people_talking_over_hi
     app.script(READ, shows_the_window)
 
     async with opened(app, bearer) as session:
-        read = await session.read_place(PLACE)
+        read = await session.read_place(place)
 
     assert read == window
 
 
 @pytest.mark.parametrize("arrangement", ["the app lost the place", "not in the place", "answered inside a 200"])
-async def test_a_window_the_app_shows_the_member_no_more_is_none(app, bearer, arrangement):
+async def test_a_window_the_app_shows_the_member_no_more_is_none(app, bearer, arrangement, place):
     async def knows_no_such_resource(reply):
         await reply.error(INVALID_PARAMS, status=HTTPStatus.OK)
 
@@ -814,19 +832,19 @@ async def test_a_window_the_app_shows_the_member_no_more_is_none(app, bearer, ar
         app.script(READ, knows_no_such_resource)
 
     async with opened(app, bearer) as session:
-        window = await session.read_place(PLACE)
+        window = await session.read_place(place)
 
     assert window is None
 
 
-async def test_a_window_read_the_app_refuses_is_a_failure_and_no_missing_window(app, bearer):
+async def test_a_window_read_the_app_refuses_is_a_failure_and_no_missing_window(app, bearer, place):
     app.stand(SUBJECT, active("room-7"))
     app.refused_method = READ
     app.refuse_with = HTTPStatus.FORBIDDEN
 
     async with opened(app, bearer) as session:
         with pytest.raises(StatusFailure):
-            await session.read_place(PLACE)
+            await session.read_place(place)
 
 
 @pytest.mark.parametrize(
@@ -837,7 +855,7 @@ async def test_a_window_read_the_app_refuses_is_a_failure_and_no_missing_window(
     ],
     ids=["not a window", "not text"],
 )
-async def test_a_window_that_is_no_window_is_an_unusable_answer(app, bearer, contents):
+async def test_a_window_that_is_no_window_is_an_unusable_answer(app, bearer, contents, place):
     async def answers_wrongly(reply):
         await reply.result(ReadResourceResult(contents=[contents], ttl_ms=0, cache_scope="private"))
 
@@ -846,57 +864,54 @@ async def test_a_window_that_is_no_window_is_an_unusable_answer(app, bearer, con
 
     async with opened(app, bearer) as session:
         with pytest.raises(UnusableAnswer) as failure:
-            await session.read_place(PLACE)
+            await session.read_place(place)
 
     assert failure.value.code == INVALID_ANSWER_CODE
 
 
-TABLE = PlaceRef(kind="table", id="table-1")
-
-
-async def test_a_view_holds_the_revision_the_wait_and_the_state_as_the_app_sent_them(app, bearer):
+async def test_a_view_holds_the_revision_the_wait_and_the_state_as_the_app_sent_them(app, bearer, table):
     state = {"hand": secrets.token_hex(4), "stack": [1, {"seen": True}]}
-    app.stand(SUBJECT, active(TABLE.id, TABLE.kind, serves_view=True))
-    app.show_view(TABLE.id, 7, state)
+    app.stand(SUBJECT, active(table.id, table.kind, serves_view=True))
+    app.show_view(table.id, 7, state)
 
     async with opened(app, bearer) as session:
-        view = await session.read_view(TABLE)
+        view = await session.read_view(table)
 
     assert view is not None
     assert (view.revision, view.awaits_you, view.state) == (7, True, state)
 
 
 @pytest.mark.parametrize("arrangement", ["the app lost the place", "not in the place", "answered inside a 200"])
-async def test_a_view_the_app_shows_the_member_no_more_is_none(app, bearer, arrangement):
+async def test_a_view_the_app_shows_the_member_no_more_is_none(app, bearer, arrangement, table):
     async def knows_no_such_resource(reply):
         await reply.error(INVALID_PARAMS, status=HTTPStatus.OK)
 
-    app.stand(SUBJECT, active(TABLE.id, TABLE.kind, serves_view=True))
-    app.show_view(TABLE.id, 1, {})
+    app.stand(SUBJECT, active(table.id, table.kind, serves_view=True))
+    app.show_view(table.id, 1, {})
     if arrangement == "the app lost the place":
-        app.vanished.add(TABLE.id)
+        app.vanished.add(table.id)
     elif arrangement == "not in the place":
         app.stand(SUBJECT)
     else:
         app.script(READ, knows_no_such_resource)
 
     async with opened(app, bearer) as session:
-        view = await session.read_view(TABLE)
+        view = await session.read_view(table)
 
     assert view is None
 
 
-async def test_a_view_that_is_no_view_is_an_unusable_answer(app, bearer):
+async def test_a_view_that_is_no_view_is_an_unusable_answer(app, bearer, table):
     async def answers_wrongly(reply):
         contents = TextResourceContents(uri="member://standing", text="{}", mime_type="application/json")
         await reply.result(ReadResourceResult(contents=[contents], ttl_ms=0, cache_scope="private"))
 
-    app.stand(SUBJECT, active(TABLE.id, TABLE.kind, serves_view=True))
+    app.stand(SUBJECT, active(table.id, table.kind, serves_view=True))
     app.script(READ, answers_wrongly)
 
     async with opened(app, bearer) as session:
         with pytest.raises(UnusableAnswer) as failure:
-            await session.read_view(TABLE)
+            await session.read_view(table)
 
     assert failure.value.code == INVALID_ANSWER_CODE
 
@@ -992,21 +1007,21 @@ def a_picture_of_two_blocks() -> dict[str, object]:
     return {"resultType": "complete", "content": [block, block]}
 
 
-MALFORMED_PICTURE_ANSWERS = {
-    "non-canonical base64": lambda: a_malformed_picture_answer(data=base64_of(a_picture(16)).rstrip("=")),
-    "no JPEG start marker": lambda: a_malformed_picture_answer(
-        data=base64.b64encode(b"\x00" + secrets.token_bytes(16)).decode("ascii")
-    ),
-    "empty data": lambda: a_malformed_picture_answer(data=""),
-    "another media type": lambda: a_malformed_picture_answer(mimeType="image/png"),
-    "two pictures": a_picture_of_two_blocks,
-}
-
-
-@pytest.fixture(params=MALFORMED_PICTURE_ANSWERS)
+@pytest.fixture(
+    params=["non-canonical base64", "no JPEG start marker", "empty data", "another media type", "two pictures"]
+)
 def malformed_picture_answer(request: pytest.FixtureRequest) -> dict[str, object]:
-    """A tool result whose picture breaks the wire in one of the ways named above, with fresh bytes."""
-    return MALFORMED_PICTURE_ANSWERS[request.param]()
+    """A tool result whose picture breaks the wire in one of the ways it lists, with fresh bytes."""
+    answers = {
+        "non-canonical base64": lambda: a_malformed_picture_answer(data=base64_of(a_picture(16)).rstrip("=")),
+        "no JPEG start marker": lambda: a_malformed_picture_answer(
+            data=base64.b64encode(b"\x00" + secrets.token_bytes(16)).decode("ascii")
+        ),
+        "empty data": lambda: a_malformed_picture_answer(data=""),
+        "another media type": lambda: a_malformed_picture_answer(mimeType="image/png"),
+        "two pictures": a_picture_of_two_blocks,
+    }
+    return answers[request.param]()
 
 
 async def test_a_picture_that_breaks_the_wire_is_an_unusable_answer_and_no_validation_error(
@@ -1062,10 +1077,11 @@ async def test_an_invoked_tool_the_app_refuses_is_a_failure(app, bearer):
     assert failure.value.status == HTTPStatus.SERVICE_UNAVAILABLE
 
 
-@pytest.mark.parametrize("name", POLLING_NAMES)
+@pytest.mark.parametrize("name", ["agents.wait", "WaitAnswer", "WAIT_TOOL", "WaitToolError", "_cursor"])
 async def test_nothing_in_the_tree_names_the_polling_path(name):
+    searched = ["src", "tests", "README.md", "docs", ":(exclude)tests/test_app_session.py"]
     search = await asyncio.create_subprocess_exec(
-        "git", "grep", "-n", "-F", name, "--", *SEARCHED, THIS_FILE, stdout=subprocess.PIPE
+        "git", "grep", "-n", "-F", name, "--", *searched, stdout=subprocess.PIPE
     )
     stdout, _ = await search.communicate()
 
