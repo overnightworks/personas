@@ -1,0 +1,8 @@
+claim_id = "7d6e9a0308684e7eb228b0b7e1796401"
+agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
+role = "builder"
+base = "6c2347ba3484008685e76e5acb79960bf3c779fa"
+branch = "claude/issue-203-blend-mozarts-wig-smooth-leonardos-beard"
+scope = ["scripts/figures", "src/characters"]
+opened_commit = "e464d357c1b4befb6d7c7929cd541801e2e62d7a"
+whole_reason = "the figure generator and its regenerated output, read together"
