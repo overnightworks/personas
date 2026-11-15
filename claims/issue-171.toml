@@ -1,8 +1,0 @@
-claim_id = "564afde2655f4f1a8caf1e092ec50856"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "87e561002b810cf14926aeaf8efdcbd0e6413ca0"
-branch = "claude/issue-171-smooth-the-remaining-hair-edges-and-fold"
-scope = ["scripts/figures", "src/characters"]
-opened_commit = "3ca5f8fae35b0ac945bfdc09683dee51287a1df9"
-whole_reason = "the figure generator and its regenerated output, read together"
