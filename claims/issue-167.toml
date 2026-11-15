@@ -3,6 +3,6 @@ agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
 role = "builder"
 base = "a71779f6ab07e4099d1da1c8c96c2c867abd9279"
 branch = "claude/issue-167-follow-ups-of-the-158-landing"
-scope = ["src/personas/task_record.py", "tests/conftest.py", "tests/support/hopin.py", "tests/test_app_session.py"]
+scope = ["src/personas/task_record.py", "src/personas/turning.py", "tests/conftest.py", "tests/support/hopin.py", "tests/test_app_session.py"]
 opened_commit = "189517e6a75fe17b8f829a170ed9018c00033995"
 whole_reason = "the log guard, the scenario builder and the held-failure input are one test cleanup of the #158 landing"
