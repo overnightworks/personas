@@ -307,6 +307,53 @@ def pierced_panel(
     return piece(wall.panel(along_cuts(length, openings, cell), cuts(sorted(heights), cell), hole=hole), paint)
 
 
-def leaf(wall: Wall, along: tuple[float, float], head: float, out: float, paint: Paint, cell: float) -> Piece:
-    """A door leaf on the wall: a sheet over the range `along` from the floor up to `head`, `out` in front of it."""
-    return piece(wall.panel(cuts(along, cell), cuts((0.0, head), cell), out), paint)
+@dataclass(frozen=True)
+class Trim:
+    """A block standing out of a wall: its range along it, its heights and how far out it stands."""
+
+    along: tuple[float, float]
+    up: tuple[float, float]
+    out: tuple[float, float]
+    paint: Paint
+    cell: float
+
+
+@dataclass(frozen=True)
+class Leaf:
+    """A sheet on a wall over the range `along` from the floor up to `head`, `out` in front of it."""
+
+    along: tuple[float, float]
+    head: float
+    out: float
+    paint: Paint
+    cell: float
+
+
+@dataclass(frozen=True)
+class Sheet:
+    """The wall of `length` from `up[0]` to `up[1]`; `pierced` leaves it open at its `openings`."""
+
+    length: float
+    up: tuple[float, float]
+    paint: Paint
+    cell: float
+    openings: Openings | None = None
+    pierced: bool = False
+
+
+def fitted(wall: Wall, parts: Sequence[Trim | Leaf | Sheet]) -> list[Piece]:
+    """What a wall or a door in it is made of: each part built on the wall, in order, from its own values."""
+    pieces: list[Piece] = []
+    for part in parts:
+        if isinstance(part, Trim):
+            pieces.append(piece(wall.box(part.along, part.up, part.out, part.cell), part.paint))
+        elif isinstance(part, Leaf):
+            pieces.append(
+                piece(wall.panel(cuts(part.along, part.cell), cuts((0.0, part.head), part.cell), part.out), part.paint)
+            )
+        elif part.pierced:
+            pieces.append(pierced_panel(wall, part.length, part.up, part.openings, part.cell, part.paint))
+        else:
+            across = along_cuts(part.length, part.openings, part.cell)
+            pieces.append(piece(wall.panel(across, cuts(part.up, part.cell)), part.paint))
+    return pieces

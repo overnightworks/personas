@@ -37,15 +37,16 @@ from figures.room_shapes import (
     BEHIND,
     UP,
     Floor,
+    Leaf,
     Openings,
+    Sheet,
+    Trim,
     Wall,
-    along_cuts,
     box,
     cuts,
-    leaf,
+    fitted,
     panel,
     piece,
-    pierced_panel,
     placed,
     tiled_floor,
     turned,
@@ -231,11 +232,14 @@ def _plaster(position: Vector) -> Colour:
 def _wall(wall: Wall, length: float) -> list[Piece]:
     """A wall's painted band, its stripe and the plaster above, open where the window is."""
     openings = Openings((WINDOW,), SILL, CROWN, (SPRING,)) if wall is RIGHT else None
-    return [
-        piece(wall.panel(along_cuts(length, openings, WALL_CELL), cuts((0.0, BAND), WALL_CELL)), BAND_COLOUR),
-        piece(wall.box((0.0, length), STRIPE, (0.0, 0.012), TRIM_CELL), STRIPE_COLOUR),
-        pierced_panel(wall, length, (STRIPE[1], CEILING), openings, WALL_CELL, _plaster),
-    ]
+    return fitted(
+        wall,
+        [
+            Sheet(length, (0.0, BAND), BAND_COLOUR, WALL_CELL, openings),
+            Trim((0.0, length), STRIPE, (0.0, 0.012), STRIPE_COLOUR, TRIM_CELL),
+            Sheet(length, (STRIPE[1], CEILING), _plaster, WALL_CELL, openings, pierced=True),
+        ],
+    )
 
 
 def _arch() -> list[tuple[float, float]]:
@@ -311,26 +315,21 @@ def _door() -> list[Piece]:
     start, end = DOOR
     frame = 0.14
     width = (end - start) / DOOR_PLANKS
-    pieces = [
-        piece(BACK.box((start - frame, start), (0.0, DOOR_HEAD), (0.0, 0.06), TRIM_CELL), STONE),
-        piece(BACK.box((end, end + frame), (0.0, DOOR_HEAD), (0.0, 0.06), TRIM_CELL), STONE),
-        piece(
-            BACK.box((start - frame - 0.04, end + frame + 0.04), (DOOR_HEAD, DOOR_HEAD + 0.2), (0.0, 0.08), TRIM_CELL),
-            STONE,
-        ),
-        leaf(BACK, (start, end), DOOR_HEAD, 0.02, TIMBER, DOOR_CELL),
+    parts: list[Trim | Leaf] = [
+        Trim((start - frame, start), (0.0, DOOR_HEAD), (0.0, 0.06), STONE, TRIM_CELL),
+        Trim((end, end + frame), (0.0, DOOR_HEAD), (0.0, 0.06), STONE, TRIM_CELL),
+        Trim((start - frame - 0.04, end + frame + 0.04), (DOOR_HEAD, DOOR_HEAD + 0.2), (0.0, 0.08), STONE, TRIM_CELL),
+        Leaf((start, end), DOOR_HEAD, 0.02, TIMBER, DOOR_CELL),
     ]
     for plank in range(DOOR_PLANKS):
         left = start + plank * width
         shade = (plank * 5 % 3 - 1) * 6
         colour = (PLANKS[0] + shade, PLANKS[1] + shade, PLANKS[2] + shade)
-        pieces.append(leaf(BACK, (left + 0.006, left + width - 0.006), DOOR_HEAD, 0.03, colour, DOOR_CELL))
+        parts.append(Leaf((left + 0.006, left + width - 0.006), DOOR_HEAD, 0.03, colour, DOOR_CELL))
     for height in (0.35, DOOR_HEAD - 0.35):
-        pieces.append(
-            piece(BACK.box((start + 0.05, end - 0.05), (height - 0.04, height + 0.04), (0.03, 0.05), TRIM_CELL), OAK)
-        )
-    pieces.append(piece(BACK.box((end - 0.2, end - 0.14), (1.0, 1.1), (0.05, 0.075), TRIM_CELL), IRON))
-    return pieces
+        parts.append(Trim((start + 0.05, end - 0.05), (height - 0.04, height + 0.04), (0.03, 0.05), OAK, TRIM_CELL))
+    parts.append(Trim((end - 0.2, end - 0.14), (1.0, 1.1), (0.05, 0.075), IRON, TRIM_CELL))
+    return fitted(BACK, parts)
 
 
 def _furniture() -> list[Piece]:

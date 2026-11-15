@@ -29,14 +29,15 @@ from figures.room_shapes import (
     BEHIND,
     UP,
     Floor,
+    Leaf,
     Openings,
+    Sheet,
+    Trim,
     Wall,
-    along_cuts,
     cuts,
-    leaf,
+    fitted,
     panel,
     piece,
-    pierced_panel,
     placed,
     tiled_floor,
     turned,
@@ -192,23 +193,22 @@ def _floor() -> list[Piece]:
 def _wall(wall: Wall, length: float) -> list[Piece]:
     """A wall's white dado, its silk and its white frieze, the skirting, the dado rail and the stepped cornice."""
     openings = Openings(WINDOWS, SILL, HEAD) if wall is LEFT else None
-    along = along_cuts(length, openings, WALL_CELL)
-    pieces = [
-        piece(wall.panel(along, cuts((0.0, RAIL[1]), WALL_CELL)), BOISERIE),
-        pierced_panel(wall, length, (RAIL[1], FRIEZE), openings, WALL_CELL, SILK),
-        piece(wall.panel(along, cuts((FRIEZE, CEILING), WALL_CELL)), BOISERIE),
-        piece(wall.box((0.0, length), (0.0, SKIRTING), (0.0, 0.022), TRIM_CELL), SKIRTING_COLOUR),
-        piece(wall.box((0.0, length), RAIL, (0.0, 0.03), TRIM_CELL), BOISERIE),
+    parts: list[Trim | Sheet] = [
+        Sheet(length, (0.0, RAIL[1]), BOISERIE, WALL_CELL, openings),
+        Sheet(length, (RAIL[1], FRIEZE), SILK, WALL_CELL, openings, pierced=True),
+        Sheet(length, (FRIEZE, CEILING), BOISERIE, WALL_CELL, openings),
+        Trim((0.0, length), (0.0, SKIRTING), (0.0, 0.022), SKIRTING_COLOUR, TRIM_CELL),
+        Trim((0.0, length), RAIL, (0.0, 0.03), BOISERIE, TRIM_CELL),
     ]
-    for bottom, top, out in CORNICE:
-        pieces.append(
-            piece(wall.box((0.0, length), (bottom, top), (0.0, out), TRIM_CELL), GILT if out < 0.06 else BOISERIE)
-        )
-    return pieces
+    parts += [
+        Trim((0.0, length), (bottom, top), (0.0, out), GILT if out < 0.06 else BOISERIE, TRIM_CELL)
+        for bottom, top, out in CORNICE
+    ]
+    return fitted(wall, parts)
 
 
-def _frame(wall: Wall, along: tuple[float, float], up: tuple[float, float], out: float = 0.0) -> list[Piece]:
-    """A gilt moulding round a rectangle on the wall."""
+def _moulding(along: tuple[float, float], up: tuple[float, float], out: float = 0.0) -> list[Trim]:
+    """The four gilt strips of a moulding round a rectangle on the wall."""
     (left, right), (bottom, top) = along, up
     reach = (out, out + 0.012)
     sides = (
@@ -217,7 +217,12 @@ def _frame(wall: Wall, along: tuple[float, float], up: tuple[float, float], out:
         ((left, left + MOULDING), (bottom + MOULDING, top - MOULDING)),
         ((right - MOULDING, right), (bottom + MOULDING, top - MOULDING)),
     )
-    return [piece(wall.box(span, rise, reach, TRIM_CELL), GILT) for span, rise in sides]
+    return [Trim(span, rise, reach, GILT, TRIM_CELL) for span, rise in sides]
+
+
+def _frame(wall: Wall, along: tuple[float, float], up: tuple[float, float], out: float = 0.0) -> list[Piece]:
+    """A gilt moulding round a rectangle on the wall."""
+    return fitted(wall, _moulding(along, up, out))
 
 
 def _bay(wall: Wall, along: tuple[float, float]) -> list[Piece]:
@@ -314,19 +319,18 @@ def _door() -> list[Piece]:
     """A white double door with raised fields in gilt mouldings, its architrave, a cornice and an overdoor panel."""
     start, end = DOOR_LEAVES
     middle = (start + end) / 2
-    pieces = [
-        piece(RIGHT.box((start - ARCHITRAVE, start), (0.0, DOOR_HEAD + ARCHITRAVE), (0.0, 0.035), TRIM_CELL), BOISERIE),
-        piece(RIGHT.box((end, end + ARCHITRAVE), (0.0, DOOR_HEAD + ARCHITRAVE), (0.0, 0.035), TRIM_CELL), BOISERIE),
-        piece(RIGHT.box((start, end), (DOOR_HEAD, DOOR_HEAD + ARCHITRAVE), (0.0, 0.035), TRIM_CELL), BOISERIE),
-        piece(
-            RIGHT.box((start - 0.2, end + 0.2), (DOOR_HEAD + 0.12, DOOR_HEAD + 0.22), (0.0, 0.09), TRIM_CELL), BOISERIE
-        ),
-        *_frame(RIGHT, (start + 0.05, end - 0.05), (DOOR_HEAD + 0.3, FRIEZE - 0.1)),
+    parts: list[Trim | Leaf] = [
+        Trim((start - ARCHITRAVE, start), (0.0, DOOR_HEAD + ARCHITRAVE), (0.0, 0.035), BOISERIE, TRIM_CELL),
+        Trim((end, end + ARCHITRAVE), (0.0, DOOR_HEAD + ARCHITRAVE), (0.0, 0.035), BOISERIE, TRIM_CELL),
+        Trim((start, end), (DOOR_HEAD, DOOR_HEAD + ARCHITRAVE), (0.0, 0.035), BOISERIE, TRIM_CELL),
+        Trim((start - 0.2, end + 0.2), (DOOR_HEAD + 0.12, DOOR_HEAD + 0.22), (0.0, 0.09), BOISERIE, TRIM_CELL),
+        *_moulding((start + 0.05, end - 0.05), (DOOR_HEAD + 0.3, FRIEZE - 0.1)),
     ]
     for left, right in ((start, middle - 0.004), (middle + 0.004, end)):
-        pieces.append(leaf(RIGHT, (left, right), DOOR_HEAD, 0.006, DOOR, DOOR_CELL))
+        parts.append(Leaf((left, right), DOOR_HEAD, 0.006, DOOR, DOOR_CELL))
         for bottom, top in ((0.22, 0.95), (1.15, 2.45)):
-            pieces += _frame(RIGHT, (left + 0.1, right - 0.1), (bottom, top), 0.006)
+            parts += _moulding((left + 0.1, right - 0.1), (bottom, top), 0.006)
+    pieces = fitted(RIGHT, parts)
     for handle in (middle - 0.05, middle + 0.05):
         pieces.append(piece(ellipsoid(RIGHT.at(handle, 1.05, 0.03), (0.015, 0.03, 0.015), 5, 6), GILT))
     return pieces
