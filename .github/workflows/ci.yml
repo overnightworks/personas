@@ -153,8 +153,11 @@ jobs:
           docker run --detach --name stopped-runner \
             --volume "$configuration:/configuration:ro" \
             --env PERSONAS_CONFIG=/configuration/personas.toml personas-image
-          until docker logs stopped-runner 2>&1 | grep --quiet backoff; do
+          waited=0
+          until docker logs stopped-runner 2>&1 | grep --quiet '"loop.backed_off"'; do
             test "$(docker inspect --format '{{.State.Running}}' stopped-runner)" = true
+            test "$waited" -lt 60
+            waited=$(( waited + 1 ))
             sleep 1
           done
           started="$(date +%s)"
