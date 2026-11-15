@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from figures.figure_body import ACROSS
 from figures.figure_head import NECK_BINDER
 from figures.figure_parts import Colour, Material, Part, mixed, part
-from figures.figure_shapes import add, ellipsoid, scaled, subtract
+from figures.figure_shapes import Shape, add, dot, ellipsoid, normalised, scaled, subtract
 from figures.figure_skeleton import EYE_HEIGHT
 from figures.figure_surfaces import arc, bump, interpolated, mirrored, rippled, shell, smoothstep, spread, sweep
 
@@ -77,6 +77,11 @@ QUEUE = (
 # Within this distance of the queue's top the strands and their furrows smooth out, so the wig gathers into the queue
 # in one even surface and colour.
 GATHERING = 0.04
+# How far beyond the queue's side, as a share of its radius there, the wig still shades like the queue, so the light
+# runs on from the queue over the edge of the wig lying on it instead of breaking where the two meet.
+OVERLAP = 1.0
+# Over this height above the queue's top the wig turns back to its own shading.
+FADING = 0.03
 BOW: Vector = (0.0, 1.478, -0.099)
 # Each ribbon end from the knot down the left of the back, lying on the coat.
 RIBBON_END = ((0.004, 1.472, -0.103), (0.020, 1.44, -0.087), (0.030, 1.395, -0.106))
@@ -94,12 +99,12 @@ def mozart_wig() -> list[Part]:
     places = _cap_places()
     surface = _cap_rows(places, 1.0, STRAND_DEPTH)
     lining = _between(places, _cap_rows(places, LINING, 0.0), surface, _gathered)
-    cap = shell(_between(places, lining, surface, _closed), lining)
+    cap = _shaded_like_queue(shell(_between(places, lining, surface, _closed), lining))
     queue = sweep([place for place, _ in QUEUE], [radii for _, radii in QUEUE], ACROSS, 16)
     return [
         part(cap, _powder, Material.HAIR, NECK_BINDER),
         *_rolls(),
-        part(queue, _shaded_powder, Material.HAIR, NECK_BINDER),
+        part(queue, _powder, Material.HAIR, NECK_BINDER),
         *_bow(),
     ]
 
@@ -110,14 +115,33 @@ def _powder(position: Vector) -> Colour:
     return mixed(POWDER, SHADE, furrows * (1.0 - _gathering(position)))
 
 
-def _shaded_powder(position: Vector) -> Colour:
-    """The powder greying towards the queue's top, where it lies in the shade of the wig's gathered end."""
-    return mixed(_powder(position), SHADE, _gathering(position))
-
-
 def _gathering(position: Vector) -> float:
     """1 at the queue's top, falling to 0 at GATHERING from it."""
     return bump(math.dist(position, QUEUE[0][0]) / GATHERING)
+
+
+def _shaded_like_queue(cap: Shape) -> Shape:
+    """The cap with its outer normals turned, where it lies on the queue's top, towards the queue's own."""
+    normals: list[Vector] = []
+    for position, normal in zip(cap.positions, cap.normals, strict=True):
+        queue_normal, share = _queue_side(position)
+        facing = share > 0.0 and dot(normal, queue_normal) > 0.0
+        normals.append(normalised(add(normal, scaled(subtract(queue_normal, normal), share))) if facing else normal)
+    return Shape(cap.positions, tuple(normals), cap.indices)
+
+
+def _queue_side(position: Vector) -> tuple[Vector, float]:
+    """The normal of the queue's top beside a point at its height, and how fully the point shades like it: 1 on the
+    queue's side, falling to 0 at OVERLAP beyond it and within FADING above the queue's top."""
+    (top, (top_across, top_depth)), (below, (below_across, below_depth)) = QUEUE[0], QUEUE[1]
+    along = min(1.0, max(0.0, (top[1] - position[1]) / (top[1] - below[1])))
+    across = top_across + (below_across - top_across) * along
+    depth = top_depth + (below_depth - top_depth) * along
+    offset_across = position[0] - (top[0] + (below[0] - top[0]) * along)
+    offset_depth = position[2] - (top[2] + (below[2] - top[2]) * along)
+    beyond = math.hypot(offset_across / across, offset_depth / depth) - 1.0
+    share = (1.0 - smoothstep(0.0, OVERLAP, beyond)) * (1.0 - smoothstep(top[1], top[1] + FADING, position[1]))
+    return normalised((offset_across / across**2, 0.0, offset_depth / depth**2)), share
 
 
 def _cap_places() -> list[list[_Place]]:
