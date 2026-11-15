@@ -193,7 +193,7 @@ def _floor() -> list[Piece]:
         red, green, blue = COTTO[(column * 3 + row) % 2]
         return (red + shade, green + shade // 2, blue + shade // 2)
 
-    floor = Floor((LEFT_X, 0.0, FRONT_Z), WIDTH, DEPTH, TILE, JOINT, MORTAR, (JOINT, TILE - JOINT, TILE), cotto)
+    floor = Floor((LEFT_X, 0.0, FRONT_Z), WIDTH, DEPTH, TILE, JOINT, MORTAR, cotto)
     return [tiled_floor(floor)]
 
 

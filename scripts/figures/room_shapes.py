@@ -237,9 +237,14 @@ class Floor:
     tile: float
     joint: float
     joint_colour: Colour
-    # Where, along a tile from its start, the floor is cut; the last is the tile's own size.
-    cuts_in_tile: tuple[float, ...]
     tile_colour: Callable[[int, int], Colour]
+    # Cuts along a tile beyond the joint's own, measured from the tile's start.
+    extra_cuts: tuple[float, ...] = ()
+
+    @property
+    def cuts_in_tile(self) -> list[float]:
+        """Where, along a tile from its start, the floor is cut: both joint edges, the extras and the tile's end."""
+        return sorted([self.joint, self.tile - self.joint, self.tile, *self.extra_cuts])
 
 
 def tiled_floor(floor: Floor) -> Piece:

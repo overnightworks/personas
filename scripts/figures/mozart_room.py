@@ -185,8 +185,7 @@ def _floor() -> list[Piece]:
         red, green, blue = OAK[(column + row) % 2]
         return (red + shade, green + shade, blue + shade)
 
-    cuts_in_tile = (JOINT, TILE / 2, TILE - JOINT, TILE)
-    floor = Floor((LEFT_X, 0.0, FRONT_Z), WIDTH, DEPTH, TILE, JOINT, JOINT_COLOUR, cuts_in_tile, oak)
+    floor = Floor((LEFT_X, 0.0, FRONT_Z), WIDTH, DEPTH, TILE, JOINT, JOINT_COLOUR, oak, extra_cuts=(TILE / 2,))
     return [tiled_floor(floor)]
 
 
