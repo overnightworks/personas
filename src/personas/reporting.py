@@ -10,6 +10,7 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING, Final
 from urllib.parse import urlsplit
 
+from anyio.lowlevel import checkpoint
 from logline import Outcome, StepTimer, current_traceparent
 
 from personas.decision import error_reason, failure_reason
@@ -192,7 +193,9 @@ def start_turn_tally(client_id: str, app: str) -> TurnTally:
 
 async def carry_trace(request: httpx2.Request) -> None:
     """The request hook of every client that calls an app or the realm: the request carries the current trace's
-    ``traceparent``, and none when there is no current trace."""
+    ``traceparent``, and none when there is no current trace. The client awaits its hooks, so this is a coroutine that
+    yields to the event loop once."""
+    await checkpoint()
     traceparent = current_traceparent()
     if traceparent is not None:
         request.headers["traceparent"] = traceparent
