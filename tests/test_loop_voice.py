@@ -513,10 +513,10 @@ async def test_the_next_turn_is_told_a_line_the_app_marked_as_cut_as_cut_with_th
     ]
 
 
-async def test_a_spoken_turn_logs_its_start_and_no_sentence(runner, caplog):
+async def test_a_spoken_turn_logs_its_start_and_its_request_and_no_sentence(runner, caplog):
     await a_voice_call(runner, completion(ANSWER))
     say_in_the_call(runner, ADDRESSED)
     await runner.app.spoken_count(1)
 
     logged = [record.getMessage() for record in caplog.get_records("call") if record.name == "personas"]
-    assert [message.split()[0] for message in logged] == [Event.STARTED.value]
+    assert [message.split()[0] for message in logged] == [Event.STARTED.value, Event.MODEL_REQUESTED.value]

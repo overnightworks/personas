@@ -24,6 +24,7 @@ class Event(StrEnum):
     JOINED = "joined"
     REFUSED = "refused"
     INVITATION_LEFT_OUT = "invitation_left_out"
+    MODEL_REQUESTED = "model_requested"
     TURN_ENDED = "turn_ended"
     PAUSED = "paused"
     SPEAK_REFUSED = "speak_refused"
@@ -40,10 +41,9 @@ class StateChange:
 
     The sweep belongs to no agent and no app, and says how many lines it removed. A turn that sent a model request
     says the bytes of its input; one that ended with a final event says the tokens it used, when the library had
-    them. A turn also says the seconds from its start to the model request it handed to its backend first, when it
-    handed one. The start says the model the agent's turns run on, when it has a persona. An invitation the loop
-    leaves out says its place's kind and the reason as the code. A pause of his turns says its reason as the code and
-    its wait in seconds.
+    them. The line of a turn's first model request says the milliseconds from the turn's start to it. The start says
+    the model the agent's turns run on, when it has a persona. An invitation the loop leaves out says its place's
+    kind and the reason as the code. A pause of his turns says its reason as the code and its wait in seconds.
     """
 
     event: Event
@@ -53,7 +53,7 @@ class StateChange:
     lines: int | None = None
     usage: TurnUsage | None = None
     sizes: InputSizes | None = None
-    request_seconds: float | None = None
+    duration_ms: int | None = None
     place_kind: str | None = None
     seconds: float | None = None
     model: str | None = None
@@ -67,7 +67,7 @@ def log_state_change(change: StateChange) -> None:
     removed = "" if change.lines is None else f" lines={change.lines}"
     sized = "" if change.sizes is None else _sizes_of(change.sizes)
     used = "" if change.usage is None else _tokens_used(change.usage)
-    requested = "" if change.request_seconds is None else f" request_seconds={change.request_seconds:.3f}"
+    requested = "" if change.duration_ms is None else f" duration_ms={change.duration_ms}"
     kind = "" if change.place_kind is None else f" place_kind={change.place_kind}"
     waited = "" if change.seconds is None else f" seconds={change.seconds:g}"
     model = "" if change.model is None else f" model={change.model}"

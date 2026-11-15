@@ -79,6 +79,7 @@ _CALL_BOUND_TEXT: Final = "this app takes no more calls in this turn"
 _APP_FAILED_TEXT: Final = "the app did not answer"
 _MODEL_FACING: Final = {"name", "description", "parameters"}
 _RESULT_ROLE: Final = "tool"
+_MILLISECONDS_PER_SECOND: Final = 1000
 
 
 def _failure_event(app: AppTarget) -> Event:
@@ -105,10 +106,10 @@ class TurnSetup:
 
 @dataclass(frozen=True)
 class TurnReports:
-    """What a turn tells the loop that runs it: the seconds to its first model request, its end and the pause its end
-    leaves."""
+    """What a turn tells the loop that runs it: the milliseconds to its first model request, its end and the pause its
+    end leaves."""
 
-    request: Callable[[float], None]
+    request: Callable[[int], None]
     ended: Callable[[str | None, TurnUsage | None, InputSizes | None], None]
     paused: Callable[[float, str], None]
 
@@ -118,7 +119,7 @@ class _Measures:
     relayed back to the model, held and refused calls included. Only bytes are kept. It also tells how long the
     turn took, on the runner's clock, to hand its first request to the backend."""
 
-    def __init__(self, clock: Clock, report_request: Callable[[float], None]) -> None:
+    def __init__(self, clock: Clock, report_request: Callable[[int], None]) -> None:
         self._clock = clock
         self._report_request = report_request
         self._started = clock.now()
@@ -143,7 +144,7 @@ class _Measures:
 
     def handing(self, events: AsyncGenerator[TurnEvent]) -> AsyncGenerator[TurnEvent]:
         """The events of the request the turn hands to its backend, which it does once: reports how long it took."""
-        self._report_request(self._clock.now() - self._started)
+        self._report_request(round((self._clock.now() - self._started) * _MILLISECONDS_PER_SECOND))
         return events
 
     def sizes(self) -> InputSizes:

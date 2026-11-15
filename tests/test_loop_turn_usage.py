@@ -34,8 +34,8 @@ def counted(prompt: int, cached: int, written: int, completed: int) -> dict[str,
 
 _SIZES = r" tools_bytes=(\d+) told_bytes=(\d+) results_bytes=(\d+) images_bytes=(\d+)"
 _COUNTS = r"(?P<counts>(?: input=\d+ cache_read=\d+ cache_write=\d+ output=\d+ requests=\d+)?)"
-_REQUEST = r"(?: request_seconds=(?P<request_seconds>\d+\.\d{3}))?"
-_LINE = re.compile(rf"turn_ended client_id=\S+ app=\S+ code=(?P<code>\S+)(?:{_SIZES})?{_COUNTS}{_REQUEST}")
+_REQUESTED = re.compile(r"model_requested client_id=\S+ app=\S+ code=- duration_ms=(?P<duration_ms>\d+)")
+_LINE = re.compile(rf"turn_ended client_id=\S+ app=\S+ code=(?P<code>\S+)(?:{_SIZES})?{_COUNTS}")
 
 
 def the_turn_ended_line(caplog) -> re.Match[str]:
@@ -174,6 +174,7 @@ async def test_a_turn_that_fails_after_its_request_logs_its_sizes_and_no_usage(r
 
 
 OPENING_SECONDS = 2.5
+OPENING_MILLISECONDS = 2500
 
 
 class SlowOpening:
@@ -213,44 +214,58 @@ async def a_turn_whose_opening_takes_time(runner, *rounds, held: bool = False) -
     return opening
 
 
-def seconds_to_the_request(caplog) -> float | None:
-    seconds = the_turn_ended_line(caplog).group("request_seconds")
-    return None if seconds is None else float(seconds)
+def requested_durations(caplog) -> list[int]:
+    """The `duration_ms` of each `model_requested` line, which holds nothing but the fields the log declares."""
+    requested = [
+        line
+        for line in formatted(caplog.get_records("call")).splitlines()
+        if line.startswith(Event.MODEL_REQUESTED.value)
+    ]
+    matches = [_REQUESTED.fullmatch(line) for line in requested]
+    assert all(matches), requested
+    return [int(matched.group("duration_ms")) for matched in matches if matched is not None]
 
 
-async def test_a_turn_logs_the_seconds_from_its_start_to_its_first_model_request_and_not_those_after(runner, caplog):
-    await a_turn_whose_opening_takes_time(runner, completion("done"))
+@pytest.mark.parametrize(
+    "rounds",
+    [
+        pytest.param((completion("done"),), id="a turn of one request"),
+        pytest.param((tool_round(say(ANSWER)), completion("done")), id="a turn with one tool round"),
+    ],
+)
+async def test_a_turn_logs_one_model_requested_line_with_the_milliseconds_to_its_first_request(runner, caplog, rounds):
+    await a_turn_whose_opening_takes_time(runner, *rounds)
     first = runner.gateway.hold_request(1)
     await runner.gateway.until_requested(1)
     runner.clock.time += 100
     first.set()
     await runner.reports.until_a_turn_completed()
 
-    assert seconds_to_the_request(caplog) == OPENING_SECONDS
+    assert requested_durations(caplog) == [OPENING_MILLISECONDS]
 
 
-async def test_a_turn_that_fails_after_its_request_logs_its_code_and_the_seconds_to_the_request(runner, caplog):
+async def test_a_turn_that_fails_after_its_request_logs_the_milliseconds_to_the_request(runner, caplog):
     await a_turn_whose_opening_takes_time(runner, Reply(status=HTTPStatus.SERVICE_UNAVAILABLE))
     await runner.reports.until(Event.TURN_ENDED)
 
-    assert seconds_to_the_request(caplog) == OPENING_SECONDS
+    assert requested_durations(caplog) == [OPENING_MILLISECONDS]
 
 
-async def test_a_turn_cancelled_after_its_request_logs_the_seconds_to_the_request(runner, caplog):
+async def test_a_turn_cancelled_after_its_request_logs_the_milliseconds_to_the_request(runner, caplog):
     await a_turn_whose_opening_takes_time(runner, completion("done"))
     runner.gateway.hold_request(1)
     await runner.gateway.until_requested(1)
     runner.app.stand(AGENT_SUBJECT)
     await runner.reports.until(Event.TURN_ENDED)
 
-    assert seconds_to_the_request(caplog) == OPENING_SECONDS
+    assert requested_durations(caplog) == [OPENING_MILLISECONDS]
 
 
-async def test_a_turn_cancelled_before_its_request_logs_no_seconds(runner, caplog):
+async def test_a_turn_cancelled_before_its_request_logs_no_model_requested_line(runner, caplog):
     opening = await a_turn_whose_opening_takes_time(runner, completion("done"), held=True)
     async with asyncio.timeout(LIMIT_SECONDS):
         await opening.arrived.wait()
     runner.app.stand(AGENT_SUBJECT)
     await runner.reports.until(Event.TURN_ENDED)
 
-    assert seconds_to_the_request(caplog) is None
+    assert requested_durations(caplog) == []

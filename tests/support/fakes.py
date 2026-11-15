@@ -244,8 +244,9 @@ class Report(NamedTuple):
 class Reports:
     """The state changes a loop reported, in order, and a way to wait for one.
 
-    A turn that ended with its final event is reported with no code; ``reported`` and ``until`` leave it out, so a
-    scenario reads what went wrong or was cut short, and ``until_a_turn_completed`` waits for it.
+    A turn that ended with its final event is reported with no code, and a turn's first model request has its own
+    line; ``reported`` and ``until`` leave both out, so a scenario reads what went wrong or was cut short, and
+    ``until_a_turn_completed`` waits for the first.
     """
 
     def __init__(self) -> None:
@@ -262,7 +263,11 @@ class Reports:
 
     @property
     def without_completed_turns(self) -> list[StateChange]:
-        return [change for change in self.changes if not self._completes_a_turn(change)]
+        return [
+            change
+            for change in self.changes
+            if not self._completes_a_turn(change) and change.event is not Event.MODEL_REQUESTED
+        ]
 
     @overload
     def reported(self, *, apps: Literal[False] = False, started: bool = True) -> list[tuple[Event, str | None]]: ...
