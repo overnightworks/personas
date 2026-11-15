@@ -785,7 +785,8 @@ def _naming_told_lines(turn: TurnTold, history: History) -> TurnTold:
     if not isinstance(occasion, Lines):
         return turn
     held = {entry.seq for entry in history.entries if isinstance(entry, KeptLine)}
-    return replace(turn, occasion=replace(occasion, seqs=occasion.seqs & held))
+    still_told = Lines(occasion.generation, occasion.seqs & held, occasion.missed)
+    return TurnTold(turn.at, turn.app, turn.place, still_told, turn.aloud, turn.through)
 
 
 def turn_messages(you: str, present: Present, current: TurnTold) -> tuple[str, ...]:
