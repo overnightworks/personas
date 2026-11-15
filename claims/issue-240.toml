@@ -1,8 +1,0 @@
-claim_id = "6683ca12e14a4e888a090954266ab2d3"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "cc6e60cbbec9958de3224b1573c5cf6e0f5addba"
-branch = "claude/issue-240-each-step-of-a-turn-is-measured-and-its"
-scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/app_session.py", "src/personas/decision.py", "src/personas/loop.py", "src/personas/main.py", "src/personas/mind.py", "src/personas/reporting.py", "src/personas/tokens.py", "src/personas/turning.py", "tests"]
-opened_commit = "fccaa36fd660986f06b132a92f3982219eb4fc0c"
-whole_reason = "the step lines of one turn and the header that carries its trace, which share the turn's clock and trace"
