@@ -65,6 +65,7 @@ from personas.failures import (
     leaves_of,
     task_is_being_cancelled,
 )
+from personas.reporting import carry_trace
 from personas.secret import Secret
 
 CONNECT_SECONDS: Final = 30.0
@@ -457,7 +458,7 @@ async def open_mcp_session(
     cancelled_in_body = False
     try:
         async with (
-            httpx2.AsyncClient(auth=auth, timeout=timeout) as client,
+            httpx2.AsyncClient(auth=auth, timeout=timeout, event_hooks={"request": [carry_trace]}) as client,
             streamable_http_client(app.mcp_url, http_client=client) as (read_stream, write_stream),
             _ValidatingSession(read_stream, write_stream) as session,
         ):

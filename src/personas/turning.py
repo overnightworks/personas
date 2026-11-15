@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import aclosing
+import time
+from contextlib import AsyncExitStack, aclosing
 from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Final
@@ -40,7 +41,7 @@ from personas.recall import (
     search_text,
     text_refused_text,
 )
-from personas.reporting import Event, TurnTally
+from personas.reporting import Event, TurnTally, step_timer, stepping
 from personas.task_record import (
     RelayFailed,
     ending_loud_when_cancelled,
@@ -61,6 +62,7 @@ if TYPE_CHECKING:
     from agents.member import PlaceRef
     from agents.tools import ToolDeclaration
     from agents.turn import FailureCode, JsonObject, Principal
+    from logline import StepTimer
 
     from personas.app_session import AppSession, SessionOpener
     from personas.clock import Clock
@@ -70,6 +72,7 @@ if TYPE_CHECKING:
     from personas.mind import Mind
     from personas.recall import LookupBounds
     from personas.remembering import Remembering
+    from personas.secret import Secret
     from personas.task_record import TaskRecord
     from personas.tokens import TokenFacts, TokenSource
 
@@ -276,8 +279,7 @@ class Turning:
             held = failure_held_by(stopped)
             if held is None and record.defect is None:
                 tally.stop_code = stopped.code.value
-                self._pause_before_retry(stopped.code)
-                self._mind.due_again(AppPlace(self._app.mcp_url, admitted.place), admitted.occasion)
+                self._leave_unanswered(stopped.code, admitted)
             # What left the session beside the stop (a late answer, the failure another stop holds) still goes to the
             # group, to be judged there.
             rest = failures_leaving_with(held, (leaf for leaf in leaves if leaf is not stopped))
@@ -288,32 +290,41 @@ class Turning:
         finally:
             tally.sizes = sizing.sizes()
 
-    def _pause_before_retry(self, code: RejectionCode | FailureCode) -> None:
+    def _leave_unanswered(self, code: RejectionCode | FailureCode, admitted: Admitted) -> None:
         """A turn that ended without an answer leaves his mind a pause that holds every turn of his, so the lines that
-        arrive meanwhile are taken into his history and make one turn after it, with the turn's own place. The pause
-        is the mind's, so it outlives this task."""
+        arrive meanwhile are taken into his history and make one turn after it, with the turn's own place, due again
+        from the pause's end on the ``time.perf_counter`` scale of the step timers. The pause is the mind's, so it
+        outlives this task."""
         seconds = self._mind.unanswered(budget_spent=code is RejectionCode.BUDGET_SPENT, now=self._clock.now())
         self._report_pause(seconds, code.value)
+        self._mind.due_again(
+            AppPlace(self._app.mcp_url, admitted.place), admitted.occasion, time.perf_counter() + seconds
+        )
 
     async def _run_turn(
         self, setup: TurnSetup, admitted: Admitted, record: TaskRecord, sizing: _Sizing, tally: TurnTally
     ) -> None:
-        turn = TurnTold(
-            admitted.at,
-            self._app.mcp_url,
-            admitted.place,
-            admitted.occasion,
-            aloud=admitted.aloud,
-            through=admitted.history.taken,
-        )
-        told = turn_messages(admitted.facts.name, admitted.present, turn)
-        token = await self._current_token()
-        async with self._open_session(self._app, token.value) as session:
-            try:
-                await self._run_session_body(setup, admitted, turn, told, session, record, sizing, tally)
-            except Exception as error:
-                record.note(error)
-                raise
+        agent = self._agent.client_id
+        begun = time.perf_counter()
+        with stepping(step_timer("turn_setup.ended", agent, self._app.mcp_url, started_at=begun)) as hand_off:
+            turn = TurnTold(
+                admitted.at,
+                self._app.mcp_url,
+                admitted.place,
+                admitted.occasion,
+                aloud=admitted.aloud,
+                through=admitted.history.taken,
+            )
+            told = turn_messages(admitted.facts.name, admitted.present, turn)
+            with stepping(step_timer("token_hold.ended", agent, self._app.mcp_url, started_at=begun)):
+                token = await self._current_token()
+            async with AsyncExitStack() as opened:
+                session = await self._opened(opened, self._app, token.value, measured=True)
+                try:
+                    await self._run_session_body(setup, admitted, turn, told, session, record, sizing, tally, hand_off)
+                except Exception as error:
+                    record.note(error)
+                    raise
 
     async def _run_session_body(
         self,
@@ -325,6 +336,7 @@ class Turning:
         record: TaskRecord,
         sizing: _Sizing,
         tally: TurnTally,
+        hand_off: StepTimer,
     ) -> None:
         raise_if_cancelled()
         held = await self._hold_tools(setup, session, record, admitted)
@@ -344,6 +356,7 @@ class Turning:
             setup.backend(tuple(sizing.measuring(each) for each in held.tools)) as backend,
             aclosing(backend.run(request, person)) as events,
         ):
+            hand_off.end()
             if admitted.aloud:
                 speaking = Speaking(
                     session,
@@ -407,7 +420,7 @@ class Turning:
         Of each app only the bound tools it lists now are held, none when it lists none. Another app whose listing
         fails is left out and reported once, and the turn holds the rest.
         """
-        own = bound_declarations(await session.declared_tools(), setup.binding.tools)
+        own = bound_declarations(await self._list_tools(self._app, session), setup.binding.tools)
         hold = _Hold(admitted.history)
         tools: list[HandTool] = []
         bounds: list[int] = []
@@ -453,12 +466,16 @@ class Turning:
         self, app: AppTarget, binding: ToolBinding, calls: _Calls, hold: _Hold, record: TaskRecord
     ) -> list[HandTool] | None:
         """The hand tools of the bound tools another app lists, or ``None`` after the report of its failed listing."""
-        declared = await self._ask_elsewhere(app, lambda session: session.declared_tools(), record)
+        declared = await self._ask_elsewhere(app, partial(self._list_tools, app), record, opening=True)
         if isinstance(declared, CallFailure):
             self._report(_failure_event(app), failure_code(declared), app, declared)
             return None
         listed = bound_declarations(declared, binding.tools)
         return [HandTool(each, partial(self._relay_elsewhere, app, each.name, calls, hold, record)) for each in listed]
+
+    async def _list_tools(self, app: AppTarget, session: AppSession) -> tuple[ToolDeclaration, ...]:
+        with stepping(step_timer("tool_list.ended", self._agent.client_id, app.mcp_url), turn_goes_on=app != self._app):
+            return await session.declared_tools()
 
     def _held(self, hold: _Hold) -> ToolOutcome | None:
         """The result of a call that is not sent, or ``None`` when the call goes on. It is asked before any await."""
@@ -533,9 +550,15 @@ class Turning:
                 self._mind.take((ActDone(app.mcp_url, name, arguments, outcome, self._clock.wall()),))
 
     async def _ask_elsewhere[Answer](
-        self, app: AppTarget, ask: Callable[[AppSession], Awaitable[Answer]], record: TaskRecord
+        self,
+        app: AppTarget,
+        ask: Callable[[AppSession], Awaitable[Answer]],
+        record: TaskRecord,
+        *,
+        opening: bool = False,
     ) -> Answer | CallFailure:
-        """Asks another app in a session of its own, under the token for its own scope.
+        """Asks another app in a session of its own, under the token for its own scope; ``opening`` says the turn
+        waits for the session's opening, which is then a step of its own.
 
         The session lives only for this request. A failure of the call, a session that died of its own child and
         an expiry of the app's call time come back as the failure; any other error is raised, and a turn whose
@@ -543,7 +566,7 @@ class Turning:
         """
         try:
             return await ending_loud_when_cancelled(
-                self._within_call_time(app, ask, record), unreachable_unless_cancelling
+                self._within_call_time(app, ask, record, opening=opening), unreachable_unless_cancelling
             )
         except Exception as error:
             raise_if_cancelled()
@@ -555,15 +578,25 @@ class Turning:
                 raise defect from failure
             return failure
 
+    async def _opened(self, opened: AsyncExitStack, app: AppTarget, token: Secret, *, measured: bool) -> AppSession:
+        """The session at ``app``, closed with ``opened``; its opening is a step when ``measured``."""
+        if not measured:
+            return await opened.enter_async_context(self._open_session(app, token))
+        with stepping(
+            step_timer("session_open.ended", self._agent.client_id, app.mcp_url), turn_goes_on=app != self._app
+        ):
+            return await opened.enter_async_context(self._open_session(app, token))
+
     async def _within_call_time[Answer](
-        self, app: AppTarget, ask: Callable[[AppSession], Awaitable[Answer]], record: TaskRecord
+        self, app: AppTarget, ask: Callable[[AppSession], Awaitable[Answer]], record: TaskRecord, *, opening: bool
     ) -> Answer:
         """The token, the session and the request, all under the call time of the app."""
         bound = asyncio.timeout(app.call_seconds)
         try:
             async with bound:
                 granted = await self._tokens.fetch(self._agent, app.scope)
-                async with self._open_session(app, granted.value) as session:
+                async with AsyncExitStack() as opened:
+                    session = await self._opened(opened, app, granted.value, measured=opening)
                     try:
                         return await ask(session)
                     except Exception as error:

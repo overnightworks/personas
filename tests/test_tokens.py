@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import secrets
 
 import httpx2
 import pytest
+from logline import current_traceparent, unit_trace
 
+from personas.decision import NO_ANSWER_REASON
 from personas.failures import INVALID_ANSWER_CODE, TokenStatusFailure, Unreachable, UnusableAnswer
+from personas.reporting import carry_trace
 from personas.secret import Secret
 from personas.tokens import HttpTokenSource, facts_of
 from tests.support.fakes import credentials
-from tests.support.hopin import ISSUER
+from tests.support.hopin import ISSUER, lines_of
 from tests.support.realm import jwt_of
 
 pytestmark = pytest.mark.anyio
@@ -99,6 +103,42 @@ async def test_the_request_asks_for_client_credentials_with_the_apps_scope():
             "scope": "mcp-app",
         }
     ]
+
+
+async def test_each_fetch_writes_one_token_request_line_with_its_outcome_and_a_closed_reason_for_a_failure(caplog):
+    caplog.set_level(logging.INFO)
+    answers = iter([httpx2.Response(401), httpx2.Response(200, json={"access_token": "t", "expires_in": 5})])
+    source = source_answering(lambda request: next(answers))
+    agent = credentials()
+
+    with pytest.raises(TokenStatusFailure):
+        await source.fetch(agent, "mcp-app")
+    await source.fetch(agent, "mcp-app")
+
+    refused, granted = lines_of(caplog.get_records("call"), "token_request.ended")
+    assert (refused["outcome"], refused["reason"], granted["outcome"]) == ("failed", NO_ANSWER_REASON, "ok")
+    assert {refused["agent_id"], granted["agent_id"]} == {agent.client_id}
+    assert all(isinstance(line["duration_ms"], float) for line in (refused, granted))
+
+
+async def test_the_request_to_the_realm_carries_the_current_trace_and_none_outside_one():
+    seen: list[str | None] = []
+
+    def record(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request.headers.get("traceparent"))
+        return httpx2.Response(200, json={"access_token": "t", "expires_in": 5})
+
+    client = httpx2.AsyncClient(transport=httpx2.MockTransport(record), event_hooks={"request": [carry_trace]})
+    source = HttpTokenSource(ENDPOINT, client)
+    agent = credentials()
+
+    await source.fetch(agent, "mcp-app")
+    with unit_trace(None):
+        inside = current_traceparent()
+        await source.fetch(agent, "mcp-app")
+
+    assert (seen[0], seen[1]) == (None, inside)
+    assert inside is not None
 
 
 def _claims(**changes: object) -> dict[str, object]:

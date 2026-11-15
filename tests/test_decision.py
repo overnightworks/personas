@@ -596,8 +596,12 @@ NOW = 1000.0
 def _due_in_order(*due: tuple[AppPlace, Lines | Waiting]) -> Turns:
     turns = Turns()
     for at, occasion in due:
-        turns = with_due(turns, at, occasion)
+        turns = with_due(turns, at, occasion, NOW)
     return turns
+
+
+def _occasions(turns: Turns) -> dict[AppPlace, Lines | Waiting]:
+    return {at: held.occasion for at, held in turns.due.items()}
 
 
 def test_lines_due_at_a_place_in_one_generation_join_and_keep_the_place_where_it_was_in_the_order():
@@ -605,9 +609,9 @@ def test_lines_due_at_a_place_in_one_generation_join_and_keep_the_place_where_it
         (CALL_AT_A, Lines("g1", frozenset({1}), missed=False)), (CALL_AT_B, Lines("g1", frozenset({4}), missed=False))
     )
 
-    turns = with_due(turns, CALL_AT_A, Lines("g1", frozenset({2, 3}), missed=True))
+    turns = with_due(turns, CALL_AT_A, Lines("g1", frozenset({2, 3}), missed=True), NOW)
 
-    assert turns.due == {
+    assert _occasions(turns) == {
         CALL_AT_A: Lines("g1", frozenset({1, 2, 3}), missed=True),
         CALL_AT_B: Lines("g1", frozenset({4}), missed=False),
     }
@@ -619,10 +623,10 @@ def test_lines_of_another_generation_and_a_newer_revision_replace_what_was_due_a
         (CALL_AT_A, Lines("g1", frozenset({1}), missed=True)), (TABLE_AT_A, Waiting(1)), (CALL_AT_B, Waiting(5))
     )
 
-    turns = with_due(turns, CALL_AT_A, Lines("g2", frozenset({1}), missed=False))
-    turns = with_due(turns, TABLE_AT_A, Waiting(2))
+    turns = with_due(turns, CALL_AT_A, Lines("g2", frozenset({1}), missed=False), NOW)
+    turns = with_due(turns, TABLE_AT_A, Waiting(2), NOW)
 
-    assert turns.due == {
+    assert _occasions(turns) == {
         CALL_AT_A: Lines("g2", frozenset({1}), missed=False),
         TABLE_AT_A: Waiting(2),
         CALL_AT_B: Waiting(5),
@@ -634,9 +638,9 @@ def test_a_turn_without_an_answer_makes_its_place_due_again_with_what_it_was_for
     turns = _due_in_order((CALL_AT_B, Waiting(1)))
 
     for occasion in (Waiting(2), Lines("g1", frozenset({3}), missed=True)):
-        again = due_again(turns, CALL_AT_A, occasion)
+        again = due_again(turns, CALL_AT_A, occasion, NOW)
 
-        assert again.due == {CALL_AT_B: Waiting(1), CALL_AT_A: occasion}
+        assert _occasions(again) == {CALL_AT_B: Waiting(1), CALL_AT_A: occasion}
         assert list(again.due) == [CALL_AT_B, CALL_AT_A]
 
 
@@ -647,11 +651,11 @@ def test_a_place_that_became_due_meanwhile_keeps_its_newer_occasion_and_only_lin
         (CALL_AT_B, Lines("g1", frozenset({7}), missed=False)),
     )
 
-    turns = due_again(turns, CALL_AT_A, Lines("g1", frozenset({1}), missed=False))
-    turns = due_again(turns, TABLE_AT_A, Waiting(2))
-    turns = due_again(turns, CALL_AT_B, Lines("g1", frozenset({4}), missed=True))
+    turns = due_again(turns, CALL_AT_A, Lines("g1", frozenset({1}), missed=False), NOW)
+    turns = due_again(turns, TABLE_AT_A, Waiting(2), NOW)
+    turns = due_again(turns, CALL_AT_B, Lines("g1", frozenset({4}), missed=True), NOW)
 
-    assert turns.due == {
+    assert _occasions(turns) == {
         CALL_AT_A: Lines("g2", frozenset({5}), missed=False),
         TABLE_AT_A: Waiting(3),
         CALL_AT_B: Lines("g1", frozenset({4, 7}), missed=True),
@@ -659,13 +663,47 @@ def test_a_place_that_became_due_meanwhile_keeps_its_newer_occasion_and_only_lin
     assert list(turns.due) == [CALL_AT_A, TABLE_AT_A, CALL_AT_B]
 
 
+def _since(turns: Turns, at: AppPlace) -> float:
+    return turns.due[at].since
+
+
+def test_a_join_and_a_replacement_keep_the_earliest_moment_the_place_became_due():
+    turns = with_due(Turns(), CALL_AT_A, Lines("g1", frozenset({1}), missed=False), NOW)
+    turns = with_due(turns, TABLE_AT_A, Waiting(1), NOW + 1)
+
+    joined = with_due(turns, CALL_AT_A, Lines("g1", frozenset({2}), missed=False), NOW + 5)
+    replaced = with_due(turns, CALL_AT_A, Lines("g2", frozenset({1}), missed=False), NOW + 5)
+    revised = with_due(turns, TABLE_AT_A, Waiting(2), NOW + 5)
+
+    assert (_since(joined, CALL_AT_A), _since(replaced, CALL_AT_A), _since(revised, TABLE_AT_A)) == (NOW, NOW, NOW + 1)
+
+
+def test_a_turn_due_again_waits_from_the_moment_given_and_a_place_due_meanwhile_keeps_its_own_moment():
+    turns = with_due(Turns(), CALL_AT_B, Waiting(1), NOW)
+    turns = with_due(turns, CALL_AT_A, Lines("g1", frozenset({2}), missed=False), NOW + 2)
+
+    again = due_again(turns, TABLE_AT_A, Waiting(1), NOW + 30)
+    joined = due_again(again, CALL_AT_A, Lines("g1", frozenset({1}), missed=False), NOW + 30)
+    newer = due_again(again, CALL_AT_B, Waiting(0), NOW + 30)
+
+    assert (_since(again, TABLE_AT_A), _since(joined, CALL_AT_A), _since(newer, CALL_AT_B)) == (NOW + 30, NOW + 2, NOW)
+
+
+def test_the_claimed_turn_says_since_when_it_was_due():
+    turns = with_due(Turns(), CALL_AT_A, Waiting(1), NOW - 7)
+
+    _, _, due = claimed(turns, CALL_AT_A.app, NOW) or pytest.fail("the place is due")
+
+    assert due.since == NOW - 7
+
+
 def test_the_turn_goes_to_the_place_that_waited_longest_and_only_in_its_app():
     turns = _due_in_order((CALL_AT_B, Waiting(1)), (CALL_AT_A, Waiting(2)))
 
     assert claimed(turns, CALL_AT_A.app, NOW) is None
-    after, at, occasion = claimed(turns, CALL_AT_B.app, NOW) or pytest.fail("the oldest place is at its app")
-    assert (after.running, at, occasion) == (True, CALL_AT_B, Waiting(1))
-    assert after.due == {CALL_AT_A: Waiting(2)}
+    after, at, due = claimed(turns, CALL_AT_B.app, NOW) or pytest.fail("the oldest place is at its app")
+    assert (after.running, at, due.occasion) == (True, CALL_AT_B, Waiting(1))
+    assert _occasions(after) == {CALL_AT_A: Waiting(2)}
 
 
 def test_no_turn_starts_while_one_runs_or_when_nothing_is_due():
@@ -1222,7 +1260,7 @@ def test_the_places_and_lines_a_turn_is_due_for_show_no_name_no_text_and_no_stat
     taken = said(1, marker, name=marker)
     at = AppPlace(taken.visit.app, taken.visit.place)
     lines = Lines(taken.visit.generation, frozenset({taken.seq}), missed=False)
-    turns = with_due(with_due(Turns(), at, lines), AppPlace(APP, TABLE), Waiting(revision=1))
+    turns = with_due(with_due(Turns(), at, lines, NOW), AppPlace(APP, TABLE), Waiting(revision=1), NOW)
 
     assert marker not in repr(at)
     assert marker not in repr(lines)

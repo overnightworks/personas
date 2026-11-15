@@ -15,6 +15,7 @@ import httpx2
 import pytest
 from agents.backend.gateway import GatewayBackend
 from agents.turn_events import FinalEvent
+from logline import current_traceparent, unit_trace
 
 from personas.app_session import open_mcp_session
 from personas.config import CONFIG_ENVIRONMENT_VARIABLE, load_config
@@ -31,7 +32,7 @@ from personas.memory import PostgresLineStore
 from personas.readiness import FileReadyMarker
 from personas.reporting import Event, log_state_change
 from personas.tokens import HttpTokenSource
-from tests.support.fakes import FakeClock
+from tests.support.fakes import FakeClock, credentials
 from tests.support.gateway import Gateway, says
 from tests.support.hopin import AGENT_SUBJECT, FakeApp, active, invited
 from tests.support.realm import FakeRealm
@@ -300,6 +301,43 @@ def test_the_real_boundaries_hand_the_loops_the_marker_they_were_given(files):
             return boundaries.ready
 
     assert asyncio.run(boundaries_ready()) is marker
+
+
+def test_the_real_boundaries_send_the_current_trace_to_the_realm_and_none_outside_one(files):
+    files.write()
+    seen: list[str | None] = []
+
+    async def answer(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        head = (await reader.readuntil(b"\r\n\r\n")).decode().lower()
+        length = int(head.split("content-length: ")[1].split("\r\n")[0])
+        await reader.readexactly(length)
+        seen.append(next((line.split(": ")[1] for line in head.split("\r\n") if line.startswith("traceparent")), None))
+        body = b'{"access_token": "t", "expires_in": 5}'
+        writer.write(
+            b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: %d\r\n\r\n%s" % (len(body), body)
+        )
+        await writer.drain()
+        writer.close()
+
+    async def fetched_twice() -> str | None:
+        async with await asyncio.start_server(answer, "127.0.0.1", 0) as realm:
+            port = realm.sockets[0].getsockname()[1]
+            config = replace(
+                load_config({CONFIG_ENVIRONMENT_VARIABLE: str(files.config_path)}),
+                token_endpoint=f"http://127.0.0.1:{port}/token",
+            )
+            async with real_boundaries(config, FileReadyMarker(config.ready_file)) as boundaries:
+                agent = credentials()
+                await boundaries.tokens.fetch(agent, "mcp-app")
+                with unit_trace(None):
+                    inside = current_traceparent()
+                    await boundaries.tokens.fetch(agent, "mcp-app")
+                return inside
+
+    inside = asyncio.run(fetched_twice())
+
+    assert inside is not None
+    assert seen == [None, inside]
 
 
 def test_an_addressed_line_gets_one_say_through_the_entry_point_and_nothing_secret_or_said_reaches_the_log(

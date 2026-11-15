@@ -54,6 +54,7 @@ from tests.support.placestore import MemoryPlaceStore
 from tests.support.wire import ConnectionCut, Handler, Reply, Rpc
 
 if TYPE_CHECKING:
+    import io
     from collections.abc import AsyncIterator, Callable, Iterator
 
     import pytest
@@ -204,6 +205,12 @@ def lines_of(records: list[logging.LogRecord], event: str | None = None) -> list
     return lines if event is None else [line for line in lines if line["event"] == event]
 
 
+def written_by_the_runner(written: io.StringIO) -> list[dict[str, object]]:
+    """The runner's lines among what the entry point's handler wrote into ``written``, as their JSON holds them."""
+    lines = map(json.loads, written.getvalue().splitlines())
+    return [line for line in lines if line["logger"] == "personas"]
+
+
 class RequestLog:
     """What the app saw, in order: each request's method, and the acknowledgement of each stream."""
 
@@ -268,6 +275,8 @@ class FakeApp:
     spoken: list[tuple[str, str, str]] = field(default_factory=list[tuple[str, str, str]])
     spoken_added: asyncio.Event = field(default_factory=asyncio.Event)
     speak_bearers: list[str] = field(default_factory=list[str])
+    traceparents: list[tuple[str, str | None]] = field(default_factory=list[tuple[str, str | None]])
+    """The method and the ``traceparent`` header of each request, in order; none when the request carried none."""
     sentence_ends_held: bool = False
     """Whether a voiced sentence plays until ``end_sentence`` or ``stop_speaking`` is called: its own line enters then,
     and a ``speak`` that arrives meanwhile is answered only then, as the app answers it at its sentence's turn."""
@@ -659,6 +668,7 @@ class FakeApp:
         headers = {name.decode(): value.decode() for name, value in scope["headers"]}
         bearer = headers.get("authorization", "").removeprefix("Bearer ")
         self.presented.add(bearer)
+        self.traceparents.append((method, headers.get("traceparent")))
         if method == CALL and (document.get("params") or {}).get("name") == SPEAK_TOOL:
             self.speak_bearers.append(bearer)
         noting = self._noting_acknowledgements(send)

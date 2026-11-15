@@ -13,6 +13,7 @@ from personas.decision import (
     BACKOFF_CAP_SECONDS,
     AppPlace,
     Lines,
+    Occasion,
     TurnTold,
     Waiting,
     turn_messages,
@@ -103,41 +104,46 @@ TABLE_AT_A = AppPlace(CALL.app, PlaceRef(kind="table", id="table-1"))
 CALL_AT_B = AppPlace(OTHER_CALL.app, OTHER_CALL.place)
 
 
+def _claimed(mind: Mind, app: str, now: float) -> tuple[AppPlace, Occasion] | None:
+    claim = mind.claim(app, now)
+    return None if claim is None else (claim[0], claim[1].occasion)
+
+
 def test_one_turn_runs_at_a_time_and_the_next_goes_to_the_place_that_waited_longest_once_it_ended():
     mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
-    mind.due(CALL_AT_B, Waiting(1))
-    mind.due(TABLE_AT_A, Waiting(2))
+    mind.due(CALL_AT_B, Waiting(1), NOW)
+    mind.due(TABLE_AT_A, Waiting(2), NOW)
 
     assert mind.claim(TABLE_AT_A.app, NOW) is None
-    assert mind.claim(CALL_AT_B.app, NOW) == (CALL_AT_B, Waiting(1))
+    assert _claimed(mind, CALL_AT_B.app, NOW) == (CALL_AT_B, Waiting(1))
     assert mind.claim(TABLE_AT_A.app, NOW) is None
 
     mind.release()
 
-    assert mind.claim(TABLE_AT_A.app, NOW) == (TABLE_AT_A, Waiting(2))
+    assert _claimed(mind, TABLE_AT_A.app, NOW) == (TABLE_AT_A, Waiting(2))
 
 
 def test_a_turn_without_an_answer_is_due_again_once_the_running_turn_ends_and_a_newer_occasion_stays():
     mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
-    mind.due(TABLE_AT_A, Waiting(1))
-    assert mind.claim(TABLE_AT_A.app, NOW) == (TABLE_AT_A, Waiting(1))
+    mind.due(TABLE_AT_A, Waiting(1), NOW)
+    assert _claimed(mind, TABLE_AT_A.app, NOW) == (TABLE_AT_A, Waiting(1))
 
-    mind.due(TABLE_AT_A, Waiting(2))
-    mind.due_again(TABLE_AT_A, Waiting(1))
-    mind.due_again(CALL_AT_B, Waiting(1))
+    mind.due(TABLE_AT_A, Waiting(2), NOW)
+    mind.due_again(TABLE_AT_A, Waiting(1), NOW)
+    mind.due_again(CALL_AT_B, Waiting(1), NOW)
     assert mind.claim(TABLE_AT_A.app, NOW) is None
     mind.release()
 
-    assert mind.claim(TABLE_AT_A.app, NOW) == (TABLE_AT_A, Waiting(2))
+    assert _claimed(mind, TABLE_AT_A.app, NOW) == (TABLE_AT_A, Waiting(2))
     mind.release()
-    assert mind.claim(CALL_AT_B.app, NOW) == (CALL_AT_B, Waiting(1))
+    assert _claimed(mind, CALL_AT_B.app, NOW) == (CALL_AT_B, Waiting(1))
 
 
 def test_the_wait_after_a_turn_without_an_answer_holds_every_claim_until_it_is_over_whatever_ends_the_turn():
     mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
-    mind.due(TABLE_AT_A, Waiting(1))
-    mind.due(CALL_AT_B, Waiting(1))
-    assert mind.claim(TABLE_AT_A.app, NOW) == (TABLE_AT_A, Waiting(1))
+    mind.due(TABLE_AT_A, Waiting(1), NOW)
+    mind.due(CALL_AT_B, Waiting(1), NOW)
+    assert _claimed(mind, TABLE_AT_A.app, NOW) == (TABLE_AT_A, Waiting(1))
 
     wait = mind.unanswered(budget_spent=False, now=NOW)
     mind.release()
@@ -145,7 +151,7 @@ def test_the_wait_after_a_turn_without_an_answer_holds_every_claim_until_it_is_o
 
     assert mind.claim(CALL_AT_B.app, before_the_end) is None
     assert mind.pause_left(CALL_AT_B.app, before_the_end) == wait / 2
-    assert mind.claim(CALL_AT_B.app, NOW + wait) == (CALL_AT_B, Waiting(1))
+    assert _claimed(mind, CALL_AT_B.app, NOW + wait) == (CALL_AT_B, Waiting(1))
 
 
 def test_the_end_of_a_wait_wakes_every_loop_of_his():
@@ -190,8 +196,8 @@ def test_the_end_of_a_turn_wakes_every_loop_of_the_agent():
 def test_a_place_dropped_while_no_turn_runs_wakes_every_loop_and_one_dropped_during_a_turn_wakes_none():
     mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
     events = [mind.wake_event(), mind.wake_event()]
-    mind.due(CALL_AT_B, Lines("generation-1", frozenset({1}), missed=False))
-    mind.due(TABLE_AT_A, Waiting(1))
+    mind.due(CALL_AT_B, Lines("generation-1", frozenset({1}), missed=False), NOW)
+    mind.due(TABLE_AT_A, Waiting(1), NOW)
     assert mind.claim(CALL_AT_B.app, NOW) is not None
 
     mind.undue(lambda at: at == TABLE_AT_A)
@@ -203,7 +209,7 @@ def test_a_place_dropped_while_no_turn_runs_wakes_every_loop_and_one_dropped_dur
     mind.undue(lambda at: at == CALL_AT_B)
     assert [each.is_set() for each in events] == [False, False]
 
-    mind.due(TABLE_AT_A, Waiting(2))
+    mind.due(TABLE_AT_A, Waiting(2), NOW)
     mind.undue(lambda at: at == TABLE_AT_A)
     assert [each.is_set() for each in events] == [True, True]
     assert mind.claim(TABLE_AT_A.app, NOW) is None
@@ -219,7 +225,7 @@ def test_a_mind_holding_lines_views_and_due_places_shows_no_name_no_text_and_no_
             ViewSeen(CALL.app, table, PlaceView(revision=1, awaits_you=True, state={"hand": marker}), READ_AT),
         )
     )
-    mind.due(CALL_AT_B, Lines(OTHER_CALL.generation, frozenset({1}), missed=False))
+    mind.due(CALL_AT_B, Lines(OTHER_CALL.generation, frozenset({1}), missed=False), NOW)
 
     assert marker not in repr(mind)
 
