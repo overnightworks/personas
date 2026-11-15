@@ -69,43 +69,32 @@ class StateChange:
 type Reporter = Callable[[StateChange], None]
 
 
+_LINE_OF: Final = {
+    Event.STARTED: (logging.INFO, "loop.started"),
+    Event.SUSPENDED: (logging.INFO, "loop.suspended"),
+    Event.RESUMED: (logging.INFO, "loop.resumed"),
+    Event.BACKOFF: (logging.INFO, "loop.backed_off"),
+    Event.JOINED: (logging.INFO, "invitation.accepted"),
+    Event.REFUSED: (logging.INFO, "invitation.refused"),
+    Event.INVITATION_LEFT_OUT: (logging.INFO, "invitation.left_out"),
+    Event.TURN_ENDED: (logging.INFO, "turn.ended"),
+    Event.PAUSED: (logging.INFO, "turns.paused"),
+    Event.SPEAK_REFUSED: (logging.INFO, "speak.refused"),
+    Event.TOOLS_ONLY_APP_FAILED: (logging.WARNING, "tools_only_app.failed"),
+    Event.HELD_APP_FAILED: (logging.WARNING, "held_app.failed"),
+    Event.STORE_FAILED: (logging.WARNING, "store.failed"),
+    Event.STORE_RESUMED: (logging.INFO, "store.resumed"),
+    Event.SWEPT: (logging.INFO, "lines.swept"),
+}
+
+
 def log_state_change(change: StateChange) -> None:
     """Writes the fields of ``_fields_of`` and nothing else: no secret, token or tool content reaches a line."""
     fields = _fields_of(change)
-    match change.event:
-        case Event.STARTED:
-            _LOG.info("loop.started", extra=fields)
-        case Event.SUSPENDED:
-            _LOG.info("loop.suspended", extra=fields)
-        case Event.RESUMED:
-            _LOG.info("loop.resumed", extra=fields)
-        case Event.BACKOFF:
-            _LOG.info("loop.backed_off", extra=fields)
-        case Event.JOINED:
-            _LOG.info("invitation.accepted", extra=fields)
-        case Event.REFUSED:
-            _LOG.info("invitation.refused", extra=fields)
-        case Event.INVITATION_LEFT_OUT:
-            _LOG.info("invitation.left_out", extra=fields)
-        case Event.TURN_ENDED:
-            if fields["outcome"] is Outcome.FAILED:
-                _LOG.error("turn.ended", extra=fields)
-            else:
-                _LOG.info("turn.ended", extra=fields)
-        case Event.PAUSED:
-            _LOG.info("turns.paused", extra=fields)
-        case Event.SPEAK_REFUSED:
-            _LOG.info("speak.refused", extra=fields)
-        case Event.TOOLS_ONLY_APP_FAILED:
-            _LOG.warning("tools_only_app.failed", extra=fields)
-        case Event.HELD_APP_FAILED:
-            _LOG.warning("held_app.failed", extra=fields)
-        case Event.STORE_FAILED:
-            _LOG.warning("store.failed", extra=fields)
-        case Event.STORE_RESUMED:
-            _LOG.info("store.resumed", extra=fields)
-        case Event.SWEPT:
-            _LOG.info("lines.swept", extra=fields)
+    level, line = _LINE_OF[change.event]
+    if fields.get("outcome") is Outcome.FAILED:
+        level = logging.ERROR
+    _LOG.log(level, line, extra=fields)
 
 
 def _fields_of(change: StateChange) -> dict[str, str | int | float | Outcome]:
