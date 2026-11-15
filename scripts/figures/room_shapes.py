@@ -225,3 +225,135 @@ class Wall:
         low = (min(corners[0][0], corners[1][0]), up[0], min(corners[0][2], corners[1][2]))
         high = (max(corners[0][0], corners[1][0]), up[1], max(corners[0][2], corners[1][2]))
         return box(low, high, cell=cell, omit=[scaled(self.out, -1.0)])
+
+
+@dataclass(frozen=True)
+class Floor:
+    """A floor of square tiles: where it starts, how large it is, how each tile is cut and what colours it."""
+
+    corner: Vector
+    width: float
+    depth: float
+    tile: float
+    joint: float
+    joint_colour: Colour
+    # Where, along a tile from its start, the floor is cut; the last is the tile's own size.
+    cuts_in_tile: tuple[float, ...]
+    tile_colour: Callable[[int, int], Colour]
+
+
+def tiled_floor(floor: Floor) -> Piece:
+    """The floor from its `corner` across to the right and back, a joint of `joint` round every tile.
+
+    The tiles are counted from the corner along each side, and `tile_colour` takes a tile's column and row.
+    """
+    columns, rows = round(floor.width / floor.tile), round(floor.depth / floor.tile)
+
+    def tile_cuts(length: float) -> list[float]:
+        stops = [0.0]
+        for tile in range(round(length / floor.tile)):
+            start = tile * floor.tile
+            stops += [start + each for each in floor.cuts_in_tile]
+        return stops
+
+    def colour(position: Vector) -> Colour:
+        across, back = position[0] - floor.corner[0], floor.corner[2] - position[2]
+        column, row = min(int(across / floor.tile), columns - 1), min(int(back / floor.tile), rows - 1)
+        inside = min(
+            across - column * floor.tile,
+            (column + 1) * floor.tile - across,
+            back - row * floor.tile,
+            (row + 1) * floor.tile - back,
+        )
+        return floor.joint_colour if inside < floor.joint / 2 else floor.tile_colour(column, row)
+
+    return piece(panel(floor.corner, ACROSS, BEHIND, tile_cuts(floor.width), tile_cuts(floor.depth)), colour)
+
+
+@dataclass(frozen=True)
+class Openings:
+    """Windows cut through a wall: their sides along it, their sill and head, and the heights where they bend."""
+
+    spans: tuple[tuple[float, float], ...]
+    sill: float
+    head: float
+    bends: tuple[float, ...] = ()
+
+
+def along_cuts(length: float, openings: Openings | None, cell: float) -> list[float]:
+    """The places along a wall of `length` where its sheets are cut: its ends and the sides of its openings."""
+    spans = openings.spans if openings else ()
+    return cuts(sorted({0.0, length, *(edge for span in spans for edge in span)}), cell)
+
+
+def pierced_panel(
+    wall: Wall,
+    length: float,
+    up: tuple[float, float],
+    openings: Openings | None,
+    cell: float,
+    paint: Paint,
+) -> Piece:
+    """The wall from `up[0]` to `up[1]` along its `length`, in cells no larger than `cell`, open at `openings`."""
+    heights = {*up, *((openings.sill, openings.head, *openings.bends) if openings else ())}
+
+    def hole(along: float, rise: float) -> bool:
+        return (
+            openings is not None
+            and openings.sill < rise < openings.head
+            and any(start < along < end for start, end in openings.spans)
+        )
+
+    return piece(wall.panel(along_cuts(length, openings, cell), cuts(sorted(heights), cell), hole=hole), paint)
+
+
+@dataclass(frozen=True)
+class Trim:
+    """A block standing out of a wall: its range along it, its heights and how far out it stands."""
+
+    along: tuple[float, float]
+    up: tuple[float, float]
+    out: tuple[float, float]
+    paint: Paint
+    cell: float
+
+
+@dataclass(frozen=True)
+class Leaf:
+    """A sheet on a wall over the range `along` from the floor up to `head`, `out` in front of it."""
+
+    along: tuple[float, float]
+    head: float
+    out: float
+    paint: Paint
+    cell: float
+
+
+@dataclass(frozen=True)
+class Sheet:
+    """The wall of `length` from `up[0]` to `up[1]`; `pierced` leaves it open at its `openings`."""
+
+    length: float
+    up: tuple[float, float]
+    paint: Paint
+    cell: float
+    openings: Openings | None = None
+    pierced: bool = False
+
+
+def fitted(wall: Wall, parts: Sequence[Trim | Leaf | Sheet]) -> list[Piece]:
+    """What a wall or a door in it is made of: each part built on the wall, in order, from its own values."""
+    pieces: list[Piece] = []
+    for part in parts:
+        if isinstance(part, Trim):
+            pieces.append(piece(wall.box(part.along, part.up, part.out, part.cell), part.paint))
+        elif isinstance(part, Leaf):
+            pieces.append(
+                piece(wall.panel(cuts(part.along, part.cell), cuts((0.0, part.head), part.cell), part.out), part.paint)
+            )
+        elif part.pierced:
+            pieces.append(pierced_panel(wall, part.length, part.up, part.openings, part.cell, part.paint))
+        else:
+            across = along_cuts(part.length, part.openings, part.cell)
+            pieces.append(piece(wall.panel(across, cuts(part.up, part.cell)), part.paint))
+    return pieces
