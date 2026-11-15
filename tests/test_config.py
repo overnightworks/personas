@@ -17,7 +17,7 @@ from personas.config import (
     DEFAULT_LOOKUP_CALLS,
     DEFAULT_SWEEP_MINUTES,
     DEFAULT_WRITE_SECONDS,
-    MAX_VOICE_NAMES,
+    ConfigError,
     ToolBinding,
     Voice,
     load_config,
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from personas.config import Config
     from personas.readiness import ReadyMarker
 
-MORE_VOICES_THAN_MOST = [f"voice-{index}" for index in range(MAX_VOICE_NAMES + 1)]
+MORE_VOICES_THAN_ANY_LIST_HOLDS = [f"voice-{index}" for index in range(100)]
 APP_TABLE = (
     '[[apps]]\nmcp_url = "https://hopin.test/mcp"\nscope = "mcp-hopin"\n'
     f'tools = ["say"]\nmax_tool_calls = {MAX_TOOL_CALLS}\n'
@@ -247,7 +247,7 @@ def test_an_agent_entry_turns_his_voice_on_with_a_table_and_may_name_an_ordered_
         ('[agents.voice]\nnames = "ryan"\n', "agents.0.voice.names"),
         ("[agents.voice]\nnames = []\n", "agents.0.voice.names"),
         ('[agents.voice]\nnames = ["ryan", "ryan"]\n', "agents.0.voice.names"),
-        (f"[agents.voice]\nnames = {json.dumps(MORE_VOICES_THAN_MOST)}\n", "agents.0.voice.names"),
+        (f"[agents.voice]\nnames = {json.dumps(MORE_VOICES_THAN_ANY_LIST_HOLDS)}\n", "agents.0.voice.names"),
         ('[agents.voice]\nname = "ryan"\n', "agents.0.voice.name"),
         ('[agents.voice]\nspeed = "fast"\n', "agents.0.voice.speed"),
         ('voice = "ryan"\n', "agents.0.voice"),
@@ -267,16 +267,37 @@ def test_an_agent_entry_turns_his_voice_on_with_a_table_and_may_name_an_ordered_
         "not a table",
     ],
 )
-def test_a_malformed_voice_stops_the_start_and_names_the_field_but_not_its_value(
-    files, monkeypatch, capsys, table, named
-):
+def test_a_malformed_voice_is_refused_naming_only_its_field_and_not_its_value(files, table, named):
     files.text += table
 
-    error = fails_at_start(files.write(), monkeypatch, capsys)
+    path = files.write()
 
-    assert named in error
+    with pytest.raises(ConfigError) as refused:
+        load_config(path)
+
+    problems = str(refused.value).split("; ")
+    assert [problem.split(": ", 1)[0] for problem in problems] == [named]
     for value in ("two words", "a/b", "ryan", "fast", "voice-0"):
-        assert value not in error
+        assert value not in str(refused.value)
+
+
+@pytest.mark.parametrize(
+    ("break_it", "named"),
+    [
+        (lambda text: text.replace('mcp_url = "https://hopin.test/mcp"', 'mcp_url = "ftp://x"'), "apps.0.mcp_url"),
+        (lambda text: text.replace('client_id = "agent-mozart"', 'client_id = ""'), "agents.0.client_id"),
+    ],
+    ids=["an app entry", "an agent entry"],
+)
+def test_a_malformed_entry_of_a_list_is_refused_naming_only_its_own_field(files, break_it, named):
+    files.text = break_it(files.text)
+
+    path = files.write()
+
+    with pytest.raises(ConfigError) as refused:
+        load_config(path)
+
+    assert [problem.split(": ", 1)[0] for problem in str(refused.value).split("; ")] == [named]
 
 
 @pytest.mark.parametrize("table", ["", "[agents.voice]\n"], ids=["without the table", "with the table"])

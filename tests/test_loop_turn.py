@@ -245,6 +245,24 @@ async def test_a_gateway_refusal_is_silent_logs_one_code_and_leaves_the_lifecycl
     assert len(runner.gateway.requests) == 1
 
 
+async def test_a_turns_backend_is_closed_once_the_turn_answered(runner):
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.app.said_count(1)
+
+    async with asyncio.timeout(LIMIT_SECONDS):
+        await runner.backends[0].closed.wait()
+
+
+async def test_a_turns_backend_is_closed_once_the_gateway_failed_the_turn(runner):
+    runner.gateway = Gateway(Reply(status=HTTPStatus.SERVICE_UNAVAILABLE))
+
+    await a_turn_ended_short(runner, FailureCode.PROVIDER_UNAVAILABLE.value)
+
+    assert runner.backends[0].closed.is_set()
+
+
 async def test_a_turn_refused_for_a_spent_budget_waits_the_backoff_base_before_his_next_turn_and_logs_the_pause_once(
     runner,
 ):

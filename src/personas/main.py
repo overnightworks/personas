@@ -30,7 +30,6 @@ from personas.tokens import HttpTokenSource
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable, Generator, Iterable, Sequence
 
-    from agents.backend import AgentBackend
     from agents.config import AgentConfig
     from agents.tools import HandTool
 
@@ -58,7 +57,7 @@ def _gateway_backends(gateway: AgentConfig | None) -> BackendFactory | None:
     if gateway is None:
         return None
 
-    def backend(tools: Iterable[HandTool]) -> AgentBackend:
+    def backend(tools: Iterable[HandTool]) -> GatewayBackend:
         return GatewayBackend(gateway, tools=tools)
 
     return backend

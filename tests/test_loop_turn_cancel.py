@@ -173,6 +173,24 @@ async def test_a_runner_cancelled_during_a_turn_ends_cancelled_and_reports_nothi
     assert runner.reports.reported() == [(Event.STARTED, None)]
 
 
+async def test_a_turns_backend_is_closed_once_the_turn_was_cancelled(runner):
+    await a_turn_in_its_first_round(runner)
+
+    runner.app.stand(SUBJECT)
+    await runner.reports.until(Event.TURN_ENDED)
+
+    assert runner.backends[0].closed.is_set()
+
+
+async def test_a_turns_backend_is_closed_once_the_runner_was_cancelled(runner):
+    await a_turn_in_its_first_round(runner)
+
+    runner.task.cancel()
+    await ended_by(runner.task)
+
+    assert runner.backends[0].closed.is_set()
+
+
 @LATE_ANSWERS
 async def test_a_runner_cancelled_while_its_lifecycle_session_unwinds_with_late_answers_alone_ends_cancelled(
     runner, monkeypatch, echo
