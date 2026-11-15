@@ -333,11 +333,13 @@ async def test_a_pause_outlives_the_leaving_of_its_turns_place_and_holds_the_tur
     await runner.app.until_window_read(other_place)
     runner.app.speak(other_place, PERSON, "Ada", ADDRESSED)
     await runner.app.until_window_read(other_place, count=2)
-    held_requests = len(runner.gateway.requests)
+    for later_read in range(3, 5):
+        runner.app.speak(other_place, PERSON, "Ada", "Hm.")
+        await runner.app.until_window_read(other_place, count=later_read)
+    assert len(runner.gateway.requests) == 1
     runner.clock.open_gate()
     await runner.app.said_count(1)
 
-    assert held_requests == 1
     assert [place for _, place, _ in runner.app.said] == [other_place]
 
 
