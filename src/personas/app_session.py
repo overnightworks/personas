@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import re
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
@@ -162,13 +161,12 @@ class _BearerAuth(httpx2.Auth):
 
 
 def _method_of(request: httpx2.Request) -> str | None:
-    """The MCP method the request carried, as the SDK wrote it; none for a request that carries no JSON-RPC message."""
+    """The MCP method the request carried; none for a request that carries no JSON-RPC message, as a reconnect does."""
     try:
-        document = json.loads(request.content)
-    except ValueError:
+        message = jsonrpc_message_adapter.validate_json(request.content, by_name=False)
+    except ValidationError:
         return None
-    method = cast("dict[str, object]", document).get("method") if isinstance(document, dict) else None
-    return method if isinstance(method, str) else None
+    return getattr(message, "method", None)
 
 
 async def _answer_code_of(response: httpx2.Response) -> str | None:

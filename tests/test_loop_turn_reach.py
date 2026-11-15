@@ -130,23 +130,30 @@ async def test_a_tools_only_app_whose_listing_fails_at_turn_start_is_absent_and_
 
 
 @pytest.mark.parametrize(
-    ("answers", "answer"),
+    ("answers", "code", "answer"),
     [
-        pytest.param(lambda reply: reply.error(INVALID_PARAMS), jsonrpc_code(INVALID_PARAMS), id="jsonrpc error"),
+        pytest.param(
+            lambda reply: reply.error(INVALID_PARAMS),
+            status_code(HTTPStatus.BAD_REQUEST),
+            jsonrpc_code(INVALID_PARAMS),
+            id="jsonrpc error",
+        ),
         pytest.param(
             lambda reply: reply.error(UNSUPPORTED_PROTOCOL_VERSION),
+            jsonrpc_code(UNSUPPORTED_PROTOCOL_VERSION),
             jsonrpc_code(UNSUPPORTED_PROTOCOL_VERSION),
             id="unsupported protocol version",
         ),
         pytest.param(
             lambda reply: reply.body(HTTPStatus.BAD_REQUEST, "text/html", b"<html>the front</html>"),
+            status_code(HTTPStatus.BAD_REQUEST),
             "text/html",
             id="no jsonrpc",
         ),
     ],
 )
-async def test_a_tools_only_app_that_answers_its_listing_with_a_400_is_reported_with_its_method_and_answer(
-    runner, songmaker, caplog, answers, answer
+async def test_a_tools_only_app_that_answers_its_listing_with_a_400_is_reported_with_its_code_method_and_answer(
+    runner, songmaker, caplog, answers, code, answer
 ):
     songmaker.script(LIST_TOOLS, answers)
     runner.gateway = Gateway(saying(ANSWER), completion("done"))
@@ -155,7 +162,7 @@ async def test_a_tools_only_app_that_answers_its_listing_with_a_400_is_reported_
     await runner.app.said_count(1)
 
     (change,) = runner.reports.changes_of(Event.TOOLS_ONLY_APP_FAILED)
-    assert (change.method, change.answer) == (LIST_TOOLS, answer)
+    assert (change.code, change.method, change.answer) == (code, LIST_TOOLS, answer)
     logged = formatted(caplog.get_records("call"))
     assert f"method={LIST_TOOLS} answer={answer}" in logged
     assert "the front" not in logged

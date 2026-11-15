@@ -274,6 +274,22 @@ async def test_a_5xx_backs_off_and_is_logged_once_until_a_read_answers(runner):
     ]
 
 
+async def test_a_5xx_backs_off_with_the_method_and_the_answer_that_failed(runner):
+    async def fails_once(reply):
+        await reply.body(HTTPStatus.SERVICE_UNAVAILABLE, "text/html", b"<html>the front</html>")
+
+    runner.app.script(READ, fails_once)
+    runner.start()
+    await runner.reports.until(Event.BACKOFF)
+
+    (change,) = runner.reports.changes_of(Event.BACKOFF)
+    assert (change.code, change.method, change.answer) == (
+        status_code(HTTPStatus.SERVICE_UNAVAILABLE),
+        READ,
+        "text/html",
+    )
+
+
 async def test_a_broken_connection_on_a_read_backs_off_and_is_logged_once_until_a_read_answers(runner):
     async def breaks_the_connection(reply):
         await reply.open_stream()
