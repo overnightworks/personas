@@ -1,0 +1,8 @@
+claim_id = "e4e877dc46114d4291b2211d4c7a43e5"
+agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
+role = "builder"
+base = "b8e733d19f41d07819d602b20c89bdc229c14230"
+branch = "claude/issue-242-the-gateway-request-carries-the-turn-s-t"
+scope = ["README.md", "docs/ARCHITECTURE.md", "pyproject.toml", "tests", "uv.lock"]
+opened_commit = "ad9b5fa1062b79db9d302a4626d0ed1b25f2db75"
+whole_reason = "one library pin with its proof through the loop and its documentation"
