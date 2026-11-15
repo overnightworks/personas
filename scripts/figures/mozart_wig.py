@@ -10,10 +10,10 @@ from figures.figure_head import NECK_BINDER
 from figures.figure_parts import Colour, Material, Part, mixed, part
 from figures.figure_shapes import add, ellipsoid, scaled, subtract
 from figures.figure_skeleton import EYE_HEIGHT
-from figures.figure_surfaces import arc, interpolated, mirrored, rippled, shell, spread, sweep
+from figures.figure_surfaces import arc, interpolated, mirrored, rippled, shell, smoothstep, spread, sweep
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from figures.figure_shapes import Vector
 
@@ -46,6 +46,8 @@ REAR = (
 )
 # The pitch over which the hair sinks to its lining before it ends.
 CLOSING = math.radians(36.0)
+# The angle across the head within which the hair thins to nothing at its end, so the queue leaves it without a lip.
+GATHER = math.radians(40.0)
 ROWS = 32
 COLUMNS = 34
 REACH = math.radians(80.0)
@@ -64,8 +66,8 @@ ROLL_END = math.radians(80.0)
 # The queue from under the gathered hair at the nape, over the collar and down the back, with its radii across and
 # in depth; the bow ties it where it leaves the wig.
 QUEUE = (
-    ((0.0, 1.53, -0.085), (0.026, 0.010)),
-    ((0.0, 1.475, -0.082), (0.018, 0.014)),
+    ((0.0, 1.53, -0.077), (0.026, 0.010)),
+    ((0.0, 1.475, -0.086), (0.018, 0.014)),
     ((0.0, 1.44, -0.097), (0.014, 0.013)),
     ((0.0, 1.40, -0.114), (0.015, 0.014)),
     ((0.0, 1.33, -0.125), (0.016, 0.015)),
@@ -87,8 +89,9 @@ class _Place(NamedTuple):
 
 def mozart_wig() -> list[Part]:
     places = _cap_places()
-    lining = _cap_rows(places, LINING, 0.0)
-    cap = shell(_sunk(places, _cap_rows(places, 1.0, STRAND_DEPTH), lining), lining)
+    surface = _cap_rows(places, 1.0, STRAND_DEPTH)
+    lining = _between(places, _cap_rows(places, LINING, 0.0), surface, _gathered)
+    cap = shell(_between(places, lining, surface, _closed), lining)
     queue = sweep([place for place, _ in QUEUE], [radii for _, radii in QUEUE], ACROSS, 10)
     return [
         part(cap, _powder, Material.HAIR, NECK_BINDER),
@@ -129,17 +132,31 @@ def _cap_rows(places: Sequence[Sequence[_Place]], scale: float, strand_depth: fl
     return rows
 
 
-def _sunk(
-    places: Sequence[Sequence[_Place]], surface: Sequence[Sequence[Vector]], lining: Sequence[Sequence[Vector]]
+def _between(
+    places: Sequence[Sequence[_Place]],
+    lining: Sequence[Sequence[Vector]],
+    surface: Sequence[Sequence[Vector]],
+    share: Callable[[_Place], float],
 ) -> list[list[Vector]]:
-    """The surface drawn down to the lining as the hair ends, so the cap closes in a hairline and has no end face."""
+    """Each point of the lining drawn out towards the surface by the share of its place."""
     return [
         [
-            add(inside, scaled(subtract(outside, inside), _quarter_circle((end - pitch) / CLOSING)))
-            for (pitch, _, end), outside, inside in zip(row_places, outer_row, inner_row, strict=True)
+            add(inside, scaled(subtract(outside, inside), share(place)))
+            for place, outside, inside in zip(row_places, outer_row, inner_row, strict=True)
         ]
         for row_places, outer_row, inner_row in zip(places, surface, lining, strict=True)
     ]
+
+
+def _closed(place: _Place) -> float:
+    """How far the surface stands off the lining: 0 at the end of the hair, rising to 1 within CLOSING before it, so
+    the cap closes in a hairline and has no end face."""
+    return _quarter_circle((place.end - place.pitch) / CLOSING)
+
+
+def _gathered(place: _Place) -> float:
+    """1 at the end of the hair in the middle, falling to 0 within GATHER across and within CLOSING before the end."""
+    return (1.0 - smoothstep(0.0, GATHER, abs(place.across))) * (1.0 - _closed(place))
 
 
 def _quarter_circle(share: float) -> float:
