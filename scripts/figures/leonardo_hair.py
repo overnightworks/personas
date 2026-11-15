@@ -34,22 +34,20 @@ HAIR_ROWS = 36
 HAIR_COLUMNS = 96
 HAIR_THICKNESS = 0.016
 # Share of the way round from the edge beside the face to the middle of the back, then the height the hair reaches
-# there: to the collar beside the neck, down the back behind it.
+# there (to the collar beside the neck, down the back behind it) and how far a furrow between two locks ends above
+# their tips, at most twice this: the locks end in tips beside the face, and from the neck on the edge runs smooth.
 HAIR_EDGE = (
-    (0.0, (1.490,)),
-    (0.08, (1.450,)),
-    (0.40, (1.412,)),
-    (0.50, (1.402,)),
-    (0.58, (1.392,)),
-    (0.66, (1.372,)),
-    (0.74, (1.345,)),
-    (0.82, (1.335,)),
-    (1.0, (1.335,)),
+    (0.0, (1.490, 0.008)),
+    (0.08, (1.450, 0.008)),
+    (0.25, (1.427, 0.0)),
+    (0.50, (1.402, 0.0)),
+    (0.66, (1.372, 0.0)),
+    (0.74, (1.345, 0.0)),
+    (0.82, (1.335, 0.0)),
+    (1.0, (1.335, 0.0)),
 )
-# The height over which a lock thins to its tip, and how far a furrow between two locks ends above their tips, at most
-# twice this.
+# The height over which a lock thins to its tip.
 HAIR_END = 0.05
-HAIR_TIPS = 0.008
 LOCKS = 13.0
 # Height, then the hanging beard's half width, how far forward its middle lies, how far it stands out from there and
 # how far round it closes: on the chest it hangs as one closed lock, at the jaw it opens to the reach of the cheeks.
@@ -133,10 +131,10 @@ def _lock_turn(column: int, height: float) -> float:
 
 
 def _lock_edge(column: int) -> float:
-    """The height where the lock at a column ends: its keyed height, lifted by up to twice HAIR_TIPS with its wave."""
+    """The height where the lock at a column ends: its keyed height, lifted with its wave."""
     across = column / HAIR_COLUMNS
-    (keyed,) = interpolated(HAIR_EDGE, 1.0 - abs(2.0 * across - 1.0))
-    return keyed + HAIR_TIPS * (1.0 - math.cos(_lock_turn(column, keyed)))
+    keyed, tips = interpolated(HAIR_EDGE, 1.0 - abs(2.0 * across - 1.0))
+    return keyed + tips * (1.0 - math.cos(_lock_turn(column, keyed)))
 
 
 def _lock_point(column: int, height: float, edge: float) -> tuple[Vector, Vector]:
