@@ -349,9 +349,10 @@ class FakeApp:
         return self.held_window_read
 
     def served(self, outcome: ToolOutcome) -> ToolOutcome:
-        """The outcome, with the picture it carries counted among the content kept out of logs."""
+        """The outcome, with the picture it carries, in its base64 and its bytes-literal spelling, counted among the
+        content kept out of logs."""
         if outcome.image is not None:
-            self.content.add(base64_of(outcome.image))
+            self.content.update((base64_of(outcome.image), repr(outcome.image.content)))
         return outcome
 
     def hold_next_speak(self) -> asyncio.Event:
