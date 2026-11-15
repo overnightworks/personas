@@ -137,7 +137,7 @@ async def test_a_duplicate_pulse_or_a_re_read_starts_no_second_turn_for_a_line(r
     say_in_the_call(runner, ADDRESSED)
     await runner.gateway.until_requested(2)
     for uri in (STANDING_URI, place_window_uri(CALL_PLACE), STANDING_URI, place_window_uri(CALL_PLACE)):
-        runner.app.changes.changed(runner.app_principal, uri)
+        await runner.app.changes.changed(runner.app_principal, uri)
     read = runner.app.hold_next_window_read()
     closing_round.set()
     await runner.app.until_window_read_held()

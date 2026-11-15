@@ -49,6 +49,7 @@ from agents.tools import ToolDeclaration, ToolEffect, ToolImage, ToolOutcome
 from agents.turn import JsonObject, Principal
 
 from tests.support.loopback import serving
+from tests.support.placestore import MemoryPlaceStore
 from tests.support.wire import ConnectionCut, Handler, Reply, Rpc
 
 if TYPE_CHECKING:
@@ -261,7 +262,7 @@ class FakeApp:
     window_read_held: asyncio.Event = field(default_factory=asyncio.Event)
     log: RequestLog = field(default_factory=RequestLog)
     refusals: asyncio.Queue[HTTPStatus] = field(default_factory=asyncio.Queue[HTTPStatus])
-    changes: ResourceChanges = field(default_factory=ResourceChanges)
+    changes: ResourceChanges = field(default_factory=lambda: ResourceChanges(MemoryPlaceStore()))
     scripted: defaultdict[str, list[Handler]] = field(default_factory=lambda: defaultdict(list[Handler]))
     held_read: asyncio.Event | None = None
     read_held: asyncio.Event = field(default_factory=asyncio.Event)
@@ -273,6 +274,7 @@ class FakeApp:
     """The name of the tool that takes a line or a move at a place of this app; ``say`` as hopin declares it."""
 
     def __post_init__(self) -> None:
+        self._announcing: set[asyncio.Task[None]] = set()
         self._front = McpPersonFront(
             self._tools(),
             resolve_person=lambda scope: Principal(iss=ISSUER, sub=scope[_SUBJECT_KEY]),
@@ -294,12 +296,21 @@ class FakeApp:
         self.bearers[bearer] = subject
         self.presented.add(bearer)
 
+    def _announce(self, principal: Principal, uri: str) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return  # before any loop runs nothing listens, and a loop's first sweep reads the state
+        task = loop.create_task(self.changes.changed(principal, uri))
+        self._announcing.add(task)
+        task.add_done_callback(self._announcing.discard)
+
     def stand(self, subject: str, *standings: Standing) -> None:
         """Sets the subject's standings and signals the change, as an app does once the state is visible."""
         self.standings[subject] = list(standings)
         for each in standings:
             self.content.update([each.place.id, *([each.invitation.id] if each.invitation else [])])
-        self.changes.changed(Principal(iss=ISSUER, sub=subject), STANDING_URI)
+        self._announce(Principal(iss=ISSUER, sub=subject), STANDING_URI)
 
     def speak(
         self,
@@ -325,7 +336,7 @@ class FakeApp:
         for subject, standings in self.standings.items():
             for each in standings:
                 if each.place.id == place_id:
-                    self.changes.changed(Principal(iss=ISSUER, sub=subject), place_window_uri(each.place))
+                    self._announce(Principal(iss=ISSUER, sub=subject), place_window_uri(each.place))
 
     def state_voice(self, place_id: str, state: VoiceState | None) -> None:
         """Sets what every window of the place states of his voice, none when ``state`` is ``None``, and signals it."""
@@ -342,7 +353,7 @@ class FakeApp:
         for subject, standings in self.standings.items():
             for each in standings:
                 if each.place.id == place_id and each.serves_view:
-                    self.changes.changed(Principal(iss=ISSUER, sub=subject), place_view_uri(each.place))
+                    self._announce(Principal(iss=ISSUER, sub=subject), place_view_uri(each.place))
 
     def join(self, place_id: str) -> None:
         """A join gives the place a new, existing window: a fresh generation, numbered from seq 1, with no old line."""
@@ -411,7 +422,7 @@ class FakeApp:
             return None
         snapshot = MemberStanding(standings=tuple(self.standings.get(principal.sub, [])))
         if self.pulses_on_read:
-            self.changes.changed(principal, STANDING_URI)
+            await self.changes.changed(principal, STANDING_URI)
         held, self.held_read = self.held_read, None
         if held is not None:
             self.read_held.set()
