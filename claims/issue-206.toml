@@ -1,8 +1,0 @@
-claim_id = "f40446c800c84446bdb0b5a84e163f56"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "4db51913d1827bfc2a62ef0669a194ad22280c1c"
-branch = "claude/issue-206-leonardo-has-his-own-room"
-scope = ["docs/ARCHITECTURE.md", "scripts/figures", "scripts/write_figures.py", "src/characters", "tests/scripts"]
-opened_commit = "129ad1cda9d97a0366ed7115b2f9963f4dcbe377"
-whole_reason = "one room module, its record and its written GLB"
