@@ -106,7 +106,7 @@ async def test_a_table_that_serves_no_view_yet_is_accepted_with_figure_and_voice
     figure = FigureRef(url=f"https://figures.test/{secrets.token_hex(6)}.glb", sha256=secrets.token_hex(32))
     voice_name = f"voice-{secrets.token_hex(4)}"
     runner.config = replace(
-        runner.config, agents=(replace(runner.config.agents[0], figure=figure, voice=Voice(voice_name)),)
+        runner.config, agents=(replace(runner.config.agents[0], figure=figure, voice=Voice((voice_name,))),)
     )
     runner.app.stand(SUBJECT, invited(TABLE.id, "inv-3", kind=TABLE.kind))
     runner.start()

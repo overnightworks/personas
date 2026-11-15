@@ -103,7 +103,7 @@ class Accept:
     invitation_id: str
     epoch: int
     figure: FigureRef | None = field(default=None, repr=False)
-    voice: VoiceName | None = field(default=None, repr=False)
+    voices: tuple[VoiceName, ...] = field(default=(), repr=False)
 
 
 @dataclass(frozen=True)
@@ -155,13 +155,14 @@ def accepts_for(
     *,
     takes_turns: bool,
     figure: FigureRef | None = None,
-    voice: VoiceName | None = None,
+    voices: tuple[VoiceName, ...] = (),
 ) -> tuple[Accept, ...]:
     """One accept for each invited call standing whose invitation was not refused as stale, and, where the loop can
     take turns, for each other invited place, whether or not it serves a view yet: a seated agent that cannot act
-    leaves the place waiting. Every accept brings the agent's figure and the name of his voice, if he has them."""
+    leaves the place waiting. Every accept brings the agent's figure and, in his order, the names of his voices, if he
+    has them."""
     return tuple(
-        Accept(standing.place, invitation.id, invitation.epoch, figure, voice)
+        Accept(standing.place, invitation.id, invitation.epoch, figure, voices)
         for standing, invitation in _invited(standings)
         if _accepted(standing, takes_turns=takes_turns) and invitation.id not in memory.stale
     )

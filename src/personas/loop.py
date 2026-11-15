@@ -302,7 +302,7 @@ class AgentLoop:
             self._memory,
             takes_turns=takes_turns,
             figure=self._agent.figure,
-            voice=None if voice is None else voice.name,
+            voices=() if voice is None else voice.names,
         ):
             await self._use_current_token(session)
             refusal = await session.accept(accept)

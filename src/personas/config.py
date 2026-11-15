@@ -3,7 +3,8 @@
 The file holds the realm's token endpoint, the ready file's path, the apps (an MCP URL and its scope) and the agents
 (a client id and the path of the file holding its client secret, and optionally the ``figure`` table, a ``url`` and
 a ``sha256``, that every accept of the agent carries, and the ``voice`` table, which turns the agent's spoken turns on
-and may name the speech service's voice that every accept of the agent carries). Which apps an agent may reach
+and may name, in ``names``, an ordered list of the speech service's voices that every accept of the agent carries
+as it stands, first choice first). Which apps an agent may reach
 is the realm's group membership, never this file. An app that binds tools to its agents' turns
 names them with their call bound, and then the model gateway and each agent's persona file are required.
 An app with ``listens = false`` serves tools only: it starts no turn, and its bound tools reach the turns of the apps
@@ -64,6 +65,7 @@ DEFAULT_LINES_KEEP_DAYS: Final = 30.0
 DEFAULT_SWEEP_MINUTES: Final = 60.0
 DEFAULT_LOOKUP_CALLS: Final = 2
 DEFAULT_LOOKUP_BYTES: Final = 8192
+MAX_VOICE_NAMES: Final = 8
 
 
 class ConfigError(Exception):
@@ -89,10 +91,10 @@ class AppTarget:
 
 @dataclass(frozen=True)
 class Voice:
-    """An agent whose turns at the call places of an app that declares ``speak`` are spoken, in the voice ``name`` the
-    speech service knows, or in the app's default voice."""
+    """An agent whose turns at the call places of an app that declares ``speak`` are spoken, in the first of the voices
+    ``names`` that the app offers, or in the app's default voice when there are none."""
 
-    name: VoiceName | None
+    names: tuple[VoiceName, ...]
 
 
 @dataclass(frozen=True)
@@ -182,7 +184,14 @@ class _AppEntry(_Entry):
 
 
 class _VoiceEntry(_Entry):
-    name: VoiceName | None = None
+    names: tuple[VoiceName, ...] | None = Field(default=None, min_length=1, max_length=MAX_VOICE_NAMES)
+
+    @field_validator("names")
+    @classmethod
+    def _names_hold_each_voice_once(cls, names: tuple[str, ...] | None) -> tuple[str, ...] | None:
+        if names is not None and len(set(names)) != len(names):
+            raise ValueError("names holds each voice once")
+        return names
 
 
 class _AgentEntry(_Entry):
@@ -368,7 +377,7 @@ def load_config(environment: Mapping[str, str]) -> Config:
                 _read_secret(f"agents.{index}.secret_file", agent.secret_file),
                 _read_persona(index, agent.persona_file, agent.model),
                 agent.figure,
-                None if agent.voice is None else Voice(agent.voice.name),
+                None if agent.voice is None else Voice(agent.voice.names or ()),
             )
             for index, agent in enumerate(parsed.agents)
         ),
