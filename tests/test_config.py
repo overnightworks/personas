@@ -269,10 +269,9 @@ def test_an_agent_entry_turns_his_voice_on_with_a_table_and_may_name_an_ordered_
 )
 def test_a_malformed_voice_is_refused_naming_only_its_field_and_not_its_value(files, table, named):
     files.text += table
-    path = files.write()
 
     with pytest.raises(ConfigError) as refused:
-        load_config(path)
+        load_config(files.write())
 
     problems = str(refused.value).split("; ")
     assert [problem.split(": ", 1)[0] for problem in problems] == [named]
@@ -290,10 +289,9 @@ def test_a_malformed_voice_is_refused_naming_only_its_field_and_not_its_value(fi
 )
 def test_a_malformed_entry_of_a_list_is_refused_naming_only_its_own_field(files, break_it, named):
     files.text = break_it(files.text)
-    path = files.write()
 
     with pytest.raises(ConfigError) as refused:
-        load_config(path)
+        load_config(files.write())
 
     assert [problem.split(": ", 1)[0] for problem in str(refused.value).split("; ")] == [named]
 
