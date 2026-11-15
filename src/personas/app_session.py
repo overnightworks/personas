@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Generator, Iterable
+import json
+import re
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
+from http import HTTPStatus
 from typing import Final, Protocol, cast, override
 
 import httpx2
@@ -40,10 +43,12 @@ from mcp_types import (
     CallToolResult,
     ImageContent,
     InputRequiredResult,
+    JSONRPCError,
     ReadResourceResult,
     TextContent,
     TextResourceContents,
     Tool,
+    jsonrpc_message_adapter,
 )
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
@@ -67,6 +72,8 @@ CONNECT_SECONDS: Final = 30.0
 READ_SECONDS: Final = 2 * LISTEN_BOUND_SECONDS
 """Twice the bound an app puts on a stream: the runner cuts a stream that outlasts it."""
 _SPEAK_ANSWER: Final = TypeAdapter(SpeakAnswer)
+_MEDIA_TYPE: Final = re.compile(r"[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*")
+"""A media type as a log line may carry it: a type and a subtype of token characters, no parameters."""
 _TRANSPORT_ERROR_CODES: Final = frozenset({CONNECTION_CLOSED, REQUEST_TIMEOUT})
 """What the SDK answers for a connection that broke or a request that timed out."""
 
@@ -125,21 +132,61 @@ class AppSession(Protocol):
 type SessionOpener = Callable[[AppTarget, Secret], AbstractAsyncContextManager[AppSession]]
 
 
+@dataclass(frozen=True)
+class _HttpAnswer:
+    """What the app's last HTTP answer was: its status and, for an error status, the failed method and the answer."""
+
+    status: int
+    method: str | None = None
+    answer: str | None = None
+
+
 class _BearerAuth(httpx2.Auth):
-    """Adds the current bearer to each request and keeps the last HTTP status the app answered.
+    """Adds the current bearer to each request and keeps the last HTTP answer the app gave.
 
     The SDK turns an HTTP error into a bare protocol error, so this is where the status is seen.
     """
 
     def __init__(self, token: Secret) -> None:
         self.token = token
-        self.last_status: int | None = None
+        self.last_answer: _HttpAnswer | None = None
 
     @override
-    def auth_flow(self, request: httpx2.Request) -> Generator[httpx2.Request, httpx2.Response]:
+    async def async_auth_flow(self, request: httpx2.Request) -> AsyncGenerator[httpx2.Request, httpx2.Response]:
         request.headers["Authorization"] = f"Bearer {self.token.reveal()}"
         response = yield request
-        self.last_status = response.status_code
+        if response.status_code < HTTPStatus.BAD_REQUEST:
+            self.last_answer = _HttpAnswer(response.status_code)
+        else:
+            self.last_answer = _HttpAnswer(response.status_code, _method_of(request), await _answer_code_of(response))
+
+
+def _method_of(request: httpx2.Request) -> str | None:
+    """The MCP method the request carried, as the SDK wrote it; none for a request that carries no JSON-RPC message."""
+    try:
+        document = json.loads(request.content)
+    except ValueError:
+        return None
+    method = cast("dict[str, object]", document).get("method") if isinstance(document, dict) else None
+    return method if isinstance(method, str) else None
+
+
+async def _answer_code_of(response: httpx2.Response) -> str | None:
+    """The code of the JSON-RPC error an error status carries, else the media type of the answer, never its content.
+
+    The SDK takes an error body for a JSON-RPC error when the answer says it is JSON and the body parses as one.
+    """
+    media_type = response.headers.get("content-type", "").partition(";")[0].strip().lower()
+    if media_type == "application/json":
+        try:
+            await response.aread()
+            message = jsonrpc_message_adapter.validate_json(response.content, by_name=False)
+        except httpx2.DecodingError, ValidationError:
+            pass
+        else:
+            if isinstance(message, JSONRPCError):
+                return jsonrpc_code(message.error.code)
+    return media_type if _MEDIA_TYPE.fullmatch(media_type) else None
 
 
 class _InvalidToolResult(Exception):  # noqa: N818
@@ -183,7 +230,7 @@ class _McpAppSession:
 
     @asynccontextmanager
     async def changes(self) -> AsyncGenerator[AsyncIterator[object]]:
-        self.auth.last_status = None
+        self.auth.last_answer = None
         deadline = asyncio.timeout(self.stream_seconds)
         raised_in_body: Exception | None = None
         try:
@@ -268,7 +315,7 @@ class _McpAppSession:
         return result
 
     async def _asked[Answer](self, request: Awaitable[Answer]) -> Answer:
-        self.auth.last_status = None
+        self.auth.last_answer = None
         try:
             return await request
         except _CALL_ERRORS as error:
@@ -346,19 +393,25 @@ def _answer_of(result: CallToolResult) -> SpeakAnswer | SpeakRefusal:
 
 
 def _failure_of(error: BaseException, auth: _BearerAuth) -> CallFailure:
-    """A call that gave no usable answer: told by the last HTTP status the app sent, else by the error.
+    """A call that gave no usable answer: told by the last HTTP answer the app sent, else by the error.
 
     A protocol error or a result the SDK cannot validate is an unusable answer; only a broken or
     silent connection is unreachable. The error is one of ``_CALL_ERRORS``: the status is read only for
     those, never for a late answer's error, which no call raised.
     """
-    if isinstance(error, MCPError) and error.code == UNSUPPORTED_PROTOCOL_VERSION:
-        return UnusableAnswer(jsonrpc_code(error.code))
-    status = auth.last_status
-    if status is not None and status >= 400:
-        return StatusFailure(status)
-    if status is not None and status >= 300:
-        return UnusableAnswer(status_code(status))
+    answered = auth.last_answer
+    if (
+        isinstance(error, MCPError)
+        and error.code == UNSUPPORTED_PROTOCOL_VERSION
+        and answered is not None
+        and answered.status >= HTTPStatus.BAD_REQUEST
+    ):
+        code = jsonrpc_code(error.code)
+        return UnusableAnswer(code, answered.method, code)
+    if answered is not None and answered.status >= HTTPStatus.BAD_REQUEST:
+        return StatusFailure(answered.status, answered.method, answered.answer)
+    if answered is not None and answered.status >= HTTPStatus.MULTIPLE_CHOICES:
+        return UnusableAnswer(status_code(answered.status))
     if isinstance(error, MCPError):
         if error.code in _TRANSPORT_ERROR_CODES:
             return Unreachable("the app did not answer")
@@ -442,7 +495,7 @@ async def open_mcp_session(
 
 
 async def _discover(session: ClientSession, auth: _BearerAuth) -> None:
-    auth.last_status = None
+    auth.last_answer = None
     try:
         await session.discover()
     except RuntimeError:

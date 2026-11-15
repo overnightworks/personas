@@ -445,17 +445,17 @@ class AgentLoop:
                 self._renewed_after_401 = True
                 self._token = None
             case Suspend(code=code):
-                await self._suspend(code)
+                await self._suspend(code, failure)
             case remaining:
                 # pyright narrows `remaining` to the one reaction left, so a new reaction fails the type check here.
                 _: Literal[Reaction.BACKOFF] = remaining
                 await self._back_off(failure)
 
-    async def _suspend(self, code: str) -> None:
+    async def _suspend(self, code: str, failure: CallFailure) -> None:
         self._park()
         if self._suspension != code:
             self._suspension = code
-            self._report(Event.SUSPENDED, code)
+            self._report(Event.SUSPENDED, code, None, failure)
         self._backing_off = False
         self._token = None
         await self._boundaries.clock.sleep(SUSPENDED_RETRY_SECONDS)
@@ -464,7 +464,7 @@ class AgentLoop:
         self._park()
         if not self._backing_off:
             self._backing_off = True
-            self._report(Event.BACKOFF, failure_code(failure))
+            self._report(Event.BACKOFF, failure_code(failure), None, failure)
         self._failures += 1
         await self._boundaries.clock.sleep(backoff_delay(self._failures))
 
@@ -479,13 +479,21 @@ class AgentLoop:
         event: Event,
         code: str | None = None,
         app: AppTarget | None = None,
+        failure: CallFailure | None = None,
         *,
         place_kind: str | None = None,
         model: str | None = None,
     ) -> None:
         self._boundaries.report(
             StateChange(
-                event, self._agent.client_id, (app or self._app).mcp_url, code, place_kind=place_kind, model=model
+                event,
+                self._agent.client_id,
+                (app or self._app).mcp_url,
+                code,
+                place_kind=place_kind,
+                model=model,
+                method=failure and failure.method,
+                answer=failure and failure.answer,
             )
         )
 

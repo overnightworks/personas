@@ -237,6 +237,27 @@ async def test_a_4xx_suspends_the_loop_with_its_status_and_it_resumes_when_the_a
     ]
 
 
+@pytest.mark.parametrize(
+    ("answers", "answer"),
+    [
+        pytest.param(lambda reply: reply.error(INVALID_PARAMS), jsonrpc_code(INVALID_PARAMS), id="jsonrpc error"),
+        pytest.param(
+            lambda reply: reply.body(HTTPStatus.BAD_REQUEST, "text/html", b"<html>the front</html>"),
+            "text/html",
+            id="no jsonrpc",
+        ),
+    ],
+)
+async def test_a_4xx_suspends_the_loop_with_the_method_and_the_answer_that_failed(runner, answers, answer):
+    runner.app.stand(SUBJECT, invited("room-7", "inv-3"))
+    runner.app.script(READ, answers)
+    runner.start()
+    await runner.reports.until(Event.SUSPENDED)
+
+    (change,) = runner.reports.changes_of(Event.SUSPENDED)
+    assert (change.code, change.method, change.answer) == (status_code(HTTPStatus.BAD_REQUEST), READ, answer)
+
+
 async def test_a_5xx_backs_off_and_is_logged_once_until_a_read_answers(runner):
     runner.app.refuse_with = HTTPStatus.SERVICE_UNAVAILABLE
     runner.app.refused_method = READ
