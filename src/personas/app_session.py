@@ -162,8 +162,12 @@ class _BearerAuth(httpx2.Auth):
 
 
 def _method_of(request: httpx2.Request) -> str | None:
-    """The MCP method the request carried, as the SDK wrote it."""
-    method = json.loads(request.content).get("method")
+    """The MCP method the request carried, as the SDK wrote it; none for a request that carries no JSON-RPC message."""
+    try:
+        document = json.loads(request.content)
+    except ValueError:
+        return None
+    method = cast("dict[str, object]", document).get("method") if isinstance(document, dict) else None
     return method if isinstance(method, str) else None
 
 

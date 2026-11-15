@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from http import HTTPStatus
 
 import anyio
+import httpx2
 import pytest
 from agents.member import (
     ACCEPT_INVITATION_TOOL,
@@ -389,6 +390,26 @@ async def test_a_status_failure_of_a_tool_call_names_the_call_method(app, bearer
 
     assert failure.value.method == CALL
     assert failure.value.answer is None
+
+
+@pytest.mark.parametrize(
+    "request_of",
+    [
+        pytest.param(lambda url: httpx2.Request("GET", url, headers={"Last-Event-ID": "3"}), id="reconnect"),
+        pytest.param(lambda url: httpx2.Request("DELETE", url), id="session close"),
+        pytest.param(lambda url: httpx2.Request("POST", url, json=[LIST_TOOLS]), id="body that is no object"),
+    ],
+)
+async def test_the_status_of_an_error_answer_to_a_request_carrying_no_method_is_kept(request_of):
+    auth = app_session._BearerAuth(Secret(secrets.token_urlsafe(24)))  # noqa: SLF001
+    transport = httpx2.MockTransport(lambda _: httpx2.Response(HTTPStatus.METHOD_NOT_ALLOWED))
+
+    async with httpx2.AsyncClient(transport=transport, auth=auth) as client:
+        await client.send(request_of("http://app.test/mcp"), auth=auth)
+
+    assert auth.last_answer is not None
+    assert auth.last_answer.status == HTTPStatus.METHOD_NOT_ALLOWED
+    assert auth.last_answer.method is None
 
 
 async def test_a_redirect_the_app_answers_is_an_unusable_answer_named_by_its_status(app, bearer):
