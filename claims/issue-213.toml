@@ -1,0 +1,7 @@
+claim_id = "8282caf6ef7446018f63dbfc0e1b234e"
+agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
+role = "builder"
+base = "6f55efdabdb52613d5790942357569bedb255644"
+branch = "claude/issue-213-release-waits-for-app-pins"
+scope = ["README.md"]
+opened_commit = "d465f3a9d609937e0a3c0002d9dd6f5e07aee15a"
