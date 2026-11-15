@@ -420,7 +420,7 @@ class AgentLoop:
     def _turn_over(self, task: asyncio.Task[None]) -> None:
         """The one writer of ``turn.ended``, whatever way the task ended."""
         turn, self._turn = self._turn, None
-        assert turn is not None  # noqa: S101 - the loop clears its turn only here, once per task
+        assert turn is not None  # noqa: S101 - the loop clears its turn only here and once per task
         cancelled = task.cancelled()
         tally = turn.tally
         ending = turn_ending(
