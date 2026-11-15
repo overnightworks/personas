@@ -1,0 +1,7 @@
+claim_id = "7e172643b0574ac5868494960d5d5886"
+agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
+role = "builder"
+base = "12f25772e453256a79327e267ff8444f61226058"
+branch = "claude/issue-199-figure-check-takes-v080"
+scope = ["scripts/check_figures.sh"]
+opened_commit = "78016ed69e0634a0242711856d6d797552d5de54"
