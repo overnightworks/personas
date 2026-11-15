@@ -65,8 +65,8 @@ jobs:
 
       # This is the only step that installs, and it installs only what the
       # lockfile resolved: --locked refuses a stale lock instead of resolving
-      # fresh versions. Only one build is allowed, the git-pinned
-      # overnightworks library named in pyproject.toml (tool.uv), run with
+      # fresh versions. Only builds of the git-pinned
+      # overnightworks libraries named in pyproject.toml (tool.uv) are allowed, run with
       # exact build tools; --no-build refuses every other source distribution,
       # whose build script would run third-party code on the runner, so third-party
       # packages are wheel-only. personas itself stays out of the environment: nothing
