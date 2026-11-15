@@ -1,8 +1,0 @@
-claim_id = "e532415cfe47473ab7365153315a6f89"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "1a5c5db8058cd4b1186f85659aed3a4952c8bbcb"
-branch = "claude/issue-228-close-proof-gaps-failed-app-call"
-scope = ["docs/ARCHITECTURE.md", "src/personas/app_session.py", "tests/support/hopin.py", "tests/test_app_session.py", "tests/test_loop_held.py", "tests/test_loop_lifecycle.py", "tests/test_loop_turn_reach.py"]
-opened_commit = "e504d9809e6dc78a9efd914cd8d3ab042c75f480"
-whole_reason = "one proof's gaps across its session and loop tests"
