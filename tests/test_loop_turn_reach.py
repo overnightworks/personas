@@ -393,7 +393,6 @@ async def test_a_turn_whose_place_left_during_a_tools_only_call_stops_with_no_fu
     await a_turn_inside_a_tools_only_call(runner, songmaker)
 
     runner.app.stand(SUBJECT)
-    await runner.reports.until_a_turn_ended()
 
     await runner.reports.until_a_turn_ended()
 
@@ -547,7 +546,6 @@ async def test_a_tools_only_call_whose_cancelled_session_leaves_as_a_failure_sti
     await a_turn_inside_a_tools_only_call(runner, songmaker)
 
     runner.app.stand(SUBJECT)
-    await runner.reports.until_a_turn_ended()
 
     await runner.reports.until_a_turn_ended()
 

@@ -243,7 +243,6 @@ async def test_a_place_that_leaves_while_the_round_after_a_hold_is_pending_cance
     await runner.gateway.until_requested(2)
 
     runner.app.stand(SUBJECT)
-    await runner.reports.until_a_turn_ended()
 
     await runner.reports.until_a_turn_ended()
 

@@ -57,7 +57,6 @@ async def test_a_turn_whose_place_left_the_standing_is_cancelled_with_no_further
     await a_turn_in_its_first_round(runner)
 
     runner.app.stand(SUBJECT)
-    await runner.reports.until_a_turn_ended()
 
     await runner.reports.until_a_turn_ended()
 

@@ -509,7 +509,7 @@ async def test_a_relayed_call_that_fails_ends_the_turn_after_one_round_and_leads
     assert len(runner.realm.issued) == issued
 
 
-async def test_a_relayed_call_beside_a_late_answer_gives_one_reaction_and_no_turn_report(runner, monkeypatch):
+async def test_a_relayed_call_beside_a_late_answer_gives_one_reaction_and_no_pause(runner, monkeypatch):
     failing = transport_closing_with_late_answers(echo=anyio.BrokenResourceError, only_close=1)
     monkeypatch.setattr(app_session, "streamable_http_client", failing)
     await relayed_say_fails(runner, cuts)
