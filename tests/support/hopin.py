@@ -33,6 +33,8 @@ from agents.member import (
     PlaceView,
     PlaceWindow,
     SpeakArguments,
+    SpeakRefusal,
+    SpeakRefused,
     Spoken,
     Standing,
     StandingState,
@@ -228,12 +230,16 @@ class FakeApp:
     failing_windows: set[str] = field(default_factory=set[str])
     """Places whose window read the app answers with a server error."""
     say_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
-    speak_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
+    speak_outcomes: list[ToolOutcome | None] = field(default_factory=list[ToolOutcome | None])
+    """The answer to each next ``speak`` as it arrives, in order; ``None`` lets the app play that sentence."""
     spoken: list[tuple[str, str, str]] = field(default_factory=list[tuple[str, str, str]])
     spoken_added: asyncio.Event = field(default_factory=asyncio.Event)
     speak_bearers: list[str] = field(default_factory=list[str])
     sentence_ends_held: bool = False
-    """Whether a voiced sentence's own line enters only when ``end_sentence`` is called, as at the end of the sound."""
+    """Whether a voiced sentence plays until ``end_sentence`` or ``stop_speaking`` is called: its own line enters then,
+    and a ``speak`` that arrives meanwhile is answered only then, as the app answers it at its sentence's turn."""
+    waiting_speaks: list[asyncio.Future[bool]] = field(default_factory=list[asyncio.Future[bool]])
+    """The ``speak`` calls waiting for the playing sentence to end, in the order sent; a result says if it plays."""
     playing: list[tuple[str, str, str]] = field(default_factory=list[tuple[str, str, str]])
     """The place, the author and the text of each voiced sentence whose own line is held, in the order sent."""
     written_speaks: int = 0
@@ -466,8 +472,13 @@ class FakeApp:
         if (held := self.held_speak) is not None:
             self.held_speak = None
             await held.wait()
-        if self.speak_outcomes:
-            return self.speak_outcomes.pop(0)
+        if self.speak_outcomes and (scripted := self.speak_outcomes.pop(0)) is not None:
+            return scripted
+        if self.sentence_ends_held and self.playing:
+            turn = asyncio.get_running_loop().create_future()
+            self.waiting_speaks.append(turn)
+            if not await turn:
+                return ToolOutcome(SpeakRefused(refused=SpeakRefusal.STOPPED).model_dump_json(), is_error=True)
         self.spoken.append((request.principal.sub, taken.place.id, taken.text))
         self.spoken_added.set()
         if self.written_speaks:
@@ -481,9 +492,21 @@ class FakeApp:
         return ToolOutcome(Spoken(spoken=True).model_dump_json(), is_error=False)
 
     def end_sentence(self, *, cut: bool = False) -> None:
-        """The oldest voiced sentence whose end is held ends: its own line enters its place, whole or cut."""
+        """The playing sentence ends: its own line enters its place, whole or cut, and the next ``speak`` waiting for
+        its turn is answered."""
         place_id, author, text = self.playing.pop(0)
         self.speak(place_id, author, ACCEPTED_NAME, text, spoken=True, cut=cut)
+        if self.waiting_speaks:
+            self.waiting_speaks.pop(0).set_result(True)
+
+    def stop_speaking(self) -> None:
+        """The member's own ``stop_speaking``: the playing sentence is cut, its own line entering cut, and every
+        ``speak`` waiting for its turn is answered stopped."""
+        place_id, author, text = self.playing.pop(0)
+        self.speak(place_id, author, ACCEPTED_NAME, text, spoken=True, cut=True)
+        for waiting in self.waiting_speaks:
+            waiting.set_result(False)
+        self.waiting_speaks.clear()
 
     async def until_window_read_held(self) -> None:
         async with asyncio.timeout(LIMIT_SECONDS):

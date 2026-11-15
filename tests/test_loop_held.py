@@ -481,12 +481,12 @@ async def test_a_call_to_the_table_while_it_is_not_his_move_is_the_tables_to_ans
 async def test_a_sentence_before_a_call_to_a_held_app_is_spoken_and_his_line_for_it_awaited_before_the_call_goes_out(
     runner, other
 ):
-    sleeps = holding_sentence_ends(runner)
+    holding_sentence_ends(runner)
     spoken, played = "Okay, der Bube.", words(1)[0]
     other.stand(SUBJECT, at_table())
     await a_voice_call(runner, tool_round(play(played), content=spoken), completion("done"))
     say_in_the_call(runner, ADDRESSED)
-    await sleeps.until_began(1)
+    await runner.app.spoken_count(1)
 
     assert runner.app.spoken == [(SUBJECT, PLACE_ID, spoken)]
     assert other.calls == []
