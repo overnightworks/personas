@@ -1,0 +1,8 @@
+claim_id = "243f8b6cd50c4cdcaaae6b11d755cbc6"
+agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
+role = "builder"
+base = "b31489b6dd8093fc8541f84cb86fc696799551bb"
+branch = "claude/issue-239-a-turn-is-one-measured-unit-in-its-own-t"
+scope = ["README.md", "docs/ARCHITECTURE.md", "pyproject.toml", "src/personas/decision.py", "src/personas/loop.py", "src/personas/main.py", "src/personas/reporting.py", "src/personas/turning.py", "src/personas/voice.py", "tests", "uv.lock"]
+opened_commit = "4c16ea76bb44473b6b7f69fa6c659dead355de72"
+whole_reason = "one writer of turn.ended across the loop, the turn and its voice, with the outcome mapping it reads"
