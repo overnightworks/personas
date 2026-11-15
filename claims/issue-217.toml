@@ -1,8 +1,0 @@
-claim_id = "9166374272c743458476f2c635ac4e31"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "970109cb884320017bca7db7ef361b4b6182da2e"
-branch = "claude/issue-217-turn-reports-time-to-model-request"
-scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/loop.py", "src/personas/reporting.py", "src/personas/turning.py", "tests/support/fakes.py", "tests/test_loop_history.py", "tests/test_loop_table.py", "tests/test_loop_turn_usage.py", "tests/test_loop_view.py", "tests/test_loop_voice.py"]
-opened_commit = "f99fe959134d499adcf2f0eccb47002a9e058c08"
-whole_reason = "one duration measured in the turn, carried by the loop and printed by the reporter, with its documents"
