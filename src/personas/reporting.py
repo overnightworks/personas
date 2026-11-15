@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import Enum, auto
 from typing import TYPE_CHECKING, Final
 from urllib.parse import urlsplit
 
@@ -23,22 +23,22 @@ if TYPE_CHECKING:
 _LOG: Final = logging.getLogger("personas")
 
 
-class Event(StrEnum):
-    STARTED = "started"
-    SUSPENDED = "suspended"
-    RESUMED = "resumed"
-    BACKOFF = "backoff"
-    JOINED = "joined"
-    REFUSED = "refused"
-    INVITATION_LEFT_OUT = "invitation_left_out"
-    TURN_ENDED = "turn_ended"
-    PAUSED = "paused"
-    SPEAK_REFUSED = "speak_refused"
-    TOOLS_ONLY_APP_FAILED = "tools_only_app_failed"
-    HELD_APP_FAILED = "held_app_failed"
-    STORE_FAILED = "store_failed"
-    STORE_RESUMED = "store_resumed"
-    SWEPT = "swept"
+class Event(Enum):
+    STARTED = auto()
+    SUSPENDED = auto()
+    RESUMED = auto()
+    BACKOFF = auto()
+    JOINED = auto()
+    REFUSED = auto()
+    INVITATION_LEFT_OUT = auto()
+    TURN_ENDED = auto()
+    PAUSED = auto()
+    SPEAK_REFUSED = auto()
+    TOOLS_ONLY_APP_FAILED = auto()
+    HELD_APP_FAILED = auto()
+    STORE_FAILED = auto()
+    STORE_RESUMED = auto()
+    SWEPT = auto()
 
 
 @dataclass(frozen=True)

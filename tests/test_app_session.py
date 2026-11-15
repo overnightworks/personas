@@ -763,6 +763,7 @@ async def test_an_accept_result_the_sdk_cannot_validate_is_an_unusable_answer(ap
 
 @pytest.mark.xfail(
     strict=True,
+    raises=AssertionError,
     reason="the SDK's client logger writes a malformed notification's validation error at warning, uncapped",
 )
 async def test_a_malformed_notification_of_the_app_logs_none_of_its_content(app, bearer, caplog, place):
