@@ -297,7 +297,11 @@ class FakeApp:
         self.presented.add(bearer)
 
     def _announce(self, principal: Principal, uri: str) -> None:
-        task = asyncio.get_running_loop().create_task(self.changes.changed(principal, uri))
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return  # before any loop runs nothing listens, and a loop's first sweep reads the state
+        task = loop.create_task(self.changes.changed(principal, uri))
         self._announcing.add(task)
         task.add_done_callback(self._announcing.discard)
 
