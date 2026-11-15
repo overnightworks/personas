@@ -656,7 +656,7 @@ def _joined(held: Occasion | None, occasion: Occasion) -> Occasion:
 def with_due(turns: Turns, at: AppPlace, occasion: Occasion) -> Turns:
     """A turn due at ``at`` for ``occasion``: a place already due keeps its position, lines of one generation join, and
     lines of another generation or a newer view revision replace what was due."""
-    return replace(turns, due={**turns.due, at: _joined(turns.due.get(at), occasion)})
+    return Turns(turns.running, {**turns.due, at: _joined(turns.due.get(at), occasion)}, turns.not_before)
 
 
 def due_again(turns: Turns, at: AppPlace, occasion: Occasion) -> Turns:
@@ -672,7 +672,8 @@ def due_again(turns: Turns, at: AppPlace, occasion: Occasion) -> Turns:
 
 def without_due(turns: Turns, leaving: Callable[[AppPlace], bool]) -> Turns:
     """The turns without the due places for which ``leaving`` holds."""
-    return replace(turns, due={at: occasion for at, occasion in turns.due.items() if not leaving(at)})
+    due = {at: occasion for at, occasion in turns.due.items() if not leaving(at)}
+    return Turns(turns.running, due, turns.not_before)
 
 
 def _next_due(turns: Turns, app: str) -> tuple[AppPlace, Occasion] | None:
@@ -695,7 +696,7 @@ def claimed(turns: Turns, app: str, now: float) -> tuple[Turns, AppPlace, Occasi
 
 def paused_for(turns: Turns, now: float, seconds: float) -> Turns:
     """The turns while no turn of his may start for ``seconds`` from ``now``."""
-    return replace(turns, not_before=now + seconds)
+    return Turns(turns.running, turns.due, now + seconds)
 
 
 def pause_left(turns: Turns, app: str, now: float) -> float:
@@ -706,7 +707,7 @@ def pause_left(turns: Turns, app: str, now: float) -> float:
 
 def released(turns: Turns) -> Turns:
     """The turns once the running turn ended; what is due stays."""
-    return replace(turns, running=False)
+    return Turns(False, turns.due, turns.not_before)
 
 
 def left_standing(app: str, standings: tuple[Standing, ...]) -> Callable[[AppPlace], bool]:
