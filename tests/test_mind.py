@@ -296,6 +296,19 @@ def test_a_turn_in_flight_whose_message_left_in_a_step_is_not_told_and_every_ent
     assert told == [entry.seq for entry in mind.history.entries]
 
 
+def test_a_turn_whose_message_a_step_cut_names_only_the_lines_it_still_tells():
+    mind = Mind(6 * LINE_BYTES, 4 * LINE_BYTES, BUDGET_PAUSE_CAP_SECONDS)
+    mind.take(tuple(said(CALL, seq, "x") for seq in range(1, 7)))
+    in_flight = a_lines_turn(mind, *range(1, 7))
+    mind.take(tuple(said(CALL, seq, "x") for seq in range(7, 10)))
+    mind.answered(in_flight)
+
+    sent = turn_messages("Mozart", mind.present, a_lines_turn(mind, 9))
+
+    message = sent[1]
+    assert (json.loads(message)["woke"]["seqs"], seqs_told(message)) == ([6], [6])
+
+
 def test_a_newest_message_past_the_kept_bytes_loses_its_oldest_entries_and_keeps_its_newest():
     mind = Mind(4 * LINE_BYTES, 2 * LINE_BYTES, BUDGET_PAUSE_CAP_SECONDS)
     answer_turn_for(mind, 1)
