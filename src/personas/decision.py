@@ -499,7 +499,9 @@ def _stays_told(turn: TurnTold, left_out: int) -> bool:
 def taken_into(present: Present, new: Iterable[Entry], history_bytes: int, keep_bytes: int) -> Present:
     """The present with ``new`` appended, a view revision it already holds adding nothing and an act always added. Past
     ``history_bytes`` the oldest whole messages leave in one step until what stays fits ``keep_bytes``; only the newest
-    message may be cut, and its newest entry always stays."""
+    message may be cut, and its newest entry always stays. A step's cut points are the ends of the answered messages, so
+    the cut can fall inside the span of a turn still in flight: when it is answered, its message renders partly cut,
+    and nothing is told twice or lost."""
     entries = present.history.entries
     heard = present.history.heard
     for entry in new:
@@ -776,14 +778,25 @@ def told_turn(turn: TurnTold, entries: Iterable[Entry]) -> str:
     return json.dumps(told, ensure_ascii=False)
 
 
+def _naming_told_lines(turn: TurnTold, history: History) -> TurnTold:
+    """``turn`` with the lines its occasion names cut down to those the history still holds, since a message partly cut
+    in a step no longer tells the rest."""
+    occasion = turn.occasion
+    if not isinstance(occasion, Lines):
+        return turn
+    held = {entry.seq for entry in history.entries if isinstance(entry, KeptLine)}
+    return replace(turn, occasion=replace(occasion, seqs=occasion.seqs & held))
+
+
 def turn_messages(you: str, present: Present, current: TurnTold) -> tuple[str, ...]:
     """The messages of a turn's request after the persona: the header, one for each answered turn the present holds,
     each rendered from the history as it stands, and the turn's own, which tells what the history holds from where the
-    last of those ended up to ``current.through``."""
+    last of those ended up to ``current.through``. A message's ``woke`` names only the lines the history holds."""
     history = present.history
     messages = [told_header(you, history)]
     start = history.left_out
     for turn in (*present.told, current):
-        messages.append(told_turn(turn, history.entries[start - history.left_out : turn.through - history.left_out]))
+        entries = history.entries[start - history.left_out : turn.through - history.left_out]
+        messages.append(told_turn(_naming_told_lines(turn, history), entries))
         start = max(start, turn.through)
     return tuple(messages)
