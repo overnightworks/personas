@@ -14,7 +14,11 @@ def digests(directory: Path) -> dict[str, str]:
 def test_the_writer_writes_one_file_per_persona(tmp_path):
     main([str(tmp_path / "characters")])
 
-    assert sorted(path.name for path in (tmp_path / "characters").iterdir()) == ["leonardo.vrm", "mozart.vrm"]
+    assert sorted(path.name for path in (tmp_path / "characters").iterdir()) == [
+        "leonardo.vrm",
+        "mozart.room.glb",
+        "mozart.vrm",
+    ]
 
 
 def test_two_runs_write_the_same_bytes(tmp_path):
