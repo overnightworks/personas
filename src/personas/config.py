@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, Final, Self
 
 from agents.agent_file import AgentDefinition, AgentFileError, load_agent
 from agents.config import AgentConfig  # noqa: TC002 - pydantic resolves the field's type at run time
-from agents.member import SPEAK_TOOL, FigureRef, VoiceName
+from agents.member import SPEAK_TOOL, FigureRef, VoiceName, Voices
 from agents.turn import GatewayModelName, ModelKind, model_kind_of
 from pydantic import (
     AnyHttpUrl,
@@ -56,6 +56,8 @@ from personas.secret import Secret
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from pydantic_core import ErrorDetails
+
 CONFIG_ENVIRONMENT_VARIABLE: Final = "PERSONAS_CONFIG"
 DEFAULT_CALL_SECONDS: Final = 30.0
 DEFAULT_WRITE_SECONDS: Final = 2.0
@@ -65,7 +67,6 @@ DEFAULT_LINES_KEEP_DAYS: Final = 30.0
 DEFAULT_SWEEP_MINUTES: Final = 60.0
 DEFAULT_LOOKUP_CALLS: Final = 2
 DEFAULT_LOOKUP_BYTES: Final = 8192
-MAX_VOICE_NAMES: Final = 8
 
 
 class ConfigError(Exception):
@@ -184,14 +185,7 @@ class _AppEntry(_Entry):
 
 
 class _VoiceEntry(_Entry):
-    names: tuple[VoiceName, ...] | None = Field(default=None, min_length=1, max_length=MAX_VOICE_NAMES)
-
-    @field_validator("names")
-    @classmethod
-    def _names_hold_each_voice_once(cls, names: tuple[str, ...] | None) -> tuple[str, ...] | None:
-        if names is not None and len(set(names)) != len(names):
-            raise ValueError("names holds each voice once")
-        return names
+    names: Voices | None = None
 
 
 class _AgentEntry(_Entry):
@@ -297,8 +291,21 @@ class _FileModel(_Entry):
             raise ConfigError(f"the file is not valid TOML: {error}") from None
         except ValidationError as error:
             # The error's input values stay out: only where the problem is and what kind it is.
-            problems = (f"{'.'.join(str(part) for part in each['loc'])}: {each['msg']}" for each in error.errors())
+            problems = (
+                f"{'.'.join(str(part) for part in each['loc'])}: {each['msg']}"
+                for each in _without_the_length_of_entries_that_failed(error.errors())
+            )
             raise ConfigError("; ".join(problems)) from None
+
+
+def _without_the_length_of_entries_that_failed(problems: list[ErrorDetails]) -> list[ErrorDetails]:
+    """A tuple whose entry failed is also counted short of the entries that held: that follows the entry's own error."""
+
+    def an_entry_failed(short: ErrorDetails) -> bool:
+        inside = len(short["loc"])
+        return any(len(each["loc"]) > inside and each["loc"][:inside] == short["loc"] for each in problems)
+
+    return [each for each in problems if each["type"] != "too_short" or not an_entry_failed(each)]
 
 
 def _read_secret(field_name: str, path: Path) -> Secret:
