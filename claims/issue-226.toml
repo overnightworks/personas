@@ -1,0 +1,8 @@
+claim_id = "905388e0578646499c21f87bdff11b0b"
+agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
+role = "builder"
+base = "f1dd5514255dda5a5d13f0ac08bd029f29b2aa4f"
+branch = "claude/issue-226-failed-app-call-names-method-and-code"
+scope = ["src/personas/app_session.py", "src/personas/reporting.py", "tests/support/hopin.py", "tests/test_app_session.py"]
+opened_commit = "1eb5461e8247282759e3d81f7ca433ab9db019fb"
+whole_reason = "one failure's code and method carried from the app session to its log line, with its test and the scripted app"
