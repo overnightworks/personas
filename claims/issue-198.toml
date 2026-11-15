@@ -1,8 +1,0 @@
-claim_id = "89ec9c91fc8d4e7791a0d0cd5334fec2"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "5f0dc8bc21f60c3655f90bdb6485862d64d5f476"
-branch = "claude/issue-198-follow-ups-of-the-179-landing"
-scope = ["README.md", "docs/ARCHITECTURE.md", "pyproject.toml", "src/personas/config.py", "src/personas/main.py", "src/personas/turning.py", "tests", "uv.lock"]
-opened_commit = "6c421b85ff60655af21f837456cf603a0ddae7c8"
-whole_reason = "the agents pin brings the Voices type and the closable backend together; both are needed at once"
