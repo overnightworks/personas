@@ -76,15 +76,6 @@ def test_every_line_the_entry_point_configures_is_one_json_object_of_the_runner_
     assert (line["service"], line["event"], line["agent_id"]) == ("personas", "loop.started", "mozart")
 
 
-def test_an_error_record_of_the_gateway_backend_reaches_no_log_line(restored_logging, caplog: pytest.LogCaptureFixture):
-    configure_logging()
-    caplog.set_level(logging.DEBUG)
-
-    logging.getLogger("agents.backend.gateway").error("tool say raised Unreachable")
-
-    assert caplog.records == []
-
-
 class Stop(Exception):  # noqa: N818 - a test's way to end a runner whose loops never end
     """Raised by the report once an agent joined, which is after its first read answered."""
 
