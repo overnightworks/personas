@@ -351,6 +351,13 @@ HTML_BODY = b"<html>the front's own page</html>"
             "application/json",
             id="json that is no jsonrpc error",
         ),
+        pytest.param(
+            lambda reply: reply.body(
+                HTTPStatus.BAD_REQUEST, "application/json", b'{"jsonrpc": "2.0", "id": 1, "result": {}}'
+            ),
+            "application/json",
+            id="json that is a jsonrpc result",
+        ),
         pytest.param(lambda reply: reply.body(HTTPStatus.BAD_REQUEST, None, HTML_BODY), None, id="no content type"),
         pytest.param(
             lambda reply: reply.body(HTTPStatus.BAD_REQUEST, "not a media type", HTML_BODY), None, id="no media type"

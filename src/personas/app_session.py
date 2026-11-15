@@ -163,10 +163,7 @@ class _BearerAuth(httpx2.Auth):
 
 def _method_of(request: httpx2.Request) -> str | None:
     """The MCP method the request carried, as the SDK wrote it."""
-    try:
-        method = json.loads(request.content).get("method")
-    except ValueError, AttributeError, httpx2.StreamError:
-        return None
+    method = json.loads(request.content).get("method")
     return method if isinstance(method, str) else None
 
 
@@ -398,9 +395,12 @@ def _failure_of(error: BaseException, auth: _BearerAuth) -> CallFailure:
     silent connection is unreachable. The error is one of ``_CALL_ERRORS``: the status is read only for
     those, never for a late answer's error, which no call raised.
     """
-    if isinstance(error, MCPError) and error.code == UNSUPPORTED_PROTOCOL_VERSION:
-        return UnusableAnswer(jsonrpc_code(error.code))
     answered = auth.last_answer
+    if isinstance(error, MCPError) and error.code == UNSUPPORTED_PROTOCOL_VERSION:
+        code = jsonrpc_code(error.code)
+        if answered is not None and answered.status >= HTTPStatus.BAD_REQUEST:
+            return UnusableAnswer(code, answered.method, code)
+        return UnusableAnswer(code)
     if answered is not None and answered.status >= HTTPStatus.BAD_REQUEST:
         return StatusFailure(answered.status, answered.method, answered.answer)
     if answered is not None and answered.status >= HTTPStatus.MULTIPLE_CHOICES:

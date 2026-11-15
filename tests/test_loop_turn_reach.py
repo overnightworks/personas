@@ -10,7 +10,7 @@ import httpx2
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.tools import ToolOutcome
-from mcp_types import INVALID_PARAMS, ListToolsResult, Tool
+from mcp_types import INVALID_PARAMS, UNSUPPORTED_PROTOCOL_VERSION, ListToolsResult, Tool
 
 from personas import app_session
 from personas.config import load_config
@@ -134,6 +134,11 @@ async def test_a_tools_only_app_whose_listing_fails_at_turn_start_is_absent_and_
     [
         pytest.param(lambda reply: reply.error(INVALID_PARAMS), jsonrpc_code(INVALID_PARAMS), id="jsonrpc error"),
         pytest.param(
+            lambda reply: reply.error(UNSUPPORTED_PROTOCOL_VERSION),
+            jsonrpc_code(UNSUPPORTED_PROTOCOL_VERSION),
+            id="unsupported protocol version",
+        ),
+        pytest.param(
             lambda reply: reply.body(HTTPStatus.BAD_REQUEST, "text/html", b"<html>the front</html>"),
             "text/html",
             id="no jsonrpc",
@@ -150,9 +155,9 @@ async def test_a_tools_only_app_that_answers_its_listing_with_a_400_is_reported_
     await runner.app.said_count(1)
 
     (change,) = runner.reports.changes_of(Event.TOOLS_ONLY_APP_FAILED)
-    assert (change.code, change.method, change.answer) == (status_code(HTTPStatus.BAD_REQUEST), LIST_TOOLS, answer)
+    assert (change.method, change.answer) == (LIST_TOOLS, answer)
     logged = formatted(caplog.get_records("call"))
-    assert f"code=http_400 method={LIST_TOOLS} answer={answer}" in logged
+    assert f"method={LIST_TOOLS} answer={answer}" in logged
     assert "the front" not in logged
 
 

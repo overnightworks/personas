@@ -28,7 +28,10 @@ LATE_ANSWER_ERRORS: Final = (anyio.BrokenResourceError, anyio.ClosedResourceErro
 
 # The base of the failures below, which name their kind; a suffix would repeat it.
 class CallFailure(Exception):  # noqa: N818
-    """A call did not give an answer the loop can use."""
+    """A call did not give an answer the loop can use; an app's error status says the failed MCP method and answer."""
+
+    method: str | None = None
+    answer: str | None = None
 
 
 class StatusFailure(CallFailure):
@@ -56,9 +59,11 @@ class Unreachable(CallFailure):
 class UnusableAnswer(CallFailure):
     """The server answered, but with an error or a body the loop cannot use; ``code`` says which."""
 
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: str, method: str | None = None, answer: str | None = None) -> None:
         super().__init__(code)
         self.code = code
+        self.method = method
+        self.answer = answer
 
 
 # Named for the state of the store, as Unreachable is; a suffix would repeat it.

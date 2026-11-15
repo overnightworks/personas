@@ -45,7 +45,7 @@ from personas.decision import (
     wakes_him,
 )
 from personas.entries import ViewSeen, Visit, WindowRead, taken_lines
-from personas.failures import CallFailure, StatusFailure, leaves_of, raise_if_cancelled
+from personas.failures import CallFailure, leaves_of, raise_if_cancelled
 from personas.mind import Mind
 from personas.recall import LookupBounds
 from personas.remembering import LineStore, Remembering
@@ -484,7 +484,6 @@ class AgentLoop:
         place_kind: str | None = None,
         model: str | None = None,
     ) -> None:
-        status = failure if isinstance(failure, StatusFailure) else None
         self._boundaries.report(
             StateChange(
                 event,
@@ -493,8 +492,8 @@ class AgentLoop:
                 code,
                 place_kind=place_kind,
                 model=model,
-                method=status and status.method,
-                answer=status and status.answer,
+                method=failure and failure.method,
+                answer=failure and failure.answer,
             )
         )
 
