@@ -19,7 +19,7 @@ from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import SweepClock, line, window_of
 from tests.support.gateway import Gateway, says
-from tests.support.hopin import LIMIT_SECONDS, formatted
+from tests.support.hopin import LIMIT_SECONDS, formatted, lines_of
 from tests.support.postgres import kept_lines, lines_table_locked, run_sql
 
 if TYPE_CHECKING:
@@ -174,6 +174,6 @@ async def test_no_line_text_speaker_or_password_reaches_a_log_line_of_a_sweep(ru
     await clock.until_waiting(1)
 
     logged = formatted(caplog.get_records("call"))
-    assert Event.SWEPT.value in logged
+    assert lines_of(caplog.get_records("call"), "lines.swept")
     for held in (text, speaker, database.password.reveal()):
         assert held not in logged
