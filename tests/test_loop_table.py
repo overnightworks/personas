@@ -130,7 +130,7 @@ async def test_revisions_and_lines_are_told_in_the_order_read_and_woke_names_onl
     first = await shows(runner.app, 1)
     await said_and_taken(runner.app, PLACE_ID, "first")
     second = await shows(runner.app, 2)
-    await said_and_taken(runner.app, PLACE_ID, "second")
+    await said_and_taken(runner.app, PLACE_ID, "middle")
     third = waits(runner.app, 3)
     await runner.gateway.until_turns(1, why="view")
 
@@ -141,7 +141,7 @@ async def test_revisions_and_lines_are_told_in_the_order_read_and_woke_names_onl
             view_entry(app, first, revision=1, awaits_you=False),
             entry(app, PLACE_ID, "first"),
             view_entry(app, second, revision=2, awaits_you=False),
-            entry(app, PLACE_ID, "second", seq=2),
+            entry(app, PLACE_ID, "middle", seq=2),
             view_entry(app, third, revision=3),
         ]
     )

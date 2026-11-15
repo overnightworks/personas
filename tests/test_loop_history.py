@@ -103,7 +103,7 @@ async def test_lines_of_two_calls_of_two_apps_are_told_in_the_order_they_were_ta
     await runner.app.until_window_read(PLACE_ID)
     await other.until_window_read(OTHER_CALL_ID)
     await said_and_taken(runner.app, PLACE_ID, "first")
-    await said_and_taken(other, OTHER_CALL_ID, "second")
+    await said_and_taken(other, OTHER_CALL_ID, "middle")
     await said_and_taken(runner.app, PLACE_ID, "third")
     state = waits(runner.app, 1)
     await runner.gateway.until_turns(1, why="view")
@@ -112,7 +112,7 @@ async def test_lines_of_two_calls_of_two_apps_are_told_in_the_order_they_were_ta
         history_of(
             [
                 entry(url_of(runner, 0), PLACE_ID, "first"),
-                entry(url_of(runner, 1), OTHER_CALL_ID, "second"),
+                entry(url_of(runner, 1), OTHER_CALL_ID, "middle"),
                 entry(url_of(runner, 0), PLACE_ID, "third", seq=2),
                 view_entry(url_of(runner, 0), state, revision=1),
             ]
@@ -202,16 +202,16 @@ async def test_a_turn_is_told_as_many_of_the_newest_lines_as_the_bytes_they_are_
     app = url_of(runner, 0)
     runner.config = bounded_history(
         runner.config,
-        told_line_bytes(app, PLACE_ID, "second", seq=2) + told_line_bytes(app, PLACE_ID, ADDRESSED, seq=3),
+        told_line_bytes(app, PLACE_ID, "middle", seq=2) + told_line_bytes(app, PLACE_ID, ADDRESSED, seq=3),
     )
     await restarted_in_the_call(runner)
     await said_and_taken(runner.app, PLACE_ID, "first")
-    await said_and_taken(runner.app, PLACE_ID, "second")
+    await said_and_taken(runner.app, PLACE_ID, "middle")
     runner.app.speak(PLACE_ID, PERSON, SPEAKER, ADDRESSED)
     written = await runner.gateway.until_written_turn(PLACE_ID, 3)
 
     assert written.room["history"] == history_of(
-        [entry(app, PLACE_ID, "second", seq=2), entry(app, PLACE_ID, ADDRESSED, seq=3)], older_dropped=True
+        [entry(app, PLACE_ID, "middle", seq=2), entry(app, PLACE_ID, ADDRESSED, seq=3)], older_dropped=True
     )
 
 
@@ -420,14 +420,14 @@ async def test_lines_said_earlier_in_the_call_are_told_in_the_order_taken_and_on
 ):
     await restarted_in_the_call(runner)
     await said_and_taken(runner.app, PLACE_ID, "first")
-    await said_and_taken(runner.app, PLACE_ID, "second")
+    await said_and_taken(runner.app, PLACE_ID, "middle")
     runner.app.speak(PLACE_ID, PERSON, SPEAKER, ADDRESSED)
     written = await runner.gateway.until_written_turn(PLACE_ID, 3)
 
     assert written.room["history"] == history_of(
         [
             entry(url_of(runner, 0), PLACE_ID, "first"),
-            entry(url_of(runner, 0), PLACE_ID, "second", seq=2),
+            entry(url_of(runner, 0), PLACE_ID, "middle", seq=2),
             entry(url_of(runner, 0), PLACE_ID, ADDRESSED, seq=3),
         ]
     )
