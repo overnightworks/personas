@@ -1099,7 +1099,7 @@ def test_an_accept_shows_neither_its_figure_nor_its_voice_in_its_repr():
     voice = f"Voice_{secrets.token_hex(6)}"
     figure = FigureRef(url=f"https://figures.test/{secrets.token_hex(6)}.glb", sha256=secrets.token_hex(32))
 
-    shown = repr(Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 4, figure, voice))
+    shown = repr(Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 4, figure, (voice,)))
 
     assert voice not in shown
     assert figure.url not in shown

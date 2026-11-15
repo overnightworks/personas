@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import secrets
 from typing import TYPE_CHECKING, NoReturn
@@ -16,6 +17,7 @@ from personas.config import (
     DEFAULT_LOOKUP_CALLS,
     DEFAULT_SWEEP_MINUTES,
     DEFAULT_WRITE_SECONDS,
+    MAX_VOICE_NAMES,
     ToolBinding,
     Voice,
     load_config,
@@ -30,6 +32,7 @@ if TYPE_CHECKING:
     from personas.config import Config
     from personas.readiness import ReadyMarker
 
+MORE_VOICES_THAN_MOST = [f"voice-{index}" for index in range(MAX_VOICE_NAMES + 1)]
 APP_TABLE = (
     '[[apps]]\nmcp_url = "https://hopin.test/mcp"\nscope = "mcp-hopin"\n'
     f'tools = ["say"]\nmax_tool_calls = {MAX_TOOL_CALLS}\n'
@@ -224,27 +227,45 @@ def test_a_malformed_figure_stops_the_start_and_names_the_field(files, monkeypat
     assert "figures.test" not in error
 
 
-def test_an_agent_entry_turns_his_voice_on_with_a_table_and_may_name_it(files):
+def test_an_agent_entry_turns_his_voice_on_with_a_table_and_may_name_an_ordered_list_of_voices(files):
     assert load_config(files.write()).agents[0].voice is None
     files.text += "[agents.voice]\n"
-    assert load_config(files.write()).agents[0].voice == Voice(None)
-    files.text += 'name = "Rachel_V2.en-GB"\n'
+    assert load_config(files.write()).agents[0].voice == Voice(())
+    files.text += 'names = ["Rachel_V2.en-GB", "de_DE-thorsten-medium"]\n'
 
-    assert load_config(files.write()).agents[0].voice == Voice("Rachel_V2.en-GB")
+    assert load_config(files.write()).agents[0].voice == Voice(("Rachel_V2.en-GB", "de_DE-thorsten-medium"))
 
 
 @pytest.mark.parametrize(
     ("table", "named"),
     [
-        ('[agents.voice]\nname = ""\n', "agents.0.voice.name"),
-        ('[agents.voice]\nname = "two words"\n', "agents.0.voice.name"),
-        ('[agents.voice]\nname = "a/b"\n', "agents.0.voice.name"),
-        (f'[agents.voice]\nname = "{"a" * 65}"\n', "agents.0.voice.name"),
-        ("[agents.voice]\nname = 7\n", "agents.0.voice.name"),
+        ('[agents.voice]\nnames = [""]\n', "agents.0.voice.names.0"),
+        ('[agents.voice]\nnames = ["two words"]\n', "agents.0.voice.names.0"),
+        ('[agents.voice]\nnames = ["a/b"]\n', "agents.0.voice.names.0"),
+        (f'[agents.voice]\nnames = ["{"a" * 65}"]\n', "agents.0.voice.names.0"),
+        ("[agents.voice]\nnames = [7]\n", "agents.0.voice.names.0"),
+        ('[agents.voice]\nnames = "ryan"\n', "agents.0.voice.names"),
+        ("[agents.voice]\nnames = []\n", "agents.0.voice.names"),
+        ('[agents.voice]\nnames = ["ryan", "ryan"]\n', "agents.0.voice.names"),
+        (f"[agents.voice]\nnames = {json.dumps(MORE_VOICES_THAN_MOST)}\n", "agents.0.voice.names"),
+        ('[agents.voice]\nname = "ryan"\n', "agents.0.voice.name"),
         ('[agents.voice]\nspeed = "fast"\n', "agents.0.voice.speed"),
         ('voice = "ryan"\n', "agents.0.voice"),
     ],
-    ids=["empty", "space", "slash", "too long", "not a string", "unknown key", "not a table"],
+    ids=[
+        "empty name",
+        "space",
+        "slash",
+        "too long",
+        "not a string",
+        "not a list",
+        "empty list",
+        "duplicate",
+        "more than the most",
+        "the single name",
+        "unknown key",
+        "not a table",
+    ],
 )
 def test_a_malformed_voice_stops_the_start_and_names_the_field_but_not_its_value(
     files, monkeypatch, capsys, table, named
@@ -254,7 +275,7 @@ def test_a_malformed_voice_stops_the_start_and_names_the_field_but_not_its_value
     error = fails_at_start(files.write(), monkeypatch, capsys)
 
     assert named in error
-    for value in ("two words", "a/b", "ryan", "fast"):
+    for value in ("two words", "a/b", "ryan", "fast", "voice-0"):
         assert value not in error
 
 

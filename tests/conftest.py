@@ -190,7 +190,7 @@ class Harness:
         self.files.persona_path.write_text(self.files.persona_text(max_duration_seconds), encoding="utf-8")
         persona = load_agent(self.files.persona_path, [])
         self.config = replace(
-            self.config, agents=tuple(replace(each, persona=persona, voice=Voice(None)) for each in self.config.agents)
+            self.config, agents=tuple(replace(each, persona=persona, voice=Voice(())) for each in self.config.agents)
         )
 
     def bound_tools_only_calls_to(self, seconds: float) -> None:
@@ -244,7 +244,7 @@ class Harness:
             self.files.password,
             self.files.persona_prompt,
             *(held for agent in self.config.agents if agent.figure for held in (agent.figure.url, agent.figure.sha256)),
-            *(agent.voice.name for agent in self.config.agents if agent.voice and agent.voice.name),
+            *(name for agent in self.config.agents if agent.voice for name in agent.voice.names),
             *self.realm.issued,
             *self.app.kept_out_of_logs(),
             *(held for each in [*self.tools_only_apps, *self.other_apps] for held in each.kept_out_of_logs()),
