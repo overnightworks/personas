@@ -42,8 +42,8 @@ from tests.support.hopin import (
     READ,
     SAY_TOOL,
     active,
-    formatted,
     invited,
+    lines_of,
 )
 from tests.support.transport import transport_closing_with_late_answers
 from tests.support.wire import cuts, hangs
@@ -588,8 +588,7 @@ async def test_a_refused_and_an_answered_turn_log_a_code_and_no_secret_or_conten
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.app.said_count(1)
 
-    logged = formatted(caplog.get_records("call"))
-    assert Event.TURN_ENDED.value in logged
+    assert "refused" in [line["outcome"] for line in lines_of(caplog.get_records("call"), "turn.ended")]
 
 
 async def test_the_started_line_names_the_model_each_agent_runs_on(runner, caplog):
@@ -599,9 +598,9 @@ async def test_the_started_line_names_the_model_each_agent_runs_on(runner, caplo
 
     await restarted_in_the_call(runner)
 
-    started = [line for line in formatted(caplog.get_records("call")).splitlines() if line.startswith("started ")]
+    started = lines_of(caplog.get_records("call"), "loop.started")
     assert started
-    assert all(line.endswith(" model=text/sonnet-low") for line in started)
+    assert all(line["model"] == "text/sonnet-low" for line in started)
 
 
 def replace_model(runner, model):

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 import secrets
 from dataclasses import replace
 from typing import TYPE_CHECKING
@@ -51,7 +50,7 @@ from tests.support.history import (
     waits,
 )
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import LIMIT_SECONDS, LIST_TOOLS, PLAY_TOOL, SAY_TOOL, active, formatted
+from tests.support.hopin import LIMIT_SECONDS, LIST_TOOLS, PLAY_TOOL, SAY_TOOL, active, formatted, lines_of
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -465,7 +464,8 @@ async def test_a_lookup_adds_no_event_and_no_content_to_the_log_and_turn_ended_c
     await runner.reports.until_a_turn_completed()
 
     logged = formatted(caplog.get_records("call"))
-    results = int(re.search(r" results_bytes=(\d+)", logged).group(1))
+    (ended,) = lines_of(caplog.get_records("call"), "turn.ended")
+    results = ended["results_bytes"]
     assert runner.reports.reported() == [(Event.STARTED, None), *stored]
     assert needle not in logged
     assert not [line for line in found if line.text in logged]
@@ -484,7 +484,5 @@ async def test_a_turn_counts_the_lookups_declaration_in_its_tools_bytes(runner, 
     say_in_the_call(runner, f"{ADDRESSED} Once more.")
     await runner.reports.until_a_turn_completed(count=2)
 
-    with_lookup, without = (
-        int(each) for each in re.findall(r" tools_bytes=(\d+)", formatted(caplog.get_records("call")))
-    )
+    with_lookup, without = (line["tools_bytes"] for line in lines_of(caplog.get_records("call"), "turn.ended"))
     assert with_lookup - without >= len(RECALL_DECLARATION.description) + len(json.dumps(RECALL_DECLARATION.parameters))

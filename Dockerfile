@@ -22,7 +22,7 @@ FROM python-base AS dependencies
 RUN apt-get update \
  && apt-get install --yes --no-install-recommends git ca-certificates \
  && rm -rf /var/lib/apt/lists/*
-# One build runs, the git-pinned library named in pyproject.toml (tool.uv),
+# Only builds of the git-pinned libraries run, those named in pyproject.toml (tool.uv),
 # with exact build tools. --no-build refuses every other source distribution,
 # whose build script would run third-party code during the image build, so
 # third-party packages are wheel-only. personas itself is installed in a second

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from http import HTTPStatus
 
 import pytest
@@ -14,7 +13,7 @@ from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, say, words
 from tests.support.history import REMARK, said_and_taken
-from tests.support.hopin import a_picture, base64_of, formatted
+from tests.support.hopin import a_picture, base64_of, lines_of
 from tests.support.voice import a_voice_call
 
 pytestmark = pytest.mark.anyio
@@ -29,20 +28,14 @@ def counted(prompt: int, cached: int, written: int, completed: int) -> dict[str,
     }
 
 
-_SIZES = r" tools_bytes=(\d+) told_bytes=(\d+) results_bytes=(\d+) images_bytes=(\d+)"
-_COUNTS = r"(?P<counts>(?: input=\d+ cache_read=\d+ cache_write=\d+ output=\d+ requests=\d+)?)"
-_LINE = re.compile(rf"turn_ended client_id=\S+ app=\S+ code=(?P<code>\S+)(?:{_SIZES})?{_COUNTS}")
+_SIZE_FIELDS = ("tools_bytes", "told_bytes", "results_bytes", "images_bytes")
+_COUNT_FIELDS = ("input_tokens", "cached_input_tokens", "cache_write_tokens", "output_tokens", "model_request_count")
 
 
-def the_turn_ended_line(caplog) -> re.Match[str]:
-    """The one `turn_ended` line, which holds nothing but the fields the log declares."""
-    ended = [
-        line for line in formatted(caplog.get_records("call")).splitlines() if line.startswith(Event.TURN_ENDED.value)
-    ]
-    assert len(ended) == 1
-    matched = _LINE.fullmatch(ended[0])
-    assert matched is not None, ended[0]
-    return matched
+def the_turn_ended_line(caplog) -> dict[str, object]:
+    """The one `turn.ended` line."""
+    (ended,) = lines_of(caplog.get_records("call"), "turn.ended")
+    return ended
 
 
 @pytest.mark.parametrize(
@@ -50,17 +43,17 @@ def the_turn_ended_line(caplog) -> re.Match[str]:
     [
         pytest.param(
             (tool_round(say(ANSWER), usage=counted(100, 40, 10, 5)), completion("done", usage=counted(150, 100, 0, 3))),
-            " input=250 cache_read=140 cache_write=10 output=8 requests=2",
+            dict(zip(_COUNT_FIELDS, (250, 140, 10, 8, 2), strict=True)),
             id="a turn with one tool round gives the library's sum once and two requests",
         ),
         pytest.param(
             (tool_round(say(ANSWER)), completion("done")),
-            "",
+            {},
             id="rounds without usage give none of the five fields",
         ),
         pytest.param(
             (tool_round(say(ANSWER), usage=counted(100, 40, 10, 5)), completion("done")),
-            "",
+            {},
             id="a round without usage gives no partial sum",
         ),
     ],
@@ -77,7 +70,8 @@ async def test_a_turn_that_ends_with_its_final_event_logs_the_tokens_it_used_or_
     say_in_the_call(runner, ADDRESSED, spoken=aloud)
     await runner.reports.until_a_turn_completed()
 
-    assert the_turn_ended_line(caplog).group("counts") == counts
+    ended = the_turn_ended_line(caplog)
+    assert {key: ended[key] for key in _COUNT_FIELDS if key in ended} == counts
 
 
 async def the_sizes_of_a_turn(runner, caplog, *rounds) -> tuple[int, int, int, int]:
@@ -85,9 +79,8 @@ async def the_sizes_of_a_turn(runner, caplog, *rounds) -> tuple[int, int, int, i
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
     await runner.reports.until_a_turn_completed()
-    sizes = the_turn_ended_line(caplog).groups()[1:5]
-    assert None not in sizes
-    return tuple(int(each) for each in sizes)
+    ended = the_turn_ended_line(caplog)
+    return tuple(ended[field] for field in _SIZE_FIELDS)
 
 
 async def test_a_turn_with_no_call_results_logs_its_sizes_and_zero_results(runner, caplog):
@@ -138,7 +131,7 @@ async def test_an_aloud_turn_logs_its_picture_and_sends_it_to_the_model_like_a_w
     say_in_the_call(runner, ADDRESSED, spoken=True)
     await runner.reports.until_a_turn_completed()
 
-    assert the_turn_ended_line(caplog).group(5) == str(len(picture.content))
+    assert the_turn_ended_line(caplog)["images_bytes"] == len(picture.content)
     assert runner.gateway.pictures_in(2) == [f"data:{TOOL_IMAGE_MEDIA_TYPE};base64,{base64_of(picture)}"]
 
 
@@ -154,7 +147,7 @@ async def test_a_turn_counts_the_result_of_a_held_call_among_its_results(runner,
     await runner.reports.until_a_turn_completed()
 
     (held,) = runner.gateway.held_result_texts(3)
-    _, _, results, _ = (int(each) for each in the_turn_ended_line(caplog).groups()[1:5])
+    results = the_turn_ended_line(caplog)["results_bytes"]
     assert results >= len(held)
 
 
@@ -165,5 +158,5 @@ async def test_a_turn_that_fails_after_its_request_logs_its_sizes_and_no_usage(r
     await runner.reports.until(Event.TURN_ENDED)
 
     ended = the_turn_ended_line(caplog)
-    assert ended.group(2) is not None
-    assert ended.group("counts") == ""
+    assert set(_SIZE_FIELDS) <= ended.keys()
+    assert not set(_COUNT_FIELDS) & ended.keys()

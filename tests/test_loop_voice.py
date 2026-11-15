@@ -16,7 +16,7 @@ from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in
 from tests.support.gateway import Gateway, says, speaks_and_says
 from tests.support.history import REMARK, SPEAKER, bounded_history, said_and_taken, settled, waits
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import ISSUER, PLAY_TOOL, SAY_TOOL, Line, QuietApp, active
+from tests.support.hopin import ISSUER, PLAY_TOOL, SAY_TOOL, Line, QuietApp, active, lines_of
 from tests.support.realm import LIFETIME_SECONDS
 from tests.support.songmaker import CREATE_SONG, GENERATE_SONG
 from tests.support.voice import (
@@ -559,5 +559,4 @@ async def test_a_spoken_turn_logs_its_start_and_no_sentence(runner, caplog):
     say_in_the_call(runner, ADDRESSED)
     await runner.app.spoken_count(1)
 
-    logged = [record.getMessage() for record in caplog.get_records("call") if record.name == "personas"]
-    assert [message.split()[0] for message in logged] == [Event.STARTED.value]
+    assert [line["event"] for line in lines_of(caplog.get_records("call"))] == ["loop.started"]

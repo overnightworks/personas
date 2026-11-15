@@ -22,7 +22,7 @@ from personas.turning import Turning
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import CALL, DISCOVER, LIMIT_SECONDS, LIST_TOOLS, LISTEN, SAY_TOOL, formatted
+from tests.support.hopin import CALL, DISCOVER, LIMIT_SECONDS, LIST_TOOLS, LISTEN, SAY_TOOL, formatted, lines_of
 from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG, SCOPE
 from tests.support.transport import (
     ClosingHold,
@@ -130,30 +130,36 @@ async def test_a_tools_only_app_whose_listing_fails_at_turn_start_is_absent_and_
 
 
 @pytest.mark.parametrize(
-    ("answers", "code", "answer"),
+    ("answers", "code", "answer", "status", "reason"),
     [
         pytest.param(
             lambda reply: reply.error(INVALID_PARAMS),
             status_code(HTTPStatus.BAD_REQUEST),
             jsonrpc_code(INVALID_PARAMS),
+            HTTPStatus.BAD_REQUEST,
+            "invalid_params",
             id="jsonrpc error",
         ),
         pytest.param(
             lambda reply: reply.error(UNSUPPORTED_PROTOCOL_VERSION),
             jsonrpc_code(UNSUPPORTED_PROTOCOL_VERSION),
             jsonrpc_code(UNSUPPORTED_PROTOCOL_VERSION),
+            None,
+            "other_jsonrpc_error",
             id="unsupported protocol version",
         ),
         pytest.param(
             lambda reply: reply.body(HTTPStatus.BAD_REQUEST, "text/html", b"<html>the front</html>"),
             status_code(HTTPStatus.BAD_REQUEST),
             "text/html",
+            HTTPStatus.BAD_REQUEST,
+            "html",
             id="no jsonrpc",
         ),
     ],
 )
 async def test_a_tools_only_app_that_answers_its_listing_with_a_400_is_reported_with_its_code_method_and_answer(
-    runner, songmaker, caplog, answers, code, answer
+    runner, songmaker, caplog, answers, code, answer, status, reason
 ):
     songmaker.script(LIST_TOOLS, answers)
     runner.gateway = Gateway(saying(ANSWER), completion("done"))
@@ -162,10 +168,10 @@ async def test_a_tools_only_app_that_answers_its_listing_with_a_400_is_reported_
     await runner.app.said_count(1)
 
     (change,) = runner.reports.changes_of(Event.TOOLS_ONLY_APP_FAILED)
-    assert (change.code, change.method, change.answer) == (code, LIST_TOOLS, answer)
-    logged = formatted(caplog.get_records("call"))
-    assert f"method={LIST_TOOLS} answer={answer}" in logged
-    assert "the front" not in logged
+    assert (change.code, change.failure.method, change.failure.answer) == (code, LIST_TOOLS, answer)
+    [logged] = lines_of(caplog.get_records("call"), "tools_only_app.failed")
+    assert (logged.get("status"), logged["mcp_method"], logged["reason"]) == (status, LIST_TOOLS, reason)
+    assert "the front" not in formatted(caplog.get_records("call"))
 
 
 async def test_a_tools_only_app_that_lists_one_of_its_two_bound_tools_lends_that_one_and_is_no_failure(

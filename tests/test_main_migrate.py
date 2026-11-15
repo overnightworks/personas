@@ -26,7 +26,7 @@ def migrate(files: Files, monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.postgres
 def test_migrating_an_empty_database_creates_the_schema_and_migrating_again_changes_nothing(
-    files, unmigrated_database, monkeypatch, library_loggers
+    files, unmigrated_database, monkeypatch, restored_logging
 ):
     target = unmigrated_database
     files.text += files.memory_table(
@@ -52,7 +52,7 @@ def test_migrating_an_empty_database_creates_the_schema_and_migrating_again_chan
 
 @pytest.mark.postgres
 def test_migrating_a_database_at_the_first_revision_keeps_its_lines_and_reads_them_back_as_not_cut(
-    files, unmigrated_database, monkeypatch, library_loggers
+    files, unmigrated_database, monkeypatch, restored_logging
 ):
     target = unmigrated_database
     files.text += files.memory_table(
@@ -68,7 +68,7 @@ def test_migrating_a_database_at_the_first_revision_keeps_its_lines_and_reads_th
 
 @pytest.mark.postgres
 def test_migrating_a_database_at_the_second_revision_keeps_its_lines_and_reads_them_back_as_no_act(
-    files, unmigrated_database, monkeypatch, library_loggers
+    files, unmigrated_database, monkeypatch, restored_logging
 ):
     target = unmigrated_database
     files.text += files.memory_table(
@@ -90,7 +90,7 @@ def test_migrating_a_database_at_the_second_revision_keeps_its_lines_and_reads_t
         )
 
 
-def test_migrating_without_a_memory_table_stops_and_names_the_field(files, monkeypatch, capsys, library_loggers):
+def test_migrating_without_a_memory_table_stops_and_names_the_field(files, monkeypatch, capsys, restored_logging):
     monkeypatch.setenv(CONFIG_ENVIRONMENT_VARIABLE, str(files.write()[CONFIG_ENVIRONMENT_VARIABLE]))
 
     with pytest.raises(SystemExit) as stopped:
@@ -101,7 +101,7 @@ def test_migrating_without_a_memory_table_stops_and_names_the_field(files, monke
 
 
 def test_migrating_a_store_that_cannot_be_reached_stops_with_its_code_and_no_traceback(
-    files, monkeypatch, capsys, library_loggers
+    files, monkeypatch, capsys, restored_logging
 ):
     files.text += files.memory_table(host='"127.0.0.1"', port=str(CLOSED_PORT))
 

@@ -228,7 +228,7 @@ async def test_a_failed_call_to_a_held_app_is_reported_with_the_method_and_the_a
     await runner.gateway.until_requested(2)
 
     (change,) = runner.reports.changes_of(Event.HELD_APP_FAILED)
-    assert (change.code, change.method, change.answer) == (
+    assert (change.code, change.failure.method, change.failure.answer) == (
         status_code(HTTPStatus.INTERNAL_SERVER_ERROR),
         CALL,
         "text/html",

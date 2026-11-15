@@ -11,6 +11,7 @@ dependencies = [
     "mcp>=2.3.0",
     "mcp-types>=2.3.0",
     "overnightworks-agents[backend,voice] @ git+https://github.com/overnightworks/agents@v0.48.0",
+    "overnightworks-logline @ git+https://github.com/overnightworks/logline@v0.3.0",
     "psycopg[binary]>=3.2",
     "pydantic>=2.12",
     "sqlalchemy[asyncio]>=2.1.6",
@@ -24,9 +25,9 @@ requires = ["hatchling==1.33.0"]
 build-backend = "hatchling.build"
 
 [tool.uv]
-# The overnightworks library is built from its git tag; a named package
+# The overnightworks libraries are built from their git tags; a named package
 # overrides a global --no-build, so every other package still installs as a wheel.
-no-binary-package = ["overnightworks-agents"]
+no-binary-package = ["overnightworks-agents", "overnightworks-logline"]
 # Its build backend runs with these exact tools, as hatchling is pinned above.
 build-constraint-dependencies = ["setuptools==84.2.1", "wheel==0.48.0"]
 

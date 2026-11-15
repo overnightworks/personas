@@ -29,7 +29,8 @@ from agents.member import (
     Written,
 )
 from agents.tools import ToolDeclaration, ToolOutcome
-from agents.turn import MAX_EVENT_BYTES, FailureCode
+from agents.turn import MAX_EVENT_BYTES, FailureCode, RejectionCode
+from logline import Outcome
 from mcp_types import INVALID_PARAMS
 
 from personas.app_session import READ_SECONDS
@@ -73,6 +74,7 @@ from personas.decision import (
     decisive_failure,
     due_again,
     failure_code,
+    failure_reason,
     forget_gone,
     held_apps,
     held_told,
@@ -103,6 +105,7 @@ from personas.decision import (
     turn_call_bound,
     turn_invalid,
     turn_messages,
+    turn_outcome,
     view_turn_due,
     wakes_him,
     with_due,
@@ -882,6 +885,48 @@ def test_an_app_takes_calls_until_its_own_bound_is_reached(made, within):
 )
 def test_a_failure_is_logged_with_its_status_its_answer_code_or_the_word_for_the_network(failure, code):
     assert failure_code(failure) == code
+
+
+@pytest.mark.parametrize(
+    ("failure", "reason"),
+    [
+        (StatusFailure(503), "no_answer"),
+        (StatusFailure(400, "tools/list", "jsonrpc_-32602"), "invalid_params"),
+        (StatusFailure(400, "tools/list", "jsonrpc_-32000"), "other_jsonrpc_error"),
+        (StatusFailure(400, "tools/list", "text/html"), "html"),
+        (StatusFailure(400, "tools/list", "application/x-secret-front"), "other_media_type"),
+        (UnusableAnswer("invalid_answer"), "invalid_answer"),
+        (UnusableAnswer("jsonrpc_-32601"), "method_not_found"),
+        (UnusableAnswer("http_302"), "unexpected_status"),
+        (Unreachable("cut"), NETWORK_FAILURE_CODE),
+    ],
+    ids=[
+        "a status with no answer",
+        "a standard jsonrpc error by name",
+        "another jsonrpc error",
+        "a known media type by name",
+        "an unknown media type",
+        "an unusable answer",
+        "an unusable jsonrpc error",
+        "a redirect",
+        "the network",
+    ],
+)
+def test_a_failure_logs_a_closed_reason_that_never_holds_a_value_the_app_chose(failure, reason):
+    assert failure_reason(failure) == reason
+
+
+@pytest.mark.parametrize(
+    ("code", "outcome"),
+    [
+        (None, Outcome.OK),
+        (TURN_CANCELLED_CODE, Outcome.CANCELLED),
+        (RejectionCode.BUDGET_SPENT.value, Outcome.REFUSED),
+        (FailureCode.PROVIDER_UNAVAILABLE.value, Outcome.FAILED),
+    ],
+)
+def test_a_turn_ends_as_its_code_says(code, outcome):
+    assert turn_outcome(code) is outcome
 
 
 OTHER_TABLE = PlaceRef(kind="table", id="table-2")
