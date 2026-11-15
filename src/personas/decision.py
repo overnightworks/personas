@@ -12,6 +12,7 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
+from agents.backend import TurnStopped
 from agents.member import (
     SPEAK_TOOL,
     AcceptInvitationRefusal,
@@ -25,7 +26,7 @@ from agents.member import (
     StandingState,
     VoiceState,
 )
-from agents.turn import MAX_EVENT_BYTES
+from agents.turn import MAX_EVENT_BYTES, FailureCode
 
 from personas.entries import (
     ActDone,
@@ -71,6 +72,8 @@ SUSPENDED_RETRY_SECONDS: Final = 30.0
 """How often a suspended loop asks the realm and then the app again."""
 TURN_ROLE: Final[AgentRole] = "user"
 """The app role a turn acts under: an agent holds no admin right."""
+SENTENCES_AHEAD: Final = 1
+"""How many sentences he sends ahead of the one playing: the wire answers a sentence at its turn, in the order sent."""
 TURN_CANCELLED_CODE: Final = "cancelled"
 """The code of a turn the loop cancelled because its place left the standing, and of an act whose call was cut while it
 was in flight, by that or by the turn's deadline."""
@@ -438,9 +441,12 @@ def act_outcome(ended: ToolOutcome | BaseException, *, cancelling: bool) -> ActO
 
 def speech_outcome(ended: SpeakAnswer | SpeakRefusal | BaseException, *, cancelling: bool) -> SpeechOutcome | None:
     """The outcome of a sentence sent to ``speak`` from how its request ended and whether the turn's task is being
-    cancelled. The app's answer, a refusal included, is an answer even while a cancel is pending."""
+    cancelled. The app's answer, a refusal included, is an answer even while a cancel is pending; a request given up
+    at the turn's deadline is unanswered with that code."""
     if isinstance(ended, SpeakAnswer | SpeakRefusal):
         return ended
+    if not cancelling and isinstance(ended, TurnStopped) and ended.code is FailureCode.LIMIT_EXCEEDED:
+        return Unanswered(ended.code.value)
     return _unanswered(ended, cancelling=cancelling)
 
 
@@ -546,17 +552,24 @@ def arrived_since(current: History, admitted: History) -> Arrived | None:
     return Arrived(_entered_since(current, admitted.taken), current.left_out > admitted.taken)
 
 
-def sentence_ended(history: History, mark: int, at: AppPlace) -> bool:
-    """Whether a sentence sent when ``history`` had taken ``mark`` entries has ended: his own spoken line at ``at`` has
-    entered since, whole or cut. A sentence is in flight alone, so the first such line is its own."""
-    return any(
-        isinstance(entry, KeptLine)
+def own_spoken_lines_since(history: History, mark: int, at: AppPlace) -> int:
+    """How many of his own spoken lines at ``at`` entered since ``history`` had taken ``mark`` entries, whole or cut."""
+    return sum(
+        1
+        for entry in _entered_since(history, mark)
+        if isinstance(entry, KeptLine)
         and entry.own
         and entry.spoken
         and entry.visit.app == at.app
         and entry.visit.place == at.place
-        for entry in _entered_since(history, mark)
     )
+
+
+def may_send_next(owed: int) -> bool:
+    """Whether his next sentence may go to ``speak`` while ``owed`` own spoken lines, one per sentence answered as
+    spoken, have not entered: the wire holds a sentence back until the one before it ends, so only the sentence playing
+    may still owe its line."""
+    return owed <= SENTENCES_AHEAD
 
 
 @dataclass(frozen=True)
