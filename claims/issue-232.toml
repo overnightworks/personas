@@ -1,8 +1,0 @@
-claim_id = "de5751746aee4bbc84489c2ee5906f59"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "09eaaa4e194a9493b753307b5c3d13176bbdc381"
-branch = "claude/issue-232-aloud-turn-carries-reply-rules"
-scope = ["docs/ARCHITECTURE.md", "pyproject.toml", "src/characters/curie.md", "src/characters/hildegard.md", "src/characters/humboldt.md", "src/characters/leonardo.md", "src/characters/lovelace.md", "src/characters/mozart.md", "src/personas/turning.py", "tests/support/hopin.py", "tests/support/placestore.py", "tests/test_loop_lifecycle.py", "tests/test_loop_turn.py", "tests/test_loop_voice.py", "uv.lock"]
-opened_commit = "2c27899d8df2970aa1d53e19219af6e886569a78"
-whole_reason = "one owner for the reply's rules: take agents' rules in the turn and drop the six copies"
