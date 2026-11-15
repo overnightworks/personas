@@ -1,8 +1,0 @@
-claim_id = "25c27b9ab344460f9f28074eb75a7383"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "16913aaa1444aef7da52bfcb557f3d8de22ea678"
-branch = "claude/issue-236-every-runner-line-through-logline"
-scope = [".github/workflows/ci.yml", "Dockerfile", "README.md", "docs/ARCHITECTURE.md", "pyproject.toml", "src/personas/app_session.py", "src/personas/decision.py", "src/personas/failures.py", "src/personas/loop.py", "src/personas/main.py", "src/personas/remembering.py", "src/personas/reporting.py", "src/personas/sweep.py", "src/personas/turning.py", "src/personas/voice.py", "tests", "uv.lock"]
-opened_commit = "6c70186d8503aa23f66f3f1e7e3c35f5c28bc96a"
-whole_reason = "one rename of every runner line onto the shared logger; split the failure fields off if it grows past the slice bound"
