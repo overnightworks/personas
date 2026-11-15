@@ -396,11 +396,14 @@ def _failure_of(error: BaseException, auth: _BearerAuth) -> CallFailure:
     those, never for a late answer's error, which no call raised.
     """
     answered = auth.last_answer
-    if isinstance(error, MCPError) and error.code == UNSUPPORTED_PROTOCOL_VERSION:
+    if (
+        isinstance(error, MCPError)
+        and error.code == UNSUPPORTED_PROTOCOL_VERSION
+        and answered is not None
+        and answered.status >= HTTPStatus.BAD_REQUEST
+    ):
         code = jsonrpc_code(error.code)
-        if answered is not None and answered.status >= HTTPStatus.BAD_REQUEST:
-            return UnusableAnswer(code, answered.method, code)
-        return UnusableAnswer(code)
+        return UnusableAnswer(code, answered.method, code)
     if answered is not None and answered.status >= HTTPStatus.BAD_REQUEST:
         return StatusFailure(answered.status, answered.method, answered.answer)
     if answered is not None and answered.status >= HTTPStatus.MULTIPLE_CHOICES:
