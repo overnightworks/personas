@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Final, NoReturn
 
 import httpx2
 from agents.backend.gateway import GatewayBackend
+from logline import configure
 
 from personas.app_session import open_mcp_session
 from personas.clock import SystemClock
@@ -43,9 +44,9 @@ type Compose = Callable[[Config, ReadyMarker], AbstractAsyncContextManager[Sweep
 CONFIGURATION_ERROR_EXIT_CODE: Final = 2
 READINESS_ERROR_EXIT_CODE: Final = 3
 STORE_ERROR_EXIT_CODE: Final = 4
-QUIET_LIBRARIES: Final = ("httpx2", "httpcore2", "mcp", "client", "agents", "sqlalchemy", "psycopg", "alembic")
-"""Their records carry request details and response content; only the runner's own state changes are logged."""
-SILENT_LEVEL: Final = logging.CRITICAL + 1
+QUIET_LIBRARIES: Final = ("mcp", "sqlalchemy.dialects.postgresql")
+"""Their INFO records carry content (the SDK's, the database's server notices); capped at WARNING until logline caps
+them in ``configure``."""
 MIGRATE_COMMAND: Final = "migrate"
 MEMORY_COMMAND: Final = "memory"
 LIST_COMMAND: Final = "list"
@@ -130,9 +131,9 @@ async def _run(config: Config, ready: ReadyMarker, compose: Compose) -> None:
 
 
 def configure_logging() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+    configure("personas")
     for name in QUIET_LIBRARIES:
-        logging.getLogger(name).setLevel(SILENT_LEVEL)
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 class _MemoryArgumentParser(argparse.ArgumentParser):

@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from personas.config import MemoryTarget
     from tests.support.configfiles import Files
 
-pytestmark = pytest.mark.usefixtures("library_loggers")
+pytestmark = pytest.mark.usefixtures("restored_logging")
 
 APP = "https://app.test/mcp"
 OTHER_APP = "https://other.test/mcp"

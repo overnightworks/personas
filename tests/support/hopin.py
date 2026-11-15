@@ -48,12 +48,15 @@ from agents.member import (
 from agents.tools import ToolDeclaration, ToolEffect, ToolImage, ToolOutcome
 from agents.turn import JsonObject, Principal
 
+from personas.main import configure_logging
 from tests.support.loopback import serving
 from tests.support.placestore import MemoryPlaceStore
 from tests.support.wire import ConnectionCut, Handler, Reply, Rpc
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator
+
+    import pytest
 
 AGENT_SUBJECT = "agent-subject"
 ISSUER = "https://realm.test/realms/test"
@@ -168,10 +171,37 @@ def paused(place_id: str, kind: str = "call", *, serves_view: bool = False) -> S
 ACCEPTED_NAME = "Mozart"
 
 
+_RECORD_ATTRIBUTES = frozenset(vars(logging.makeLogRecord({}))) | {"message", "asctime"}
+
+
+def fields_of(record: logging.LogRecord) -> dict[str, object]:
+    """The fields a record carries beside its message, as the JSON line holds them."""
+    return {key: value for key, value in vars(record).items() if key not in _RECORD_ATTRIBUTES}
+
+
+class _FormatterWithFields(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        return f"{super().format(record)} {json.dumps(fields_of(record), default=str, sort_keys=True)}"
+
+
+def configure_logging_into(caplog: pytest.LogCaptureFixture) -> None:
+    """The entry point's logging, with the lines of every logger also in ``caplog`` and its fields in their text."""
+    configure_logging()
+    caplog.handler.setFormatter(_FormatterWithFields())
+    logging.getLogger().addHandler(caplog.handler)
+    caplog.set_level(logging.DEBUG)
+
+
 def formatted(records: list[logging.LogRecord]) -> str:
-    """The records as a handler writes them, with the traceback of each."""
-    formatter = logging.Formatter()
+    """The records as a handler writes them, with the fields and the traceback of each."""
+    formatter = _FormatterWithFields()
     return "\n".join(formatter.format(record) for record in records)
+
+
+def lines_of(records: list[logging.LogRecord], event: str | None = None) -> list[dict[str, object]]:
+    """The runner's lines among ``records`` as their JSON holds them, only those of ``event`` when it is given."""
+    lines = [{"event": record.getMessage(), **fields_of(record)} for record in records if record.name == "personas"]
+    return lines if event is None else [line for line in lines if line["event"] == event]
 
 
 class RequestLog:

@@ -18,7 +18,7 @@ from tests.support.fakes import SweepClock
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
 from tests.support.history import after_start, entry, history_of, said_and_taken, settled, view_entry, woke_at_table
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import CALL, READ, SAY_TOOL, active, formatted, invited, paused
+from tests.support.hopin import CALL, READ, SAY_TOOL, active, invited, lines_of, paused
 from tests.support.realm import AGENT_NAME
 from tests.support.songmaker import CREATE_SONG, GENERATE_SONG
 from tests.support.wire import cuts
@@ -94,10 +94,9 @@ async def test_an_invitation_the_loop_leaves_out_is_reported_once_with_its_place
 
     [left_out] = runner.reports.changes_of(Event.INVITATION_LEFT_OUT)
     assert (left_out.place_kind, left_out.code) == (TABLE.kind, NO_TURNS_CODE)
-    logged = [line for line in formatted(caplog.get_records("call")).splitlines() if Event.INVITATION_LEFT_OUT in line]
-    assert len(logged) == 1
-    assert logged[0].endswith(f" code={NO_TURNS_CODE} place_kind={TABLE.kind}")
-    assert not [value for value in (TABLE.id, "inv-3") if value in logged[0]]
+    [logged] = lines_of(caplog.get_records("call"), "invitation.left_out")
+    assert (logged["reason"], logged["place_kind"]) == (NO_TURNS_CODE, TABLE.kind)
+    assert not [value for value in (TABLE.id, "inv-3") if value in str(logged)]
 
 
 async def test_a_table_that_serves_no_view_yet_is_accepted_with_figure_and_voice_and_his_turn_runs_once_it_is_active(

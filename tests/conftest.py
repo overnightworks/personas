@@ -13,12 +13,13 @@ from agents.agent_file import load_agent
 from agents.backend.fake_gateway import completion
 from agents.backend.gateway import GatewayBackend
 from agents.turn import Principal
+from logline.testing import configured
 
 from personas.app_session import READ_SECONDS, open_mcp_session
 from personas.config import DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES, Voice, load_config
 from personas.decision import DEFAULT_BUDGET_PAUSE_CAP_SECONDS
 from personas.loop import AgentLoop, Boundaries
-from personas.main import QUIET_LIBRARIES, SweepingBoundaries, configure_logging, run_with_sweep
+from personas.main import QUIET_LIBRARIES, SweepingBoundaries, run_with_sweep
 from personas.mind import Mind
 from personas.readiness import FileReadyMarker
 from personas.reporting import log_state_change
@@ -36,7 +37,7 @@ from tests.support.fakes import (
     grant,
 )
 from tests.support.gateway import Gateway, RoundBackend
-from tests.support.hopin import AGENT_SUBJECT, ISSUER, PLAY_TOOL, FakeApp, formatted
+from tests.support.hopin import AGENT_SUBJECT, ISSUER, PLAY_TOOL, FakeApp, configure_logging_into, formatted
 from tests.support.realm import TOKEN_ENDPOINT, FakeRealm
 from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG, ToolsOnlyApp
 from tests.support.songmaker import SCOPE as TOOLS_ONLY_SCOPE
@@ -265,20 +266,21 @@ async def songmaker(runner: Harness) -> AsyncIterator[ToolsOnlyApp]:
 
 
 @pytest.fixture
-def library_loggers() -> Iterator[None]:
-    """The levels of the loggers `configure_logging` quiets, put back at the test's end."""
+def restored_logging() -> Iterator[None]:
+    """The logging state the entry point configures, put back at the test's end: the root handlers and the levels of
+    the loggers it caps."""
     loggers = [logging.getLogger(name) for name in QUIET_LIBRARIES]
     levels = [each.level for each in loggers]
-    yield
+    with configured("personas"):
+        yield
     for each, level in zip(loggers, levels, strict=True):
         each.setLevel(level)
 
 
 @pytest.fixture
-async def runner(caplog: pytest.LogCaptureFixture, library_loggers: None, files: Files) -> AsyncIterator[Harness]:
+async def runner(caplog: pytest.LogCaptureFixture, restored_logging: None, files: Files) -> AsyncIterator[Harness]:
     """The runner's world; at its end no log line holds a secret, a token or the content of a tool."""
-    configure_logging()
-    caplog.set_level(logging.DEBUG)
+    configure_logging_into(caplog)
     app = FakeApp()
     async with app.serving() as app_url:
         harness = Harness(files, app, app_url)
@@ -288,7 +290,7 @@ async def runner(caplog: pytest.LogCaptureFixture, library_loggers: None, files:
             await asyncio.gather(harness.task, return_exceptions=True)
     await harness.token_client.aclose()
     logged = formatted(caplog.get_records("call"))
-    assert harness.reports.is_empty or "client_id=" in logged
+    assert harness.reports.is_empty or "agent_id" in logged
     for held in harness.secrets_and_content():
         assert held not in logged
 

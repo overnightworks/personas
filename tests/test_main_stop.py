@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 import socket
@@ -12,13 +13,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import personas
-from personas.reporting import Event
 from tests.support.configfiles import Files
 
 if TYPE_CHECKING:
     from typing import TextIO
 
 WAIT_SECONDS = 30
+BACKOFF_EVENT = "loop.backed_off"
 ENTRY_POINT_CALL = "from personas.main import main; main()"
 """What the console script `personas` runs; the test environment does not install the project's scripts."""
 REALM_TOKEN_ENDPOINT = "https://realm.test/protocol/openid-connect/token"
@@ -31,9 +32,9 @@ def _refused_token_endpoint() -> str:
         return f"http://127.0.0.1:{unused.getsockname()[1]}/token"
 
 
-def _flag_when_logged(stream: TextIO, needle: str, seen: threading.Event) -> None:
+def _flag_when_logged(stream: TextIO, event: str, seen: threading.Event) -> None:
     for line in stream:
-        if needle in line:
+        if json.loads(line)["event"] == event:
             seen.set()
 
 
@@ -42,13 +43,11 @@ def test_a_sigterm_ends_a_backing_off_runner_with_exit_code_0(tmp_path: Path):
     files.text = files.text.replace(REALM_TOKEN_ENDPOINT, _refused_token_endpoint())
     environment = {**os.environ, **files.write(), "PYTHONPATH": str(Path(personas.__file__).parent.parent)}
     runner = subprocess.Popen(  # noqa: S603 - the interpreter running the tests
-        [sys.executable, "-c", ENTRY_POINT_CALL], env=environment, stderr=subprocess.PIPE, text=True
+        [sys.executable, "-c", ENTRY_POINT_CALL], env=environment, stdout=subprocess.PIPE, text=True
     )
-    assert runner.stderr is not None
+    assert runner.stdout is not None
     backing_off = threading.Event()
-    watcher = threading.Thread(
-        target=_flag_when_logged, args=(runner.stderr, Event.BACKOFF.value, backing_off), daemon=True
-    )
+    watcher = threading.Thread(target=_flag_when_logged, args=(runner.stdout, BACKOFF_EVENT, backing_off), daemon=True)
     watcher.start()
     try:
         assert backing_off.wait(WAIT_SECONDS), "the runner never logged a backoff"

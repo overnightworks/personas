@@ -255,7 +255,11 @@ async def test_a_4xx_suspends_the_loop_with_the_method_and_the_answer_that_faile
     await runner.reports.until(Event.SUSPENDED)
 
     (change,) = runner.reports.changes_of(Event.SUSPENDED)
-    assert (change.code, change.method, change.answer) == (status_code(HTTPStatus.BAD_REQUEST), READ, answer)
+    assert (change.code, change.failure.method, change.failure.answer) == (
+        status_code(HTTPStatus.BAD_REQUEST),
+        READ,
+        answer,
+    )
 
 
 async def test_a_5xx_backs_off_and_is_logged_once_until_a_read_answers(runner):
@@ -283,7 +287,7 @@ async def test_a_5xx_backs_off_with_the_method_and_the_answer_that_failed(runner
     await runner.reports.until(Event.BACKOFF)
 
     (change,) = runner.reports.changes_of(Event.BACKOFF)
-    assert (change.code, change.method, change.answer) == (
+    assert (change.code, change.failure.method, change.failure.answer) == (
         status_code(HTTPStatus.SERVICE_UNAVAILABLE),
         READ,
         "text/html",

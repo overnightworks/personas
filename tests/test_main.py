@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import signal
@@ -33,7 +34,7 @@ from personas.reporting import Event, log_state_change
 from personas.tokens import HttpTokenSource
 from tests.support.fakes import FakeClock
 from tests.support.gateway import Gateway, says
-from tests.support.hopin import AGENT_SUBJECT, FakeApp, active, formatted, invited
+from tests.support.hopin import AGENT_SUBJECT, FakeApp, active, configure_logging_into, invited
 from tests.support.realm import FakeRealm
 
 if TYPE_CHECKING:
@@ -53,18 +54,29 @@ if TYPE_CHECKING:
 
 
 @pytest.mark.parametrize("library", QUIET_LIBRARIES)
-def test_an_error_record_of_a_library_the_runner_uses_reaches_no_log_line(
-    library, library_loggers, caplog: pytest.LogCaptureFixture
+def test_an_info_record_of_a_library_the_runner_uses_reaches_no_log_line_and_its_error_does(
+    library, restored_logging, caplog: pytest.LogCaptureFixture
+):
+    configure_logging_into(caplog)
+
+    logging.getLogger(f"{library}.client.streamable_http").info("a response body")
+    logging.getLogger(library).error("a failure")
+
+    assert [record.getMessage() for record in caplog.records] == ["a failure"]
+
+
+def test_every_line_the_entry_point_configures_is_one_json_object_of_the_runner_on_stdout(
+    restored_logging, capsys: pytest.CaptureFixture[str]
 ):
     configure_logging()
-    caplog.set_level(logging.DEBUG)
 
-    logging.getLogger(f"{library}.client.streamable_http").error("a response body")
+    logging.getLogger("personas").info("loop.started", extra={"agent_id": "mozart"})
 
-    assert caplog.records == []
+    line = json.loads(capsys.readouterr().out)
+    assert (line["service"], line["event"], line["agent_id"]) == ("personas", "loop.started", "mozart")
 
 
-def test_an_error_record_of_the_gateway_backend_reaches_no_log_line(library_loggers, caplog: pytest.LogCaptureFixture):
+def test_an_error_record_of_the_gateway_backend_reaches_no_log_line(restored_logging, caplog: pytest.LogCaptureFixture):
     configure_logging()
     caplog.set_level(logging.DEBUG)
 
@@ -313,7 +325,7 @@ def test_the_real_boundaries_hand_the_loops_the_marker_they_were_given(files):
 
 
 def test_an_addressed_line_gets_one_say_through_the_entry_point_and_nothing_secret_or_said_reaches_the_log(
-    world, library_loggers, caplog
+    world, restored_logging, capsys
 ):
     answer = world.files.persona_prompt
 
@@ -322,22 +334,21 @@ def test_an_addressed_line_gets_one_say_through_the_entry_point_and_nothing_secr
         world.app.speak("room-7", "visitor-subject", "Ada", "Mozart, are you there?")
 
     world.on_joined = addressed_once_joined
-    caplog.set_level(logging.DEBUG)
 
     with pytest.raises(ExceptionGroup) as ended:
         world.start()
 
     assert [type(leaf) for leaf in leaves_of(ended.value)] == [Stop]
     assert world.app.said == [(AGENT_SUBJECT, "room-7", answer)]
-    logged = formatted(caplog.get_records("call"))
-    assert Event.STARTED.value in logged
+    logged = capsys.readouterr().out
+    assert "loop.started" in [json.loads(line)["event"] for line in logged.splitlines()]
     for held in (world.files.secret, world.files.gateway_key, *world.issued, *world.app.kept_out_of_logs()):
         assert held not in logged
 
 
 @pytest.mark.parametrize("binds_tools", [True, False], ids=["tools bound", "lifecycle only"])
 def test_the_real_boundaries_run_turns_through_the_gateway_exactly_when_the_configuration_has_one(
-    files, library_loggers, binds_tools
+    files, restored_logging, binds_tools
 ):
     files.text = files.valid_text(binds_tools=binds_tools)
     config = load_config(files.write())

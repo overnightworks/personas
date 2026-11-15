@@ -492,8 +492,7 @@ class AgentLoop:
                 code,
                 place_kind=place_kind,
                 model=model,
-                method=failure and failure.method,
-                answer=failure and failure.answer,
+                failure=failure,
             )
         )
 

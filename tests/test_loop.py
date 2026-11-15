@@ -848,7 +848,7 @@ class DefectInARelayedCall(ScriptedSessions):
 
 @pytest.mark.parametrize("beside", [[], [Unreachable("late answer")]], ids=["alone", "beside a late answer"])
 async def test_a_relayed_call_that_raises_a_defect_ends_the_runner_loud_with_every_leaf_and_no_second_round(
-    files, library_loggers, beside
+    files, restored_logging, beside
 ):
     defect = ValueError("a defect")
     raising = DefectInARelayedCall(files, defect, *beside)

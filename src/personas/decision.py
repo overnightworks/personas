@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
@@ -26,7 +27,8 @@ from agents.member import (
     StandingState,
     VoiceState,
 )
-from agents.turn import MAX_EVENT_BYTES, FailureCode
+from agents.turn import MAX_EVENT_BYTES, FailureCode, RejectionCode
+from logline import Outcome
 
 from personas.entries import (
     ActDone,
@@ -240,6 +242,60 @@ def failure_code(failure: CallFailure) -> str:
     if isinstance(failure, UnusableAnswer):
         return failure.code
     return NETWORK_FAILURE_CODE
+
+
+_JSONRPC_ERROR_REASONS: Final = {
+    -32700: "parse_error",
+    -32600: "invalid_request",
+    -32601: "method_not_found",
+    -32602: "invalid_params",
+    -32603: "internal_error",
+}
+_MEDIA_TYPE_REASONS: Final = {"application/json": "json", "text/html": "html", "text/plain": "plain_text"}
+_JSONRPC_CODE: Final = re.compile(r"jsonrpc_(-?[0-9]+)")
+NO_ANSWER_REASON: Final = "no_answer"
+"""The reason of an error status that carried neither a JSON-RPC error nor a media type."""
+OTHER_JSONRPC_REASON: Final = "other_jsonrpc_error"
+OTHER_MEDIA_TYPE_REASON: Final = "other_media_type"
+"""The one word of every media type no reason names: an app's content type is no closed set."""
+UNEXPECTED_STATUS_REASON: Final = "unexpected_status"
+"""The reason of a redirect, which no call expects."""
+
+
+def _jsonrpc_reason(code: str) -> str | None:
+    matched = _JSONRPC_CODE.fullmatch(code)
+    return None if matched is None else _JSONRPC_ERROR_REASONS.get(int(matched[1]), OTHER_JSONRPC_REASON)
+
+
+def _answer_reason(answer: str | None) -> str:
+    """The reason an error status's answer gives: the JSON-RPC error by name, a known media type by name, else a
+    fixed word; an app's own value never reaches the line."""
+    if answer is None:
+        return NO_ANSWER_REASON
+    return _jsonrpc_reason(answer) or _MEDIA_TYPE_REASONS.get(answer, OTHER_MEDIA_TYPE_REASON)
+
+
+def failure_reason(failure: CallFailure) -> str:
+    """The closed reason a failure logs; its status and failed method are logged beside it."""
+    if isinstance(failure, StatusFailure):
+        return _answer_reason(failure.answer)
+    if isinstance(failure, UnusableAnswer):
+        if failure.code.startswith("http_"):
+            return UNEXPECTED_STATUS_REASON
+        return _jsonrpc_reason(failure.code) or failure.code
+    return NETWORK_FAILURE_CODE
+
+
+def turn_outcome(code: str | None) -> Outcome:
+    """How a turn ended, from the code its end reports: none for an answer, else a cancellation, a refusal of the
+    gateway or a failure."""
+    if code is None:
+        return Outcome.OK
+    if code == TURN_CANCELLED_CODE:
+        return Outcome.CANCELLED
+    if code in {each.value for each in RejectionCode}:
+        return Outcome.REFUSED
+    return Outcome.FAILED
 
 
 def reaction_to(failure: CallFailure, *, already_renewed: bool) -> Reaction | Suspend:
