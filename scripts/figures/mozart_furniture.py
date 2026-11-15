@@ -275,7 +275,7 @@ def stove() -> list[Piece]:
     rings: list[Ring] = []
     for (height, radius), _ in STOVE:
         ring = oval((0.0, height, 0.0), ACROSS, AHEAD, (radius, radius), STOVE_SEGMENTS)
-        if FLUTED[0] < height < FLUTED[1]:
+        if FLUTED[0] <= height <= FLUTED[1]:
             ring = rippled(ring, (0.0, height, 0.0), STOVE_FLUTES, FLUTE_DEPTH)
         rings.append(ring)
     return [

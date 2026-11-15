@@ -17,8 +17,6 @@ if TYPE_CHECKING:
     from figures.room_light import Lit
 
 UNLIT = "KHR_materials_unlit"
-# An unsigned short index reaches this many vertices, so a primitive holds no more.
-MOST_VERTICES = 65_536
 
 
 @dataclass(frozen=True)
@@ -32,14 +30,14 @@ class Room:
 def build_room(room: Room) -> bytes:
     """The GLB file of one persona's room."""
     builder = GlbBuilder()
-    primitives = [_primitive(builder, batch) for batch in _batches(room.furnish())]
+    primitive = _primitive(builder, room.furnish())
     document: JsonObject = {
         "asset": {"version": "2.0", "generator": "personas room generator"},
         "extensionsUsed": [UNLIT],
         "scene": 0,
         "scenes": [{"name": room.name, "nodes": [0]}],
         "nodes": [{"name": "room", "mesh": 0}],
-        "meshes": [{"name": "room", "primitives": primitives}],
+        "meshes": [{"name": "room", "primitives": [primitive]}],
         "materials": [
             {
                 "name": "baked",
@@ -49,20 +47,6 @@ def build_room(room: Room) -> bytes:
         ],
     }
     return builder.encode(document)
-
-
-def _batches(surfaces: Sequence[Lit]) -> list[list[Lit]]:
-    """The surfaces in order, in as few primitives as the index width allows."""
-    batches: list[list[Lit]] = [[]]
-    count = 0
-    for surface in surfaces:
-        size = len(surface.shape.positions)
-        if count + size > MOST_VERTICES:
-            batches.append([])
-            count = 0
-        batches[-1].append(surface)
-        count += size
-    return batches
 
 
 def _primitive(builder: GlbBuilder, surfaces: Sequence[Lit]) -> JsonObject:
@@ -78,6 +62,7 @@ def _primitive(builder: GlbBuilder, surfaces: Sequence[Lit]) -> JsonObject:
             "POSITION": builder.add_accessor(positions, "VEC3", ComponentType.FLOAT, bounded=True),
             "COLOR_0": builder.add_accessor(colours, "VEC3", ComponentType.FLOAT),
         },
+        # An unsigned short index reaches 65 536 vertices; a room with more fails loud here, where it is packed.
         "indices": builder.add_accessor(indices, "SCALAR", ComponentType.UNSIGNED_SHORT),
         "material": 0,
     }
