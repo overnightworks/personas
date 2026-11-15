@@ -105,14 +105,7 @@ def _fields_of(change: StateChange) -> dict[str, str | int | float | Outcome]:
         fields["app_id"] = urlsplit(change.app).hostname or ""
     if change.event is Event.TURN_ENDED:
         fields["outcome"] = turn_outcome(change.code)
-    if change.failure is not None:
-        fields["reason"] = failure_reason(change.failure)
-        if isinstance(change.failure, StatusFailure):
-            fields["status"] = change.failure.status
-        if change.failure.method is not None:
-            fields["mcp_method"] = change.failure.method
-    elif change.code is not None:
-        fields["reason"] = change.code
+    fields |= _failure_fields(change)
     if change.lines is not None:
         fields["line_count"] = change.lines
     if change.place_kind is not None:
@@ -136,6 +129,18 @@ def _fields_of(change: StateChange) -> dict[str, str | int | float | Outcome]:
             "output_tokens": change.usage.output_tokens,
             "model_request_count": change.usage.requests,
         }
+    return fields
+
+
+def _failure_fields(change: StateChange) -> dict[str, str | int]:
+    failure = change.failure
+    if failure is None:
+        return {} if change.code is None else {"reason": change.code}
+    fields: dict[str, str | int] = {"reason": failure_reason(failure)}
+    if isinstance(failure, StatusFailure):
+        fields["status"] = failure.status
+    if failure.method is not None:
+        fields["mcp_method"] = failure.method
     return fields
 
 
