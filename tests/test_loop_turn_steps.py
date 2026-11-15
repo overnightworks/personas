@@ -67,6 +67,8 @@ async def test_a_failed_step_ends_failed_with_a_closed_reason(runner, caplog):
     await runner.app.log.until(LISTEN, 2)
 
     (listed,) = lines_of(caplog.get_records("call"), "tool_list.ended")
+    (listed_record,) = [each for each in caplog.get_records("call") if each.getMessage() == "tool_list.ended"]
+    assert listed_record.levelname == "ERROR"
     (setup,) = lines_of(caplog.get_records("call"), "turn_setup.ended")
     assert (listed["outcome"], listed["reason"]) == ("failed", NO_ANSWER_REASON)
     assert (setup["outcome"], setup["reason"]) == ("failed", NO_ANSWER_REASON)
@@ -119,3 +121,19 @@ async def test_a_failed_listing_of_another_app_ends_its_tool_list_line_failed_an
     listed = [line for line in lines if line["event"] == "tool_list.ended"]
     assert sorted(str(line["outcome"]) for line in listed) == ["failed", "ok"]
     assert [line["event"] for line in lines].count("session_open.ended") == 2
+
+
+async def test_a_failed_step_of_another_app_is_written_as_a_handled_failure(runner, songmaker, caplog):
+    songmaker.refuse_with = HTTPStatus.SERVICE_UNAVAILABLE
+    songmaker.refused_method = LIST_TOOLS
+    runner.gateway = Gateway(*says(PLACE_ID, "Here."))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.reports.until_a_turn_ended()
+
+    levels = [
+        record.levelname
+        for record in caplog.get_records("call")
+        if record.getMessage() == "tool_list.ended" and str(record.outcome) == "failed"
+    ]
+    assert levels == ["WARNING"]

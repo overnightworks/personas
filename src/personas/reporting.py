@@ -209,10 +209,13 @@ def step_timer(event: str, /, agent_id: str, app: str | None = None, *, started_
 
 
 @contextmanager
-def stepping(timer: StepTimer) -> Generator[StepTimer]:
+def stepping(timer: StepTimer, *, turn_goes_on: bool = False) -> Generator[StepTimer]:
     """Ends the timer's one line when the block does: an error ends it failed with its closed reason, a cancellation
-    cancelled, and the timer's own ``end`` inside the block writes it earlier."""
+    cancelled, and the timer's own ``end`` inside the block writes it earlier. A failure the unit survives
+    (``turn_goes_on``) is written as a handled one."""
     with timer:
+        if turn_goes_on:
+            timer.handled()
         try:
             yield timer
         except Exception as error:

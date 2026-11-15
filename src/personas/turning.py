@@ -474,7 +474,7 @@ class Turning:
         return [HandTool(each, partial(self._relay_elsewhere, app, each.name, calls, hold, record)) for each in listed]
 
     async def _list_tools(self, app: AppTarget, session: AppSession) -> tuple[ToolDeclaration, ...]:
-        with stepping(step_timer("tool_list.ended", self._agent.client_id, app.mcp_url)):
+        with stepping(step_timer("tool_list.ended", self._agent.client_id, app.mcp_url), turn_goes_on=app != self._app):
             return await session.declared_tools()
 
     def _held(self, hold: _Hold) -> ToolOutcome | None:
@@ -582,7 +582,9 @@ class Turning:
         """The session at ``app``, closed with ``opened``; its opening is a step when ``measured``."""
         if not measured:
             return await opened.enter_async_context(self._open_session(app, token))
-        with stepping(step_timer("session_open.ended", self._agent.client_id, app.mcp_url)):
+        with stepping(
+            step_timer("session_open.ended", self._agent.client_id, app.mcp_url), turn_goes_on=app != self._app
+        ):
             return await opened.enter_async_context(self._open_session(app, token))
 
     async def _within_call_time[Answer](
