@@ -1,7 +1,0 @@
-claim_id = "f1a77aeeefe54684a3fe33700a50a060"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "6dbaecf30bdb550a9550313ebb5f3ef81bb67156"
-branch = "claude/issue-224-floor-states-tile-joint-once"
-scope = ["scripts/figures/leonardo_room.py", "scripts/figures/mozart_room.py", "scripts/figures/room_shapes.py"]
-opened_commit = "a00c1026e1ba56ef61118717fb7844de001290d9"
