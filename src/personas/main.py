@@ -23,7 +23,7 @@ from personas.config import Config, ConfigError, load_config
 from personas.failures import SchemaNotAtHeadError, StoreDefect, StoreUnavailable, leaves_of
 from personas.loop import Boundaries, run_all
 from personas.readiness import FileReadyMarker, ReadinessError, ReadyMarker
-from personas.reporting import log_state_change
+from personas.reporting import carry_trace, log_state_change
 from personas.sweep import sweep_lines
 from personas.tokens import HttpTokenSource
 
@@ -87,7 +87,10 @@ async def _line_store(target: MemoryTarget | None) -> AsyncGenerator[PostgresLin
 
 @asynccontextmanager
 async def real_boundaries(config: Config, ready: ReadyMarker) -> AsyncGenerator[SweepingBoundaries]:
-    async with httpx2.AsyncClient() as token_client, _line_store(config.memory) as lines:
+    async with (
+        httpx2.AsyncClient(event_hooks={"request": [carry_trace]}) as token_client,
+        _line_store(config.memory) as lines,
+    ):
         yield SweepingBoundaries(
             tokens=HttpTokenSource(config.token_endpoint, token_client),
             open_session=open_mcp_session,

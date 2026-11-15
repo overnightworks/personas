@@ -13,6 +13,7 @@ from agents.turn import NonEmptyUnicodeText, Principal
 from pydantic import BaseModel, ConfigDict
 
 from personas.failures import INVALID_ANSWER_CODE, TokenStatusFailure, Unreachable, UnusableAnswer
+from personas.reporting import step_timer, stepping
 from personas.secret import Secret
 
 if TYPE_CHECKING:
@@ -46,13 +47,14 @@ class HttpTokenSource:
             "client_secret": agent.client_secret.reveal(),
             "scope": scope,
         }
-        try:
-            response = await self._client.post(self._endpoint, data=form, timeout=TOKEN_TIMEOUT_SECONDS)
-        except httpx2.HTTPError:
-            raise Unreachable("the token endpoint did not answer") from None
-        if response.status_code != HTTPStatus.OK:
-            raise TokenStatusFailure(response.status_code)
-        return _granted(response.content)
+        with stepping(step_timer("token_request.ended", agent.client_id)):
+            try:
+                response = await self._client.post(self._endpoint, data=form, timeout=TOKEN_TIMEOUT_SECONDS)
+            except httpx2.HTTPError:
+                raise Unreachable("the token endpoint did not answer") from None
+            if response.status_code != HTTPStatus.OK:
+                raise TokenStatusFailure(response.status_code)
+            return _granted(response.content)
 
 
 def _granted(body: bytes) -> GrantedToken:

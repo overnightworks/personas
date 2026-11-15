@@ -4,17 +4,21 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Final
 from urllib.parse import urlsplit
 
-from logline import Outcome, StepTimer
+from logline import Outcome, StepTimer, current_traceparent
 
-from personas.decision import failure_reason
+from personas.decision import error_reason, failure_reason
 from personas.failures import StatusFailure
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
+    import httpx2
     from agents.turn import TurnUsage
 
     from personas.decision import TurnEnding
@@ -184,6 +188,33 @@ def _reason_of(ending: TurnEnding) -> str:
 def start_turn_tally(client_id: str, app: str) -> TurnTally:
     """The tally of a turn that starts now; its line carries the agent and the app's host."""
     return TurnTally(StepTimer("turn.ended", _LOG, agent_id=client_id, app_id=urlsplit(app).hostname or ""))
+
+
+async def carry_trace(request: httpx2.Request) -> None:
+    """The request hook of every client that calls an app or the realm: the request carries the current trace's
+    ``traceparent``, and none when there is no current trace."""
+    traceparent = current_traceparent()
+    if traceparent is not None:
+        request.headers["traceparent"] = traceparent
+
+
+def step_timer(event: str, /, agent_id: str, app: str | None = None, *, started_at: float | None = None) -> StepTimer:
+    """The timer of one step of an agent, optionally at one app, written as ``event``, a literal ``<noun>.ended`` at the
+    call: its line carries the agent, the app's host and the timer's duration and outcome, never a name or content."""
+    fields = {"agent_id": agent_id} | ({} if app is None else {"app_id": urlsplit(app).hostname or ""})
+    return StepTimer(event, _LOG, started_at=started_at, **fields)
+
+
+@contextmanager
+def stepping(timer: StepTimer) -> Generator[StepTimer]:
+    """Ends the timer's one line when the block does: an error ends it failed with its closed reason, a cancellation
+    cancelled, and the timer's own ``end`` inside the block writes it earlier."""
+    with timer:
+        try:
+            yield timer
+        except Exception as error:
+            timer.fail(error_reason(error))
+            raise
 
 
 class StoreOutage:

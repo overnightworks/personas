@@ -290,6 +290,13 @@ def failure_reason(failure: CallFailure) -> str:
     return NETWORK_FAILURE_CODE
 
 
+def error_reason(error: BaseException) -> str:
+    """The closed reason an error that ended a step or turn logs: the reason of the failure that decides the loop's
+    reaction, or a defect."""
+    failure = decisive_failure(tuple(leaves_of(error)), already_renewed=False)
+    return DEFECT_REASON if failure is None else failure_reason(failure)
+
+
 @dataclass(frozen=True)
 class TurnEnding:
     """How a turn ended: its outcome, and the closed reason of one that did not end ``ok`` or cancelled."""
@@ -315,8 +322,7 @@ def turn_ending(*, cancelled: bool, error: BaseException | None, stop_code: str 
         refused = stop_code in {each.value for each in RejectionCode}
         return TurnEnding(Outcome.REFUSED if refused else Outcome.FAILED, stop_code)
     if error is not None:
-        failure = decisive_failure(tuple(leaves_of(error)), already_renewed=False)
-        return TurnEnding(Outcome.FAILED, DEFECT_REASON if failure is None else failure_reason(failure))
+        return TurnEnding(Outcome.FAILED, error_reason(error))
     return TurnEnding(Outcome.FAILED, NO_FINAL_EVENT_REASON)
 
 
@@ -728,6 +734,15 @@ type Occasion = Lines | Waiting
 
 
 @dataclass(frozen=True)
+class Due:
+    """What a due place's turn is for, and ``since``, the ``time.perf_counter`` value of the earliest moment the place
+    was due that the turn answers; a turn due again after one with no answer is due from the end of its pause."""
+
+    occasion: Occasion
+    since: float
+
+
+@dataclass(frozen=True)
 class AppPlace:
     """One of an agent's places, whichever of his apps it is in."""
 
@@ -741,7 +756,7 @@ class Turns:
     turn is for, and until when, on the clock's monotonic scale, no turn of his may start."""
 
     running: bool = False
-    due: Mapping[AppPlace, Occasion] = field(default_factory=dict[AppPlace, Occasion])
+    due: Mapping[AppPlace, Due] = field(default_factory=dict[AppPlace, Due])
     not_before: float = 0.0
 
 
@@ -751,45 +766,54 @@ def _joined(held: Occasion | None, occasion: Occasion) -> Occasion:
     return occasion
 
 
-def with_due(turns: Turns, at: AppPlace, occasion: Occasion) -> Turns:
-    """A turn due at ``at`` for ``occasion``: a place already due keeps its position, lines of one generation join, and
-    lines of another generation or a newer view revision replace what was due."""
-    return Turns(turns.running, {**turns.due, at: _joined(turns.due.get(at), occasion)}, turns.not_before)
+def with_due(turns: Turns, at: AppPlace, occasion: Occasion, since: float) -> Turns:
+    """A turn due at ``at`` for ``occasion`` from ``since``: a place already due keeps its position and its earliest
+    ``since``, lines of one generation join, and lines of another generation or a newer view revision replace what
+    was due."""
+    held = turns.due.get(at)
+    due = Due(
+        _joined(None if held is None else held.occasion, occasion), since if held is None else min(held.since, since)
+    )
+    return Turns(turns.running, {**turns.due, at: due}, turns.not_before)
 
 
-def due_again(turns: Turns, at: AppPlace, occasion: Occasion) -> Turns:
-    """A turn due again at ``at`` for ``occasion``, which a turn ended without an answer: a place due meanwhile keeps
-    what is newer, except that lines of the same generation join; any other place goes to the back of the order."""
+def due_again(turns: Turns, at: AppPlace, occasion: Occasion, since: float) -> Turns:
+    """A turn due again at ``at`` for ``occasion`` from ``since``, the end of the pause the turn left, which a turn
+    ended without an answer: a place due meanwhile keeps what is newer, except that lines of the same generation join;
+    any other place goes to the back of the order."""
     held = turns.due.get(at)
     if held is None or (
-        isinstance(held, Lines) and isinstance(occasion, Lines) and held.generation == occasion.generation
+        isinstance(held.occasion, Lines)
+        and isinstance(occasion, Lines)
+        and held.occasion.generation == occasion.generation
     ):
-        return with_due(turns, at, occasion)
+        return with_due(turns, at, occasion, since)
     return turns
 
 
 def without_due(turns: Turns, leaving: Callable[[AppPlace], bool]) -> Turns:
     """The turns without the due places for which ``leaving`` holds."""
-    due = {at: occasion for at, occasion in turns.due.items() if not leaving(at)}
+    due = {at: held for at, held in turns.due.items() if not leaving(at)}
     return Turns(turns.running, due, turns.not_before)
 
 
-def _next_due(turns: Turns, app: str) -> tuple[AppPlace, Occasion] | None:
+def _next_due(turns: Turns, app: str) -> tuple[AppPlace, Due] | None:
     """The place that has waited longest and what its turn is for, when no turn runs and that place is in ``app``."""
     if turns.running or not turns.due:
         return None
-    at, occasion = next(iter(turns.due.items()))
-    return (at, occasion) if at.app == app else None
+    at, due = next(iter(turns.due.items()))
+    return (at, due) if at.app == app else None
 
 
-def claimed(turns: Turns, app: str, now: float) -> tuple[Turns, AppPlace, Occasion] | None:
-    """The turns after a turn starts at the place that has waited longest, with that place and what the turn is for;
-    none while a turn runs, while a pause holds his turns at ``now``, or when that place is not in ``app``."""
-    due = _next_due(turns, app)
-    if due is None or now < turns.not_before:
+def claimed(turns: Turns, app: str, now: float) -> tuple[Turns, AppPlace, Due] | None:
+    """The turns after a turn starts at the place that has waited longest, with that place and what the turn is for
+    and since when; none while a turn runs, while a pause holds his turns at ``now``, or when that place is not in
+    ``app``."""
+    next_due = _next_due(turns, app)
+    if next_due is None or now < turns.not_before:
         return None
-    at, occasion = due
-    return replace(without_due(turns, lambda each: each == at), running=True), at, occasion
+    at, due = next_due
+    return replace(without_due(turns, lambda each: each == at), running=True), at, due
 
 
 def paused_for(turns: Turns, now: float, seconds: float) -> Turns:

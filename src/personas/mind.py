@@ -28,7 +28,7 @@ from personas.decision import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
-    from personas.decision import AppPlace, Occasion, Present, TurnTold
+    from personas.decision import AppPlace, Due, Occasion, Present, TurnTold
     from personas.entries import Entry, History
 
 
@@ -107,13 +107,15 @@ class Mind:
         self._wake_events.append(event)
         return event
 
-    def due(self, at: AppPlace, occasion: Occasion) -> None:
-        self._turns = with_due(self._turns, at, occasion)
+    def due(self, at: AppPlace, occasion: Occasion, since: float) -> None:
+        """The place is due for ``occasion`` from ``since``, a ``time.perf_counter`` value."""
+        self._turns = with_due(self._turns, at, occasion, since)
 
-    def due_again(self, at: AppPlace, occasion: Occasion) -> None:
-        """The turn at ``at`` ended without an answer: the place is due for ``occasion`` again unless something newer
-        made it due meanwhile. It waits for the running turn to end."""
-        self._turns = due_again(self._turns, at, occasion)
+    def due_again(self, at: AppPlace, occasion: Occasion, since: float) -> None:
+        """The turn at ``at`` ended without an answer: the place is due for ``occasion`` again from ``since``, the end
+        of the pause the turn left, unless something newer made it due meanwhile. It waits for the running turn to
+        end."""
+        self._turns = due_again(self._turns, at, occasion, since)
 
     def undue(self, leaving: Callable[[AppPlace], bool]) -> None:
         """Drops the due places for which ``leaving`` holds; with no turn running a younger place may then go first."""
@@ -123,13 +125,13 @@ class Mind:
         if dropped and not remaining.running:
             self.wake()
 
-    def claim(self, app: str, now: float) -> tuple[AppPlace, Occasion] | None:
+    def claim(self, app: str, now: float) -> tuple[AppPlace, Due] | None:
         """Takes the one turn for the place that has waited longest when it is at ``app`` and no pause holds it."""
         taken = claimed(self._turns, app, now)
         if taken is None:
             return None
-        self._turns, at, occasion = taken
-        return at, occasion
+        self._turns, at, due = taken
+        return at, due
 
     def pause_left(self, app: str, now: float) -> float:
         """The seconds a pause still holds the turn of the place that has waited longest, when it is at ``app``."""

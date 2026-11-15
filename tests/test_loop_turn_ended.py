@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import io
-import json
-import logging
 from http import HTTPStatus
 
 import pytest
@@ -16,7 +13,7 @@ from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_i
 from tests.support.fakes import CANCELLED_TURN, COMPLETED_TURN, refused_turn
 from tests.support.gateway import Gateway, says
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import CALL, LISTEN, lines_of
+from tests.support.hopin import CALL, LISTEN, lines_of, written_by_the_runner
 from tests.support.voice import TWO_SENTENCES, a_voice_call, ended_by, holding_sentence_ends
 from tests.support.wire import cuts
 
@@ -122,20 +119,6 @@ async def test_a_turn_the_runner_cancelled_ends_cancelled_though_the_loop_did_no
     assert runner.reports.turn_endings == [CANCELLED_TURN]
 
 
-@pytest.fixture
-def written(runner) -> io.StringIO:
-    """What the entry point's handler writes from now on, as the JSON lines it holds."""
-    stream = io.StringIO()
-    (handler,) = [each for each in logging.getLogger().handlers if type(each) is logging.StreamHandler]
-    handler.setStream(stream)
-    return stream
-
-
-def written_by_the_runner(written: io.StringIO) -> list[dict[str, object]]:
-    lines = map(json.loads, written.getvalue().splitlines())
-    return [line for line in lines if line["logger"] == "personas"]
-
-
 async def test_every_line_a_turn_writes_shares_its_trace_and_no_line_outside_it_carries_one(written, runner):
     runner.gateway = Gateway(Reply(status=HTTPStatus.TOO_MANY_REQUESTS))
     await restarted_in_the_call(runner)
@@ -144,7 +127,15 @@ async def test_every_line_a_turn_writes_shares_its_trace_and_no_line_outside_it_
 
     lines = written_by_the_runner(written)
     in_the_turn = [line for line in lines if line["trace_id"] is not None]
-    assert [line["event"] for line in in_the_turn] == ["turns.paused", "turn.ended"]
+    assert [line["event"] for line in in_the_turn] == [
+        "turn_wait.ended",
+        "token_hold.ended",
+        "session_open.ended",
+        "tool_list.ended",
+        "turn_setup.ended",
+        "turns.paused",
+        "turn.ended",
+    ]
     assert len({line["trace_id"] for line in in_the_turn}) == 1
     assert {line["event"] for line in lines} > {"loop.started", "turn.ended"}
     assert {line["trace_id"] for line in lines if line not in in_the_turn} == {None}

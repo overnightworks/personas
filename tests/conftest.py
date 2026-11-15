@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import secrets
 from dataclasses import replace
@@ -22,7 +23,7 @@ from personas.loop import AgentLoop, Boundaries
 from personas.main import SweepingBoundaries, run_with_sweep
 from personas.mind import Mind
 from personas.readiness import FileReadyMarker
-from personas.reporting import log_state_change
+from personas.reporting import carry_trace, log_state_change
 from personas.secret import Secret
 from personas.tokens import HttpTokenSource
 from tests.support.configfiles import MAX_TOOL_CALLS, PERSONA_MAX_DURATION_SECONDS, Files
@@ -142,7 +143,7 @@ class Harness:
         self.clock = FakeClock()
         self.reports = Reports()
         self.reports.attach_to(logging.getLogger())
-        self.token_client = httpx2.AsyncClient(transport=self.realm.transport())
+        self.token_client = httpx2.AsyncClient(transport=self.realm.transport(), event_hooks={"request": [carry_trace]})
         self.task: asyncio.Task[object] | None = None
         self.tools_only_apps: list[ToolsOnlyApp] = []
         self.other_apps: list[FakeApp] = []
@@ -289,6 +290,15 @@ async def runner(caplog: pytest.LogCaptureFixture, restored_logging: None, files
     assert harness.reports.is_empty or "agent_id" in logged
     for held in harness.secrets_and_content():
         assert held not in logged
+
+
+@pytest.fixture
+def written(runner: Harness) -> io.StringIO:
+    """What the entry point's handler writes from now on, as the JSON lines it holds."""
+    stream = io.StringIO()
+    (handler,) = [each for each in logging.getLogger().handlers if type(each) is logging.StreamHandler]
+    handler.setStream(stream)
+    return stream
 
 
 @pytest.fixture

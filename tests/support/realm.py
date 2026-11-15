@@ -51,6 +51,8 @@ class FakeRealm:
         self.groups = list(groups)
         self.agent_name = agent_name
         self.issued: list[str] = []
+        self.traceparents: list[str | None] = []
+        """The ``traceparent`` header of each token request, in order; none when the request carried none."""
         self.issued_for: dict[str, list[str]] = {scope: []}
         self.refusing = False
         self.refused_scopes: set[str] = set()
@@ -72,6 +74,7 @@ class FakeRealm:
         return httpx2.MockTransport(self._answer)
 
     def _answer(self, request: httpx2.Request) -> httpx2.Response:
+        self.traceparents.append(request.headers.get("traceparent"))
         form = {name: values[0] for name, values in parse_qs(request.content.decode()).items()}
         agent, subject = self._clients.get(form.get("client_id", ""), (None, ""))
         asked_as_agent = (

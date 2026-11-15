@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from contextlib import aclosing
 from dataclasses import dataclass, replace
 from functools import partial
@@ -51,7 +52,7 @@ from personas.failures import CallFailure, leaves_of, raise_if_cancelled
 from personas.mind import Mind
 from personas.recall import LookupBounds
 from personas.remembering import LineStore, Remembering
-from personas.reporting import Event, Reporter, StateChange, TurnTally, start_turn_tally
+from personas.reporting import Event, Reporter, StateChange, TurnTally, start_turn_tally, step_timer
 from personas.task_record import (
     TaskRecord,
     ending_loud_when_cancelled,
@@ -363,7 +364,7 @@ class AgentLoop:
                 continue
             self._mind.take((seen,))
             if view_turn_due(self._turned_revisions.get(place), seen.view):
-                self._mind.due(at, Waiting(seen.view.revision))
+                self._mind.due(at, Waiting(seen.view.revision), time.perf_counter())
             elif not seen.view.awaits_you:
                 self._mind.undue(partial(eq, at))
 
@@ -379,13 +380,14 @@ class AgentLoop:
         if claim is None:
             self._wake_when_pause_over(turns, now)
             return
-        at, occasion = claim
+        at, due = claim
+        occasion = due.occasion
         if isinstance(occasion, Waiting):
             self._turned_revisions[at.place] = occasion.revision
         aloud = speaks_aloud(self._voice_app, occasion, self._checkpoints.get(at.place))
         apps = self._mind.held_apps(self._app.mcp_url)
         admitted = Admitted(facts, at.place, occasion, self._mind.present, self._boundaries.clock.wall(), aloud, apps)
-        self._start_turn(turns, setup, at.place, admitted)
+        self._start_turn(turns, setup, at.place, admitted, due.since)
 
     def _wake_when_pause_over(self, turns: asyncio.TaskGroup, now: float) -> None:
         """A pause holds the turn of the place at this app that has waited longest: one waiter of this loop wakes
@@ -406,12 +408,21 @@ class AgentLoop:
         self._mind.take(taken_lines(Visit(self._app.mcp_url, place, window.generation), perception.new, read_at))
         if wakes_him(perception.new, serves_view=serves_view):
             lines = Lines(window.generation, frozenset(line.seq for line in perception.new), perception.missed)
-            self._mind.due(AppPlace(self._app.mcp_url, place), lines)
+            self._mind.due(AppPlace(self._app.mcp_url, place), lines, time.perf_counter())
 
-    def _start_turn(self, turns: asyncio.TaskGroup, setup: TurnSetup, place: PlaceRef, admitted: Admitted) -> None:
-        """Starts the turn in a trace of its own, which its task and its done callback share and the loop's own lines
-        do not."""
+    def _start_turn(
+        self, turns: asyncio.TaskGroup, setup: TurnSetup, place: PlaceRef, admitted: Admitted, due_since: float
+    ) -> None:
+        """Starts the turn in a trace of its own, which its task, its done callback and its step lines share and the
+        loop's own lines do not. The turn's wait, from ``due_since`` to now, ends here; a pause that ended later than
+        ``due_since`` says the place was due only from then."""
         with unit_trace(None):
+            step_timer(
+                "turn_wait.ended",
+                self._agent.client_id,
+                self._app.mcp_url,
+                started_at=min(due_since, time.perf_counter()),
+            ).end()
             tally = start_turn_tally(self._agent.client_id, self._app.mcp_url)
             task = turns.create_task(self._turning.take(setup, admitted, TaskRecord(), tally))
             self._turn = ActiveTurn(task, place, tally)
