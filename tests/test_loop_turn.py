@@ -301,13 +301,7 @@ async def test_a_lines_turn_the_gateway_failed_runs_again_after_the_wait_with_it
 
 
 async def test_the_wait_after_a_spent_budget_doubles_and_starts_over_after_a_turn_that_is_not_refused_for_it(runner):
-    rounds = [
-        ([BUDGET_SPENT], BACKOFF_BASE_SECONDS),
-        ([BUDGET_SPENT], 2 * BACKOFF_BASE_SECONDS),
-        (says(PLACE_ID, ANSWER), None),
-        ([BUDGET_SPENT], BACKOFF_BASE_SECONDS),
-    ]
-    runner.gateway = Gateway(*[reply for replies, _ in rounds for reply in replies])
+    runner.gateway = Gateway(BUDGET_SPENT, BUDGET_SPENT, *says(PLACE_ID, ANSWER), BUDGET_SPENT)
     await restarted_in_the_call(runner)
 
     say_in_the_call(runner, f"{ADDRESSED} First.")
@@ -316,7 +310,9 @@ async def test_the_wait_after_a_spent_budget_doubles_and_starts_over_after_a_tur
     await runner.reports.until(Event.PAUSED, count=3)
 
     assert [change.seconds for change in runner.reports.changes if change.event is Event.PAUSED] == [
-        pause for _, pause in rounds if pause is not None
+        BACKOFF_BASE_SECONDS,
+        2 * BACKOFF_BASE_SECONDS,
+        BACKOFF_BASE_SECONDS,
     ]
 
 

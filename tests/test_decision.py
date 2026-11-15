@@ -83,7 +83,7 @@ from personas.decision import (
     lends_tools,
     past_deadline,
     pause_left,
-    paused_until,
+    paused_for,
     perceive,
     reaction_to,
     released,
@@ -666,7 +666,7 @@ def test_no_turn_starts_while_one_runs_or_when_nothing_is_due():
 
 
 def test_a_pause_holds_the_turn_of_the_oldest_place_until_its_end_and_a_release_leaves_it():
-    turns = paused_until(_due_in_order((CALL_AT_A, Waiting(1))), NOW + 4)
+    turns = paused_for(_due_in_order((CALL_AT_A, Waiting(1))), NOW, 4)
 
     assert claimed(turns, CALL_AT_A.app, NOW + 3) is None
     assert pause_left(turns, CALL_AT_A.app, NOW + 3) == 1
@@ -676,11 +676,11 @@ def test_a_pause_holds_the_turn_of_the_oldest_place_until_its_end_and_a_release_
 
 
 def test_a_pause_is_left_only_to_the_app_of_the_oldest_place_and_only_while_a_turn_waits_for_it():
-    waiting = paused_until(_due_in_order((CALL_AT_B, Waiting(1))), NOW + 4)
+    waiting = paused_for(_due_in_order((CALL_AT_B, Waiting(1))), NOW, 4)
 
     assert pause_left(waiting, CALL_AT_A.app, NOW) == 0
     assert pause_left(replace(waiting, running=True), CALL_AT_B.app, NOW) == 0
-    assert pause_left(paused_until(Turns(), NOW + 4), CALL_AT_B.app, NOW) == 0
+    assert pause_left(paused_for(Turns(), NOW, 4), CALL_AT_B.app, NOW) == 0
 
 
 def test_a_released_turn_leaves_what_is_due_and_lets_the_next_one_start():

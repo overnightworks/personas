@@ -693,9 +693,9 @@ def claimed(turns: Turns, app: str, now: float) -> tuple[Turns, AppPlace, Occasi
     return replace(without_due(turns, lambda each: each == at), running=True), at, occasion
 
 
-def paused_until(turns: Turns, until: float) -> Turns:
-    """The turns while no turn of his may start before ``until``."""
-    return replace(turns, not_before=until)
+def paused_for(turns: Turns, now: float, seconds: float) -> Turns:
+    """The turns while no turn of his may start for ``seconds`` from ``now``."""
+    return replace(turns, not_before=now + seconds)
 
 
 def pause_left(turns: Turns, app: str, now: float) -> float:

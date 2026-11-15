@@ -18,7 +18,7 @@ from personas.decision import (
     due_again,
     held_apps,
     pause_left,
-    paused_until,
+    paused_for,
     released,
     taken_into,
     with_due,
@@ -84,7 +84,7 @@ class Mind:
             if budget_spent
             else backoff_delay(self._unanswered_turns)
         )
-        self._turns = paused_until(self._turns, now + seconds)
+        self._turns = paused_for(self._turns, now, seconds)
         return seconds
 
     def answered(self, turn: TurnTold) -> None:
