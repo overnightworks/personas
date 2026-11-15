@@ -64,6 +64,8 @@ LISTEN = "subscriptions/listen"
 READ = "resources/read"
 CALL = "tools/call"
 LIST_TOOLS = "tools/list"
+NO_METHOD = ""
+"""The key a request that carries no JSON-RPC message, a stream reconnect, is scripted and logged under."""
 INITIALIZE = "initialize"
 ACKNOWLEDGED = "acknowledged"
 
@@ -609,7 +611,7 @@ class FakeApp:
         body: bytes,
         document: dict[str, Any],
     ) -> None:
-        method = document.get("method", "")
+        method = document.get("method", NO_METHOD)
         self.log.add(method)
         if method == CALL:
             self._take_in(document.get("params") or {})
