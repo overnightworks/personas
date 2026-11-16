@@ -39,7 +39,7 @@ LIST = ("memory", "list")
 ERASE_ALL = ("memory", "erase", "--all")
 RENAME_CLIENT_ID = "ALTER TABLE lines RENAME COLUMN client_id TO renamed"
 RENAME_CLIENT_ID_BACK = "ALTER TABLE lines RENAME COLUMN renamed TO client_id"
-SCHEMA_BEHIND = "UPDATE alembic_version SET version_num = 'behind'"
+SCHEMA_BEHIND = "UPDATE alembic_version SET version_num = '0001'"
 
 
 class Spoken:
