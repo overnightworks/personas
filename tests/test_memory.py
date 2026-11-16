@@ -309,10 +309,11 @@ async def test_a_schema_behind_its_head_ends_the_write_naming_the_field_and_no_s
 async def test_a_schema_at_a_known_revision_behind_its_head_ends_the_write(unmigrated_database):
     migrated_to(unmigrated_database, "0001")
     store = PostgresLineStore(unmigrated_database)
+    behind_the_head = a_read(line(1, "Behind"))
 
     try:
         with pytest.raises(SchemaNotAtHeadError):
-            await store.keep(a_read(line(1, "Behind")))
+            await store.keep(behind_the_head)
     finally:
         await store.close()
 
@@ -669,12 +670,13 @@ async def test_a_search_met_by_a_defect_while_its_task_is_being_cancelled_raises
 async def test_a_search_waiting_on_a_lock_ends_within_the_write_bound_as_a_timeout(store, database):
     await store.keep(a_read(line(1, "Before the lock")))
     bounded = PostgresLineStore(replace(database, write_seconds=BOUND_SECONDS))
+    searching_during_the_lock = a_search()
     try:
         with lines_table_locked(database):
             started = time.monotonic()
             async with asyncio.timeout(LIMIT_SECONDS):
                 with pytest.raises(StoreUnavailable) as cut:
-                    await bounded.search(a_search())
+                    await bounded.search(searching_during_the_lock)
             elapsed = time.monotonic() - started
             still_waiting = waiting_statements(database)
 
