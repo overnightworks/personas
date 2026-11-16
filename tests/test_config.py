@@ -762,16 +762,25 @@ def test_an_agent_entry_with_a_model_runs_on_it_and_one_without_keeps_the_person
     assert file_model != "text/sonnet-low"
 
 
+def test_an_agent_entry_with_a_hold_model_gives_it_to_the_agent_and_one_without_gives_none(files):
+    assert load_config(files.write()).agents[0].hold_model is None
+    files.text += 'hold_model = "text/sonnet-low"\n'
+
+    assert load_config(files.write()).agents[0].hold_model == "text/sonnet-low"
+
+
+@pytest.mark.parametrize("field", ["model", "hold_model"])
 @pytest.mark.parametrize(
     "name", ["image/painter", "sonnet", "text/", 7], ids=["image", "no kind", "no model", "number"]
 )
-def test_a_model_that_is_no_text_model_stops_the_start_and_names_the_field(files, monkeypatch, capsys, name):
-    files.text += f"model = {name!r}\n".replace("'", '"')
+def test_a_model_that_is_no_text_model_stops_the_start_and_names_the_field(files, monkeypatch, capsys, field, name):
+    files.text += f"{field} = {name!r}\n".replace("'", '"')
 
-    assert "agents.0.model" in fails_at_start(files.write(), monkeypatch, capsys)
+    assert f"agents.0.{field}" in fails_at_start(files.write(), monkeypatch, capsys)
 
 
-def test_a_model_without_a_persona_file_stops_the_start_and_names_the_field(files, monkeypatch, capsys):
-    files.text = files.valid_text(binds_tools=False) + 'model = "text/sonnet-low"\n'
+@pytest.mark.parametrize("field", ["model", "hold_model"])
+def test_a_model_without_a_persona_file_stops_the_start_and_names_the_field(files, monkeypatch, capsys, field):
+    files.text = files.valid_text(binds_tools=False) + f'{field} = "text/sonnet-low"\n'
 
-    assert "agents.0.model" in fails_at_start(files.write(), monkeypatch, capsys)
+    assert f"agents.0.{field}" in fails_at_start(files.write(), monkeypatch, capsys)

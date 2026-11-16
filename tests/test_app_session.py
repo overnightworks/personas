@@ -13,11 +13,15 @@ import anyio
 import pytest
 from agents.member import (
     ACCEPT_INVITATION_TOOL,
+    CONTINUE_SPEAKING_TOOL,
     SPEAK_TOOL,
     STANDING_URI,
+    STOP_SPEAKING_TOOL,
     AcceptInvitationArguments,
     AcceptInvitationRefusal,
     AcceptInvitationRefused,
+    ContinueSpeakingRefusal,
+    ContinueSpeakingRefused,
     FigureRef,
     PartialSpeech,
     PlaceEntry,
@@ -26,6 +30,8 @@ from agents.member import (
     SpeakRefusal,
     SpeakRefused,
     Spoken,
+    StopSpeakingRefusal,
+    StopSpeakingRefused,
     TalkedOver,
     VoiceState,
     Written,
@@ -318,6 +324,44 @@ async def test_a_speak_answer_that_is_none_of_the_answers_or_refusals_of_the_rec
     async with opened(app, bearer) as session:
         with pytest.raises(UnusableAnswer) as failure:
             await session.speak(place, "A sentence.")
+
+    assert failure.value.code == INVALID_ANSWER_CODE
+
+
+@pytest.mark.parametrize("tool", [CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL])
+async def test_a_decision_on_a_hold_that_stands_is_sent_with_the_place_and_the_hold_and_gives_none(
+    app, bearer, place, tool
+):
+    app.hold(place.id, "hold-1", ("Ada", "wait"))
+
+    async with opened(app, bearer) as session:
+        decide = session.continue_speaking if tool == CONTINUE_SPEAKING_TOOL else session.stop_speaking
+        assert await decide(place, "hold-1") is None
+
+    assert app.hold_calls == [(tool, "hold-1")]
+
+
+@pytest.mark.parametrize(
+    ("tool", "refusal"),
+    [
+        (CONTINUE_SPEAKING_TOOL, ContinueSpeakingRefused(refused=ContinueSpeakingRefusal.NOT_INTERRUPTED)),
+        (STOP_SPEAKING_TOOL, StopSpeakingRefused(refused=StopSpeakingRefusal.NOT_INTERRUPTED)),
+    ],
+)
+async def test_a_decision_on_a_hold_that_does_not_stand_is_told_by_the_apps_refusal(app, bearer, place, tool, refusal):
+    async with opened(app, bearer) as session:
+        decide = session.continue_speaking if tool == CONTINUE_SPEAKING_TOOL else session.stop_speaking
+        assert await decide(place, "hold-1") is refusal.refused
+
+
+@pytest.mark.parametrize("tool", [CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL])
+async def test_a_refusal_of_a_decision_that_is_none_of_the_records_is_an_unusable_answer(app, bearer, place, tool):
+    app.hold_outcomes.append(ToolOutcome('{"refused": "other"}', is_error=True))
+
+    async with opened(app, bearer) as session:
+        decide = session.continue_speaking if tool == CONTINUE_SPEAKING_TOOL else session.stop_speaking
+        with pytest.raises(UnusableAnswer) as failure:
+            await decide(place, "hold-1")
 
     assert failure.value.code == INVALID_ANSWER_CODE
 
@@ -936,7 +980,13 @@ async def test_the_declared_tools_are_the_ones_the_app_lists(app, bearer):
     async with opened(app, bearer) as session:
         declared = await session.declared_tools()
 
-    assert {each.name for each in declared} == {ACCEPT_INVITATION_TOOL, SAY_TOOL, SPEAK_TOOL}
+    assert {each.name for each in declared} == {
+        ACCEPT_INVITATION_TOOL,
+        SAY_TOOL,
+        SPEAK_TOOL,
+        CONTINUE_SPEAKING_TOOL,
+        STOP_SPEAKING_TOOL,
+    }
 
 
 async def test_a_tool_marked_read_only_is_declared_read_only(app, bearer):

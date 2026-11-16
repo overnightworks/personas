@@ -13,11 +13,15 @@ from typing import Final, Protocol, cast, override
 import httpx2
 from agents.member import (
     ACCEPT_INVITATION_TOOL,
+    CONTINUE_SPEAKING_TOOL,
     LISTEN_BOUND_SECONDS,
     SPEAK_TOOL,
     STANDING_URI,
+    STOP_SPEAKING_TOOL,
     AcceptInvitationArguments,
     AcceptInvitationRefused,
+    ContinueSpeakingRefusal,
+    ContinueSpeakingRefused,
     MemberStanding,
     PlaceRef,
     PlaceView,
@@ -25,6 +29,8 @@ from agents.member import (
     SpeakAnswer,
     SpeakRefusal,
     SpeakRefused,
+    StopSpeakingRefusal,
+    StopSpeakingRefused,
     place_view_uri,
     place_window_uri,
 )
@@ -118,6 +124,14 @@ class AppSession(Protocol):
         """That the sentence starts to play, that the app wrote it at the place instead, or why it does not speak it;
         raises ``StatusFailure``, ``Unreachable`` or ``UnusableAnswer``, the last for an answer that is none of
         these."""
+        ...
+
+    async def continue_speaking(self, place: PlaceRef, interrupted: str) -> ContinueSpeakingRefusal | None:
+        """``None`` when the held sentence goes on, else the refusal; raises as ``speak`` does."""
+        ...
+
+    async def stop_speaking(self, place: PlaceRef, interrupted: str) -> StopSpeakingRefusal | None:
+        """``None`` when the hold ended with nothing more said, else the refusal; raises as ``speak`` does."""
         ...
 
     async def declared_tools(self) -> tuple[ToolDeclaration, ...]:
@@ -291,6 +305,14 @@ class _McpAppSession:
         result = await self._called(SPEAK_TOOL, {"place": place.model_dump(mode="json"), "text": sentence})
         return _answer_of(result)
 
+    async def continue_speaking(self, place: PlaceRef, interrupted: str) -> ContinueSpeakingRefusal | None:
+        result = await self._called(CONTINUE_SPEAKING_TOOL, _naming_hold(place, interrupted))
+        return _refusal_in(ContinueSpeakingRefused, result).refused if result.is_error else None
+
+    async def stop_speaking(self, place: PlaceRef, interrupted: str) -> StopSpeakingRefusal | None:
+        result = await self._called(STOP_SPEAKING_TOOL, _naming_hold(place, interrupted))
+        return _refusal_in(StopSpeakingRefused, result).refused if result.is_error else None
+
     async def invoke(self, name: str, arguments: JsonObject) -> ToolOutcome:
         result = await self._called(name, arguments)
         return ToolOutcome(_text_of(result), result.is_error, _picture_of(result))
@@ -387,6 +409,18 @@ def _answer_of(result: CallToolResult) -> SpeakAnswer | SpeakRefusal:
     text = _text_of(result)
     try:
         return SpeakRefused.model_validate_json(text).refused if result.is_error else _SPEAK_ANSWER.validate_json(text)
+    except ValidationError:
+        raise UnusableAnswer(INVALID_ANSWER_CODE) from None
+
+
+def _naming_hold(place: PlaceRef, interrupted: str) -> JsonObject:
+    """The wire's arguments of ``continue_speaking`` and ``stop_speaking``, built unvalidated as ``speak``'s are."""
+    return {"place": place.model_dump(mode="json"), "interrupted": interrupted}
+
+
+def _refusal_in[Refused: BaseModel](refused: type[Refused], result: CallToolResult) -> Refused:
+    try:
+        return refused.model_validate_json(_text_of(result))
     except ValidationError:
         raise UnusableAnswer(INVALID_ANSWER_CODE) from None
 

@@ -17,8 +17,11 @@ from typing import TYPE_CHECKING, Final
 from agents.backend import TurnStopped
 from agents.member import (
     ACCEPT_INVITATION_TOOL,
+    CONTINUE_SPEAKING_TOOL,
     SPEAK_TOOL,
+    STOP_SPEAKING_TOOL,
     AcceptInvitationRefusal,
+    PartialSpeech,
     PlaceEntry,
     PlaceRef,
     PlaceView,
@@ -64,9 +67,11 @@ if TYPE_CHECKING:
     from personas.secret import Secret
 
 CALL_PLACE_KIND: Final = "call"
-RESERVED_TOOLS: Final = frozenset({ACCEPT_INVITATION_TOOL, SPEAK_TOOL, RECALL_TOOL})
-"""The names the runner calls or answers itself in every turn: the accept of an invitation, the voice's ``speak`` and
-the lookup's ``recall``."""
+RESERVED_TOOLS: Final = frozenset(
+    {ACCEPT_INVITATION_TOOL, SPEAK_TOOL, RECALL_TOOL, CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL}
+)
+"""The names the runner calls or answers itself in every turn: the accept of an invitation, the voice's ``speak``, the
+lookup's ``recall`` and the two tools that decide a hold."""
 RENEW_BEFORE_EXPIRY_SECONDS: Final = 60.0
 """A token is renewed once this little of its lifetime remains, so no call carries an expired one."""
 NETWORK_FAILURE_CODE: Final = "network"
@@ -879,6 +884,46 @@ def held_told(arrived: Arrived) -> str:
     fitting = newest_that_fit(sizes, MAX_EVENT_BYTES - len(empty.encode()) + separator)
     kept = told[len(told) - fitting :]
     return _held_json(kept, older_dropped=arrived.older_dropped or fitting < len(told))
+
+
+@dataclass(frozen=True)
+class Held:
+    """A hold as the window states it: its id and what people said over him, which stays what the last read that had
+    a record said once the record is gone."""
+
+    id: str
+    speech: tuple[PartialSpeech, ...]
+    record_gone: bool
+
+
+class HoldOutcome(StrEnum):
+    """How a hold ended on the runner's side, as the one line per hold id reports it."""
+
+    CONTINUED = "continued"
+    STOPPED = "stopped"
+    UNDECIDED = "undecided"
+    NO_TURN = "no_turn"
+
+
+def hold_stated(window: PlaceWindow, seen: Held | None) -> Held | None:
+    """The hold the window states, or ``None`` when he is not held; a hold whose record has gone keeps the words an
+    earlier read of the same hold had."""
+    hold = window.interrupted
+    if hold is None:
+        return None
+    talked_over = window.talked_over
+    kept = seen.speech if seen is not None and seen.id == hold.id else ()
+    return Held(hold.id, kept if talked_over is None else talked_over.speech, record_gone=talked_over is None)
+
+
+def hold_tellable(held: Held) -> bool:
+    """Whether a hold may be told: a person has said words over him, or the record is gone and no more will come."""
+    return held.record_gone or any(each.text for each in held.speech)
+
+
+def round_seconds(remaining: float) -> int:
+    """The whole seconds a decision round may last, at least one: the library takes only a positive whole bound."""
+    return max(1, math.ceil(remaining))
 
 
 def _held_json(entries: list[dict[str, object]], *, older_dropped: bool) -> str:

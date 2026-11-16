@@ -9,7 +9,17 @@ from dataclasses import dataclass, field
 from datetime import UTC
 from typing import TYPE_CHECKING
 
-from agents.member import PlaceEntry, PlaceRef, PlaceView, PlaceWindow, SpeakAnswer, SpeakRefusal, Spoken, Written
+from agents.member import (
+    PartialSpeech,
+    PlaceEntry,
+    PlaceRef,
+    PlaceView,
+    PlaceWindow,
+    SpeakAnswer,
+    SpeakRefusal,
+    Spoken,
+    Written,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -271,3 +281,31 @@ def told_entry(entry: Entry) -> dict[str, object]:
         "at": told_time(entry.first_read_at),
         "seq": entry.seq,
     } | told_line(entry)
+
+
+def told_hold(
+    hold_id: str,
+    speech: Iterable[PartialSpeech],
+    saying: str | None,
+    unsaid: Iterable[str],
+    waiting: tuple[str, JsonObject] | None,
+) -> str:
+    """The message that tells him he is held: the hold's id, what people said over him, the sentence he was in, the
+    sentences he had not yet said and the call of his that waits, as its tool and arguments."""
+    held: dict[str, object] = {
+        "id": hold_id,
+        "talked_over": [{"name": each.name, "text": each.text} for each in speech],
+        "in_sentence": saying,
+        "unsaid": list(unsaid),
+    }
+    if waiting is not None:
+        held["call_waiting"] = {"tool": waiting[0], "arguments": waiting[1]}
+    return json.dumps({"held": held}, ensure_ascii=False)
+
+
+def told_stop(unsaid: Iterable[str], waiting_tool: str | None) -> str:
+    """The result of his stop: the sentences that were not said and the tool of the call that was never sent."""
+    stopped: dict[str, object] = {"stopped": True, "unsaid": list(unsaid)}
+    if waiting_tool is not None:
+        stopped["call_dropped"] = waiting_tool
+    return json.dumps(stopped, ensure_ascii=False)

@@ -106,6 +106,7 @@ class AgentCredentials:
     client_id: str
     client_secret: Secret
     persona: AgentDefinition | None = None
+    hold_model: GatewayModelName | None = None
     figure: FigureRef | None = field(default=None, repr=False)
     voice: Voice | None = field(default=None, repr=False)
 
@@ -184,10 +185,11 @@ class _AgentEntry(_Entry):
     secret_file: Path
     persona_file: Path | None = None
     model: GatewayModelName | None = None
+    hold_model: GatewayModelName | None = None
     figure: FigureRef | None = None
     voice: _VoiceEntry | None = None
 
-    @field_validator("model")
+    @field_validator("model", "hold_model")
     @classmethod
     def _model_is_a_text_model_of_an_agent_file(cls, model: str, info: ValidationInfo) -> str:
         if model_kind_of(model) is not ModelKind.TEXT:
@@ -393,6 +395,7 @@ def load_config(environment: Mapping[str, str]) -> Config:
                 agent.client_id,
                 _read_secret(f"agents.{index}.secret_file", agent.secret_file),
                 _read_persona(index, agent.persona_file, agent.model),
+                agent.hold_model,
                 agent.figure,
                 None if agent.voice is None else Voice(agent.voice.names or ()),
             )

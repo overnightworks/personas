@@ -6,7 +6,7 @@ import json
 
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
-from agents.member import SpeakRefusal, SpeakRefused, VoiceState
+from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL, SpeakRefusal, SpeakRefused, VoiceState
 from agents.tools import ToolOutcome
 from agents.turn import Principal, person_fingerprint
 from agents.voice.reply import REPLY_RULES
@@ -70,7 +70,13 @@ async def test_a_line_at_a_voice_place_makes_a_turn_told_aloud_that_holds_every_
     (turn,) = runner.gateway.turns()
     assert turn.aloud
     assert turn.woke_seqs == [1]
-    assert set(runner.gateway.offered_tools()) == {SAY_TOOL, CREATE_SONG, GENERATE_SONG}
+    assert set(runner.gateway.offered_tools()) == {
+        SAY_TOOL,
+        CREATE_SONG,
+        GENERATE_SONG,
+        CONTINUE_SPEAKING_TOOL,
+        STOP_SPEAKING_TOOL,
+    }
 
 
 async def test_sentences_released_while_a_reply_is_written_are_sent_in_order_the_next_once_the_one_before_plays(runner):

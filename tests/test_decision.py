@@ -14,11 +14,15 @@ import pytest
 from agents.backend import TurnStopKind, TurnStopped
 from agents.member import (
     ACCEPT_INVITATION_TOOL,
+    CONTINUE_SPEAKING_TOOL,
     LEASE_SECONDS,
     LISTEN_BOUND_SECONDS,
     SPEAK_TOOL,
+    STOP_SPEAKING_TOOL,
     AcceptInvitationRefusal,
     FigureRef,
+    Interrupted,
+    PartialSpeech,
     PlaceRef,
     PlaceView,
     PlaceWindow,
@@ -26,6 +30,7 @@ from agents.member import (
     Spoken,
     Standing,
     StandingState,
+    TalkedOver,
     VoiceState,
     Written,
 )
@@ -47,6 +52,7 @@ from personas.decision import (
     Accept,
     AppPlace,
     Arrived,
+    Held,
     Joined,
     Lines,
     Memory,
@@ -81,6 +87,8 @@ from personas.decision import (
     forget_gone,
     held_apps,
     held_told,
+    hold_stated,
+    hold_tellable,
     holds_a_place,
     is_not_granted,
     is_voice_app,
@@ -826,7 +834,12 @@ def _declaration(name: str) -> ToolDeclaration:
         (["a", "b", "c"], ["b"], ["a", "c"], 1),
         (["a", "b"], ["a", "b"], [], 2),
         ([], ["a"], [], 0),
-        (["a", SPEAK_TOOL, RECALL_TOOL, ACCEPT_INVITATION_TOOL], [], ["a"], 0),
+        (
+            ["a", SPEAK_TOOL, RECALL_TOOL, ACCEPT_INVITATION_TOOL, CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL],
+            [],
+            ["a"],
+            0,
+        ),
         (["a", SPEAK_TOOL], [SPEAK_TOOL], ["a"], 0),
     ],
     ids=[
@@ -1850,3 +1863,46 @@ def test_the_repr_of_an_arrival_shows_no_entry():
     arrived = Arrived((said(1, marker, name=marker), a_view_seen(1)), older_dropped=False)
 
     assert marker not in repr(arrived)
+
+
+def _window(*, interrupted: str | None, speech: tuple[PartialSpeech, ...] | None) -> PlaceWindow:
+    talked_over = None if speech is None else TalkedOver(id="talk", playing=True, speech=speech)
+    return PlaceWindow(
+        generation="g",
+        starts_at=1,
+        entries=(),
+        talked_over=talked_over,
+        interrupted=None if interrupted is None else Interrupted(id=interrupted),
+    )
+
+
+ADA_SAYS = (PartialSpeech(name="Ada", text="wait"),)
+ADA_STARTED = (PartialSpeech(name="Ada", text=""),)
+
+
+@pytest.mark.parametrize(
+    ("window", "seen", "stated"),
+    [
+        (_window(interrupted=None, speech=ADA_SAYS), None, None),
+        (_window(interrupted="h1", speech=ADA_SAYS), None, Held("h1", ADA_SAYS, record_gone=False)),
+        (_window(interrupted="h1", speech=None), Held("h1", ADA_SAYS, record_gone=False), Held("h1", ADA_SAYS, True)),
+        (_window(interrupted="h2", speech=None), Held("h1", ADA_SAYS, record_gone=False), Held("h2", (), True)),
+    ],
+    ids=["not held", "held", "record gone keeps the words of the same hold", "record gone of a new hold has none"],
+)
+def test_a_window_states_the_hold_with_what_was_said_over_him(window, seen, stated):
+    assert hold_stated(window, seen) == stated
+
+
+@pytest.mark.parametrize(
+    ("held", "tellable"),
+    [
+        (Held("h", ADA_STARTED, record_gone=False), False),
+        (Held("h", ADA_SAYS, record_gone=False), True),
+        (Held("h", ADA_STARTED, record_gone=True), True),
+        (Held("h", (), record_gone=True), True),
+    ],
+    ids=["a person started and said no words", "words", "record gone", "record gone, no one said anything"],
+)
+def test_a_hold_may_be_told_once_someone_has_said_words_or_the_record_is_gone(held, tellable):
+    assert hold_tellable(held) is tellable

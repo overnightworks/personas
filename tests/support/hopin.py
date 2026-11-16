@@ -22,12 +22,20 @@ from agents.mcp_server import McpPersonFront, PersonRequest, PersonTool, Resourc
 from agents.mcp_wire import MCP_ENDPOINT_PATH
 from agents.member import (
     ACCEPT_INVITATION_TOOL,
+    CONTINUE_SPEAKING_TOOL,
     SPEAK_TOOL,
     STANDING_URI,
+    STOP_SPEAKING_TOOL,
     AcceptInvitationArguments,
+    ContinueSpeakingArguments,
+    ContinueSpeakingRefusal,
+    ContinueSpeakingRefused,
+    DroppedSpeaking,
+    Interrupted,
     Invitation,
     MemberStanding,
     ParentPlace,
+    PartialSpeech,
     PlaceEntry,
     PlaceRef,
     PlaceView,
@@ -38,6 +46,11 @@ from agents.member import (
     Spoken,
     Standing,
     StandingState,
+    StoppedSpeaking,
+    StopSpeakingArguments,
+    StopSpeakingRefusal,
+    StopSpeakingRefused,
+    TalkedOver,
     VoiceState,
     Written,
     place_ref_from_view_uri,
@@ -95,6 +108,20 @@ _SPEAK_DECLARATION = ToolDeclaration(
     name=SPEAK_TOOL,
     description="Speaks a sentence in a call.",
     parameters=SpeakArguments.model_json_schema(),
+    effect=ToolEffect.SIDE_EFFECTING,
+)
+
+_CONTINUE_DECLARATION = ToolDeclaration(
+    name=CONTINUE_SPEAKING_TOOL,
+    description="Lets a held sentence go on.",
+    parameters=ContinueSpeakingArguments.model_json_schema(),
+    effect=ToolEffect.SIDE_EFFECTING,
+)
+
+_STOP_DECLARATION = ToolDeclaration(
+    name=STOP_SPEAKING_TOOL,
+    description="Cuts the member's sentence and queue, or drops a held one.",
+    parameters=StopSpeakingArguments.model_json_schema(),
     effect=ToolEffect.SIDE_EFFECTING,
 )
 
@@ -311,6 +338,16 @@ class FakeApp:
     says_move_the_view: bool = False
     line_tool: str = SAY_TOOL
     """The name of the tool that takes a line or a move at a place of this app; ``say`` as hopin declares it."""
+    declares_hold_tools: bool = True
+    """Whether the app declares ``continue_speaking`` and ``stop_speaking``, as one that can hold the member does."""
+    holds: dict[str, tuple[str, tuple[PartialSpeech, ...] | None]] = field(
+        default_factory=dict[str, tuple[str, tuple[PartialSpeech, ...] | None]]
+    )
+    """Each place whose member is held: the hold's id and what is said over it, none once the record is gone."""
+    hold_calls: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+    """The tool and the hold id of each ``continue_speaking`` and ``stop_speaking`` that arrived."""
+    hold_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
+    """The answer to each next ``continue_speaking`` or ``stop_speaking`` as it arrives, in order."""
 
     def __post_init__(self) -> None:
         self._announcing: set[asyncio.Task[None]] = set()
@@ -322,11 +359,17 @@ class FakeApp:
         )
 
     def _tools(self) -> list[PersonTool]:
-        return [
+        tools = [
             PersonTool(_ACCEPT_DECLARATION, self._accept),
             PersonTool(self._line_declaration(), self._say),
             PersonTool(_SPEAK_DECLARATION, self._speak),
         ]
+        if self.declares_hold_tools:
+            tools += [
+                PersonTool(_CONTINUE_DECLARATION, self._continue_speaking),
+                PersonTool(_STOP_DECLARATION, self._stop_speaking),
+            ]
+        return tools
 
     def _line_declaration(self) -> ToolDeclaration:
         return _SAY_DECLARATION.model_copy(update={"name": self.line_tool})
@@ -376,6 +419,23 @@ class FakeApp:
             for each in standings:
                 if each.place.id == place_id:
                     self._announce(Principal(iss=ISSUER, sub=subject), place_window_uri(each.place))
+
+    def hold(self, place_id: str, hold_id: str, *said: tuple[str, str]) -> None:
+        """The member is held at the place: the window states the hold and, over it, what each person has said so far
+        (a name and its words), and signals the change."""
+        self.holds[place_id] = (hold_id, tuple(PartialSpeech(name=name, text=text) for name, text in said))
+        self._signal_window(place_id)
+
+    def talk_over(self, place_id: str, *said: tuple[str, str]) -> None:
+        """What is said over the held member changes, under the same hold."""
+        hold_id, _ = self.holds[place_id]
+        self.hold(place_id, hold_id, *said)
+
+    def end_record(self, place_id: str) -> None:
+        """The record of what was said over the held member is gone while the hold stands."""
+        hold_id, _ = self.holds[place_id]
+        self.holds[place_id] = (hold_id, None)
+        self._signal_window(place_id)
 
     def state_voice(self, place_id: str, state: VoiceState | None) -> None:
         """Sets what every window of the place states of his voice, none when ``state`` is ``None``, and signals it."""
@@ -498,10 +558,13 @@ class FakeApp:
             )
             for line in self.lines.get(place.id, [])
         )
+        hold_id, said = self.holds.get(place.id, (None, None))
         return PlaceWindow(
             generation=self.generations.get(place.id, GENERATION),
             starts_at=entries[0].seq if entries else 1,
             entries=entries,
+            talked_over=None if not said else TalkedOver(id=f"talk-{hold_id}", playing=True, speech=said),
+            interrupted=None if hold_id is None else Interrupted(id=hold_id),
             voice_state=self.voice_states.get(place.id),
         )
 
@@ -542,6 +605,42 @@ class FakeApp:
         else:
             self.speak(taken.place.id, request.principal.sub, ACCEPTED_NAME, taken.text, spoken=True)
         return ToolOutcome(Spoken(spoken=True).model_dump_json(), is_error=False)
+
+    async def _continue_speaking(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
+        """Lets the held sentence play to its end, so that the sentence waiting for its turn is answered."""
+        taken = ContinueSpeakingArguments.model_validate(arguments)
+        self.hold_calls.append((CONTINUE_SPEAKING_TOOL, taken.interrupted))
+        if self.hold_outcomes:
+            return self.hold_outcomes.pop(0)
+        if not self._ends_hold(taken.place.id, taken.interrupted):
+            refusal = ContinueSpeakingRefused(refused=ContinueSpeakingRefusal.NOT_INTERRUPTED)
+            return ToolOutcome(refusal.model_dump_json(), is_error=True)
+        if self.playing:
+            self.end_sentence()
+        return ToolOutcome(json.dumps({"continued": True}), is_error=False)
+
+    async def _stop_speaking(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
+        """Cuts the held sentence and drops every sentence waiting for its turn."""
+        taken = StopSpeakingArguments.model_validate(arguments)
+        self.hold_calls.append((STOP_SPEAKING_TOOL, taken.interrupted or ""))
+        if self.hold_outcomes:
+            return self.hold_outcomes.pop(0)
+        if taken.interrupted is not None and not self._ends_hold(taken.place.id, taken.interrupted):
+            refusal = StopSpeakingRefused(refused=StopSpeakingRefusal.NOT_INTERRUPTED)
+            return ToolOutcome(refusal.model_dump_json(), is_error=True)
+        if not self.playing:
+            return ToolOutcome(DroppedSpeaking(dropped=True).model_dump_json(), is_error=False)
+        cut = self.playing[0][2]
+        self.stop_speaking()
+        return ToolOutcome(StoppedSpeaking(cut=cut).model_dump_json(), is_error=False)
+
+    def _ends_hold(self, place_id: str, hold_id: str) -> bool:
+        """Whether the hold stands at the place; it ends, and the window says so."""
+        if self.holds.get(place_id, ("", None))[0] != hold_id:
+            return False
+        del self.holds[place_id]
+        self._signal_window(place_id)
+        return True
 
     def end_sentence(self, *, cut: bool = False) -> None:
         """The playing sentence ends: its own line enters its place, whole or cut, and the next ``speak`` waiting for
