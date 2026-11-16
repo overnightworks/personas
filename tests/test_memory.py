@@ -306,15 +306,15 @@ async def test_a_schema_behind_its_head_ends_the_write_naming_the_field_and_no_s
     assert unmigrated_database.password.reveal() not in str(behind.value)
 
 
-async def test_a_schema_at_a_known_revision_behind_its_head_ends_the_write_though_a_newer_one_would_not(
-    unmigrated_database,
-):
+async def test_a_schema_at_a_known_revision_behind_its_head_ends_the_write(unmigrated_database):
     migrated_to(unmigrated_database, "0001")
     store = PostgresLineStore(unmigrated_database)
 
-    with pytest.raises(SchemaNotAtHeadError):
-        await store.keep(a_read(line(1, "Behind")))
-    await store.close()
+    try:
+        with pytest.raises(SchemaNotAtHeadError):
+            await store.keep(a_read(line(1, "Behind")))
+    finally:
+        await store.close()
 
 
 async def test_a_database_at_a_revision_the_scripts_do_not_know_is_served(store, database):
