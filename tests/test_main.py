@@ -188,20 +188,21 @@ def test_the_marker_is_created_when_the_runner_contends_for_its_agents_and_stays
     assert world.files.ready_path.exists()
 
 
-class AnswersOnItsSecondAsk:
-    """A memory database that cannot be reached at the first check of its schema and is at its head at the second."""
+class AnswersOnItsThirdAsk:
+    """A memory database that cannot be reached at the first two checks of its schema and is at its head at the
+    third."""
 
     def __init__(self) -> None:
         self.asked = 0
 
     async def require_head(self) -> None:
         self.asked += 1
-        if self.asked == 1:
+        if self.asked <= 2:
             raise StoreUnavailable(STORE_UNREACHABLE_CODE)
 
 
 def test_a_runner_whose_database_cannot_be_reached_reports_it_once_and_starts_once_the_schema_answers(world):
-    world.schema = AnswersOnItsSecondAsk()
+    world.schema = AnswersOnItsThirdAsk()
 
     with pytest.raises(ExceptionGroup):
         world.start()
