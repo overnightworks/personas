@@ -1,0 +1,8 @@
+claim_id = "525dc1f0e77f47f28296b8bb07eff33c"
+agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
+role = "builder"
+base = "e7cbae1c9177dfc07bd8a9f8ee3f0c71a56b3eef"
+branch = "claude/issue-258-held-he-goes-on-or-stops"
+scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas", "tests"]
+opened_commit = "3ffdfc0a4fbd28a05f1684d205dec06aa2d198f4"
+whole_reason = "one behaviour, the decision at a hold, across eight modules with its proof"
