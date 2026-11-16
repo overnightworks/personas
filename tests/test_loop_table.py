@@ -128,7 +128,7 @@ async def test_revisions_and_lines_are_told_in_the_order_read_and_woke_names_onl
     await restarted_in_the_call(runner)
     runner.app.stand(SUBJECT, active(PLACE_ID), at_table())
     first = await shows(runner.app, 1)
-    await said_and_taken(runner.app, PLACE_ID, "first")
+    await said_and_taken(runner.app, PLACE_ID, "opening line")
     second = await shows(runner.app, 2)
     await said_and_taken(runner.app, PLACE_ID, "second")
     third = waits(runner.app, 3)
@@ -139,7 +139,7 @@ async def test_revisions_and_lines_are_told_in_the_order_read_and_woke_names_onl
     assert opening.room["history"] == history_of(
         [
             view_entry(app, first, revision=1, awaits_you=False),
-            entry(app, PLACE_ID, "first"),
+            entry(app, PLACE_ID, "opening line"),
             view_entry(app, second, revision=2, awaits_you=False),
             entry(app, PLACE_ID, "second", seq=2),
             view_entry(app, third, revision=3),
