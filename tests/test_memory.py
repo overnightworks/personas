@@ -212,23 +212,23 @@ async def test_a_line_with_u0000_is_kept_with_the_character_replaced_and_the_oth
 
 
 async def test_a_write_waiting_on_a_lock_ends_within_its_bound_releases_its_statement_and_the_next_write_succeeds(
-    database,
+    store, database
 ):
-    store = PostgresLineStore(replace(database, write_seconds=BOUND_SECONDS))
     await store.keep(a_read(line(1, "Before the lock")))
+    bounded = PostgresLineStore(replace(database, write_seconds=BOUND_SECONDS))
     try:
         with lines_table_locked(database):
             started = time.monotonic()
             during_the_lock = a_read(line(2, "During the lock"))
             async with asyncio.timeout(LIMIT_SECONDS):
                 with pytest.raises(StoreUnavailable) as cut:
-                    await store.keep(during_the_lock)
+                    await bounded.keep(during_the_lock)
             elapsed = time.monotonic() - started
             still_waiting = waiting_statements(database)
 
         await store.keep(a_read(line(3, "After the lock")))
     finally:
-        await store.close()
+        await bounded.close()
 
     assert cut.value.code == STORE_TIMEOUT_CODE
     assert still_waiting == 0
@@ -666,22 +666,21 @@ async def test_a_search_met_by_a_defect_while_its_task_is_being_cancelled_raises
     assert isinstance(ended, StoreDefect)
 
 
-async def test_a_search_waiting_on_a_lock_ends_within_the_write_bound_as_a_timeout(database):
-    store = PostgresLineStore(replace(database, write_seconds=BOUND_SECONDS))
+async def test_a_search_waiting_on_a_lock_ends_within_the_write_bound_as_a_timeout(store, database):
     await store.keep(a_read(line(1, "Before the lock")))
-    search = a_search()
+    bounded = PostgresLineStore(replace(database, write_seconds=BOUND_SECONDS))
     try:
         with lines_table_locked(database):
             started = time.monotonic()
             async with asyncio.timeout(LIMIT_SECONDS):
                 with pytest.raises(StoreUnavailable) as cut:
-                    await store.search(search)
+                    await bounded.search(a_search())
             elapsed = time.monotonic() - started
             still_waiting = waiting_statements(database)
 
         after_the_lock = await store.search(a_search())
     finally:
-        await store.close()
+        await bounded.close()
 
     assert cut.value.code == STORE_TIMEOUT_CODE
     assert still_waiting == 0
