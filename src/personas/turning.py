@@ -22,7 +22,6 @@ from personas.decision import (
     AppPlace,
     Held,
     HoldOutcome,
-    TurnTold,
     act_outcome,
     arrived_since,
     call_within_bound,
@@ -41,6 +40,7 @@ from personas.decision import (
 from personas.entries import (
     ActDone,
     InputSizes,
+    TurnTold,
     message_bytes,
     picture_bytes,
     told_bytes,
@@ -83,8 +83,8 @@ if TYPE_CHECKING:
     from personas.app_session import AppSession, SessionOpener
     from personas.clock import Clock
     from personas.config import AgentCredentials, AppTarget
-    from personas.decision import Arrived, Occasion, Present, Token
-    from personas.entries import History
+    from personas.decision import Arrived, Present, Token
+    from personas.entries import History, Occasion
     from personas.mind import Mind
     from personas.recall import LookupBounds
     from personas.remembering import Remembering

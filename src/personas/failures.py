@@ -80,6 +80,11 @@ class StoreDefect(Exception):  # noqa: N818
     """A database error that is no outage; the message holds a code and no parameter, row or secret."""
 
 
+class StaleGenerationError(Exception):
+    """A write of an agent's state carried a generation that is not the agent's current one: another pod has taken the
+    agent over since, and the write changed nothing."""
+
+
 class SchemaNotAtHeadError(Exception):
     """The database is not at the newest migration; the message names the field and the revisions, no secret."""
 

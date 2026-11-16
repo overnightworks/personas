@@ -1,14 +1,17 @@
-"""The memory: a Postgres table of the lines every agent read, verbatim, and the migration that owns its schema.
+"""The memory: personas' Postgres, which holds the lines every agent read, verbatim, and each agent's history, and the
+migration that owns its schema.
 
-The runner writes, searches and sweeps through ``PostgresLineStore`` and the ``memory`` commands list and erase through
-it; ``migrate`` is the only code that changes the schema. A line is keyed by the agent, the app, the place, the visit
-and its ``seq``, so reading a window again changes nothing and the time of the first read stands. No database error
+The runner writes, searches and sweeps through ``PostgresLineStore``; ``PostgresHistoryStore`` keeps each agent's
+history for the pod that owns him; the ``memory`` commands list through both and erase through ``PostgresMemory``;
+``migrate`` is the only code that changes the schema. A line is keyed by the agent, the app, the place, the visit and
+its ``seq``, so reading a window again changes nothing and the time of the first read stands. No database error
 reaches a log or a traceback with a parameter or a row in it.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
@@ -22,6 +25,7 @@ from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import (
     URL,
+    BigInteger,
     Boolean,
     Column,
     DateTime,
@@ -38,17 +42,28 @@ from sqlalchemy import (
     or_,
     select,
     text,
+    union_all,
 )
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import InterfaceError, OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
-from personas.entries import KeptLine, Visit
+from personas.entries import (
+    KeptHistory,
+    KeptLine,
+    Visit,
+    entry_from_stored,
+    entry_time,
+    stored_entry,
+    stored_turn,
+    turn_from_stored,
+)
 from personas.failures import (
     STORE_DEFECT_CODE,
     STORE_TIMEOUT_CODE,
     STORE_UNREACHABLE_CODE,
     SchemaNotAtHeadError,
+    StaleGenerationError,
     StoreDefect,
     StoreUnavailable,
     task_is_being_cancelled,
@@ -61,7 +76,7 @@ if TYPE_CHECKING:
     from sqlalchemy import Delete
 
     from personas.config import DatabaseTarget
-    from personas.entries import WindowRead
+    from personas.entries import HistoryDelta, WindowRead
     from personas.recall import LineSearch
 
 MIGRATIONS_DIRECTORY: Final = Path(__file__).parent / "migrations"
@@ -97,6 +112,31 @@ _LINES: Final = Table(
     PrimaryKeyConstraint("client_id", "app", "place_kind", "place_id", "generation", "seq"),
 )
 
+_HISTORY_ENTRIES: Final = Table(
+    "history_entries",
+    MetaData(),
+    Column("client_id", Text),
+    Column("ordinal", BigInteger),
+    Column("at", DateTime(timezone=True)),
+    Column("entry", Text),
+    PrimaryKeyConstraint("client_id", "ordinal"),
+)
+_ANSWERED_TURNS: Final = Table(
+    "answered_turns",
+    MetaData(),
+    Column("client_id", Text),
+    Column("ordinal", BigInteger),
+    Column("through", BigInteger),
+    Column("turn", Text),
+    PrimaryKeyConstraint("client_id", "ordinal"),
+)
+_AGENT_OWNER: Final = Table(
+    "agent_owner",
+    MetaData(),
+    Column("client_id", Text, primary_key=True),
+    Column("generation", BigInteger),
+)
+
 
 @dataclass(frozen=True)
 class KeptVisit:
@@ -107,6 +147,24 @@ class KeptVisit:
     lines: int
     first_read_at: datetime
     last_read_at: datetime
+
+
+@dataclass(frozen=True)
+class KeptAgentHistory:
+    """What one agent's history holds: how many entries and answered turns, and the time of its first and last entry."""
+
+    client_id: str
+    entries: int
+    answered_turns: int
+    first_at: datetime
+    last_at: datetime
+
+
+@dataclass(frozen=True)
+class MemoryErased:
+    lines: int
+    entries: int
+    answered_turns: int
 
 
 def _url(target: DatabaseTarget) -> URL:
@@ -220,13 +278,11 @@ def _rows_of(read: WindowRead) -> list[dict[str, object]]:
     ]
 
 
-class PostgresLineStore:
-    """Keeps the lines of the windows the loops read in the database the configuration names.
-
-    It opens no connection until the first write, read or sweep, which checks the schema is at its head; a schema
-    that is not ends the runner. A pooled connection is not checked before its use: a stale one fails its write or
-    read, and the pool takes another for the next. ``engine_factory`` makes the engine; a test hands it a driver of its
-    own.
+class _PostgresStore:
+    """A store in the database the configuration names, with no connection until its first statement, which checks
+    the schema is at its head; a schema that is not ends the runner. A pooled connection is not checked before its use:
+    a stale one fails its statement, and the pool takes another for the next. ``engine_factory`` makes the engine; a
+    test hands it a driver of its own.
     """
 
     def __init__(
@@ -237,6 +293,52 @@ class PostgresLineStore:
             _url(target), hide_parameters=True, connect_args=_connect_arguments(target)
         )
         self._schema_checked = False
+
+    @asynccontextmanager
+    async def _bounded_transaction(self) -> AsyncGenerator[AsyncConnection]:
+        """A transaction on a schema at its head, whose failure leaves as ``StoreUnavailable`` or ``StoreDefect``.
+
+        ``write_seconds`` bounds taking a connection, connecting and the statement against a store that answers. A
+        connection that goes dark in the middle of the statement is given up only after the driver's own cancel
+        wait, about ten seconds beyond the bound.
+        """
+        try:
+            async with asyncio.timeout(self._write_bound):
+                with _as_store_failure():
+                    async with self._engine.begin() as connection:
+                        await self._require_head(connection)
+                        yield connection
+        except TimeoutError:
+            raise StoreUnavailable(STORE_TIMEOUT_CODE) from None
+        except StoreUnavailable:
+            # The driver answers a cancellation with its own cancel request and raises a break of the connection
+            # during that wait instead of the cancellation; the time bound has taken back its own request by now.
+            # A defect is no break of the connection: it leaves as itself, so that the turn records it.
+            if task_is_being_cancelled():
+                raise asyncio.CancelledError from None
+            raise
+
+    async def require_head(self) -> None:
+        """Raises ``SchemaNotAtHeadError`` when the schema is behind this release's head, or ``StoreUnavailable`` or
+        ``StoreDefect`` with a code when it cannot tell now."""
+        async with self._bounded_transaction():
+            # Opening the transaction checks the schema; the check is the whole work.
+            pass
+
+    async def _require_head(self, connection: AsyncConnection) -> None:
+        if self._schema_checked:
+            return
+        current = await connection.run_sync(lambda each: MigrationContext.configure(each).get_current_revision())
+        if current != _head() and not _newer_than_this_release(current):
+            raise _not_at_head(current)
+        self._schema_checked = True
+
+    async def close(self) -> None:
+        await self._engine.dispose()
+
+
+class PostgresLineStore(_PostgresStore):
+    """Keeps the lines of the windows the loops read."""
 
     async def keep(self, read: WindowRead) -> None:
         """Keeps the window's lines, or raises ``StoreUnavailable`` or ``StoreDefect`` with a code."""
@@ -315,14 +417,6 @@ class PostgresLineStore:
             for agent, app, kind, place_id, generation, count, first, last in rows
         )
 
-    async def erase_agent(self, client_id: str) -> int:
-        """Deletes every line the agent keeps, in one statement, and returns how many."""
-        return await self._erase(delete(_LINES).where(_LINES.c.client_id == client_id))
-
-    async def erase_all(self) -> int:
-        """Deletes every line of every agent, in one statement, and returns how many; the schema stays."""
-        return await self._erase(delete(_LINES))
-
     async def erase_before(self, first_read_before: datetime) -> int:
         """Deletes every line of every agent first read before the time, in one statement, and returns how many."""
         return await self._erase(delete(_LINES).where(_LINES.c.first_read_at < first_read_before))
@@ -331,37 +425,151 @@ class PostgresLineStore:
         async with self._bounded_transaction() as connection:
             return (await connection.execute(statement)).rowcount
 
-    @asynccontextmanager
-    async def _bounded_transaction(self) -> AsyncGenerator[AsyncConnection]:
-        """A transaction on a schema at its head, whose failure leaves as ``StoreUnavailable`` or ``StoreDefect``.
 
-        ``write_seconds`` bounds taking a connection, connecting and the statement against a store that answers. A
-        connection that goes dark in the middle of the statement is given up only after the driver's own cancel
-        wait, about ten seconds beyond the bound.
-        """
+def _entry_rows(client_id: str, delta: HistoryDelta) -> list[dict[str, object]]:
+    return [
+        {"client_id": client_id, "ordinal": ordinal, "at": entry_time(entry), "entry": json.dumps(stored_entry(entry))}
+        for ordinal, entry in enumerate(delta.entries, start=delta.first)
+    ]
+
+
+def _turn_rows(client_id: str, delta: HistoryDelta) -> list[dict[str, object]]:
+    return [
+        {"client_id": client_id, "ordinal": ordinal, "through": turn.through, "turn": json.dumps(stored_turn(turn))}
+        for ordinal, turn in enumerate(delta.told, start=delta.first_told)
+    ]
+
+
+class PostgresHistoryStore(_PostgresStore):
+    """Keeps each agent's history: his entries by ordinal and his answered turns, written by the pod that owns him.
+
+    A pod that takes an agent over renews his generation, and every write carries the writer's; one whose generation
+    is no longer current is refused and changes nothing, so a pod that lost an agent cannot write over his new owner.
+    """
+
+    async def take_over(self, client_id: str) -> int:
+        """Renews the agent's generation and returns it: every write with an older one is refused from now on."""
+        statement = (
+            insert(_AGENT_OWNER)
+            .values(client_id=client_id, generation=1)
+            .on_conflict_do_update(
+                index_elements=[_AGENT_OWNER.c.client_id], set_={"generation": _AGENT_OWNER.c.generation + 1}
+            )
+            .returning(_AGENT_OWNER.c.generation)
+        )
+        async with self._bounded_transaction() as connection:
+            return (await connection.execute(statement)).scalar_one()
+
+    async def generation(self, client_id: str) -> int | None:
+        """The agent's current generation; none before his first owner took him."""
+        statement = select(_AGENT_OWNER.c.generation).where(_AGENT_OWNER.c.client_id == client_id)
+        async with self._bounded_transaction() as connection:
+            return (await connection.execute(statement)).scalar_one_or_none()
+
+    async def append(self, client_id: str, generation: int, delta: HistoryDelta) -> None:
+        """Writes the delta in one transaction while ``generation`` is the agent's current one, or raises
+        ``StaleGenerationError`` and writes nothing. Writing a delta again changes nothing."""
+        async with self._bounded_transaction() as connection:
+            # The shared row lock holds a take-over back until this write has committed.
+            current = (
+                select(_AGENT_OWNER.c.generation)
+                .where(_AGENT_OWNER.c.client_id == client_id, _AGENT_OWNER.c.generation == generation)
+                .with_for_update(read=True)
+            )
+            if (await connection.execute(current)).first() is None:
+                raise StaleGenerationError
+            if delta.entries:
+                await connection.execute(
+                    insert(_HISTORY_ENTRIES).values(_entry_rows(client_id, delta)).on_conflict_do_nothing()
+                )
+            if delta.told:
+                await connection.execute(
+                    insert(_ANSWERED_TURNS).values(_turn_rows(client_id, delta)).on_conflict_do_nothing()
+                )
+            await connection.execute(
+                delete(_HISTORY_ENTRIES).where(
+                    _HISTORY_ENTRIES.c.client_id == client_id, _HISTORY_ENTRIES.c.ordinal < delta.left_out
+                )
+            )
+            await connection.execute(
+                delete(_ANSWERED_TURNS).where(
+                    _ANSWERED_TURNS.c.client_id == client_id, _ANSWERED_TURNS.c.through <= delta.left_out
+                )
+            )
+
+    async def load(self, client_id: str) -> KeptHistory:
+        """The agent's history as one committed write left it; a stored value that is no entry or turn is a
+        ``StoreDefect``."""
+        # One statement reads both tables in one snapshot: two would let a write commit between them.
+        stored = union_all(
+            select(literal(False).label("is_turn"), _HISTORY_ENTRIES.c.ordinal, _HISTORY_ENTRIES.c.entry).where(
+                _HISTORY_ENTRIES.c.client_id == client_id
+            ),
+            select(literal(True), _ANSWERED_TURNS.c.ordinal, _ANSWERED_TURNS.c.turn).where(
+                _ANSWERED_TURNS.c.client_id == client_id
+            ),
+        ).subquery()
+        statement = select(stored).order_by(stored.c.is_turn, stored.c.ordinal)
+        async with self._bounded_transaction() as connection:
+            rows = (await connection.execute(statement)).all()
+        entry_rows = [(ordinal, value) for is_turn, ordinal, value in rows if not is_turn]
+        turn_rows = [(ordinal, value) for is_turn, ordinal, value in rows if is_turn]
         try:
-            async with asyncio.timeout(self._write_bound):
-                with _as_store_failure():
-                    async with self._engine.begin() as connection:
-                        await self._require_head(connection)
-                        yield connection
-        except TimeoutError:
-            raise StoreUnavailable(STORE_TIMEOUT_CODE) from None
-        except StoreUnavailable:
-            # The driver answers a cancellation with its own cancel request and raises a break of the connection
-            # during that wait instead of the cancellation; the time bound has taken back its own request by now.
-            # A defect is no break of the connection: it leaves as itself, so that the turn records it.
-            if task_is_being_cancelled():
-                raise asyncio.CancelledError from None
-            raise
+            return KeptHistory(
+                entry_rows[0][0] if entry_rows else 0,
+                tuple(entry_from_stored(json.loads(value)) for _, value in entry_rows),
+                turn_rows[0][0] if turn_rows else 0,
+                tuple(turn_from_stored(json.loads(value)) for _, value in turn_rows),
+            )
+        except ValueError:
+            raise StoreDefect(STORE_DEFECT_CODE) from None
 
-    async def _require_head(self, connection: AsyncConnection) -> None:
-        if self._schema_checked:
-            return
-        current = await connection.run_sync(lambda each: MigrationContext.configure(each).get_current_revision())
-        if current != _head() and not _newer_than_this_release(current):
-            raise _not_at_head(current)
-        self._schema_checked = True
+    async def kept_histories(self, client_id: str | None) -> tuple[KeptAgentHistory, ...]:
+        """Every agent's history, or that of one agent, ordered by agent; no entry's content."""
+        turns = (
+            select(_ANSWERED_TURNS.c.client_id, func.count().label("answered"))
+            .group_by(_ANSWERED_TURNS.c.client_id)
+            .subquery()
+        )
+        statement = (
+            select(
+                _HISTORY_ENTRIES.c.client_id,
+                func.count(),
+                func.coalesce(func.max(turns.c.answered), 0),
+                func.min(_HISTORY_ENTRIES.c.at),
+                func.max(_HISTORY_ENTRIES.c.at),
+            )
+            .outerjoin(turns, turns.c.client_id == _HISTORY_ENTRIES.c.client_id)
+            .group_by(_HISTORY_ENTRIES.c.client_id)
+            .order_by(_HISTORY_ENTRIES.c.client_id)
+        )
+        if client_id is not None:
+            statement = statement.where(_HISTORY_ENTRIES.c.client_id == client_id)
+        async with self._bounded_transaction() as connection:
+            rows = (await connection.execute(statement)).all()
+        return tuple(KeptAgentHistory(*row) for row in rows)
 
-    async def close(self) -> None:
-        await self._engine.dispose()
+
+class PostgresMemory(_PostgresStore):
+    """Everything the agents keep in the database, as ``personas memory erase`` deletes it: their lines, history
+    entries and answered turns, all of them or none."""
+
+    async def erase_agent(self, client_id: str) -> MemoryErased:
+        """Deletes the agent's lines and history in one transaction and returns how much; his generation stays, so a
+        pod that lost him still cannot write."""
+        return await self._erase(
+            delete(_LINES).where(_LINES.c.client_id == client_id),
+            delete(_HISTORY_ENTRIES).where(_HISTORY_ENTRIES.c.client_id == client_id),
+            delete(_ANSWERED_TURNS).where(_ANSWERED_TURNS.c.client_id == client_id),
+        )
+
+    async def erase_all(self) -> MemoryErased:
+        """Deletes every agent's lines and history in one transaction and returns how much; the schema and the
+        generations stay."""
+        return await self._erase(delete(_LINES), delete(_HISTORY_ENTRIES), delete(_ANSWERED_TURNS))
+
+    async def _erase(self, lines: Delete, entries: Delete, answered_turns: Delete) -> MemoryErased:
+        async with self._bounded_transaction() as connection:
+            erased_lines = (await connection.execute(lines)).rowcount
+            erased_entries = (await connection.execute(entries)).rowcount
+            return MemoryErased(erased_lines, erased_entries, (await connection.execute(answered_turns)).rowcount)

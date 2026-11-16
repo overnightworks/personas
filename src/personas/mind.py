@@ -29,8 +29,8 @@ from personas.decision import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
-    from personas.decision import AppPlace, Due, Occasion, Present, TurnTold
-    from personas.entries import Entry, History
+    from personas.decision import AppPlace, Due, Present
+    from personas.entries import Entry, History, Occasion, TurnTold
 
 
 class Mind:

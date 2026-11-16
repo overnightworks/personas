@@ -11,7 +11,7 @@ import signal
 import sys
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final, NoReturn
+from typing import TYPE_CHECKING, Final, NoReturn, Protocol
 
 import httpx2
 from agents.backend.gateway import GatewayBackend
@@ -25,7 +25,7 @@ from personas.locks import PostgresAgentLocks
 from personas.loop import Boundaries, run_all
 from personas.ownership import LockedOwnership
 from personas.readiness import FileReadyMarker, ReadinessError, ReadyMarker
-from personas.reporting import carry_trace, log_state_change
+from personas.reporting import StateChange, StoreOutage, carry_trace, log_state_change
 from personas.sweep import sweep_lines
 from personas.tokens import HttpTokenSource
 
@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from agents.tools import HandTool
 
     from personas.config import DatabaseTarget
-    from personas.memory import KeptVisit, PostgresLineStore
+    from personas.memory import KeptAgentHistory, KeptVisit, PostgresLineStore
     from personas.ownership import Ownership
     from personas.sweep import SweptStore
     from personas.turning import BackendFactory
@@ -51,6 +51,7 @@ MEMORY_COMMAND: Final = "memory"
 LIST_COMMAND: Final = "list"
 ERASE_COMMAND: Final = "erase"
 VISIT_COLUMNS: Final = ("agent", "app", "place_kind", "place_id", "generation", "lines", "first_read", "last_read")
+HISTORY_COLUMNS: Final = ("agent", "history_entries", "answered_turns", "first_at", "last_at")
 
 
 def _gateway_backends(gateway: AgentConfig | None) -> BackendFactory | None:
@@ -63,13 +64,20 @@ def _gateway_backends(gateway: AgentConfig | None) -> BackendFactory | None:
     return backend
 
 
+class SchemaChecked(Protocol):
+    async def require_head(self) -> None:
+        """Raises ``SchemaNotAtHeadError`` when the schema is behind; ``StoreUnavailable`` when it cannot tell now."""
+        ...
+
+
 @dataclass(frozen=True, kw_only=True)
 class SweepingBoundaries(Boundaries):
-    """The loops' boundaries, the ownership they run under and the store the sweep erases from, none without a
-    memory."""
+    """The loops' boundaries, the ownership they run under, the store the sweep erases from and the store whose
+    schema the runner checks before it starts, none without a memory."""
 
     ownership: Ownership
     swept: SweptStore | None = None
+    schema: SchemaChecked | None = None
 
 
 @asynccontextmanager
@@ -109,14 +117,33 @@ async def real_boundaries(config: Config, ready: ReadyMarker) -> AsyncGenerator[
                 lines=lines,
                 ownership=LockedOwnership(locks, clock, config.ownership, log_state_change),
                 swept=lines,
+                schema=lines,
             )
     finally:
         # Closing the connection frees the pod's locks: the loops have ended by now, so the next owner may start.
         await locks.close()
 
 
+async def _schema_at_head(schema: SchemaChecked, config: Config, boundaries: SweepingBoundaries) -> None:
+    """Waits until the memory's database answers, an outage reported once, and raises ``SchemaNotAtHeadError`` when
+    its schema is behind; the loops and the ready marker wait for it."""
+    outage = StoreOutage(lambda event, code: boundaries.report(StateChange(event, None, None, code)))
+    while True:
+        try:
+            await schema.require_head()
+        except StoreUnavailable as unavailable:
+            outage.failed(unavailable.code)
+        else:
+            outage.answered()
+            return
+        await boundaries.clock.sleep(config.ownership.contend_seconds)
+
+
 async def run_with_sweep(config: Config, boundaries: SweepingBoundaries) -> NoReturn:
-    """The loops, and beside them the sweep when the configuration has a memory; a defect of either ends both."""
+    """Once the memory's schema is at its head, the loops, and beside them the sweep when the configuration has a
+    memory; a defect of either ends both."""
+    if boundaries.schema is not None:
+        await _schema_at_head(boundaries.schema, config, boundaries)
     async with asyncio.TaskGroup() as group:
         group.create_task(run_all(config, boundaries, boundaries.ownership))
         if config.memory is not None and boundaries.swept is not None:
@@ -220,18 +247,46 @@ def _print_visits(visits: Iterable[KeptVisit]) -> None:
         rows.writerow((each.client_id, each.visit.app, place.kind, place.id, each.visit.generation, each.lines, *times))
 
 
-async def _perform_memory(target: DatabaseTarget, request: argparse.Namespace) -> None:
-    from personas.memory import PostgresLineStore
+def _print_histories(histories: Iterable[KeptAgentHistory]) -> None:
+    """A blank line, then tab-separated below the visits."""
+    sys.stdout.write("\n")
+    rows = csv.writer(sys.stdout, dialect="excel-tab", lineterminator="\n")
+    rows.writerow(HISTORY_COLUMNS)
+    for each in histories:
+        times = (each.first_at.isoformat(), each.last_at.isoformat())
+        rows.writerow((each.client_id, each.entries, each.answered_turns, *times))
 
-    store = PostgresLineStore(target)
+
+async def _list_memory(target: DatabaseTarget, client_id: str | None) -> None:
+    from personas.memory import PostgresHistoryStore, PostgresLineStore
+
+    lines, histories = PostgresLineStore(target), PostgresHistoryStore(target)
     try:
-        if request.command == LIST_COMMAND:
-            _print_visits(await store.kept_visits(request.agent))
-            return
-        erased = await (store.erase_all() if request.every_agent else store.erase_agent(request.agent))
-        sys.stdout.write(f"{erased} lines erased\n")
+        _print_visits(await lines.kept_visits(client_id))
+        _print_histories(await histories.kept_histories(client_id))
     finally:
-        await store.close()
+        await lines.close()
+        await histories.close()
+
+
+async def _erase_memory(target: DatabaseTarget, request: argparse.Namespace) -> None:
+    from personas.memory import PostgresMemory
+
+    memory = PostgresMemory(target)
+    try:
+        erased = await (memory.erase_all() if request.every_agent else memory.erase_agent(request.agent))
+    finally:
+        await memory.close()
+    sys.stdout.write(
+        f"{erased.lines} lines, {erased.entries} history entries and {erased.answered_turns} answered turns erased\n"
+    )
+
+
+async def _perform_memory(target: DatabaseTarget, request: argparse.Namespace) -> None:
+    if request.command == LIST_COMMAND:
+        await _list_memory(target, request.agent)
+    else:
+        await _erase_memory(target, request)
 
 
 def _memory(config: Config, request: argparse.Namespace) -> None:

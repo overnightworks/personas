@@ -17,12 +17,10 @@ from personas.decision import (
     SUSPENDED_RETRY_SECONDS,
     AppPlace,
     Joined,
-    Lines,
     Memory,
     Reaction,
     Suspend,
     Token,
-    Waiting,
     accepts_for,
     active_view_places,
     active_window_places,
@@ -47,7 +45,7 @@ from personas.decision import (
     view_turn_due,
     waking_line,
 )
-from personas.entries import ViewSeen, Visit, WindowRead, taken_lines
+from personas.entries import Lines, ViewSeen, Visit, Waiting, WindowRead, taken_lines
 from personas.failures import CallFailure, leaves_of, raise_if_cancelled
 from personas.mind import Mind
 from personas.recall import LookupBounds

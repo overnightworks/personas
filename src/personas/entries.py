@@ -6,8 +6,8 @@ from __future__ import annotations
 import itertools
 import json
 from dataclasses import dataclass, field
-from datetime import UTC
-from typing import TYPE_CHECKING
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Final, cast
 
 from agents.member import (
     PartialSpeech,
@@ -20,13 +20,13 @@ from agents.member import (
     Spoken,
     Written,
 )
+from agents.turn import JsonObject  # noqa: TC002 - pydantic resolves the fields' types at run time
+from pydantic import TypeAdapter
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
-    from datetime import datetime
 
     from agents.tools import ToolImage
-    from agents.turn import JsonObject
 
 
 @dataclass(frozen=True)
@@ -122,6 +122,104 @@ class SaidAloud:
 
 
 type Entry = KeptLine | ViewSeen | ActDone | SaidAloud
+
+
+@dataclass(frozen=True)
+class Lines:
+    """Why a written turn runs: the lines of one visit's window taken since his last turn there, which the history
+    holds, and whether older ones were never seen. ``traceparent`` is the trace the newest line that made the turn due
+    entered in, which the turn continues; none opens a trace of its own."""
+
+    generation: str
+    seqs: frozenset[int]
+    missed: bool
+    traceparent: str | None = None
+
+
+@dataclass(frozen=True)
+class Waiting:
+    """Why a view turn runs: the place's view waits for the agent at this revision, which the history holds.
+    ``traceparent`` is the trace the view moved to it in, which the turn continues; none opens a trace of its own."""
+
+    revision: int
+    traceparent: str | None = None
+
+
+type Occasion = Lines | Waiting
+
+
+@dataclass(frozen=True)
+class TurnTold:
+    """An answered turn and what its message told: the turn's app, place, occasion and admission time, and ``through``,
+    the ordinal after the last entry of the history it told. It tells the entries of the history from the ordinal
+    where the message before it ended, or from the oldest the history holds."""
+
+    at: datetime
+    app: str
+    place: PlaceRef
+    occasion: Occasion
+    aloud: bool
+    through: int
+
+
+@dataclass(frozen=True)
+class HistoryDelta:
+    """What one agent's history gained and lost since its last write: the entries appended, the first of them at the
+    ordinal ``first``, the turns answered in their order, the first of them at the ordinal ``first_told``, and
+    ``left_out``, the ordinal of the oldest entry it still holds; every older entry has left it, and so has every
+    answered turn that told none of the rest. An answered turn's ordinal, not its wall time, is its identity and order.
+    """
+
+    first: int
+    entries: tuple[Entry, ...] = field(repr=False)
+    first_told: int
+    told: tuple[TurnTold, ...]
+    left_out: int
+
+
+@dataclass(frozen=True)
+class KeptHistory:
+    """One agent's history as the store keeps it: its entries in order, the first of them at the ordinal ``first``,
+    and his answered turns that tell one of them in the order they were answered, the first of them at the ordinal
+    ``first_told``."""
+
+    first: int
+    entries: tuple[Entry, ...] = field(repr=False)
+    first_told: int
+    told: tuple[TurnTold, ...]
+
+
+STORED_KIND_KEY: Final = "entry"
+"""The key of a stored entry that names its kind."""
+_ENTRY_KINDS: Final = (("line", KeptLine), ("view", ViewSeen), ("act", ActDone), ("speech", SaidAloud))
+_STORED_ENTRIES: Final = {kind: TypeAdapter(of_kind) for kind, of_kind in _ENTRY_KINDS}
+_KIND_OF_ENTRY: Final = {of_kind: kind for kind, of_kind in _ENTRY_KINDS}
+_ANY_ENTRY: Final = TypeAdapter[Entry](Entry)
+_STORED_TURN: Final = TypeAdapter(TurnTold)
+
+
+def stored_entry(entry: Entry) -> JsonObject:
+    """The entry as a JSON object, its kind under ``STORED_KIND_KEY``, which ``entry_from_stored`` turns back into an
+    equal entry."""
+    return {STORED_KIND_KEY: _KIND_OF_ENTRY[type(entry)]} | _ANY_ENTRY.dump_python(entry, mode="json")
+
+
+def entry_from_stored(stored: object) -> Entry:
+    """The entry ``stored_entry`` made ``stored`` of; a value it did not make raises a ``ValueError``."""
+    kind = cast("dict[str, object]", stored).get(STORED_KIND_KEY) if isinstance(stored, dict) else None
+    if not isinstance(kind, str) or kind not in _STORED_ENTRIES:
+        raise ValueError("the stored value names no kind of entry")
+    return _STORED_ENTRIES[kind].validate_python(stored)
+
+
+def stored_turn(turn: TurnTold) -> JsonObject:
+    """The answered turn as a JSON object, which ``turn_from_stored`` turns back into an equal turn."""
+    return _STORED_TURN.dump_python(turn, mode="json")
+
+
+def turn_from_stored(stored: JsonObject) -> TurnTold:
+    """The answered turn ``stored_turn`` made ``stored`` of; a value it did not make raises a ``ValueError``."""
+    return _STORED_TURN.validate_python(stored)
 
 
 def entry_time(entry: Entry) -> datetime:

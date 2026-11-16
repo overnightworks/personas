@@ -54,7 +54,6 @@ from personas.decision import (
     Arrived,
     Held,
     Joined,
-    Lines,
     Memory,
     Paused,
     Perception,
@@ -66,9 +65,7 @@ from personas.decision import (
     Token,
     TurnEnding,
     Turns,
-    TurnTold,
     UnrecognisedRefusal,
-    Waiting,
     accepts_for,
     act_outcome,
     active_view_places,
@@ -125,7 +122,7 @@ from personas.decision import (
     with_due,
     without_due,
 )
-from personas.entries import Answered, Entry, History, KeptLine, Unanswered, ViewSeen, Visit
+from personas.entries import Answered, Entry, History, KeptLine, Lines, TurnTold, Unanswered, ViewSeen, Visit, Waiting
 from personas.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer
 from personas.recall import RECALL_TOOL
 from personas.secret import Secret

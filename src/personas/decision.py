@@ -42,8 +42,11 @@ from personas.entries import (
     Entry,
     History,
     KeptLine,
+    Lines,
+    Occasion,
     SaidAloud,
     SpeechOutcome,
+    TurnTold,
     Unanswered,
     ViewSeen,
     entry_size,
@@ -58,7 +61,6 @@ from personas.recall import RECALL_TOOL
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
-    from datetime import datetime
 
     from agents.member import FigureRef, Invitation, VoiceName
     from agents.tools import ToolDeclaration, ToolOutcome
@@ -575,20 +577,6 @@ def _not_his_own(entry: Entry) -> bool:
 
 
 @dataclass(frozen=True)
-class TurnTold:
-    """An answered turn and what its message told: the turn's app, place, occasion and admission time, and ``through``,
-    the ordinal after the last entry of the history it told. It tells the entries of the history from the ordinal
-    where the message before it ended, or from the oldest the history holds."""
-
-    at: datetime
-    app: str
-    place: PlaceRef
-    occasion: Occasion
-    aloud: bool
-    through: int
-
-
-@dataclass(frozen=True)
 class Present:
     """What one agent's next request holds besides its header and its own turn: the history and the answered turns whose
     messages are still in it, oldest first."""
@@ -744,30 +732,6 @@ def turn_call_bound(bounds: Iterable[int]) -> int | None:
 def call_within_bound(made: int, bound: int) -> bool:
     """Whether an app whose bound is ``bound`` takes one more call after ``made``."""
     return made < bound
-
-
-@dataclass(frozen=True)
-class Lines:
-    """Why a written turn runs: the lines of one visit's window taken since his last turn there, which the history
-    holds, and whether older ones were never seen. ``traceparent`` is the trace the newest line that made the turn due
-    entered in, which the turn continues; none opens a trace of its own."""
-
-    generation: str
-    seqs: frozenset[int]
-    missed: bool
-    traceparent: str | None = None
-
-
-@dataclass(frozen=True)
-class Waiting:
-    """Why a view turn runs: the place's view waits for the agent at this revision, which the history holds.
-    ``traceparent`` is the trace the view moved to it in, which the turn continues; none opens a trace of its own."""
-
-    revision: int
-    traceparent: str | None = None
-
-
-type Occasion = Lines | Waiting
 
 
 @dataclass(frozen=True)

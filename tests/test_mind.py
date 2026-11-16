@@ -12,13 +12,9 @@ from personas.decision import (
     BACKOFF_BASE_SECONDS,
     BACKOFF_CAP_SECONDS,
     AppPlace,
-    Lines,
-    Occasion,
-    TurnTold,
-    Waiting,
     turn_messages,
 )
-from personas.entries import KeptLine, ViewSeen, Visit, entry_size
+from personas.entries import KeptLine, Lines, Occasion, TurnTold, ViewSeen, Visit, Waiting, entry_size
 from personas.mind import Mind
 
 READ_AT = datetime(2026, 11, 11, 20, 0, tzinfo=UTC)
