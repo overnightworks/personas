@@ -128,11 +128,10 @@ async def test_a_write_with_a_generation_that_is_not_current_is_refused_and_chan
         current = await histories.take_over(AGENT)
         await histories.append(AGENT, current, appended(0, said(1, "kept"), told=[a_turn(1)]))
     before = await histories.load(AGENT)
+    delta = appended(1, said(2, "stale"), told=[a_turn(2, 1)], first_told=1, left_out=1)
 
     with pytest.raises(StaleGenerationError):
-        await histories.append(
-            AGENT, stale, appended(1, said(2, "stale"), told=[a_turn(2, 1)], first_told=1, left_out=1)
-        )
+        await histories.append(AGENT, stale, delta)
 
     assert await histories.load(AGENT) == before
 
