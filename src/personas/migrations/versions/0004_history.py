@@ -21,10 +21,10 @@ def upgrade() -> None:
     op.create_table(
         "answered_turns",
         sa.Column("client_id", sa.Text, nullable=False),
-        sa.Column("at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("ordinal", sa.BigInteger, nullable=False),
         sa.Column("through", sa.BigInteger, nullable=False),
         sa.Column("turn", sa.Text, nullable=False),
-        sa.PrimaryKeyConstraint("client_id", "at"),
+        sa.PrimaryKeyConstraint("client_id", "ordinal"),
     )
     op.create_table(
         "agent_owner",

@@ -165,11 +165,14 @@ class TurnTold:
 @dataclass(frozen=True)
 class HistoryDelta:
     """What one agent's history gained and lost since its last write: the entries appended, the first of them at the
-    ordinal ``first``, the turns answered, and ``left_out``, the ordinal of the oldest entry it still holds; every older
-    entry has left it, and so has every answered turn that told none of the rest."""
+    ordinal ``first``, the turns answered in their order, the first of them at the ordinal ``first_told``, and
+    ``left_out``, the ordinal of the oldest entry it still holds; every older entry has left it, and so has every
+    answered turn that told none of the rest. An answered turn's ordinal, not its wall time, is its identity and order.
+    """
 
     first: int
     entries: tuple[Entry, ...] = field(repr=False)
+    first_told: int
     told: tuple[TurnTold, ...]
     left_out: int
 
@@ -177,10 +180,12 @@ class HistoryDelta:
 @dataclass(frozen=True)
 class KeptHistory:
     """One agent's history as the store keeps it: its entries in order, the first of them at the ordinal ``first``,
-    and his answered turns that tell one of them, oldest first."""
+    and his answered turns that tell one of them in the order they were answered, the first of them at the ordinal
+    ``first_told``."""
 
     first: int
     entries: tuple[Entry, ...] = field(repr=False)
+    first_told: int
     told: tuple[TurnTold, ...]
 
 

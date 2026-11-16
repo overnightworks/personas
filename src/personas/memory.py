@@ -124,10 +124,10 @@ _ANSWERED_TURNS: Final = Table(
     "answered_turns",
     MetaData(),
     Column("client_id", Text),
-    Column("at", DateTime(timezone=True)),
+    Column("ordinal", BigInteger),
     Column("through", BigInteger),
     Column("turn", Text),
-    PrimaryKeyConstraint("client_id", "at"),
+    PrimaryKeyConstraint("client_id", "ordinal"),
 )
 _AGENT_OWNER: Final = Table(
     "agent_owner",
@@ -433,8 +433,8 @@ def _entry_rows(client_id: str, delta: HistoryDelta) -> list[dict[str, object]]:
 
 def _turn_rows(client_id: str, delta: HistoryDelta) -> list[dict[str, object]]:
     return [
-        {"client_id": client_id, "at": turn.at, "through": turn.through, "turn": json.dumps(stored_turn(turn))}
-        for turn in delta.told
+        {"client_id": client_id, "ordinal": ordinal, "through": turn.through, "turn": json.dumps(stored_turn(turn))}
+        for ordinal, turn in enumerate(delta.told, start=delta.first_told)
     ]
 
 
@@ -503,9 +503,9 @@ class PostgresHistoryStore(_PostgresStore):
             .order_by(_HISTORY_ENTRIES.c.ordinal)
         )
         turns = (
-            select(_ANSWERED_TURNS.c.turn)
+            select(_ANSWERED_TURNS.c.ordinal, _ANSWERED_TURNS.c.turn)
             .where(_ANSWERED_TURNS.c.client_id == client_id)
-            .order_by(_ANSWERED_TURNS.c.at)
+            .order_by(_ANSWERED_TURNS.c.ordinal)
         )
         async with self._bounded_transaction() as connection:
             entry_rows = (await connection.execute(entries)).all()
@@ -514,6 +514,7 @@ class PostgresHistoryStore(_PostgresStore):
             return KeptHistory(
                 entry_rows[0].ordinal if entry_rows else 0,
                 tuple(entry_from_stored(json.loads(row.entry)) for row in entry_rows),
+                turn_rows[0].ordinal if turn_rows else 0,
                 tuple(turn_from_stored(json.loads(row.turn)) for row in turn_rows),
             )
         except ValueError:

@@ -138,8 +138,8 @@ def histories_of_two_agents(target: DatabaseTarget, spoken: Spoken) -> None:
     turns = (a_turn_through(1, 0.5), a_turn_through(3, 2.5))
     histories_kept(
         target,
-        (AGENT, HistoryDelta(0, spoken.history(3, 0), turns, left_out=0)),
-        (OTHER_AGENT, HistoryDelta(0, spoken.history(1, 5), (), left_out=0)),
+        (AGENT, HistoryDelta(0, spoken.history(3, 0), 0, turns, left_out=0)),
+        (OTHER_AGENT, HistoryDelta(0, spoken.history(1, 5), 0, (), left_out=0)),
     )
 
 
@@ -472,7 +472,7 @@ def test_erasing_one_agent_removes_his_lines_entries_and_answered_turns_and_keep
     main(arguments=["memory", "erase", "--agent", AGENT])
 
     assert capsys.readouterr().out == "4 lines, 3 history entries and 2 answered turns erased\n"
-    assert history_loaded(database, AGENT) == KeptHistory(0, (), ())
+    assert history_loaded(database, AGENT) == KeptHistory(0, (), 0, ())
     assert history_loaded(database, OTHER_AGENT) == others_before
 
 
@@ -485,7 +485,7 @@ def test_erasing_all_removes_every_history_and_the_next_owner_writes_a_new_one(f
     main(arguments=list(ERASE_ALL))
 
     assert capsys.readouterr().out == "0 lines, 4 history entries and 2 answered turns erased\n"
-    assert history_loaded(database, OTHER_AGENT) == KeptHistory(0, (), ())
+    assert history_loaded(database, OTHER_AGENT) == KeptHistory(0, (), 0, ())
     again = spoken.history(1, 6)
-    histories_kept(database, (AGENT, HistoryDelta(0, again, (), left_out=0)))
-    assert history_loaded(database, AGENT) == KeptHistory(0, again, ())
+    histories_kept(database, (AGENT, HistoryDelta(0, again, 0, (), left_out=0)))
+    assert history_loaded(database, AGENT) == KeptHistory(0, again, 0, ())

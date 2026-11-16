@@ -37,8 +37,8 @@ def a_turn(through: int, minutes: int = 0) -> TurnTold:
     return TurnTold(LATER + timedelta(minutes=minutes), APP, MORNING.place, occasion, aloud=True, through=through)
 
 
-def appended(first: int, *entries, told=(), left_out: int = 0) -> HistoryDelta:
-    return HistoryDelta(first, tuple(entries), tuple(told), left_out)
+def appended(first: int, *entries, told=(), first_told: int = 0, left_out: int = 0) -> HistoryDelta:
+    return HistoryDelta(first, tuple(entries), first_told, tuple(told), left_out)
 
 
 async def test_a_new_owner_gets_the_next_generation_and_reading_it_gives_the_same(histories):
@@ -59,24 +59,35 @@ async def test_the_history_loads_every_appended_entry_and_answered_turn_in_order
 
     await histories.append(AGENT, mine, appended(0, said(1, "first"), an_act(), told=[a_turn(2)]))
     await histories.append(OTHER_AGENT, others, appended(0, said(1, "not his")))
-    await histories.append(AGENT, mine, appended(2, view, a_sentence(), told=[a_turn(4, minutes=1)]))
+    await histories.append(AGENT, mine, appended(2, view, a_sentence(), told=[a_turn(4, minutes=1)], first_told=1))
 
     assert await histories.load(AGENT) == KeptHistory(
-        0, (said(1, "first"), an_act(), view, a_sentence()), (a_turn(2), a_turn(4, minutes=1))
+        0, (said(1, "first"), an_act(), view, a_sentence()), 0, (a_turn(2), a_turn(4, minutes=1))
     )
 
 
+async def test_answered_turns_load_in_the_order_they_were_appended_whatever_their_wall_time(histories):
+    mine = await histories.take_over(AGENT)
+    at_the_same_time = [a_turn(1), a_turn(2)]
+    earlier = a_turn(2, minutes=-1)
+    await histories.append(AGENT, mine, appended(0, said(1, "a"), said(2, "b"), told=at_the_same_time))
+
+    await histories.append(AGENT, mine, appended(2, told=[earlier], first_told=2))
+
+    assert (await histories.load(AGENT)).told == (*at_the_same_time, earlier)
+
+
 async def test_an_agent_with_no_history_loads_an_empty_one(histories):
-    assert await histories.load(AGENT) == KeptHistory(0, (), ())
+    assert await histories.load(AGENT) == KeptHistory(0, (), 0, ())
 
 
 async def test_entries_that_left_the_history_and_the_turns_that_told_only_them_are_gone_after_the_write(histories):
     mine = await histories.take_over(AGENT)
     await histories.append(AGENT, mine, appended(0, said(1, "a"), said(2, "b"), told=[a_turn(1), a_turn(2, 1)]))
 
-    await histories.append(AGENT, mine, appended(2, said(3, "c"), told=[a_turn(3, 2)], left_out=1))
+    await histories.append(AGENT, mine, appended(2, said(3, "c"), told=[a_turn(3, 2)], first_told=2, left_out=1))
 
-    assert await histories.load(AGENT) == KeptHistory(1, (said(2, "b"), said(3, "c")), (a_turn(2, 1), a_turn(3, 2)))
+    assert await histories.load(AGENT) == KeptHistory(1, (said(2, "b"), said(3, "c")), 1, (a_turn(2, 1), a_turn(3, 2)))
 
 
 async def test_a_delta_written_again_after_an_unknown_outcome_changes_nothing(histories):
@@ -86,7 +97,7 @@ async def test_a_delta_written_again_after_an_unknown_outcome_changes_nothing(hi
 
     await histories.append(AGENT, mine, delta)
 
-    assert await histories.load(AGENT) == KeptHistory(0, (said(1, "once"),), (a_turn(1),))
+    assert await histories.load(AGENT) == KeptHistory(0, (said(1, "once"),), 0, (a_turn(1),))
 
 
 @pytest.mark.parametrize("taken_over", [True, False], ids=["taken over since", "never owned"])
@@ -99,7 +110,9 @@ async def test_a_write_with_a_generation_that_is_not_current_is_refused_and_chan
     before = await histories.load(AGENT)
 
     with pytest.raises(StaleGenerationError):
-        await histories.append(AGENT, stale, appended(1, said(2, "stale"), told=[a_turn(2, 1)], left_out=1))
+        await histories.append(
+            AGENT, stale, appended(1, said(2, "stale"), told=[a_turn(2, 1)], first_told=1, left_out=1)
+        )
 
     assert await histories.load(AGENT) == before
 
