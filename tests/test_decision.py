@@ -82,6 +82,7 @@ from personas.decision import (
     held_apps,
     held_told,
     holds_a_place,
+    is_not_granted,
     is_voice_app,
     jsonrpc_code,
     left_out_for,
@@ -290,6 +291,24 @@ def test_the_pause_for_a_spent_budget_doubles_from_the_backoff_base_up_to_its_ca
 )
 def test_each_failure_makes_the_loop_renew_suspend_or_back_off(failure, already_renewed, reaction):
     assert reaction_to(failure, already_renewed=already_renewed) == reaction
+
+
+@pytest.mark.parametrize(
+    ("failure", "not_granted"),
+    [
+        (TokenStatusFailure(400), True),
+        (TokenStatusFailure(401), True),
+        (TokenStatusFailure(403), True),
+        (TokenStatusFailure(500), False),
+        (StatusFailure(401), True),
+        (StatusFailure(403), True),
+        (StatusFailure(500), False),
+        (UnusableAnswer("http_307"), False),
+        (Unreachable("down"), False),
+    ],
+)
+def test_only_a_realm_refusal_or_an_app_401_or_403_says_the_agent_is_not_granted(failure, not_granted):
+    assert is_not_granted(failure) is not_granted
 
 
 def test_a_json_rpc_code_is_logged_as_the_word_and_the_signed_number():
