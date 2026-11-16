@@ -26,6 +26,7 @@ from personas.decision import (
     decisive_failure,
     failure_code,
     held_told,
+    is_not_granted,
     offered_declarations,
     turn_call_bound,
     turn_messages,
@@ -214,7 +215,8 @@ class Turning:
     after the lookup when ``[memory]`` is set.
 
     It holds no state across turns beyond what it records into the agent's mind: each relayed call that passed its
-    app's bound, once its request ended. A call is held back, once per turn, when something not his own arrived in
+    app's bound, once its request ended, and each tools-only app the realm refuses the agent, which no turn holds
+    until its retry is due. A call is held back, once per turn, when something not his own arrived in
     his history since the turn's admission: it is not sent and the model is told what arrived. The token, its use on
     a session and the two reports are the loop's, handed over as callables and read at each call. A lookup reads the
     memory through the loop's ``Remembering``, takes nothing into the agent's history and is never held back.
@@ -414,8 +416,8 @@ class Turning:
 
     async def _hold_tools(self, session: AppSession, record: TaskRecord, admitted: Admitted) -> _HeldTools:
         """The lookup when the configuration has a memory, then the tools of the place's app, of each app named in the
-        admission and of each tools-only app that answers, in the configuration's order, each app counting its own
-        calls.
+        admission and of each tools-only app the realm grants and that answers, in the configuration's order, each app
+        counting its own calls.
 
         Of each app every tool it lists now is held but the runner's reserved names and those an earlier app holds,
         none when it lists none. Another app whose listing fails is left out and reported once, and the turn holds the
@@ -434,13 +436,15 @@ class Turning:
             calls = _Calls(max_calls)
             if app.mcp_url == self._app.mcp_url:
                 declared = own
-            elif not app.listens or app.mcp_url in admitted.apps:
+            elif (app.listens and app.mcp_url not in admitted.apps) or (
+                not app.listens and self._mind.holds_back(app.mcp_url, self._clock.now())
+            ):
+                continue
+            else:
                 found = await self._list_elsewhere(app, record)
                 if found is None:
                     continue
                 declared = found
-            else:
-                continue
             offered, left_out = offered_declarations(declared, taken)
             self._tools_left_out(app, left_out)
             taken |= {each.name for each in offered}
@@ -497,8 +501,14 @@ class Turning:
         """The tools another app lists, or ``None`` after the report of its failed listing."""
         declared = await self._ask_elsewhere(app, partial(self._list_tools, app), record, opening=True)
         if isinstance(declared, CallFailure):
-            self._report(_failure_event(app), failure_code(declared), app, declared)
+            if not app.listens and is_not_granted(declared):
+                if self._mind.refused(app.mcp_url, self._clock.now()):
+                    self._report(Event.SUSPENDED, failure_code(declared), app, declared)
+            else:
+                self._report(_failure_event(app), failure_code(declared), app, declared)
             return None
+        if not app.listens and self._mind.granted(app.mcp_url):
+            self._report(Event.RESUMED, None, app, None)
         return declared
 
     async def _list_tools(self, app: AppTarget, session: AppSession) -> tuple[ToolDeclaration, ...]:

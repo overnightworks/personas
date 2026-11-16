@@ -19,6 +19,7 @@ from personas.decision import (
     held_apps,
     pause_left,
     paused_for,
+    refusal_retry_at,
     released,
     taken_into,
     with_due,
@@ -49,6 +50,7 @@ class Mind:
         self._present = EMPTY_PRESENT
         self._turns = Turns()
         self._placed = frozenset[str]()
+        self._not_granted: dict[str, float] = {}
         self._wake_events: list[asyncio.Event] = []
         self._next_take = asyncio.Event()
 
@@ -99,6 +101,22 @@ class Mind:
     def held_apps(self, own: str) -> frozenset[str]:
         """The apps, other than ``own``, where he holds an active place."""
         return held_apps(own, self._placed)
+
+    def holds_back(self, app: str, now: float) -> bool:
+        """Whether the realm refused him ``app`` and its retry is not yet due at ``now``."""
+        retry_at = self._not_granted.get(app)
+        return retry_at is not None and now < retry_at
+
+    def refused(self, app: str, now: float) -> bool:
+        """The realm or ``app`` did not grant him ``app`` at ``now``: it is asked again when the retry is due. Whether
+        this is the first refusal since the last grant."""
+        first = app not in self._not_granted
+        self._not_granted[app] = refusal_retry_at(now)
+        return first
+
+    def granted(self, app: str) -> bool:
+        """``app`` answered him. Whether it was refused before."""
+        return self._not_granted.pop(app, None) is not None
 
     def wake_event(self) -> asyncio.Event:
         """A new event a loop waits on; the end of a turn or of a pause sets it, and so does a place dropped while no

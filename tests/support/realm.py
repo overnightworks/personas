@@ -56,6 +56,8 @@ class FakeRealm:
         self.issued_for: dict[str, list[str]] = {scope: []}
         self.refusing = False
         self.refused_scopes: set[str] = set()
+        self.refused_to: set[tuple[str, str]] = set()
+        """Pairs of a client id and a scope the realm refuses that client alone."""
         self.reaches_app = True
         self.refusals: asyncio.Queue[None] = asyncio.Queue()
 
@@ -83,7 +85,12 @@ class FakeRealm:
             and form.get("client_secret") == agent.client_secret.reveal()
             and form.get("scope") in self._apps
         )
-        if self.refusing or not asked_as_agent or form["scope"] in self.refused_scopes:
+        if (
+            self.refusing
+            or not asked_as_agent
+            or form["scope"] in self.refused_scopes
+            or (form["client_id"], form["scope"]) in self.refused_to
+        ):
             self.refusals.put_nowait(None)
             return httpx2.Response(401, json={"error": "invalid_client"})
         claims = {
