@@ -165,6 +165,8 @@ async def test_after_a_sigkill_of_the_holder_the_takers_next_turn_carries_the_ea
 
     await holder.kill()
     await until(lambda: is_listening(other, AGENT), "the other pod listens for the agent")
+    reads_by_the_holder = pods.app.window_reads(PLACE_ID)
+    await until(lambda: pods.app.window_reads(PLACE_ID) > reads_by_the_holder, "the other pod read the place")
     pods.app.speak(PLACE_ID, PERSON, "Ada", LATER_LINE)
     await pods.app.said_count(2)
 
