@@ -160,7 +160,8 @@ class KeptAgentHistory:
 
 
 @dataclass(frozen=True)
-class HistoryErased:
+class MemoryErased:
+    lines: int
     entries: int
     answered_turns: int
 
@@ -414,14 +415,6 @@ class PostgresLineStore(_PostgresStore):
             for agent, app, kind, place_id, generation, count, first, last in rows
         )
 
-    async def erase_agent(self, client_id: str) -> int:
-        """Deletes every line the agent keeps, in one statement, and returns how many."""
-        return await self._erase(delete(_LINES).where(_LINES.c.client_id == client_id))
-
-    async def erase_all(self) -> int:
-        """Deletes every line of every agent, in one statement, and returns how many; the schema stays."""
-        return await self._erase(delete(_LINES))
-
     async def erase_before(self, first_read_before: datetime) -> int:
         """Deletes every line of every agent first read before the time, in one statement, and returns how many."""
         return await self._erase(delete(_LINES).where(_LINES.c.first_read_at < first_read_before))
@@ -551,19 +544,27 @@ class PostgresHistoryStore(_PostgresStore):
             rows = (await connection.execute(statement)).all()
         return tuple(KeptAgentHistory(*row) for row in rows)
 
-    async def erase_agent(self, client_id: str) -> HistoryErased:
-        """Deletes the agent's history in one transaction and returns how much; his generation stays, so a pod that
-        lost him still cannot write."""
+
+class PostgresMemory(_PostgresStore):
+    """Everything the agents keep in the database, as ``personas memory erase`` deletes it: their lines, history
+    entries and answered turns, all of them or none."""
+
+    async def erase_agent(self, client_id: str) -> MemoryErased:
+        """Deletes the agent's lines and history in one transaction and returns how much; his generation stays, so a
+        pod that lost him still cannot write."""
         return await self._erase(
+            delete(_LINES).where(_LINES.c.client_id == client_id),
             delete(_HISTORY_ENTRIES).where(_HISTORY_ENTRIES.c.client_id == client_id),
             delete(_ANSWERED_TURNS).where(_ANSWERED_TURNS.c.client_id == client_id),
         )
 
-    async def erase_all(self) -> HistoryErased:
-        """Deletes every agent's history in one transaction and returns how much; the generations stay."""
-        return await self._erase(delete(_HISTORY_ENTRIES), delete(_ANSWERED_TURNS))
+    async def erase_all(self) -> MemoryErased:
+        """Deletes every agent's lines and history in one transaction and returns how much; the schema and the
+        generations stay."""
+        return await self._erase(delete(_LINES), delete(_HISTORY_ENTRIES), delete(_ANSWERED_TURNS))
 
-    async def _erase(self, entries: Delete, answered_turns: Delete) -> HistoryErased:
+    async def _erase(self, lines: Delete, entries: Delete, answered_turns: Delete) -> MemoryErased:
         async with self._bounded_transaction() as connection:
+            erased_lines = (await connection.execute(lines)).rowcount
             erased_entries = (await connection.execute(entries)).rowcount
-            return HistoryErased(erased_entries, (await connection.execute(answered_turns)).rowcount)
+            return MemoryErased(erased_lines, erased_entries, (await connection.execute(answered_turns)).rowcount)

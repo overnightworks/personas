@@ -257,27 +257,36 @@ def _print_histories(histories: Iterable[KeptAgentHistory]) -> None:
         rows.writerow((each.client_id, each.entries, each.answered_turns, *times))
 
 
-async def _perform_memory(target: DatabaseTarget, request: argparse.Namespace) -> None:
+async def _list_memory(target: DatabaseTarget, client_id: str | None) -> None:
     from personas.memory import PostgresHistoryStore, PostgresLineStore
 
     lines, histories = PostgresLineStore(target), PostgresHistoryStore(target)
     try:
-        if request.command == LIST_COMMAND:
-            _print_visits(await lines.kept_visits(request.agent))
-            _print_histories(await histories.kept_histories(request.agent))
-            return
-        if request.every_agent:
-            erased_lines, erased_history = await lines.erase_all(), await histories.erase_all()
-        else:
-            erased_lines = await lines.erase_agent(request.agent)
-            erased_history = await histories.erase_agent(request.agent)
-        sys.stdout.write(
-            f"{erased_lines} lines, {erased_history.entries} history entries"
-            f" and {erased_history.answered_turns} answered turns erased\n"
-        )
+        _print_visits(await lines.kept_visits(client_id))
+        _print_histories(await histories.kept_histories(client_id))
     finally:
         await lines.close()
         await histories.close()
+
+
+async def _erase_memory(target: DatabaseTarget, request: argparse.Namespace) -> None:
+    from personas.memory import PostgresMemory
+
+    memory = PostgresMemory(target)
+    try:
+        erased = await (memory.erase_all() if request.every_agent else memory.erase_agent(request.agent))
+    finally:
+        await memory.close()
+    sys.stdout.write(
+        f"{erased.lines} lines, {erased.entries} history entries and {erased.answered_turns} answered turns erased\n"
+    )
+
+
+async def _perform_memory(target: DatabaseTarget, request: argparse.Namespace) -> None:
+    if request.command == LIST_COMMAND:
+        await _list_memory(target, request.agent)
+    else:
+        await _erase_memory(target, request)
 
 
 def _memory(config: Config, request: argparse.Namespace) -> None:

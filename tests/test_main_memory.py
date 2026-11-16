@@ -37,8 +37,7 @@ SECOND_VISIT = Visit(APP, PlaceRef(kind="call", id="room-1"), "generation-2")
 OTHER_VISIT = Visit(OTHER_APP, PlaceRef(kind="call", id="room-9"), "generation-1")
 LIST = ("memory", "list")
 ERASE_ALL = ("memory", "erase", "--all")
-RENAME_CLIENT_ID = "ALTER TABLE lines RENAME COLUMN client_id TO renamed"
-RENAME_CLIENT_ID_BACK = "ALTER TABLE lines RENAME COLUMN renamed TO client_id"
+ERASE_AGENT = ("memory", "erase", "--agent", AGENT)
 SCHEMA_BEHIND = "UPDATE alembic_version SET version_num = '0001'"
 
 
@@ -371,13 +370,17 @@ def test_a_memory_command_against_a_store_that_cannot_be_reached_stops_with_its_
 
 
 @pytest.mark.postgres
-@pytest.mark.parametrize("arguments", [LIST, ("memory", "erase", "--agent", AGENT)], ids=["list", "erase"])
+@pytest.mark.parametrize(
+    ("arguments", "broken_table"),
+    [(LIST, "lines"), (ERASE_AGENT, "lines"), (ERASE_AGENT, "answered_turns")],
+    ids=["list", "erase", "erase failing past the lines"],
+)
 def test_a_memory_command_met_by_a_database_error_stops_with_its_code_and_deletes_nothing(
-    files, database, monkeypatch, capsys, caplog, arguments
+    files, database, monkeypatch, capsys, caplog, arguments, broken_table
 ):
     spoken = Spoken()
     three_visits_of_two_agents(database, spoken)
-    run_sql(database, RENAME_CLIENT_ID)
+    run_sql(database, f"ALTER TABLE {broken_table} RENAME COLUMN client_id TO renamed")
     configured_for(files, database, monkeypatch)
 
     with pytest.raises(SystemExit) as stopped:
@@ -387,7 +390,7 @@ def test_a_memory_command_met_by_a_database_error_stops_with_its_code_and_delete
     assert stopped.value.__cause__ is None
     output = capsys.readouterr()
     assert output.err == f"personas: memory: {STORE_DEFECT_CODE}\n"
-    run_sql(database, RENAME_CLIENT_ID_BACK)
+    run_sql(database, f"ALTER TABLE {broken_table} RENAME COLUMN renamed TO client_id")
     assert len(agents_kept(database)) == 6
     no_content_in(output.out + output.err + caplog.text, spoken, files)
 
