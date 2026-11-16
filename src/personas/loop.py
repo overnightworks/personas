@@ -122,7 +122,7 @@ class AgentLoop:
     not his own and a view that waits for him make a turn due in the agent's mind, and after each read the loop starts
     the turn of the place that has waited longest when it is in this app; at most one turn of the agent runs across all
     his loops, over its own session, and a failure of the turn's calls to this app goes into the one reaction of the
-    loop. The turn also holds the bound tools of the tools-only apps and of the other apps where the agent holds an
+    loop. The turn also holds the tools of the tools-only apps and of the other apps where the agent holds an
     active place when it is admitted, which the loops of those apps record in his mind: each request to one runs in a
     session of its own under the token for its own scope, and its failure never reaches the reaction. Each call the
     turn relays, to this app or another, enters the agent's history when its request ends. In an app
@@ -156,6 +156,7 @@ class AgentLoop:
             self._use_current_token,
             self._report,
             self._report_pause,
+            self._report_tools_left_out,
             self._remembering,
         )
         self._token: Token | None = None
@@ -171,9 +172,9 @@ class AgentLoop:
         self._pause_wake: asyncio.Task[None] | None = None
         self._turn_ended = mind.wake_event()
         self._voice_app = False
-        persona, binding, backend = agent.persona, app.binding, boundaries.backend
+        persona, backend = agent.persona, boundaries.backend
         self._turn_setup = (
-            None if persona is None or binding is None or backend is None else TurnSetup(persona, binding, backend)
+            None if persona is None or app.max_tool_calls is None or backend is None else TurnSetup(persona, backend)
         )
 
     async def run(self) -> NoReturn:
@@ -194,6 +195,7 @@ class AgentLoop:
             asyncio.TaskGroup() as turns,
             self._boundaries.open_session(self._app, token.value) as session,
         ):
+            self._turning.new_session()
             self._voice_app = await self._is_voice_app(session)
             while True:
                 await self._use_current_token(session)
@@ -258,7 +260,9 @@ class AgentLoop:
         self._standings = standing.standings
         self._turned_revisions = sync_turned_revisions(self._turned_revisions, standing.standings)
         self._mind.undue(left_standing(self._app.mcp_url, standing.standings))
-        self._mind.stand_at(self._app.mcp_url, holds=lends_tools(self._app.binding is not None, standing.standings))
+        self._mind.stand_at(
+            self._app.mcp_url, holds=lends_tools(self._app.max_tool_calls is not None, standing.standings)
+        )
         self._cancel_turn_if_its_place_left(standing.standings)
         await self._accept_invitations(session, standing.standings)
         return standing.standings
@@ -453,6 +457,9 @@ class AgentLoop:
                 seconds=seconds,
             )
         )
+
+    def _report_tools_left_out(self, app: AppTarget, count: int) -> None:
+        self._boundaries.report(StateChange(Event.TOOLS_LEFT_OUT, self._agent.client_id, app.mcp_url, tool_count=count))
 
     async def _react(self, failure: CallFailure) -> None:
         match reaction_to(failure, already_renewed=self._renewed_after_401):

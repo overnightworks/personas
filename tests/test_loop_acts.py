@@ -234,7 +234,7 @@ async def test_a_relayed_say_that_fails_is_told_as_not_answered_with_the_failure
 
 
 async def test_calls_past_the_places_own_bound_enter_no_act(runner, songmaker):
-    own_bound = runner.config.apps[0].binding.max_tool_calls
+    own_bound = runner.config.apps[0].max_tool_calls
     runner.gateway = Gateway(say_round(*[ANSWER] * (own_bound + 1)), completion("done"), completion("again"))
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)

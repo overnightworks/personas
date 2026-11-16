@@ -5,13 +5,14 @@ The file holds the realm's token endpoint, the ready file's path, the apps (an M
 a ``sha256``, that every accept of the agent carries, and the ``voice`` table, which turns the agent's spoken turns on
 and may name, in ``names``, an ordered list of the speech service's voices that every accept of the agent carries
 as it stands, first choice first). Which apps an agent may reach
-is the realm's group membership, never this file. An app that binds tools to its agents' turns
-names them with their call bound, and then the model gateway and each agent's persona file are required.
-An app with ``listens = false`` serves tools only: it starts no turn, and its bound tools reach the turns of the apps
-that listen. An app that listens lends its bound tools to a turn of another app too, while the agent holds a place
-there. ``call_seconds`` bounds each request a turn of another app makes to an app. No tool name is bound by two apps,
-since one turn holds the tools of several, and no app names ``speak``, the voice's own tool, which is never offered to
-a turn, or ``recall``, the lookup, which every turn holds while ``[memory]`` is set.
+is the realm's group membership, never this file, and what an agent may do in an app is the app's, through the tools
+it offers and the role in the token. An app that sets ``max_tool_calls`` binds every tool it offers to its agents'
+turns, that many calls to it in one turn, and then the model gateway and each agent's persona file are required.
+An app with ``listens = false`` serves tools only: it starts no turn, and its tools reach the turns of the apps
+that listen. An app that listens lends its tools to a turn of another app too, while the agent holds a place
+there. ``call_seconds`` bounds each request a turn of another app makes to an app. A tool name two apps offer goes to
+the first app in this file, and the runner's own names, ``speak``, the voice's tool, and ``recall``, the lookup, which
+every turn holds while ``[memory]`` is set, are never taken from an app.
 The top-level ``history_bytes`` bounds the history each agent keeps in memory of the lines he took in, the views he
 read and the calls relayed for him at any of his apps and tells every turn; past it the oldest messages leave in one
 step until what stays fits ``history_keep_bytes``, which is never above ``history_bytes``. The top-level
@@ -40,7 +41,7 @@ from typing import TYPE_CHECKING, Final, Self
 
 from agents.agent_file import AgentDefinition, AgentFileError, load_agent
 from agents.config import AgentConfig  # noqa: TC002 - pydantic resolves the field's type at run time
-from agents.member import SPEAK_TOOL, FigureRef, VoiceName, Voices
+from agents.member import FigureRef, VoiceName, Voices  # noqa: TC002 - pydantic resolves the fields' types at run time
 from agents.turn import GatewayModelName, ModelKind, model_kind_of
 from pydantic import (
     AnyHttpUrl,
@@ -56,7 +57,7 @@ from pydantic import (
 )
 
 from personas.decision import BACKOFF_BASE_SECONDS, DEFAULT_BUDGET_PAUSE_CAP_SECONDS, TURN_ROLE
-from personas.recall import RECALL_TOOL, SMALLEST_RESULT_BYTES
+from personas.recall import SMALLEST_RESULT_BYTES
 from personas.secret import Secret
 
 if TYPE_CHECKING:
@@ -84,18 +85,10 @@ class ConfigError(Exception):
 
 
 @dataclass(frozen=True)
-class ToolBinding:
-    """The tools of an app that its agents' turns may call, and how many calls one turn may make."""
-
-    tools: tuple[str, ...]
-    max_tool_calls: int
-
-
-@dataclass(frozen=True)
 class AppTarget:
     mcp_url: str
     scope: str
-    binding: ToolBinding | None = None
+    max_tool_calls: int | None = None
     listens: bool = True
     call_seconds: float = DEFAULT_CALL_SECONDS
 
@@ -171,44 +164,15 @@ class _Entry(BaseModel):
 class _AppEntry(_Entry):
     mcp_url: AnyHttpUrl
     scope: str = Field(min_length=1)
-    tools: tuple[str, ...] = ()
     max_tool_calls: PositiveInt | None = None
     listens: bool = True
     call_seconds: PositiveFloat | None = None
 
     @model_validator(mode="after")
-    def _a_tools_only_app_has_tools(self) -> Self:
-        if not self.listens and not self.tools:
-            raise ValueError("listens = false needs tools")
+    def _a_tools_only_app_has_a_call_bound(self) -> Self:
+        if not self.listens and self.max_tool_calls is None:
+            raise ValueError("listens = false needs max_tool_calls")
         return self
-
-    @field_validator("tools")
-    @classmethod
-    def _speak_is_never_offered_to_the_model(cls, tools: tuple[str, ...]) -> tuple[str, ...]:
-        if SPEAK_TOOL in tools:
-            raise ValueError(f"{SPEAK_TOOL} is the voice's own tool and is never offered to a turn")
-        return tools
-
-    @field_validator("tools")
-    @classmethod
-    def _the_lookups_name_is_never_bound(cls, tools: tuple[str, ...]) -> tuple[str, ...]:
-        if RECALL_TOOL in tools:
-            raise ValueError(f"{RECALL_TOOL} is the lookup's own tool and no app binds it")
-        return tools
-
-    @model_validator(mode="after")
-    def _tools_come_with_their_call_bound(self) -> Self:
-        if bool(self.tools) != (self.max_tool_calls is not None):
-            raise ValueError("tools and max_tool_calls are set together")
-        if len(set(self.tools)) != len(self.tools) or not all(self.tools):
-            raise ValueError("tools holds each name once and no empty name")
-        return self
-
-    @property
-    def binding(self) -> ToolBinding | None:
-        if self.max_tool_calls is None:
-            return None
-        return ToolBinding(self.tools, self.max_tool_calls)
 
 
 class _VoiceEntry(_Entry):
@@ -288,7 +252,7 @@ class _FileModel(_Entry):
 
     @model_validator(mode="after")
     def _tools_need_a_gateway_and_personas(self) -> Self:
-        if any(app.binding for app in self.apps):
+        if any(app.max_tool_calls for app in self.apps):
             if self.gateway is None:
                 raise ValueError("gateway: required when an app binds tools")
             if any(agent.persona_file is None for agent in self.agents):
@@ -313,14 +277,6 @@ class _FileModel(_Entry):
     def _one_entry_per_app(cls, apps: tuple[_AppEntry, ...]) -> tuple[_AppEntry, ...]:
         if len({app.mcp_url for app in apps}) != len(apps):
             raise ValueError("an mcp_url is listed twice")
-        return apps
-
-    @field_validator("apps")
-    @classmethod
-    def _a_turn_holds_no_tool_name_twice(cls, apps: tuple[_AppEntry, ...]) -> tuple[_AppEntry, ...]:
-        names = [name for app in apps for name in app.tools]
-        if len(set(names)) != len(names):
-            raise ValueError("a tool name is bound by two apps")
         return apps
 
     @field_validator("apps")
@@ -427,7 +383,9 @@ def load_config(environment: Mapping[str, str]) -> Config:
         token_endpoint=str(parsed.token_endpoint),
         ready_file=parsed.ready_file,
         apps=tuple(
-            AppTarget(str(app.mcp_url), app.scope, app.binding, app.listens, app.call_seconds or DEFAULT_CALL_SECONDS)
+            AppTarget(
+                str(app.mcp_url), app.scope, app.max_tool_calls, app.listens, app.call_seconds or DEFAULT_CALL_SECONDS
+            )
             for app in parsed.apps
         ),
         agents=tuple(

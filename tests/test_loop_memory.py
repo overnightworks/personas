@@ -246,7 +246,7 @@ async def test_a_turns_call_total_is_his_apps_bounds_plus_his_lookups_and_the_on
         runner.app.script(LIST_TOOLS, lists_nothing)
     stored_in(runner, ScriptedStore())
     lookups = runner.config.memory.lookup_calls
-    own_calls = runner.config.apps[0].binding.max_tool_calls if lists_tools else 0
+    own_calls = runner.config.apps[0].max_tool_calls if lists_tools else 0
     total = [
         *(tool_round(recalling()) for _ in range(lookups + 1)),
         *(tool_round(say(secrets.token_hex(4))) for _ in range(own_calls)),

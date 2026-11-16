@@ -9,6 +9,7 @@ import anyio
 import httpx2
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
+from agents.member import ACCEPT_INVITATION_TOOL, SPEAK_TOOL
 from agents.tools import ToolOutcome
 from mcp_types import INVALID_PARAMS, UNSUPPORTED_PROTOCOL_VERSION, ListToolsResult, Tool
 
@@ -16,15 +17,17 @@ from personas import app_session
 from personas.config import load_config
 from personas.decision import NETWORK_FAILURE_CODE, jsonrpc_code, status_code
 from personas.failures import Unreachable, leaves_of
+from personas.recall import RECALL_TOOL
 from personas.reporting import Event
 from personas.tokens import HttpTokenSource
 from personas.turning import Turning
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import CANCELLED_TURN
 from tests.support.gateway import Gateway
+from tests.support.history import said_and_taken, settled
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, DISCOVER, LIMIT_SECONDS, LIST_TOOLS, LISTEN, SAY_TOOL, formatted, lines_of
-from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG, SCOPE
+from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG, SCOPE, ToolsOnlyApp
 from tests.support.transport import (
     ClosingHold,
     transport_by_url,
@@ -193,6 +196,57 @@ async def test_a_tools_only_app_that_lists_one_of_its_two_bound_tools_lends_that
 
     assert runner.gateway.offered_tools() == [SAY_TOOL, CREATE_SONG]
     assert runner.reports.reported(apps=True, started=False) == []
+
+
+async def test_a_tool_the_app_lists_beyond_the_configuration_is_declared_and_the_reserved_names_never_are(
+    runner, songmaker
+):
+    added = "remix_song"
+
+    async def lists_an_added_tool_and_the_reserved_names(reply):
+        await reply.result(
+            ListToolsResult(
+                tools=[
+                    Tool(name=name, description=f"{name} in songmaker.", input_schema={"type": "object"})
+                    for name in (CREATE_SONG, added, SPEAK_TOOL, RECALL_TOOL, ACCEPT_INVITATION_TOOL)
+                ]
+            )
+        )
+
+    songmaker.script(LIST_TOOLS, lists_an_added_tool_and_the_reserved_names)
+    runner.gateway = Gateway(saying(ANSWER), completion("done"))
+
+    await addressed_in_the_call(runner)
+    await runner.app.said_count(1)
+
+    offered = runner.gateway.offered_tools()
+    assert {SAY_TOOL, CREATE_SONG, added} <= set(offered)
+    assert not {SPEAK_TOOL, RECALL_TOOL, ACCEPT_INVITATION_TOOL} & set(offered)
+    assert runner.reports.changes_of(Event.TOOLS_LEFT_OUT) == []
+
+
+async def test_a_name_two_apps_offer_goes_to_the_first_app_and_the_later_app_is_reported_once_per_session(
+    runner, songmaker
+):
+    second = ToolsOnlyApp()
+    async with second.serving() as second_url:
+        runner.add_tools_only_app(second, second_url, "mcp-second")
+        runner.gateway = Gateway(calling(CREATE_SONG), saying(ANSWER), completion("done"), completion("again"))
+        await addressed_in_the_call(runner)
+        await runner.app.said_count(1)
+
+        offered = runner.gateway.offered_tools()
+        assert sorted(offered) == sorted([SAY_TOOL, CREATE_SONG, GENERATE_SONG])
+        assert [name for name, _ in songmaker.called] == [CREATE_SONG]
+        assert second.called == []
+        (change,) = runner.reports.changes_of(Event.TOOLS_LEFT_OUT)
+        assert (change.app, change.tool_count) == (second_url, 2)
+
+        await runner.gateway.until_requested(3)
+        await settled(runner.app)
+        await said_and_taken(runner.app, PLACE_ID, f"{ADDRESSED} Again.")
+        await runner.gateway.until_turns(2)
+        assert len(runner.reports.changes_of(Event.TOOLS_LEFT_OUT)) == 1
 
 
 async def a_call_that_fails_and_a_turn_that_goes_on(runner, songmaker, code, *, call_seconds=None):
@@ -582,7 +636,7 @@ async def test_calls_past_an_apps_own_bound_are_errors_and_the_other_apps_calls_
 
 
 async def test_calls_past_the_places_own_bound_are_errors_while_the_tools_only_app_has_calls_left(runner, songmaker):
-    own_bound = runner.config.apps[0].binding.max_tool_calls
+    own_bound = runner.config.apps[0].max_tool_calls
     over_the_bound = own_bound + 1
     says = tool_round(
         *(tool_call(f"say-{index}", SAY_TOOL, {"place": PLACE_ID, "text": ANSWER}) for index in range(over_the_bound))

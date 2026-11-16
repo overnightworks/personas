@@ -277,8 +277,8 @@ def rounds_spending_every_bound(runner) -> list[object]:
     """One call a round until every app's bound is spent: the held app's bound plus one, the last of which its own
     bound refuses, then the place's and the tools-only app's. Their calls number the turn's bound, the sum of the
     apps' bounds plus one, so the call after them is past it."""
-    held_bound = runner.config.apps[1].binding.max_tool_calls
-    own_bound = runner.config.apps[0].binding.max_tool_calls
+    held_bound = runner.config.apps[1].max_tool_calls
+    own_bound = runner.config.apps[0].max_tool_calls
     return [
         *(tool_round(play(words(1)[0])) for _ in range(held_bound + 1)),
         *(tool_round(say(words(1)[0])) for _ in range(own_bound)),
@@ -289,8 +289,8 @@ def rounds_spending_every_bound(runner) -> list[object]:
 async def test_every_apps_bound_of_a_turn_is_spent_in_full_and_the_call_past_a_held_apps_bound_is_an_error(
     runner, other, songmaker
 ):
-    held_bound = runner.config.apps[1].binding.max_tool_calls
-    own_bound = runner.config.apps[0].binding.max_tool_calls
+    held_bound = runner.config.apps[1].max_tool_calls
+    own_bound = runner.config.apps[0].max_tool_calls
     rounds = rounds_spending_every_bound(runner)
     await seated_in_the_call(runner, other, *rounds, completion("done"))
     final_request = len(rounds) + 1
@@ -313,8 +313,8 @@ async def test_the_call_past_the_turn_bound_of_the_three_apps_ends_the_turn_as_l
     await runner.reports.until(Event.PAUSED)
 
     assert runner.gateway.arrivals == len(rounds) + 1
-    assert other.calls == [PLAY_TOOL] * runner.config.apps[1].binding.max_tool_calls
-    assert len(runner.app.said) == runner.config.apps[0].binding.max_tool_calls
+    assert other.calls == [PLAY_TOOL] * runner.config.apps[1].max_tool_calls
+    assert len(runner.app.said) == runner.config.apps[0].max_tool_calls
     assert len(songmaker.called) == CALLS
     await runner.reports.until_a_turn_ended()
     assert runner.reports.reported(apps=True, started=False) == [

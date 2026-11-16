@@ -22,13 +22,12 @@ from personas.config import (
     DEFAULT_SWEEP_MINUTES,
     DEFAULT_WRITE_SECONDS,
     ConfigError,
-    ToolBinding,
     Voice,
     load_config,
 )
 from personas.decision import DEFAULT_BUDGET_PAUSE_CAP_SECONDS
 from personas.main import CONFIGURATION_ERROR_EXIT_CODE, main
-from personas.recall import RECALL_TOOL, SMALLEST_RESULT_BYTES
+from personas.recall import SMALLEST_RESULT_BYTES
 from tests.support.configfiles import MAX_TOOL_CALLS, PERSONA_NAME
 from tests.support.realm import API_GROUP
 
@@ -37,15 +36,11 @@ if TYPE_CHECKING:
     from personas.readiness import ReadyMarker
 
 MORE_VOICES_THAN_ANY_LIST_HOLDS = [f"voice-{index}" for index in range(100)]
-APP_TABLE = (
-    '[[apps]]\nmcp_url = "https://hopin.test/mcp"\nscope = "mcp-hopin"\n'
-    f'tools = ["say"]\nmax_tool_calls = {MAX_TOOL_CALLS}\n'
-)
+APP_TABLE = f'[[apps]]\nmcp_url = "https://hopin.test/mcp"\nscope = "mcp-hopin"\nmax_tool_calls = {MAX_TOOL_CALLS}\n'
 
 
 TOOLS_ONLY_TABLE = (
-    '[[apps]]\nmcp_url = "https://songmaker.test/mcp"\nscope = "mcp-songmaker"\nlistens = false\n'
-    'tools = ["create_song", "generate_song"]\nmax_tool_calls = 5\n'
+    '[[apps]]\nmcp_url = "https://songmaker.test/mcp"\nscope = "mcp-songmaker"\nlistens = false\nmax_tool_calls = 5\n'
 )
 
 
@@ -185,7 +180,7 @@ def test_a_valid_file_gives_the_agent_its_persona_the_app_its_tools_and_the_runn
     [agent], [app] = config.agents, config.apps
     assert agent.persona is not None
     assert (agent.persona.name, agent.persona.prompt) == (PERSONA_NAME, files.persona_prompt)
-    assert app.binding == ToolBinding(("say",), MAX_TOOL_CALLS)
+    assert app.max_tool_calls == MAX_TOOL_CALLS
     assert config.gateway is not None
     assert (config.gateway.api_group, config.gateway.gateway.key_file) == (API_GROUP, files.key_path)
 
@@ -325,23 +320,18 @@ def test_a_configuration_without_tools_in_any_app_needs_no_gateway_and_no_person
     config = load_config(files.write())
 
     assert config.gateway is None
-    assert [app.binding for app in config.apps] == [None]
+    assert [app.max_tool_calls for app in config.apps] == [None]
     assert [agent.persona for agent in config.agents] == [None]
 
 
 @pytest.mark.parametrize(
     ("break_it", "named"),
     [
-        (lambda text: text.replace(f"max_tool_calls = {MAX_TOOL_CALLS}\n", ""), "apps.0"),
-        (lambda text: text.replace('tools = ["say"]\n', ""), "apps.0"),
+        (lambda text: text.replace("max_tool_calls", 'tools = ["say"]\nmax_tool_calls'), "apps.0.tools"),
         (
             lambda text: text.replace(f"max_tool_calls = {MAX_TOOL_CALLS}", "max_tool_calls = 0"),
             "apps.0.max_tool_calls",
         ),
-        (lambda text: text.replace('tools = ["say"]', 'tools = ["say", "say"]'), "apps.0"),
-        (lambda text: text.replace('tools = ["say"]', 'tools = [""]'), "apps.0"),
-        (lambda text: text.replace('tools = ["say"]', 'tools = ["say", "speak"]'), "apps.0.tools"),
-        (lambda text: text.replace('tools = ["say"]', f'tools = ["say", "{RECALL_TOOL}"]'), "apps.0.tools"),
         (lambda text: text.replace('[gateway]\nbackend = "litellm"\n', '[gatewa]\nbackend = "litellm"\n'), "gatewa"),
         (lambda text: text.split("[gateway]")[0] + "[[apps]]" + text.split("[[apps]]")[1], "gateway"),
         (lambda text: text.replace('backend = "litellm"', 'backend = "other"'), "gateway.backend"),
@@ -350,13 +340,8 @@ def test_a_configuration_without_tools_in_any_app_needs_no_gateway_and_no_person
         (lambda text: "\n".join(line for line in text.splitlines() if "persona_file" not in line), "persona_file"),
     ],
     ids=[
-        "tools without a call bound",
-        "a call bound without tools",
+        "a tools key",
         "no call allowed",
-        "a tool listed twice",
-        "an empty tool name",
-        "speak among the tools",
-        "the lookup among the tools",
         "unknown gateway key",
         "tools without a gateway",
         "unknown backend",
@@ -365,7 +350,7 @@ def test_a_configuration_without_tools_in_any_app_needs_no_gateway_and_no_person
         "tools without a persona file",
     ],
 )
-def test_tools_need_their_call_bound_and_the_gateway_and_a_persona_to_run_with(
+def test_a_tools_key_is_refused_and_a_call_bound_needs_the_gateway_and_a_persona_to_run_with(
     files, monkeypatch, capsys, break_it, named
 ):
     files.text = break_it(files.text)
@@ -423,17 +408,14 @@ def test_a_persona_file_that_is_unusable_stops_the_start_and_names_the_field(fil
     assert files.persona_prompt not in error
 
 
-def test_a_tools_only_app_has_its_tools_its_call_bound_and_the_default_call_bound_unless_set(files):
+def test_a_tools_only_app_has_its_call_bound_and_the_default_call_bound_unless_set(files):
     files.text += TOOLS_ONLY_TABLE
-    files.text += (
-        TOOLS_ONLY_TABLE.replace("songmaker", "other").replace("create_song", "make").replace("generate_song", "play")
-        + "call_seconds = 4.5\n"
-    )
+    files.text += TOOLS_ONLY_TABLE.replace("songmaker", "other") + "call_seconds = 4.5\n"
 
     hopin, songmaker, other = load_config(files.write()).apps
 
     assert (hopin.listens, songmaker.listens, other.listens) == (True, False, False)
-    assert songmaker.binding == ToolBinding(("create_song", "generate_song"), 5)
+    assert songmaker.max_tool_calls == 5
     assert (songmaker.call_seconds, other.call_seconds) == (DEFAULT_CALL_SECONDS, 4.5)
 
 
@@ -441,28 +423,9 @@ def test_a_tools_only_app_has_its_tools_its_call_bound_and_the_default_call_boun
     ("break_it", "named", "reason"),
     [
         (
-            lambda text: text + TOOLS_ONLY_TABLE.replace("create_song", "say"),
-            "apps",
-            "a tool name is bound by two apps",
-        ),
-        (
-            lambda text: text + TOOLS_ONLY_TABLE.replace("generate_song", "say").replace("songmaker", "x"),
-            "apps",
-            "a tool name is bound by two apps",
-        ),
-        (
-            lambda text: (
-                text
-                + TOOLS_ONLY_TABLE
-                + TOOLS_ONLY_TABLE.replace("songmaker", "other").replace('"create_song"', '"play"')
-            ),
-            "apps",
-            "a tool name is bound by two apps",
-        ),
-        (
-            lambda text: text + TOOLS_ONLY_TABLE.replace('tools = ["create_song", "generate_song"]\n', ""),
+            lambda text: text + TOOLS_ONLY_TABLE.replace("max_tool_calls = 5\n", ""),
             "apps.1",
-            "listens = false needs tools",
+            "listens = false needs max_tool_calls",
         ),
         (
             lambda text: text.replace('scope = "mcp-hopin"\n', 'scope = "mcp-hopin"\nlistens = false\n'),
@@ -470,19 +433,14 @@ def test_a_tools_only_app_has_its_tools_its_call_bound_and_the_default_call_boun
             "no app listens",
         ),
         (lambda text: text + TOOLS_ONLY_TABLE + "call_seconds = 0\n", "apps.1.call_seconds", "greater than 0"),
-        (lambda text: text + APP_TABLE.replace("hopin", "other"), "apps", "a tool name is bound by two apps"),
     ],
     ids=[
-        "a tool name the first app has too",
-        "a tool name a listening app has too",
-        "a tool name another tools-only app has too",
         "a tools-only app without tools",
         "no listening app",
         "no call time",
-        "a tool name another listening app has too",
     ],
 )
-def test_a_tool_name_two_apps_of_one_turn_share_and_a_file_without_a_listening_app_are_refused(
+def test_a_tools_only_app_without_a_call_bound_and_a_file_without_a_listening_app_are_refused(
     files, monkeypatch, capsys, break_it, named, reason
 ):
     files.text = break_it(files.text)
@@ -494,22 +452,11 @@ def test_a_tool_name_two_apps_of_one_turn_share_and_a_file_without_a_listening_a
 
 
 def test_a_listening_app_may_set_the_call_time_a_turn_of_another_app_has_for_each_request_to_it(files):
-    files.text += APP_TABLE.replace("hopin", "other").replace('tools = ["say"]', 'tools = ["play"]') + (
-        "call_seconds = 4.5\n"
-    )
+    files.text += APP_TABLE.replace("hopin", "other") + "call_seconds = 4.5\n"
 
     hopin, other = load_config(files.write()).apps
 
     assert (hopin.call_seconds, other.call_seconds) == (DEFAULT_CALL_SECONDS, 4.5)
-
-
-def test_a_file_that_binds_many_differently_named_tools_in_a_second_listening_app_starts(files):
-    many = ", ".join(f'"{secrets.token_hex(4)}"' for _ in range(29))
-    files.text += APP_TABLE.replace("hopin", "table").replace('tools = ["say"]', f"tools = [{many}]")
-
-    hopin, table = load_config(files.write()).apps
-
-    assert (len(hopin.binding.tools), len(table.binding.tools)) == (1, 29)
 
 
 def test_a_database_table_gives_the_runner_its_database_its_password_and_a_default_write_bound(files):

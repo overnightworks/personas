@@ -175,7 +175,7 @@ async def test_a_held_call_to_a_tools_only_app_opens_no_session_and_takes_nothin
 
 
 async def test_a_held_call_takes_nothing_from_its_apps_bound_so_the_whole_bound_goes_out_after_it(runner):
-    bound = runner.config.apps[0].binding.max_tool_calls
+    bound = runner.config.apps[0].max_tool_calls
     runner.gateway = Gateway(*(tool_round(say(ANSWER)) for _ in range(bound + 1)), completion("done"))
     running = runner.gateway.hold_request(1)
     await addressed_in_the_call(runner)
@@ -190,7 +190,7 @@ async def test_a_held_call_takes_nothing_from_its_apps_bound_so_the_whole_bound_
 
 
 async def test_a_turn_that_spends_every_apps_bound_after_a_hold_ends_normally(runner, songmaker):
-    bound = runner.config.apps[0].binding.max_tool_calls
+    bound = runner.config.apps[0].max_tool_calls
     runner.gateway = Gateway(
         tool_round(say(ANSWER)),
         *(tool_round(say(ANSWER)) for _ in range(bound)),

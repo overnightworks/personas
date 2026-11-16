@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 import pytest
 from agents.backend import TurnStopKind, TurnStopped
 from agents.member import (
+    ACCEPT_INVITATION_TOOL,
     LEASE_SECONDS,
     LISTEN_BOUND_SECONDS,
     SPEAK_TOOL,
@@ -70,7 +71,6 @@ from personas.decision import (
     answered_into,
     arrived_since,
     backoff_delay,
-    bound_declarations,
     budget_pause,
     call_within_bound,
     claimed,
@@ -88,6 +88,7 @@ from personas.decision import (
     left_standing,
     lends_tools,
     may_send_next,
+    offered_declarations,
     own_spoken_lines_since,
     past_deadline,
     pause_left,
@@ -116,6 +117,7 @@ from personas.decision import (
 )
 from personas.entries import Answered, Entry, History, KeptLine, Unanswered, ViewSeen, Visit
 from personas.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer
+from personas.recall import RECALL_TOOL
 from personas.secret import Secret
 from tests.support.fakes import line, window_of
 from tests.support.history import (
@@ -797,27 +799,35 @@ def _declaration(name: str) -> ToolDeclaration:
     return ToolDeclaration(name=name, description=secrets.token_hex(4), parameters={"type": "object"})
 
 
-def test_the_bound_tools_are_declared_in_the_order_they_are_bound():
-    declared = [_declaration("a"), _declaration("b"), _declaration("c")]
-
-    assert bound_declarations(declared, ["c", "a"]) == (declared[2], declared[0])
-
-
 @pytest.mark.parametrize(
-    ("listed", "bound", "expected"),
+    ("listed", "taken", "kept", "left_out"),
     [
-        (["a", "b"], ["a", "b"], ["a", "b"]),
-        (["c", "a", "b"], ["b", "a"], ["b", "a"]),
-        (["a", "c"], ["a", "b", "c"], ["a", "c"]),
-        ([], ["a", "b"], []),
-        (["a", "extra"], ["a"], ["a"]),
+        (["a", "b"], [], ["a", "b"], 0),
+        (["c", "a", "b"], [], ["c", "a", "b"], 0),
+        (["a", "b", "c"], ["b"], ["a", "c"], 1),
+        (["a", "b"], ["a", "b"], [], 2),
+        ([], ["a"], [], 0),
+        (["a", SPEAK_TOOL, RECALL_TOOL, ACCEPT_INVITATION_TOOL], [], ["a"], 0),
+        (["a", SPEAK_TOOL], [SPEAK_TOOL], ["a"], 0),
     ],
-    ids=["all listed", "binding order", "a subset", "none listed", "an unbound tool stays out"],
+    ids=[
+        "all",
+        "listing order",
+        "one held by an earlier app",
+        "all held",
+        "none listed",
+        "reserved names",
+        "reserved and held",
+    ],
 )
-def test_a_turn_binds_the_bound_tools_the_app_lists_in_binding_order(listed, bound, expected):
-    declared = {name: _declaration(name) for name in {*listed, *bound}}
+def test_a_turn_declares_what_an_app_lists_but_the_reserved_names_and_those_an_earlier_app_holds(
+    listed, taken, kept, left_out
+):
+    declared = {name: _declaration(name) for name in listed}
 
-    assert bound_declarations([declared[name] for name in listed], bound) == tuple(declared[name] for name in expected)
+    offered = offered_declarations(list(declared.values()), frozenset(taken))
+
+    assert offered == (tuple(declared[name] for name in kept), left_out)
 
 
 ONCE_DROPPED = History((), left_out=1, heard=0)

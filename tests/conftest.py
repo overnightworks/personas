@@ -42,7 +42,7 @@ from tests.support.gateway import Gateway, RoundBackend
 from tests.support.hopin import AGENT_SUBJECT, ISSUER, PLAY_TOOL, FakeApp, configure_logging_into, formatted
 from tests.support.ownership import AllAgentsOwned
 from tests.support.realm import TOKEN_ENDPOINT, FakeRealm
-from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG, ToolsOnlyApp
+from tests.support.songmaker import CALLS, ToolsOnlyApp
 from tests.support.songmaker import SCOPE as TOOLS_ONLY_SCOPE
 from tests.support.voice import HeldSleeps
 
@@ -167,14 +167,13 @@ class Harness:
         self.swept = store
         self.config = replace(self.config, memory=memory or MemoryTarget(lines_keep_days=math.inf))
 
-    def add_tools_only_app(self, app: ToolsOnlyApp, url: str) -> None:
+    def add_tools_only_app(self, app: ToolsOnlyApp, url: str, scope: str = TOOLS_ONLY_SCOPE) -> None:
         """Binds the tools of an app that listens to nothing and lets the agent's tokens for its scope into it."""
         self.files.text += (
-            f'[[apps]]\nmcp_url = "{url}"\nscope = "{TOOLS_ONLY_SCOPE}"\nlistens = false\n'
-            f'tools = ["{CREATE_SONG}", "{GENERATE_SONG}"]\nmax_tool_calls = {CALLS}\n'
+            f'[[apps]]\nmcp_url = "{url}"\nscope = "{scope}"\nlistens = false\nmax_tool_calls = {CALLS}\n'
         )
         self.config = load_config(self.files.write())
-        self.realm.add_app(TOOLS_ONLY_SCOPE, app)
+        self.realm.add_app(scope, app)
         self.tools_only_apps.append(app)
 
     def add_listening_app(self, app: FakeApp, url: str, scope: str) -> None:
@@ -182,10 +181,7 @@ class Harness:
 
         It reloads the configuration, so it comes before the other changes of a scenario.
         """
-        self.files.text += (
-            f'[[apps]]\nmcp_url = "{url}"\nscope = "{scope}"\ntools = ["{app.line_tool}"]\n'
-            f"max_tool_calls = {MAX_TOOL_CALLS}\n"
-        )
+        self.files.text += f'[[apps]]\nmcp_url = "{url}"\nscope = "{scope}"\nmax_tool_calls = {MAX_TOOL_CALLS}\n'
         self.config = load_config(self.files.write())
         self.realm.add_app(scope, app)
         self.other_apps.append(app)
