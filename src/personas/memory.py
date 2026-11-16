@@ -60,7 +60,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy import Delete
 
-    from personas.config import MemoryTarget
+    from personas.config import DatabaseTarget
     from personas.entries import WindowRead
     from personas.recall import LineSearch
 
@@ -109,7 +109,7 @@ class KeptVisit:
     last_read_at: datetime
 
 
-def _url(target: MemoryTarget) -> URL:
+def _url(target: DatabaseTarget) -> URL:
     return URL.create(
         POSTGRES_DRIVER,
         username=target.user,
@@ -120,12 +120,12 @@ def _url(target: MemoryTarget) -> URL:
     )
 
 
-def _write_bound(target: MemoryTarget) -> float | None:
+def _write_bound(target: DatabaseTarget) -> float | None:
     """The seconds one write may take; an infinite ``write_seconds`` is no bound."""
     return None if math.isinf(target.write_seconds) else target.write_seconds
 
 
-def _connect_arguments(target: MemoryTarget) -> dict[str, int]:
+def _connect_arguments(target: DatabaseTarget) -> dict[str, int]:
     bound = _write_bound(target)
     return {} if bound is None else {"connect_timeout": max(MINIMUM_CONNECT_SECONDS, math.ceil(bound))}
 
@@ -138,6 +138,15 @@ def _alembic_config() -> AlembicConfig:
 
 def _head() -> str | None:
     return ScriptDirectory.from_config(_alembic_config()).get_current_head()
+
+
+def _newer_than_this_release(current: str | None) -> bool:
+    """Whether a newer release migrated the database: its revision is none of this release's scripts.
+
+    Releases that run side by side change the schema only by adding to it, so the older one still works on it.
+    """
+    known = {each.revision for each in ScriptDirectory.from_config(_alembic_config()).walk_revisions()}
+    return current is not None and current not in known
 
 
 def _not_at_head(current: str | None) -> SchemaNotAtHeadError:
@@ -157,8 +166,9 @@ def _as_store_failure() -> Generator[None]:
         raise StoreDefect(STORE_DEFECT_CODE) from None
 
 
-def migrate(target: MemoryTarget) -> None:
-    """Brings the database to head; concurrent runs wait for one another on a Postgres advisory lock.
+def migrate(target: DatabaseTarget) -> None:
+    """Brings the database to head; concurrent runs wait for one another on a Postgres advisory lock. A database that a
+    newer release migrated is left as it is.
 
     It is synchronous and bounded by the driver's connect timeout alone.
     """
@@ -168,9 +178,13 @@ def migrate(target: MemoryTarget) -> None:
             connection.execute(text("SELECT pg_advisory_lock(:key)"), {"key": MIGRATION_LOCK_KEY})
             connection.commit()
             try:
-                config = _alembic_config()
-                config.attributes["connection"] = connection
-                command.upgrade(config, "head")
+                current = MigrationContext.configure(connection).get_current_revision()
+                # The read began a transaction, which would swallow the upgrade's own and be rolled back below.
+                connection.rollback()
+                if not _newer_than_this_release(current):
+                    config = _alembic_config()
+                    config.attributes["connection"] = connection
+                    command.upgrade(config, "head")
             finally:
                 connection.rollback()
                 connection.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": MIGRATION_LOCK_KEY})
@@ -215,7 +229,9 @@ class PostgresLineStore:
     own.
     """
 
-    def __init__(self, target: MemoryTarget, engine_factory: Callable[..., AsyncEngine] = create_async_engine) -> None:
+    def __init__(
+        self, target: DatabaseTarget, engine_factory: Callable[..., AsyncEngine] = create_async_engine
+    ) -> None:
         self._write_bound = _write_bound(target)
         self._engine: AsyncEngine = engine_factory(
             _url(target), hide_parameters=True, connect_args=_connect_arguments(target)
@@ -343,7 +359,7 @@ class PostgresLineStore:
         if self._schema_checked:
             return
         current = await connection.run_sync(lambda each: MigrationContext.configure(each).get_current_revision())
-        if current != _head():
+        if current != _head() and not _newer_than_this_release(current):
             raise _not_at_head(current)
         self._schema_checked = True
 

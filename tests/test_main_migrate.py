@@ -1,7 +1,9 @@
-"""The ``migrate`` command: it brings the memory's schema to its head, and stops with the field named without one."""
+"""The ``migrate`` command: it brings the schema to its head and leaves one a newer release migrated as it is."""
 
 from __future__ import annotations
 
+import secrets
+import string
 import sys
 from typing import TYPE_CHECKING
 
@@ -11,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from personas.config import CONFIG_ENVIRONMENT_VARIABLE
 from personas.failures import STORE_UNREACHABLE_CODE
 from personas.main import CONFIGURATION_ERROR_EXIT_CODE, MIGRATE_COMMAND, STORE_ERROR_EXIT_CODE, command_line, main
-from tests.support.postgres import kept_lines, migrated_to, run_sql, tables_of
+from tests.support.postgres import kept_lines, migrated_to, revision_of, run_sql, tables_of
 
 if TYPE_CHECKING:
     from tests.support.configfiles import Files
@@ -29,9 +31,7 @@ def test_migrating_an_empty_database_creates_the_schema_and_migrating_again_chan
     files, unmigrated_database, monkeypatch, restored_logging
 ):
     target = unmigrated_database
-    files.text += files.memory_table(
-        host=f'"{target.host}"', port=str(target.port), dbname=f'"{target.dbname}"', user=f'"{target.user}"'
-    )
+    files.use_database(target)
     migrate(files, monkeypatch)
     run_sql(
         unmigrated_database,
@@ -55,9 +55,7 @@ def test_migrating_a_database_at_the_first_revision_keeps_its_lines_and_reads_th
     files, unmigrated_database, monkeypatch, restored_logging
 ):
     target = unmigrated_database
-    files.text += files.memory_table(
-        host=f'"{target.host}"', port=str(target.port), dbname=f'"{target.dbname}"', user=f'"{target.user}"'
-    )
+    files.use_database(target)
     migrated_to(target, "0001")
     run_sql(target, "INSERT INTO lines VALUES ('a','b','c','d','e',1,now(),'f','g','h',false,true)")
 
@@ -71,9 +69,7 @@ def test_migrating_a_database_at_the_second_revision_keeps_its_lines_and_reads_t
     files, unmigrated_database, monkeypatch, restored_logging
 ):
     target = unmigrated_database
-    files.text += files.memory_table(
-        host=f'"{target.host}"', port=str(target.port), dbname=f'"{target.dbname}"', user=f'"{target.user}"'
-    )
+    files.use_database(target)
     migrated_to(target, "0002")
     run_sql(target, "INSERT INTO lines VALUES ('a','b','c','d','e',1,now(),'f','g','h',false,true,true)")
 
@@ -90,20 +86,23 @@ def test_migrating_a_database_at_the_second_revision_keeps_its_lines_and_reads_t
         )
 
 
-def test_migrating_without_a_memory_table_stops_and_names_the_field(files, monkeypatch, capsys, restored_logging):
-    monkeypatch.setenv(CONFIG_ENVIRONMENT_VARIABLE, str(files.write()[CONFIG_ENVIRONMENT_VARIABLE]))
+@pytest.mark.postgres
+def test_migrating_a_database_at_a_revision_it_does_not_know_changes_nothing_and_stops_with_no_error(
+    files, database, monkeypatch, restored_logging
+):
+    files.use_database(database)
+    newer = "".join(secrets.choice(string.ascii_lowercase) for _ in range(12))
+    run_sql(database, f"UPDATE alembic_version SET version_num = '{newer}'")  # noqa: S608 - a test-generated name
 
-    with pytest.raises(SystemExit) as stopped:
-        main(arguments=[MIGRATE_COMMAND])
+    migrate(files, monkeypatch)
 
-    assert stopped.value.code == CONFIGURATION_ERROR_EXIT_CODE
-    assert "memory" in capsys.readouterr().err
+    assert revision_of(database) == newer
 
 
 def test_migrating_a_store_that_cannot_be_reached_stops_with_its_code_and_no_traceback(
     files, monkeypatch, capsys, restored_logging
 ):
-    files.text += files.memory_table(host='"127.0.0.1"', port=str(CLOSED_PORT))
+    files.set_database(host='"127.0.0.1"', port=str(CLOSED_PORT))
 
     with pytest.raises(SystemExit) as stopped:
         migrate(files, monkeypatch)

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import math
 import os
 import secrets
 from contextlib import asynccontextmanager, contextmanager
@@ -16,7 +15,7 @@ from alembic.config import Config
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
-from personas.config import MemoryTarget
+from personas.config import DatabaseTarget
 from personas.memory import MIGRATIONS_DIRECTORY, migrate
 from personas.secret import Secret
 
@@ -46,18 +45,13 @@ def engine_of(database: str) -> Engine:
     return create_engine(server_url().set(database=database), isolation_level="AUTOCOMMIT")
 
 
-def target_of(database: str) -> MemoryTarget:
-    """What the runner's configuration holds for this database; the password is the test's own.
-
-    It keeps every line, so that a runner on the fake clock never sweeps unless the test sets a keep period.
-    """
+def target_of(database: str) -> DatabaseTarget:
+    """What the runner's configuration holds for this database; the password is the test's own."""
     url = server_url()
     assert url.host is not None
     assert url.port is not None
     assert url.username is not None
-    return MemoryTarget(
-        url.host, url.port, database, url.username, Secret(secrets.token_hex(8)), lines_keep_days=math.inf
-    )
+    return DatabaseTarget(url.host, url.port, database, url.username, Secret(secrets.token_hex(8)))
 
 
 @contextmanager
@@ -75,7 +69,7 @@ def created_database(template: str | None = None) -> Iterator[str]:
         server.dispose()
 
 
-def migrated_to(target: MemoryTarget, revision: str) -> None:
+def migrated_to(target: DatabaseTarget, revision: str) -> None:
     """Brings the target's database up to one revision, as a deployment that has not yet taken the newer ones."""
     config = Config()
     config.set_main_option("script_location", str(MIGRATIONS_DIRECTORY))
@@ -96,7 +90,7 @@ def migrated_template() -> Iterator[str]:
         yield name
 
 
-def kept_lines(target: MemoryTarget, columns: str) -> list[tuple[object, ...]]:
+def kept_lines(target: DatabaseTarget, columns: str) -> list[tuple[object, ...]]:
     """The rows of the lines table, read with plain SQL in the order of agent and ``seq``."""
     engine = engine_of(target.dbname)
     try:
@@ -107,7 +101,17 @@ def kept_lines(target: MemoryTarget, columns: str) -> list[tuple[object, ...]]:
         engine.dispose()
 
 
-def run_sql(target: MemoryTarget, statement: str) -> None:
+def revision_of(target: DatabaseTarget) -> str | None:
+    """The migration revision the database holds."""
+    engine = engine_of(target.dbname)
+    try:
+        with engine.connect() as connection:
+            return connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one_or_none()
+    finally:
+        engine.dispose()
+
+
+def run_sql(target: DatabaseTarget, statement: str) -> None:
     engine = engine_of(target.dbname)
     try:
         with engine.connect() as connection:
@@ -116,7 +120,7 @@ def run_sql(target: MemoryTarget, statement: str) -> None:
         engine.dispose()
 
 
-def waiting_statements(target: MemoryTarget) -> int:
+def waiting_statements(target: DatabaseTarget) -> int:
     """How many statements of this database wait for a lock right now."""
     engine = engine_of(target.dbname)
     try:
@@ -130,7 +134,7 @@ def waiting_statements(target: MemoryTarget) -> int:
 
 
 @contextmanager
-def lines_table_locked(target: MemoryTarget) -> Iterator[None]:
+def lines_table_locked(target: DatabaseTarget) -> Iterator[None]:
     """Another session holds the lines table, so that a write to it waits."""
     engine = create_engine(server_url().set(database=target.dbname))
     with engine.connect() as connection:
@@ -145,14 +149,14 @@ def lines_table_locked(target: MemoryTarget) -> Iterator[None]:
 class Forwarder:
     """A TCP forwarder in front of the server whose open connections can go dark: their bytes are then dropped."""
 
-    def __init__(self, target: MemoryTarget) -> None:
+    def __init__(self, target: DatabaseTarget) -> None:
         self._target = target
         self._dark: set[asyncio.StreamWriter] = set()
         self._open: set[asyncio.StreamWriter] = set()
         self.dropped = asyncio.Event()
 
     @asynccontextmanager
-    async def serving(self) -> AsyncIterator[MemoryTarget]:
+    async def serving(self) -> AsyncIterator[DatabaseTarget]:
         """The target as seen through the forwarder; every connection is closed at the end."""
         server = await asyncio.start_server(self._forward, LOOPBACK, 0)
         port = server.sockets[0].getsockname()[1]
@@ -195,7 +199,7 @@ class Forwarder:
             self._open.discard(sink)
 
 
-def tables_of(target: MemoryTarget) -> list[str]:
+def tables_of(target: DatabaseTarget) -> list[str]:
     """The names of the tables in the database's public schema."""
     engine = engine_of(target.dbname)
     try:
@@ -204,5 +208,30 @@ def tables_of(target: MemoryTarget) -> list[str]:
                 text("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY 1")
             )
             return [row[0] for row in result]
+    finally:
+        engine.dispose()
+
+
+def lock_holders(target: DatabaseTarget) -> list[int]:
+    """The backend of each session holding an advisory lock of the two-integer form, as often as it holds one."""
+    engine = engine_of(target.dbname)
+    try:
+        with engine.connect() as connection:
+            return [
+                pid
+                for (pid,) in connection.execute(
+                    text("SELECT pid FROM pg_locks WHERE locktype = 'advisory' AND objsubid = 2 AND granted")
+                )
+            ]
+    finally:
+        engine.dispose()
+
+
+def terminate_backend(target: DatabaseTarget, pid: int) -> None:
+    """Ends the session of this backend, as an operator or a failover does."""
+    engine = engine_of(target.dbname)
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT pg_terminate_backend(:pid)"), {"pid": pid})
     finally:
         engine.dispose()

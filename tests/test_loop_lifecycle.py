@@ -204,7 +204,6 @@ async def test_a_stream_that_does_not_honor_the_standing_suspends_the_loop_and_l
 
     assert runner.reports.reported() == [(Event.STARTED, None), (Event.SUSPENDED, LISTEN_NOT_HONORED_CODE)]
     assert set(runner.clock.slept) == {SUSPENDED_RETRY_SECONDS}
-    assert not runner.ready_file.exists()
 
 
 @pytest.mark.parametrize("method", [DISCOVER, LISTEN, READ, CALL])
@@ -468,30 +467,6 @@ async def test_a_programming_error_in_a_reconciliation_ends_the_runner_loud(runn
     with pytest.RaisesGroup(BugError, flatten_subgroups=True):
         async with asyncio.timeout(LIMIT_SECONDS):
             await runner.task
-
-
-async def test_the_marker_is_absent_after_an_acknowledgement_with_no_read_and_present_after_the_first_read(runner):
-    release = runner.app.hold_next_read()
-    runner.app.stand(SUBJECT, invited("room-7", "inv-3"))
-    runner.start()
-    async with asyncio.timeout(LIMIT_SECONDS):
-        await runner.app.read_held.wait()
-
-    assert runner.app.log.count(ACKNOWLEDGED) == 1
-    assert not runner.ready_file.exists()
-
-    release.set()
-    await runner.reports.until(Event.JOINED)
-
-    assert runner.ready_file.exists()
-
-
-async def test_an_app_that_refuses_with_403_leaves_no_marker(runner):
-    runner.app.refuse_with = HTTPStatus.FORBIDDEN
-    runner.start()
-    await runner.reports.until(Event.SUSPENDED)
-
-    assert not runner.ready_file.exists()
 
 
 async def test_a_defect_in_the_lifecycle_sessions_body_whose_close_loses_a_child_ends_the_runner_loud(

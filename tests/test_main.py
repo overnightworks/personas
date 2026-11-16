@@ -35,10 +35,13 @@ from personas.tokens import HttpTokenSource
 from tests.support.fakes import FakeClock, credentials
 from tests.support.gateway import Gateway, says
 from tests.support.hopin import AGENT_SUBJECT, FakeApp, active, invited
+from tests.support.ownership import AllAgentsOwned
 from tests.support.realm import FakeRealm
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterable
+    from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterable, Sequence
+    from pathlib import Path
+    from typing import NoReturn
 
     from agents.agent_file import TurnRequest
     from agents.backend import TurnEvent, TurnPerson
@@ -46,6 +49,7 @@ if TYPE_CHECKING:
 
     from personas.config import AppTarget, Config
     from personas.entries import WindowRead
+    from personas.ownership import ServeAgent
     from personas.readiness import ReadyMarker
     from personas.remembering import LineStore
     from personas.reporting import StateChange
@@ -87,13 +91,29 @@ class StopsAfterTheAnswer:
                 raise Stop
 
 
+class NotingTheMarker:
+    """The ownership that serves every agent and notes whether the marker existed when it started."""
+
+    def __init__(self, inner: AllAgentsOwned, marker: Path, noted: list[bool]) -> None:
+        self._inner = inner
+        self._marker = marker
+        self._noted = noted
+
+    async def serve(
+        self, client_ids: Sequence[str], serve_agent: ServeAgent, contending: Callable[[], None]
+    ) -> NoReturn:
+        self._noted.append(self._marker.exists())
+        await self._inner.serve(client_ids, serve_agent, contending)
+
+
 class World:
     """The real entry point, loops and adapters over a fake realm and app that answer for real."""
 
     def __init__(self, files: Files) -> None:
         self.files = files
         self.app = FakeApp()
-        self.tokens_requested_with_marker: list[bool] = []
+        self.ownership = AllAgentsOwned()
+        self.marker_when_ownership_started: list[bool] = []
         self.gateway = Gateway(*says("room-7", files.persona_prompt))
         self.issued: list[str] = []
         self.app.stand(AGENT_SUBJECT, invited("room-7", "inv-3"))
@@ -118,15 +138,12 @@ class World:
             assert config.gateway is not None
             return StopsAfterTheAnswer(GatewayBackend(config.gateway, tools=tools, transport=self.gateway))
 
-        async def note_request(request: httpx2.Request) -> None:
-            self.tokens_requested_with_marker.append(self.files.ready_path.exists())
-
         def open_at_the_app(app: AppTarget, token: Secret):
             return open_mcp_session(replace(app, mcp_url=app_url), token)
 
         async with (
             self.app.serving() as app_url,
-            httpx2.AsyncClient(transport=realm.transport(), event_hooks={"request": [note_request]}) as token_client,
+            httpx2.AsyncClient(transport=realm.transport()) as token_client,
         ):
             yield SweepingBoundaries(
                 tokens=HttpTokenSource(config.token_endpoint, token_client),
@@ -136,6 +153,7 @@ class World:
                 ready=ready,
                 backend=gateway_backend,
                 lines=self.lines,
+                ownership=NotingTheMarker(self.ownership, self.files.ready_path, self.marker_when_ownership_started),
             )
 
     def start(self) -> None:
@@ -149,16 +167,16 @@ def world(files: Files, monkeypatch: pytest.MonkeyPatch) -> World:
     return World(files)
 
 
-def test_a_marker_left_from_an_earlier_run_is_gone_before_the_first_token_request(world):
+def test_a_marker_left_from_an_earlier_run_is_gone_before_the_agents_are_contended_for(world):
     world.files.ready_path.touch()
 
     with pytest.raises(ExceptionGroup):
         world.start()
 
-    assert world.tokens_requested_with_marker[0] is False
+    assert world.marker_when_ownership_started == [False]
 
 
-def test_the_marker_is_created_when_a_loop_is_served_and_stays(world):
+def test_the_marker_is_created_when_the_runner_contends_for_its_agents_and_stays(world):
     with pytest.raises(ExceptionGroup):
         world.start()
 
@@ -201,7 +219,7 @@ def test_a_marker_that_cannot_be_removed_stops_the_start_and_names_its_path(worl
 
     assert stopped.value.code == READINESS_ERROR_EXIT_CODE
     assert str(world.files.ready_path) in capsys.readouterr().err
-    assert world.tokens_requested_with_marker == []
+    assert world.marker_when_ownership_started == []
 
 
 def test_a_marker_that_cannot_be_created_stops_the_runner_and_names_its_path(files, world, capsys):

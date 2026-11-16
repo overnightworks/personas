@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import pytest
 from agents.member import PlaceRef
 
+from personas.config import MemoryTarget
 from personas.entries import WindowRead
 from personas.failures import STORE_TIMEOUT_CODE, STORE_UNREACHABLE_CODE, StoreDefect, StoreUnavailable, leaves_of
 from personas.memory import PostgresLineStore
@@ -25,7 +26,8 @@ from tests.support.postgres import kept_lines, lines_table_locked, run_sql
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from personas.config import MemoryTarget
+    from personas.config import DatabaseTarget
+
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 
@@ -42,7 +44,7 @@ RENAME_FIRST_READ_AT = "ALTER TABLE lines RENAME COLUMN first_read_at TO renamed
 class UnreachableUntilMended(PostgresLineStore):
     """The real store, whose sweeps meet an outage until it is mended."""
 
-    def __init__(self, target: MemoryTarget) -> None:
+    def __init__(self, target: DatabaseTarget) -> None:
         super().__init__(target)
         self.mended = False
 
@@ -60,10 +62,10 @@ def read_of(text: str, *, days_ago: float, now, client_id: str = "agent-mozart",
     )
 
 
-def sweeping(runner, target: MemoryTarget, store: PostgresLineStore, **memory) -> SweepClock:
+def sweeping(runner, store: PostgresLineStore, **memory) -> SweepClock:
     """The runner remembers in ``store`` and sweeps every ``SWEEP_MINUTES`` on a clock that waits for its gate."""
     runner.clock = SweepClock(SWEEP_SECONDS)
-    runner.remember_in(store, replace(target, lines_keep_days=KEEP_DAYS, sweep_minutes=SWEEP_MINUTES, **memory))
+    runner.remember_in(store, MemoryTarget(lines_keep_days=KEEP_DAYS, sweep_minutes=SWEEP_MINUTES, **memory))
     return runner.clock
 
 
@@ -74,7 +76,7 @@ async def ended_by(task):
 
 
 @pytest.fixture
-async def store(database: MemoryTarget) -> AsyncIterator[PostgresLineStore]:
+async def store(database: DatabaseTarget) -> AsyncIterator[PostgresLineStore]:
     kept = PostgresLineStore(database)
     yield kept
     await kept.close()
@@ -86,7 +88,7 @@ async def test_the_first_sweep_removes_the_line_first_read_longer_ago_than_the_k
     now = runner.clock.wall()
     await store.keep(read_of("Older", days_ago=OLD_DAYS, now=now))
     await store.keep(read_of("Younger", days_ago=YOUNG_DAYS, now=now))
-    clock = sweeping(runner, database, store)
+    clock = sweeping(runner, store)
     runner.start()
     await clock.until_waiting(1)
 
@@ -98,7 +100,7 @@ async def test_a_line_that_ages_past_the_period_while_the_runner_runs_is_removed
     runner, store, database
 ):
     await store.keep(read_of("Ages", days_ago=0, now=runner.clock.wall()))
-    clock = sweeping(runner, database, store)
+    clock = sweeping(runner, store)
     runner.start()
     await clock.until_waiting(1)
     clock.time += LATER_DAYS * 24 * 3600
@@ -115,7 +117,7 @@ async def test_a_store_that_cannot_be_reached_at_a_sweep_is_reported_once_costs_
 ):
     store = UnreachableUntilMended(database)
     await store.keep(read_of("Older", days_ago=OLD_DAYS, now=runner.clock.wall()))
-    clock = sweeping(runner, database, store)
+    clock = sweeping(runner, store)
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
     await clock.until_waiting(1)
@@ -140,7 +142,7 @@ async def test_a_store_that_cannot_be_reached_at_a_sweep_is_reported_once_costs_
 async def test_a_database_error_at_a_sweep_that_is_no_outage_ends_the_runner_with_a_code_and_no_secret(
     runner, store, database
 ):
-    sweeping(runner, database, store)
+    sweeping(runner, store)
     run_sql(database, RENAME_FIRST_READ_AT)
     runner.start()
 
@@ -154,7 +156,7 @@ async def test_a_sweep_slower_than_the_write_bound_is_cut_as_a_timeout_logged_an
     bounded = replace(database, write_seconds=BOUND_SECONDS)
     store = PostgresLineStore(bounded)
     await store.keep(read_of("Older", days_ago=OLD_DAYS, now=runner.clock.wall()))
-    clock = sweeping(runner, bounded, store)
+    clock = sweeping(runner, store)
     try:
         with lines_table_locked(database):
             runner.start()
@@ -169,7 +171,7 @@ async def test_a_sweep_slower_than_the_write_bound_is_cut_as_a_timeout_logged_an
 async def test_no_line_text_speaker_or_password_reaches_a_log_line_of_a_sweep(runner, store, database, caplog):
     text, speaker = f"text-{secrets.token_hex(8)}", f"speaker-{secrets.token_hex(8)}"
     await store.keep(read_of(text, days_ago=OLD_DAYS, now=runner.clock.wall(), speaker=speaker))
-    clock = sweeping(runner, database, store)
+    clock = sweeping(runner, store)
     runner.start()
     await clock.until_waiting(1)
 

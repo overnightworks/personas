@@ -276,36 +276,6 @@ async def test_an_accept_that_fails_on_the_network_backs_off_and_does_not_retry_
     assert run.clock.slept == [backoff_delay(1), backoff_delay(2), backoff_delay(3)]
 
 
-async def test_the_marker_is_asked_for_when_a_read_answers_and_not_before(scenario):
-    run = scenario([Unreachable("down"), StatusFailure(403), read_of(), read_of()])
-
-    await run.play()
-
-    assert run.ready.announced == 2
-
-
-@pytest.mark.parametrize(
-    "failure",
-    [StatusFailure(403), StatusFailure(503), Unreachable("down")],
-    ids=["refusal", "5xx", "network"],
-)
-async def test_no_marker_is_asked_for_while_no_read_has_answered(scenario, failure):
-    run = scenario([failure, failure])
-
-    await run.play()
-
-    assert run.ready.announced == 0
-
-
-async def test_a_failure_after_the_first_answer_does_not_take_the_marker_back(scenario):
-    run = scenario([read_of(), StatusFailure(403), Unreachable("down")])
-
-    await run.play()
-
-    assert run.ready.announced == 1
-    assert run.ready.cleared == 0
-
-
 async def test_a_backoff_is_logged_once_for_its_retries_and_again_after_the_loop_resumed(scenario):
     run = scenario(
         [Unreachable("down"), StatusFailure(502), Unreachable("down"), read_of(), StatusFailure(503), read_of()]

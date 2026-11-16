@@ -16,8 +16,14 @@ The top-level ``history_bytes`` bounds the history each agent keeps in memory of
 read and the calls relayed for him at any of his apps and tells every turn; past it the oldest messages leave in one
 step until what stays fits ``history_keep_bytes``, which is never above ``history_bytes``. The top-level
 ``budget_pause_cap_seconds`` is the longest wait between his turns while the gateway refuses them for a spent budget.
-The optional ``[memory]`` table names the Postgres database that keeps every line the agents read: its host, port,
-database, user, the file holding the password, ``write_seconds``, the bound on one write or read, how long a line is
+The required ``[database]`` table names the Postgres database the runner shares with its other pods: its host, port,
+database, user, the file holding the password and ``write_seconds``, the bound on one write or read. A pod serves an
+agent only while it holds that agent's advisory lock there. The optional ``[ownership]`` table sets how the pods
+share the agents: ``contend_seconds`` is how often a pod checks its locks and takes the free ones,
+``heartbeat_timeout_seconds`` how long one such check may take, ``cancel_margin_seconds`` the time a pod that lost
+its hold is given to stop its loops and ``grace_seconds`` how long a pod that took an agent waits before it
+starts; the grace is above the other three together, so that the pod that lost the agent has stopped by then.
+The optional ``[memory]`` table keeps every line the agents read in that database: how long a line is
 kept (``lines_keep_days``) and how often older ones are swept (``sweep_minutes``); ``inf`` keeps every line or sweeps
 once, at the start. A turn may look up what was said in its place before its history (``lookup_calls``, the lookups one
 turn makes, and ``lookup_bytes``, the bytes of one result and the longest text a lookup accepts); both are integers,
@@ -67,6 +73,10 @@ DEFAULT_LINES_KEEP_DAYS: Final = 30.0
 DEFAULT_SWEEP_MINUTES: Final = 60.0
 DEFAULT_LOOKUP_CALLS: Final = 2
 DEFAULT_LOOKUP_BYTES: Final = 8192
+DEFAULT_CONTEND_SECONDS: Final = 5.0
+DEFAULT_HEARTBEAT_TIMEOUT_SECONDS: Final = 3.0
+DEFAULT_CANCEL_MARGIN_SECONDS: Final = 2.0
+DEFAULT_GRACE_SECONDS: Final = 12.0
 
 
 class ConfigError(Exception):
@@ -108,9 +118,8 @@ class AgentCredentials:
 
 
 @dataclass(frozen=True)
-class MemoryTarget:
-    """The database that keeps the lines, how long one write or read of it may take and how long a line is kept, with
-    how often older ones are swept, and what a turn's lookups may take."""
+class DatabaseTarget:
+    """The Postgres database every pod shares, and how long one write or read of it may take."""
 
     host: str
     port: int
@@ -118,6 +127,22 @@ class MemoryTarget:
     user: str
     password: Secret
     write_seconds: float = DEFAULT_WRITE_SECONDS
+
+
+@dataclass(frozen=True)
+class OwnershipTimings:
+    """How the pods share the agents, in seconds; the grace is above the other three together."""
+
+    contend_seconds: float = DEFAULT_CONTEND_SECONDS
+    heartbeat_timeout_seconds: float = DEFAULT_HEARTBEAT_TIMEOUT_SECONDS
+    cancel_margin_seconds: float = DEFAULT_CANCEL_MARGIN_SECONDS
+    grace_seconds: float = DEFAULT_GRACE_SECONDS
+
+
+@dataclass(frozen=True)
+class MemoryTarget:
+    """How long a line is kept, how often older ones are swept, and what a turn's lookups may take."""
+
     lines_keep_days: float = DEFAULT_LINES_KEEP_DAYS
     sweep_minutes: float = DEFAULT_SWEEP_MINUTES
     lookup_calls: int = DEFAULT_LOOKUP_CALLS
@@ -130,6 +155,8 @@ class Config:
     ready_file: Path
     apps: tuple[AppTarget, ...]
     agents: tuple[AgentCredentials, ...]
+    database: DatabaseTarget
+    ownership: OwnershipTimings = OwnershipTimings()
     gateway: AgentConfig | None = None
     memory: MemoryTarget | None = None
     history_bytes: int = DEFAULT_HISTORY_BYTES
@@ -206,13 +233,38 @@ class _AgentEntry(_Entry):
         return model
 
 
-class _MemoryEntry(_Entry):
+class _DatabaseEntry(_Entry):
     host: str = Field(min_length=1)
     port: int = Field(ge=1, le=65535, strict=True)
     dbname: str = Field(min_length=1)
     user: str = Field(min_length=1)
     password_file: Path
     write_seconds: PositiveFloat = Field(default=DEFAULT_WRITE_SECONDS, strict=True)
+
+
+class _OwnershipEntry(_Entry):
+    contend_seconds: PositiveFloat = Field(default=DEFAULT_CONTEND_SECONDS, strict=True, allow_inf_nan=False)
+    heartbeat_timeout_seconds: PositiveFloat = Field(
+        default=DEFAULT_HEARTBEAT_TIMEOUT_SECONDS, strict=True, allow_inf_nan=False
+    )
+    cancel_margin_seconds: PositiveFloat = Field(
+        default=DEFAULT_CANCEL_MARGIN_SECONDS, strict=True, allow_inf_nan=False
+    )
+    grace_seconds: PositiveFloat = Field(default=DEFAULT_GRACE_SECONDS, strict=True, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def _the_grace_outlasts_the_hold_it_takes_over_from(self) -> Self:
+        """A pod that lost its lock notices within a contend interval and a heartbeat timeout and then needs its margin
+        to stop; a taker that starts sooner than that could speak beside it."""
+        stopped_by = self.contend_seconds + self.heartbeat_timeout_seconds + self.cancel_margin_seconds
+        if self.grace_seconds <= stopped_by:
+            raise ValueError(
+                "grace_seconds: must be above contend_seconds + heartbeat_timeout_seconds + cancel_margin_seconds"
+            )
+        return self
+
+
+class _MemoryEntry(_Entry):
     lines_keep_days: PositiveFloat = Field(default=DEFAULT_LINES_KEEP_DAYS, strict=True)
     sweep_minutes: PositiveFloat = Field(default=DEFAULT_SWEEP_MINUTES, strict=True)
     lookup_calls: PositiveInt = Field(default=DEFAULT_LOOKUP_CALLS, strict=True)
@@ -224,6 +276,8 @@ class _FileModel(_Entry):
     ready_file: Path
     apps: tuple[_AppEntry, ...] = Field(min_length=1)
     agents: tuple[_AgentEntry, ...] = Field(min_length=1)
+    database: _DatabaseEntry
+    ownership: _OwnershipEntry = _OwnershipEntry()
     gateway: AgentConfig | None = None
     memory: _MemoryEntry | None = None
     history_bytes: PositiveInt = Field(default=DEFAULT_HISTORY_BYTES, strict=True)
@@ -344,17 +398,15 @@ def _read_persona(index: int, path: Path | None, model: GatewayModelName | None)
     return persona if model is None else persona.model_copy(update={"model": model})
 
 
+def _database_target(entry: _DatabaseEntry) -> DatabaseTarget:
+    password = _read_secret("database.password_file", entry.password_file)
+    return DatabaseTarget(entry.host, entry.port, entry.dbname, entry.user, password, entry.write_seconds)
+
+
 def _memory_target(entry: _MemoryEntry | None) -> MemoryTarget | None:
     if entry is None:
         return None
-    password = _read_secret("memory.password_file", entry.password_file)
     return MemoryTarget(
-        entry.host,
-        entry.port,
-        entry.dbname,
-        entry.user,
-        password,
-        entry.write_seconds,
         entry.lines_keep_days,
         entry.sweep_minutes,
         entry.lookup_calls,
@@ -388,6 +440,8 @@ def load_config(environment: Mapping[str, str]) -> Config:
             )
             for index, agent in enumerate(parsed.agents)
         ),
+        database=_database_target(parsed.database),
+        ownership=OwnershipTimings(**parsed.ownership.model_dump()),
         gateway=parsed.gateway,
         memory=_memory_target(parsed.memory),
         history_bytes=parsed.history_bytes,

@@ -21,7 +21,7 @@ from tests.support.fakes import WALL_START, window_of
 from tests.support.postgres import kept_lines, run_sql
 
 if TYPE_CHECKING:
-    from personas.config import MemoryTarget
+    from personas.config import DatabaseTarget
     from tests.support.configfiles import Files
 
 pytestmark = pytest.mark.usefixtures("restored_logging")
@@ -62,7 +62,7 @@ def a_read(client_id: str, visit: Visit, lines: tuple[PlaceEntry, ...], hours_af
     return WindowRead(client_id, visit.app, visit.place, window, WALL_START + timedelta(hours=hours_after_start))
 
 
-def kept_by_the_store(target: MemoryTarget, *reads: WindowRead) -> None:
+def kept_by_the_store(target: DatabaseTarget, *reads: WindowRead) -> None:
     async def keep_each() -> None:
         store = PostgresLineStore(target)
         try:
@@ -74,7 +74,7 @@ def kept_by_the_store(target: MemoryTarget, *reads: WindowRead) -> None:
     asyncio.run(keep_each())
 
 
-def three_visits_of_two_agents(target: MemoryTarget, spoken: Spoken) -> None:
+def three_visits_of_two_agents(target: DatabaseTarget, spoken: Spoken) -> None:
     """The first visit is read twice, an hour apart, with a new line the second time."""
     first_lines = spoken.lines(1, 2)
     kept_by_the_store(
@@ -86,10 +86,9 @@ def three_visits_of_two_agents(target: MemoryTarget, spoken: Spoken) -> None:
     )
 
 
-def configured_for(files: Files, target: MemoryTarget, monkeypatch: pytest.MonkeyPatch) -> None:
-    files.text += files.memory_table(
-        host=f'"{target.host}"', port=str(target.port), dbname=f'"{target.dbname}"', user=f'"{target.user}"'
-    )
+def configured_for(files: Files, target: DatabaseTarget, monkeypatch: pytest.MonkeyPatch) -> None:
+    files.text += files.memory_table()
+    files.use_database(target)
     monkeypatch.setenv(CONFIG_ENVIRONMENT_VARIABLE, str(files.write()[CONFIG_ENVIRONMENT_VARIABLE]))
 
 
@@ -126,7 +125,7 @@ def a_row(agent: str, visit: Visit, count: int, first_hours: float, last_hours: 
     )
 
 
-def agents_kept(target: MemoryTarget) -> list[object]:
+def agents_kept(target: DatabaseTarget) -> list[object]:
     return [row[0] for row in kept_lines(target, "client_id")]
 
 
@@ -286,7 +285,8 @@ def test_a_memory_command_without_a_memory_table_stops_and_names_the_table(files
 def test_a_memory_command_against_a_store_that_cannot_be_reached_stops_with_its_code_and_no_traceback(
     files, monkeypatch, capsys, arguments
 ):
-    files.text += files.memory_table(host='"127.0.0.1"', port=str(CLOSED_PORT))
+    files.text += files.memory_table()
+    files.set_database(host='"127.0.0.1"', port=str(CLOSED_PORT))
     monkeypatch.setenv(CONFIG_ENVIRONMENT_VARIABLE, str(files.write()[CONFIG_ENVIRONMENT_VARIABLE]))
 
     with pytest.raises(SystemExit) as stopped:
