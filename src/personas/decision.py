@@ -921,6 +921,13 @@ def hold_tellable(held: Held) -> bool:
     return held.record_gone or any(each.text for each in held.speech)
 
 
+def untold_words(said: Iterable[PartialSpeech], told: Iterable[PartialSpeech]) -> tuple[PartialSpeech, ...]:
+    """What people have said over him that he was not told: each partial with words that differs from the one of the
+    same name that was told."""
+    known = {(each.name, each.text) for each in told}
+    return tuple(each for each in said if each.text and (each.name, each.text) not in known)
+
+
 def round_seconds(remaining: float) -> int:
     """The whole seconds a decision round may last, at least one: the library takes only a positive whole bound."""
     return max(1, math.ceil(remaining))

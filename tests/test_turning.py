@@ -54,4 +54,4 @@ def test_an_admission_repr_shows_neither_a_view_state_nor_a_line_nor_an_act_of_t
 def test_a_hold_repr_shows_neither_a_view_state_nor_a_line_nor_an_act_of_the_history(marked_present):
     marker, present = marked_present
 
-    assert marker not in repr(_Hold(present.history))
+    assert marker not in repr(_Hold(present.history, None))

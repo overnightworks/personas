@@ -193,6 +193,29 @@ async def test_a_call_waiting_on_his_speech_is_sent_after_a_continue(runner):
     assert [text for *_, text in runner.app.said] == ["written"]
 
 
+async def test_words_said_over_him_after_a_continue_are_told_once_at_his_next_call_and_the_call_after_it_goes_out(
+    runner,
+):
+    more = ("Ada", "wait a moment, please")
+    replies = [tool_round(say("first try", PLACE_ID), content=TWO_SENTENCES), deciding(CONTINUE_SPEAKING_TOOL)]
+    await held_in_the_first_sentence(
+        runner, *replies, completion(), tool_round(say("second try", PLACE_ID)), completion()
+    )
+    await decided(runner)
+    await runner.gateway.until_answered(3)
+    runner.app.talk_over(PLACE_ID, more)
+    await window_read_after_the_hold(runner)
+
+    await runner.app.spoken_count(2)
+    runner.app.end_sentence()
+    await runner.app.said_count(1)
+
+    assert [text for *_, text in runner.app.said] == ["second try"]
+    assert [json.loads(each) for each in runner.gateway.tool_results(4)] == [
+        {"sent": False, "talked_over": [{"name": more[0], "text": more[1]}]}
+    ]
+
+
 async def test_a_call_waiting_on_his_speech_is_never_sent_after_a_stop_and_he_is_told_so(runner):
     replies = [tool_round(say("written", PLACE_ID), content=TWO_SENTENCES), deciding(STOP_SPEAKING_TOOL)]
     await held_in_the_first_sentence(runner, *replies, completion(), completion())

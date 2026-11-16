@@ -36,8 +36,18 @@ from personas.decision import (
     round_seconds,
     turn_call_bound,
     turn_messages,
+    untold_words,
 )
-from personas.entries import ActDone, InputSizes, message_bytes, picture_bytes, told_bytes, told_hold, told_stop
+from personas.entries import (
+    ActDone,
+    InputSizes,
+    message_bytes,
+    picture_bytes,
+    told_bytes,
+    told_hold,
+    told_stop,
+    told_words,
+)
 from personas.failures import CallFailure, Unreachable, leaves_of, raise_if_cancelled, task_is_being_cancelled
 from personas.recall import (
     LOOKUPS_SPENT_TEXT,
@@ -66,7 +76,7 @@ if TYPE_CHECKING:
 
     from agents.agent_file import AgentDefinition
     from agents.backend import AgentBackend, TurnEvent
-    from agents.member import PlaceRef, PlaceWindow
+    from agents.member import PartialSpeech, PlaceRef, PlaceWindow
     from agents.turn import FailureCode, JsonObject, Principal
     from logline import StepTimer
 
@@ -196,18 +206,31 @@ class _Calls:
 
 
 class _HoldInbox:
-    """What the window says of him while a spoken turn runs: the hold that stands, and the call that waits."""
+    """What the window says of him while a spoken turn runs: the hold that stands, the call that waits, and what people
+    say over him, with what a round told him of it."""
 
     def __init__(self) -> None:
         self.hold: Held | None = None
         self.waiting: ToolCallEvent | None = None
+        self.told: tuple[PartialSpeech, ...] | None = None
+        self._said: tuple[PartialSpeech, ...] = ()
         self._taken: str | None = None
         self._closed = False
         self._changed = asyncio.Event()
 
     def hear(self, window: PlaceWindow) -> None:
         self.hold = hold_stated(window, self.hold)
+        self._said = () if window.talked_over is None else window.talked_over.speech
         self._changed.set()
+
+    def untold(self) -> tuple[PartialSpeech, ...]:
+        """What people said over him since a round told him of it, once; nothing before a round has."""
+        if self.told is None:
+            return ()
+        words = untold_words(self._said, self.told)
+        if words:
+            self.told = self._said
+        return words
 
     def close(self) -> None:
         self._closed = True
@@ -231,9 +254,10 @@ class _HoldInbox:
 @dataclass
 class _Hold:
     """Whether a call of the turn is held back: once, when an entry not his own entered his history since the turn's
-    admission."""
+    admission, and again when people said words over him that no round told him."""
 
     admitted: History = field(repr=False)
+    inbox: _HoldInbox | None
     spent: bool = False
 
     def holding(self, current: History) -> Arrived | None:
@@ -243,6 +267,9 @@ class _Hold:
         arrived = arrived_since(current, self.admitted)
         self.spent = arrived is not None
         return arrived
+
+    def said_over_him(self) -> tuple[PartialSpeech, ...]:
+        return () if self.inbox is None else self.inbox.untold()
 
 
 @dataclass(frozen=True)
@@ -541,6 +568,7 @@ class Turning:
         """One round on a backend of its own beside the run parked at the hold: his history as it stands and the
         telling of the hold, on his persona and tools. Without a decision he stops and says nothing."""
         admitted, speaking, inbox = voiced.admitted, voiced.speaking, voiced.inbox
+        inbox.told = hold.speech
         told = (
             *turn_messages(
                 admitted.facts.name, self._mind.present, replace(voiced.turn, through=self._mind.history.taken)
@@ -637,7 +665,7 @@ class Turning:
         """
         own = await self._list_tools(self._app, session)
         inbox = _HoldInbox() if admitted.aloud else None
-        hold = _Hold(admitted.history)
+        hold = _Hold(admitted.history, inbox)
         tools: list[HandTool] = []
         bounds: list[int] = []
         taken = frozenset[str]()
@@ -737,9 +765,11 @@ class Turning:
     def _held(self, hold: _Hold) -> ToolOutcome | None:
         """The result of a call that is not sent, or ``None`` when the call goes on. It is asked before any await."""
         arrived = hold.holding(self._mind.history)
-        if arrived is None:
-            return None
-        return ToolOutcome(held_told(arrived), is_error=False)
+        if arrived is not None:
+            return ToolOutcome(held_told(arrived), is_error=False)
+        if words := hold.said_over_him():
+            return ToolOutcome(told_words(words), is_error=False)
+        return None
 
     async def _relay(
         self, session: AppSession, name: str, calls: _Calls, hold: _Hold, _principal: Principal, arguments: JsonObject

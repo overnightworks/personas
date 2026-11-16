@@ -344,6 +344,8 @@ class FakeApp:
         default_factory=dict[str, tuple[str, tuple[PartialSpeech, ...] | None]]
     )
     """Each place whose member is held: the hold's id and what is said over it, none once the record is gone."""
+    talked_over: dict[str, tuple[PartialSpeech, ...]] = field(default_factory=dict[str, tuple[PartialSpeech, ...]])
+    """Each place where people still talk over a member whose hold a continue ended: what each has said so far."""
     hold_calls: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
     """The tool and the hold id of each ``continue_speaking`` and ``stop_speaking`` that arrived."""
     hold_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
@@ -428,6 +430,10 @@ class FakeApp:
 
     def talk_over(self, place_id: str, *said: tuple[str, str]) -> None:
         """What is said over the held member changes, under the same hold."""
+        if place_id in self.talked_over:
+            self.talked_over[place_id] = tuple(PartialSpeech(name=name, text=text) for name, text in said)
+            self._signal_window(place_id)
+            return
         hold_id, _ = self.holds[place_id]
         self.hold(place_id, hold_id, *said)
 
@@ -558,7 +564,7 @@ class FakeApp:
             )
             for line in self.lines.get(place.id, [])
         )
-        hold_id, said = self.holds.get(place.id, (None, None))
+        hold_id, said = self.holds.get(place.id, (None, self.talked_over.get(place.id)))
         return PlaceWindow(
             generation=self.generations.get(place.id, GENERATION),
             starts_at=entries[0].seq if entries else 1,
@@ -612,7 +618,7 @@ class FakeApp:
         self.hold_calls.append((CONTINUE_SPEAKING_TOOL, taken.interrupted))
         if self.hold_outcomes:
             return self.hold_outcomes.pop(0)
-        if not self._ends_hold(taken.place.id, taken.interrupted):
+        if not self._ends_hold(taken.place.id, taken.interrupted, keep_record=True):
             refusal = ContinueSpeakingRefused(refused=ContinueSpeakingRefusal.NOT_INTERRUPTED)
             return ToolOutcome(refusal.model_dump_json(), is_error=True)
         if self.playing:
@@ -634,11 +640,15 @@ class FakeApp:
         self.stop_speaking()
         return ToolOutcome(StoppedSpeaking(cut=cut).model_dump_json(), is_error=False)
 
-    def _ends_hold(self, place_id: str, hold_id: str) -> bool:
-        """Whether the hold stands at the place; it ends, and the window says so."""
+    def _ends_hold(self, place_id: str, hold_id: str, *, keep_record: bool = False) -> bool:
+        """Whether the hold stands at the place; it ends, and the window says so. A continue keeps the record: people
+        go on talking over him without holding him again."""
         if self.holds.get(place_id, ("", None))[0] != hold_id:
             return False
-        del self.holds[place_id]
+        said = self.holds.pop(place_id)[1]
+        self.talked_over.pop(place_id, None)
+        if keep_record and said:
+            self.talked_over[place_id] = said
         self._signal_window(place_id)
         return True
 

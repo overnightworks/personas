@@ -303,6 +303,14 @@ def told_hold(
     return json.dumps({"held": held}, ensure_ascii=False)
 
 
+def told_words(words: Iterable[PartialSpeech]) -> str:
+    """The result of a call that was not sent because people kept talking over him after he went on: that it was not,
+    and what each has said that he was not told."""
+    return json.dumps(
+        {"sent": False, "talked_over": [{"name": each.name, "text": each.text} for each in words]}, ensure_ascii=False
+    )
+
+
 def told_stop(unsaid: Iterable[str], waiting_tool: str | None) -> str:
     """The result of his stop: the sentences that were not said and the tool of the call that was never sent."""
     stopped: dict[str, object] = {"stopped": True, "unsaid": list(unsaid)}

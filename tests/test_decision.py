@@ -119,6 +119,7 @@ from personas.decision import (
     turn_ending,
     turn_invalid,
     turn_messages,
+    untold_words,
     view_turn_due,
     wakes_him,
     with_due,
@@ -1906,3 +1907,24 @@ def test_a_window_states_the_hold_with_what_was_said_over_him(window, seen, stat
 )
 def test_a_hold_may_be_told_once_someone_has_said_words_or_the_record_is_gone(held, tellable):
     assert hold_tellable(held) is tellable
+
+
+@pytest.mark.parametrize(
+    ("said", "told", "untold"),
+    [
+        (ADA_SAYS, ADA_SAYS, ()),
+        (ADA_SAYS, (), ADA_SAYS),
+        (ADA_STARTED, (), ()),
+        (
+            (PartialSpeech(name="Ada", text="wait a moment"),),
+            ADA_SAYS,
+            (PartialSpeech(name="Ada", text="wait a moment"),),
+        ),
+        ((PartialSpeech(name="Ben", text="no"), *ADA_SAYS), ADA_SAYS, (PartialSpeech(name="Ben", text="no"),)),
+    ],
+    ids=["told", "not told", "no words yet", "more words", "another person"],
+)
+def test_the_words_said_over_him_that_were_not_told_are_each_partial_with_words_that_differs_from_the_told(
+    said, told, untold
+):
+    assert untold_words(said, told) == untold
