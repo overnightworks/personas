@@ -44,13 +44,16 @@ class Event(Enum):
     STORE_FAILED = auto()
     STORE_RESUMED = auto()
     SWEPT = auto()
+    TAKEN = auto()
+    LOST = auto()
 
 
 @dataclass(frozen=True)
 class StateChange:
     """One change of an agent's loop for one app, with the refusal or failure code if any.
 
-    The sweep belongs to no agent and no app, and says how many lines it removed. The start says the model the agent's
+    The sweep belongs to no agent and no app, and says how many lines it removed. The lock of an agent taken or lost
+    belongs to no app. The start says the model the agent's
     turns run on, when it has a persona. An invitation the loop leaves out says its place's kind and the reason as the
     code. A pause of his turns says its reason as the code and its wait in seconds. A call that failed
     says its failure: the line holds its HTTP status, the MCP method that failed and a closed reason.
@@ -85,6 +88,8 @@ _LINE_OF: Final = {
     Event.STORE_FAILED: (logging.WARNING, "store.failed"),
     Event.STORE_RESUMED: (logging.INFO, "store.resumed"),
     Event.SWEPT: (logging.INFO, "lines.swept"),
+    Event.TAKEN: (logging.INFO, "agent.taken"),
+    Event.LOST: (logging.WARNING, "agent.lost"),
 }
 
 

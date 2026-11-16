@@ -37,14 +37,22 @@ from tests.support.history import (
 )
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import LIMIT_SECONDS, active, formatted, invited, paused
-from tests.support.postgres import Forwarder, kept_lines, lines_table_locked, run_sql, waiting_statements
+from tests.support.postgres import (
+    Forwarder,
+    at_an_unknown_revision,
+    kept_lines,
+    lines_table_locked,
+    migrated_to,
+    run_sql,
+    waiting_statements,
+)
 from tests.support.realm import AGENT_NAME
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from datetime import datetime
 
-    from personas.config import MemoryTarget
+    from personas.config import DatabaseTarget
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 
@@ -69,7 +77,7 @@ REFUSE_EVERY_NEW_ROW = "ALTER TABLE lines ADD CONSTRAINT refuses_every_row CHECK
 class ObservedStore(PostgresLineStore):
     """The real store, which tells how many writes have finished, in all and per agent, whatever way they ended."""
 
-    def __init__(self, target: MemoryTarget) -> None:
+    def __init__(self, target: DatabaseTarget) -> None:
         super().__init__(target)
         self.finished = 0
         self._finished_by_client_id = Counter[str]()
@@ -97,7 +105,7 @@ class ObservedStore(PostgresLineStore):
 
 
 @pytest.fixture
-async def store(database: MemoryTarget) -> AsyncIterator[ObservedStore]:
+async def store(database: DatabaseTarget) -> AsyncIterator[ObservedStore]:
     kept = ObservedStore(database)
     yield kept
     await kept.close()
@@ -204,23 +212,23 @@ async def test_a_line_with_u0000_is_kept_with_the_character_replaced_and_the_oth
 
 
 async def test_a_write_waiting_on_a_lock_ends_within_its_bound_releases_its_statement_and_the_next_write_succeeds(
-    database,
+    store, database
 ):
-    store = PostgresLineStore(replace(database, write_seconds=BOUND_SECONDS))
     await store.keep(a_read(line(1, "Before the lock")))
+    bounded = PostgresLineStore(replace(database, write_seconds=BOUND_SECONDS))
     try:
         with lines_table_locked(database):
             started = time.monotonic()
             during_the_lock = a_read(line(2, "During the lock"))
             async with asyncio.timeout(LIMIT_SECONDS):
                 with pytest.raises(StoreUnavailable) as cut:
-                    await store.keep(during_the_lock)
+                    await bounded.keep(during_the_lock)
             elapsed = time.monotonic() - started
             still_waiting = waiting_statements(database)
 
         await store.keep(a_read(line(3, "After the lock")))
     finally:
-        await store.close()
+        await bounded.close()
 
     assert cut.value.code == STORE_TIMEOUT_CODE
     assert still_waiting == 0
@@ -298,6 +306,26 @@ async def test_a_schema_behind_its_head_ends_the_write_naming_the_field_and_no_s
     assert unmigrated_database.password.reveal() not in str(behind.value)
 
 
+async def test_a_schema_at_a_known_revision_behind_its_head_ends_the_write(unmigrated_database):
+    migrated_to(unmigrated_database, "0001")
+    store = PostgresLineStore(unmigrated_database)
+    behind_the_head = a_read(line(1, "Behind"))
+
+    try:
+        with pytest.raises(SchemaNotAtHeadError):
+            await store.keep(behind_the_head)
+    finally:
+        await store.close()
+
+
+async def test_a_database_at_a_revision_the_scripts_do_not_know_is_served(store, database):
+    at_an_unknown_revision(database)
+
+    await store.keep(a_read(line(1, "Kept on a newer schema")))
+
+    assert kept_lines(database, "text") == [("Kept on a newer schema",)]
+
+
 async def test_a_database_error_that_is_no_outage_raises_a_code_that_holds_no_line_name_or_password(store, database):
     await store.keep(a_read(line(1, "Kept before")))
     run_sql(database, REFUSE_EVERY_NEW_ROW)
@@ -370,7 +398,7 @@ async def test_back_four_hours_after_a_visit_his_first_turn_is_told_its_history_
             runner.app.stand(SUBJECT, active(PLACE_ID))
             say_in_the_call(runner, welcome_back)
 
-    runner.remember_in(store, database)
+    runner.remember_in(store)
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER, "Yes."))
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
@@ -423,7 +451,7 @@ def test_a_writer_that_forgets_a_mark_of_a_line_is_refused_by_the_database(datab
 async def test_a_write_slower_than_its_bound_is_cut_as_a_timeout_and_the_turn_answers(runner, database):
     bounded = replace(database, write_seconds=BOUND_SECONDS)
     store = ObservedStore(bounded)
-    runner.remember_in(store, bounded)
+    runner.remember_in(store)
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
     try:
@@ -639,22 +667,22 @@ async def test_a_search_met_by_a_defect_while_its_task_is_being_cancelled_raises
     assert isinstance(ended, StoreDefect)
 
 
-async def test_a_search_waiting_on_a_lock_ends_within_the_write_bound_as_a_timeout(database):
-    store = PostgresLineStore(replace(database, write_seconds=BOUND_SECONDS))
+async def test_a_search_waiting_on_a_lock_ends_within_the_write_bound_as_a_timeout(store, database):
     await store.keep(a_read(line(1, "Before the lock")))
-    search = a_search()
+    bounded = PostgresLineStore(replace(database, write_seconds=BOUND_SECONDS))
+    searching_during_the_lock = a_search()
     try:
         with lines_table_locked(database):
             started = time.monotonic()
             async with asyncio.timeout(LIMIT_SECONDS):
                 with pytest.raises(StoreUnavailable) as cut:
-                    await store.search(search)
+                    await bounded.search(searching_during_the_lock)
             elapsed = time.monotonic() - started
             still_waiting = waiting_statements(database)
 
         after_the_lock = await store.search(a_search())
     finally:
-        await store.close()
+        await bounded.close()
 
     assert cut.value.code == STORE_TIMEOUT_CODE
     assert still_waiting == 0
@@ -666,13 +694,13 @@ RESTART_LINE = "Said before the restart."
 PAUSE_LINE = "Said during the pause."
 
 
-async def until_rows(store: ObservedStore, database: MemoryTarget, count: int) -> None:
+async def until_rows(store: ObservedStore, database: DatabaseTarget, count: int) -> None:
     """The store holds this many lines, once the writes in flight have finished."""
     while len(kept_lines(database, "seq")) < count:
         await store.until_finished(store.finished + 1)
 
 
-async def said_in_a_pause(runner, store: ObservedStore, database: MemoryTarget, text: str, rows: int) -> None:
+async def said_in_a_pause(runner, store: ObservedStore, database: DatabaseTarget, text: str, rows: int) -> None:
     """A line said while his place was paused, read when it is active again, and kept."""
     pause_seen = runner.app.hold_next_read()
     runner.app.stand(SUBJECT, paused(PLACE_ID))
@@ -690,7 +718,7 @@ def told_lines(opening) -> list[str]:
 async def test_a_line_a_window_held_at_a_restart_and_one_said_in_a_pause_are_told_to_no_turn_and_a_lookup_gives_them(
     runner, store, database
 ):
-    runner.remember_in(store, database)
+    runner.remember_in(store)
     runner.gateway = Gateway(tool_round(tool_call("call-0", RECALL_TOOL, {"text": ""})), completion("done"))
     runner.app.speak(PLACE_ID, PERSON, "Ada", RESTART_LINE)
     await restarted_in_the_call(runner)
@@ -710,7 +738,7 @@ async def test_a_line_a_window_held_at_a_restart_and_one_said_in_a_pause_are_tol
 async def test_a_lookup_gives_none_of_the_lines_kept_in_a_pause_while_the_first_entry_of_his_history_is_older(
     runner, store, database
 ):
-    runner.remember_in(store, database)
+    runner.remember_in(store)
     runner.gateway = Gateway(
         *says(PLACE_ID, ANSWER), tool_round(tool_call("call-1", RECALL_TOOL, {"text": ""})), completion("done")
     )

@@ -87,8 +87,8 @@ def credentials(client_id: str = "agent-mozart") -> AgentCredentials:
 
 
 def memory_target() -> MemoryTarget:
-    """A memory table naming a database no test reaches, for a loop whose store is scripted."""
-    return MemoryTarget("db.test", 5432, "personas", "mozart", Secret(secrets.token_hex(16)))
+    """A memory table of the defaults, for a loop whose store is scripted."""
+    return MemoryTarget()
 
 
 def app_target() -> AppTarget:

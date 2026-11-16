@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import math
 import secrets
 from dataclasses import replace
 from functools import partial
@@ -17,7 +18,7 @@ from agents.turn import Principal
 from logline.testing import configured
 
 from personas.app_session import READ_SECONDS, open_mcp_session
-from personas.config import DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES, Voice, load_config
+from personas.config import DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES, MemoryTarget, Voice, load_config
 from personas.decision import DEFAULT_BUDGET_PAUSE_CAP_SECONDS
 from personas.loop import AgentLoop, Boundaries
 from personas.main import SweepingBoundaries, run_with_sweep
@@ -39,6 +40,7 @@ from tests.support.fakes import (
 )
 from tests.support.gateway import Gateway, RoundBackend
 from tests.support.hopin import AGENT_SUBJECT, ISSUER, PLAY_TOOL, FakeApp, configure_logging_into, formatted
+from tests.support.ownership import AllAgentsOwned
 from tests.support.realm import TOKEN_ENDPOINT, FakeRealm
 from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG, ToolsOnlyApp
 from tests.support.songmaker import SCOPE as TOOLS_ONLY_SCOPE
@@ -52,7 +54,7 @@ if TYPE_CHECKING:
     from agents.tools import HandTool
 
     from personas.app_session import SessionOpener
-    from personas.config import MemoryTarget
+    from personas.config import DatabaseTarget
     from personas.decision import Refusal
     from personas.failures import CallFailure
     from personas.remembering import LineStore
@@ -156,11 +158,14 @@ class Harness:
         self.sleeps: HeldSleeps | None = None
         """The held sleeps of the clock, from the first spoken scenario that needs the wait for his own line gated."""
 
-    def remember_in(self, store: LineStore, target: MemoryTarget) -> None:
-        """Gives the runner a memory: the store its loops keep and read lines through, and the table that names it."""
+    def remember_in(self, store: LineStore, memory: MemoryTarget | None = None) -> None:
+        """Gives the runner a memory: the store its loops keep and read lines through, and the table that names it.
+
+        The table keeps every line unless the test names one, so that a runner on the fake clock never sweeps.
+        """
         self.lines = store
         self.swept = store
-        self.config = replace(self.config, memory=target)
+        self.config = replace(self.config, memory=memory or MemoryTarget(lines_keep_days=math.inf))
 
     def add_tools_only_app(self, app: ToolsOnlyApp, url: str) -> None:
         """Binds the tools of an app that listens to nothing and lets the agent's tokens for its scope into it."""
@@ -232,6 +237,7 @@ class Harness:
             ready=FileReadyMarker(self.ready_file),
             backend=self._backend,
             lines=self.lines,
+            ownership=AllAgentsOwned(),
             swept=self.swept,
         )
         self.task = asyncio.create_task(run_with_sweep(self.config, boundaries))
@@ -319,7 +325,7 @@ def postgres_template() -> Iterator[str]:
 
 
 @pytest.fixture
-def database(postgres_template: str) -> Iterator[MemoryTarget]:
+def database(postgres_template: str) -> Iterator[DatabaseTarget]:
     """A migrated database of this test's own."""
     from tests.support.postgres import created_database, target_of
 
@@ -328,7 +334,7 @@ def database(postgres_template: str) -> Iterator[MemoryTarget]:
 
 
 @pytest.fixture
-def unmigrated_database() -> Iterator[MemoryTarget]:
+def unmigrated_database() -> Iterator[DatabaseTarget]:
     from tests.support.postgres import created_database, target_of
 
     with created_database() as name:

@@ -21,7 +21,7 @@ from tests.support.hopin import LIMIT_SECONDS, SAY_TOOL, active
 from tests.support.postgres import kept_lines, lines_table_locked
 
 if TYPE_CHECKING:
-    from personas.config import MemoryTarget
+    from personas.config import DatabaseTarget
     from personas.entries import WindowRead
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
@@ -33,7 +33,7 @@ BOUND_SECONDS = 0.5
 class WatchedStore(PostgresLineStore):
     """The real store, which tells which sequence numbers it has kept."""
 
-    def __init__(self, target: MemoryTarget) -> None:
+    def __init__(self, target: DatabaseTarget) -> None:
         super().__init__(target)
         self._kept: set[int] = set()
         self._kept_more = asyncio.Event()
@@ -52,7 +52,7 @@ class WatchedStore(PostgresLineStore):
 
 async def test_a_line_heard_in_a_voice_place_is_kept_once_with_the_sentence_he_spoke_in_answer(runner, database):
     store = WatchedStore(database)
-    runner.remember_in(store, database)
+    runner.remember_in(store)
     runner.give_voice()
     runner.gateway = Gateway(completion(ANSWER))
     await restarted_in_the_call(runner)
@@ -72,7 +72,7 @@ async def test_a_line_heard_in_a_voice_place_is_kept_once_with_the_sentence_he_s
 async def test_a_write_cut_as_a_timeout_lets_the_turn_speak_and_is_logged_once(runner, database):
     bounded = replace(database, write_seconds=BOUND_SECONDS)
     store = WatchedStore(bounded)
-    runner.remember_in(store, bounded)
+    runner.remember_in(store)
     runner.give_voice()
     runner.gateway = Gateway(completion(ANSWER))
     runner.app.stand(SUBJECT, active(PLACE_ID))
@@ -93,7 +93,7 @@ async def test_a_spoken_turn_with_a_memory_is_handed_the_lookup_first_declared_r
     runner, database
 ):
     store = WatchedStore(database)
-    runner.remember_in(store, database)
+    runner.remember_in(store)
     runner.give_voice()
     runner.gateway = Gateway(completion(ANSWER))
     await restarted_in_the_call(runner)

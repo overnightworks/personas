@@ -71,6 +71,7 @@ if TYPE_CHECKING:
     from personas.clock import Clock
     from personas.config import AgentCredentials, AppTarget, Config
     from personas.decision import Checkpoint
+    from personas.ownership import Ownership
     from personas.readiness import ReadyMarker
     from personas.tokens import TokenSource
     from personas.turning import BackendFactory
@@ -252,7 +253,6 @@ class AgentLoop:
         await self._use_current_token(session)
         standing = await session.read_standing()
         self._resume_if_unwell()
-        self._boundaries.ready.announce()
         self._memory = forget_gone(self._memory, standing.standings)
         self._checkpoints = sync_checkpoints(self._checkpoints, standing.standings, self._standings)
         self._standings = standing.standings
@@ -512,26 +512,33 @@ class AgentLoop:
         )
 
 
-async def _run_loop(loop: AgentLoop, runner: asyncio.Task[object]) -> None:
-    """Runs a loop; one that ends cancelled while its runner is not being cancelled ends the runner loud.
+async def _run_loop(loop: AgentLoop, agent_task: asyncio.Task[object]) -> None:
+    """Runs a loop; one that ends cancelled while its agent's task is not being cancelled ends the runner loud.
 
-    The runner's own count says so: it is above zero on a cancellation of the runner and while its group aborts
-    after a loop's loud end. A loop task's count is not read, a cancelled lifecycle session lowers it.
+    The agent task's own count says so: it is above zero when the ownership or the runner cancels it and while its
+    group aborts after a loop's loud end. A loop task's count is not read, a cancelled lifecycle session lowers it.
     """
-    return await ending_loud_when_cancelled(loop.run(), partial(unrequested_unless_cancelling, runner))
+    return await ending_loud_when_cancelled(loop.run(), partial(unrequested_unless_cancelling, agent_task))
 
 
-async def run_all(config: Config, boundaries: Boundaries) -> NoReturn:
-    """One loop for every agent and every app that listens; a loop never ends on its own."""
-    runner = asyncio.current_task()
-    assert runner is not None  # noqa: S101 - run_all runs inside a task
+async def run_all(config: Config, boundaries: Boundaries, ownership: Ownership) -> NoReturn:
+    """One loop for every app that listens, for each agent while this pod owns it; a loop never ends on its own."""
     memory = config.memory
     lookup = None if memory is None else LookupBounds(memory.lookup_calls, memory.lookup_bytes)
-    async with asyncio.TaskGroup() as group:
-        for agent in config.agents:
-            mind = Mind(config.history_bytes, config.history_keep_bytes, config.budget_pause_cap_seconds)
+    agents = {agent.client_id: agent for agent in config.agents}
+
+    async def serve_agent(client_id: str) -> NoReturn:
+        """Every loop of the agent, over a history of his own that a new owner starts empty."""
+        agent_task = asyncio.current_task()
+        assert agent_task is not None  # noqa: S101 - an agent is served inside its own task
+        mind = Mind(config.history_bytes, config.history_keep_bytes, config.budget_pause_cap_seconds)
+        async with asyncio.TaskGroup() as group:
             for app in config.apps:
                 if app.listens:
-                    loop = AgentLoop(agent, app, boundaries, mind, config.apps, lookup)
-                    group.create_task(_run_loop(loop, runner))
-    raise AssertionError("a loop ended")  # pragma: no cover
+                    group.create_task(
+                        _run_loop(AgentLoop(agents[client_id], app, boundaries, mind, config.apps, lookup), agent_task)
+                    )
+        raise AssertionError("a loop ended")  # pragma: no cover
+
+    await ownership.serve(list(agents), serve_agent, boundaries.ready.announce)
+    raise AssertionError("the ownership ended")  # pragma: no cover

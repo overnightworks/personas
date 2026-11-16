@@ -21,7 +21,9 @@ from personas.app_session import open_mcp_session
 from personas.clock import SystemClock
 from personas.config import Config, ConfigError, load_config
 from personas.failures import SchemaNotAtHeadError, StoreDefect, StoreUnavailable, leaves_of
+from personas.locks import PostgresAgentLocks
 from personas.loop import Boundaries, run_all
+from personas.ownership import LockedOwnership
 from personas.readiness import FileReadyMarker, ReadinessError, ReadyMarker
 from personas.reporting import carry_trace, log_state_change
 from personas.sweep import sweep_lines
@@ -33,8 +35,9 @@ if TYPE_CHECKING:
     from agents.config import AgentConfig
     from agents.tools import HandTool
 
-    from personas.config import MemoryTarget
+    from personas.config import DatabaseTarget
     from personas.memory import KeptVisit, PostgresLineStore
+    from personas.ownership import Ownership
     from personas.sweep import SweptStore
     from personas.turning import BackendFactory
 
@@ -60,25 +63,27 @@ def _gateway_backends(gateway: AgentConfig | None) -> BackendFactory | None:
     return backend
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SweepingBoundaries(Boundaries):
-    """The loops' boundaries and the store the sweep erases from, none without a memory."""
+    """The loops' boundaries, the ownership they run under and the store the sweep erases from, none without a
+    memory."""
 
+    ownership: Ownership
     swept: SweptStore | None = None
 
 
 @asynccontextmanager
-async def _line_store(target: MemoryTarget | None) -> AsyncGenerator[PostgresLineStore | None]:
-    """The store the configuration names, opened on its first write; without the table there is none.
+async def _line_store(config: Config) -> AsyncGenerator[PostgresLineStore | None]:
+    """The store the configuration names, opened on its first write; without a memory table there is none.
 
-    The database library is loaded only here, so a runner without a memory never imports it.
+    The store's library is loaded only here, so a runner without a memory never imports it.
     """
-    if target is None:
+    if config.memory is None:
         yield None
         return
     from personas.memory import PostgresLineStore
 
-    store = PostgresLineStore(target)
+    store = PostgresLineStore(config.database)
     try:
         yield store
     finally:
@@ -87,26 +92,33 @@ async def _line_store(target: MemoryTarget | None) -> AsyncGenerator[PostgresLin
 
 @asynccontextmanager
 async def real_boundaries(config: Config, ready: ReadyMarker) -> AsyncGenerator[SweepingBoundaries]:
-    async with (
-        httpx2.AsyncClient(event_hooks={"request": [carry_trace]}) as token_client,
-        _line_store(config.memory) as lines,
-    ):
-        yield SweepingBoundaries(
-            tokens=HttpTokenSource(config.token_endpoint, token_client),
-            open_session=open_mcp_session,
-            clock=SystemClock(),
-            report=log_state_change,
-            ready=ready,
-            backend=_gateway_backends(config.gateway),
-            lines=lines,
-            swept=lines,
-        )
+    clock = SystemClock()
+    locks = PostgresAgentLocks(config.database, config.ownership)
+    try:
+        async with (
+            httpx2.AsyncClient(event_hooks={"request": [carry_trace]}) as token_client,
+            _line_store(config) as lines,
+        ):
+            yield SweepingBoundaries(
+                tokens=HttpTokenSource(config.token_endpoint, token_client),
+                open_session=open_mcp_session,
+                clock=clock,
+                report=log_state_change,
+                ready=ready,
+                backend=_gateway_backends(config.gateway),
+                lines=lines,
+                ownership=LockedOwnership(locks, clock, config.ownership, log_state_change),
+                swept=lines,
+            )
+    finally:
+        # Closing the connection frees the pod's locks: the loops have ended by now, so the next owner may start.
+        await locks.close()
 
 
 async def run_with_sweep(config: Config, boundaries: SweepingBoundaries) -> NoReturn:
     """The loops, and beside them the sweep when the configuration has a memory; a defect of either ends both."""
     async with asyncio.TaskGroup() as group:
-        group.create_task(run_all(config, boundaries))
+        group.create_task(run_all(config, boundaries, boundaries.ownership))
         if config.memory is not None and boundaries.swept is not None:
             group.create_task(sweep_lines(boundaries.swept, config.memory, boundaries.clock, boundaries.report))
     raise AssertionError("a loop ended")  # pragma: no cover
@@ -172,11 +184,11 @@ def _memory_request(arguments: Sequence[str]) -> argparse.Namespace:
     return parser.parse_args(arguments)
 
 
-def _memory_target(config: Config, command: str) -> MemoryTarget:
+def _database_of_memory(config: Config, command: str) -> DatabaseTarget:
     if config.memory is None:
         sys.stderr.write(f"personas: memory: the table is required to {command}\n")
         raise SystemExit(CONFIGURATION_ERROR_EXIT_CODE)
-    return config.memory
+    return config.database
 
 
 @contextmanager
@@ -193,11 +205,10 @@ def _stopping_on_store_failure() -> Generator[None]:
 
 
 def _migrate(config: Config) -> None:
-    target = _memory_target(config, MIGRATE_COMMAND)
     from personas.memory import migrate
 
     with _stopping_on_store_failure():
-        migrate(target)
+        migrate(config.database)
 
 
 def _print_visits(visits: Iterable[KeptVisit]) -> None:
@@ -209,7 +220,7 @@ def _print_visits(visits: Iterable[KeptVisit]) -> None:
         rows.writerow((each.client_id, each.visit.app, place.kind, place.id, each.visit.generation, each.lines, *times))
 
 
-async def _perform_memory(target: MemoryTarget, request: argparse.Namespace) -> None:
+async def _perform_memory(target: DatabaseTarget, request: argparse.Namespace) -> None:
     from personas.memory import PostgresLineStore
 
     store = PostgresLineStore(target)
@@ -224,7 +235,7 @@ async def _perform_memory(target: MemoryTarget, request: argparse.Namespace) -> 
 
 
 def _memory(config: Config, request: argparse.Namespace) -> None:
-    target = _memory_target(config, request.command)
+    target = _database_of_memory(config, request.command)
     with _stopping_on_store_failure():
         asyncio.run(_perform_memory(target, request))
 

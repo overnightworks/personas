@@ -108,6 +108,19 @@ jobs:
     name: Image
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # The runner holds its agents' locks in this database, which needs no schema; the digest is the one of the test job.
+    services:
+      postgres:
+        image: postgres:18.6-alpine3.24@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready --host 127.0.0.1 --username postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -123,8 +136,9 @@ jobs:
           if docker run --rm personas-image 2>stderr.txt; then exit 1; fi
           grep PERSONAS_CONFIG stderr.txt
 
-      # The runner is PID 1 here, which ignores a signal it has no handler for. Its token endpoint refuses
-      # connections, so its loop backs off and the stop reaches it mid-loop. One agent per file the repository
+      # The runner is PID 1 here, which ignores a signal it has no handler for. It holds its agents' locks in the
+      # job's database, reached over the host network, and its token endpoint refuses connections, so its loop backs
+      # off after the grace and the stop reaches it mid-loop. One agent per file the repository
       # ships names that file in the image, and the runner loads each before it backs off: a file it refuses
       # ends the container before the first backoff, which the Running check fails.
       - name: Check that a container stop ends the runner with exit code 0 before the timeout
@@ -133,9 +147,17 @@ jobs:
           chmod 755 "$configuration"
           openssl rand -hex 16 > "$configuration/runner.secret"
           chmod 644 "$configuration/runner.secret"
+          openssl rand -hex 16 > "$configuration/database.password"
+          chmod 644 "$configuration/database.password"
           cat > "$configuration/personas.toml" <<'EOF'
           token_endpoint = "http://127.0.0.1:9/token"
           ready_file = "/tmp/ready"
+          [database]
+          host = "127.0.0.1"
+          port = 5432
+          dbname = "postgres"
+          user = "postgres"
+          password_file = "/configuration/database.password"
           [[apps]]
           mcp_url = "http://127.0.0.1:9/mcp"
           scope = "mcp-app"
@@ -150,7 +172,7 @@ jobs:
             printf '[[agents]]\nclient_id = "agent-%s"\nsecret_file = "/configuration/runner.secret"\npersona_file = "/app/characters/%s.md"\n' \
               "$stem" "$stem" >> "$configuration/personas.toml"
           done
-          docker run --detach --name stopped-runner \
+          docker run --detach --name stopped-runner --network host \
             --volume "$configuration:/configuration:ro" \
             --env PERSONAS_CONFIG=/configuration/personas.toml personas-image
           waited=0
