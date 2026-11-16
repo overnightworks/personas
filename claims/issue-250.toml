@@ -3,6 +3,6 @@ agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
 role = "builder"
 base = "1e5b44dc43a055e6058f068e383f70afe33ecf56"
 branch = "claude/issue-250-each-agent-runs-on-one-runner-pod"
-scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas", "tests"]
+scope = [".github/workflows/ci.yml", "README.md", "docs/ARCHITECTURE.md", "src/personas", "tests"]
 opened_commit = "604a4e3a6807075d06aabac75fc48d881946e25f"
 whole_reason = "one ownership boundary: the lock, the self-stop, readiness and the schema rule are one rollout-safe change, and the two-process proof needs all of them"
