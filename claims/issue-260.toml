@@ -1,8 +1,0 @@
-claim_id = "2f593d14123b456a8c69ca640071cf08"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "b2100bc96034e6be27eead596091da2c88aff081"
-branch = "claude/issue-260-a-woken-turn-runs-in-the-trace-of-the-li"
-scope = ["README.md", "docs/ARCHITECTURE.md", "pyproject.toml", "src/personas/decision.py", "src/personas/loop.py", "src/personas/recall.py", "tests", "uv.lock"]
-opened_commit = "e7dbe72e8d70b9c28aadeb864edaafb58168292e"
-whole_reason = "one library pin with the woken turn opened in its waking line's trace, proven through the loop and documented"
