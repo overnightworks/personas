@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import replace
 
 import pytest
@@ -99,9 +100,12 @@ async def test_a_round_on_a_connection_that_goes_dark_is_cut_at_the_heartbeat_ti
             await locks.hold([AGENT])
             forwarder.go_dark()
 
+            started = time.monotonic()
             async with asyncio.timeout(LIMIT_SECONDS):
                 with pytest.raises(LockConnectionLost):
                     await locks.hold([AGENT])
+
+            assert time.monotonic() - started < TIMINGS.heartbeat_timeout_seconds + TIMINGS.cancel_margin_seconds
         finally:
             await locks.close()
 

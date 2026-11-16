@@ -33,6 +33,10 @@ WHERE locktype = 'advisory' AND objsubid = 2 AND classid = %s AND granted AND pi
 TAKE_FREE_KEYS: Final = "SELECT key, pg_try_advisory_lock(%s, key) FROM unnest(%s::int4[]) AS key"
 
 
+type Round = asyncio.Task[tuple[psycopg.AsyncConnection, set[int]]]
+"""One round on the lock connection: the connection it used and the keys held after it."""
+
+
 def key_of(client_id: str) -> int:
     """The second integer of the agent's lock: a digest of the client id, in the range both integer and oid hold."""
     return int.from_bytes(blake2b(client_id.encode(), digest_size=KEY_BYTES).digest()) & KEY_MASK
@@ -45,19 +49,22 @@ class PostgresAgentLocks:
         self._database = database
         self._timeout = timings.heartbeat_timeout_seconds
         self._connection: psycopg.AsyncConnection | None = None
+        self._abandoned: set[Round] = set()
 
     async def hold(self, client_ids: Sequence[str]) -> frozenset[str]:
         by_key = {key_of(each): each for each in client_ids}
+        connection, self._connection = self._connection, None
+        round_ = asyncio.create_task(self._round(connection, by_key))
         try:
-            async with asyncio.timeout(self._timeout):
-                connection = self._connection or await self._open()
-                held = set(await self._keys_held(connection))
-                free = [key for key in by_key if key not in held]
-                if free:
-                    held |= await self._take(connection, free)
-        except psycopg.OperationalError, psycopg.InterfaceError, TimeoutError:
-            await self.close()
+            await asyncio.wait({round_}, timeout=self._timeout)
+            if not round_.done():
+                raise LockConnectionLost
+            self._connection, held = round_.result()
+        except psycopg.OperationalError, psycopg.InterfaceError:
             raise LockConnectionLost from None
+        finally:
+            if not round_.done():
+                self._abandon(round_)
         return frozenset(by_key[key] for key in held if key in by_key)
 
     async def close(self) -> None:
@@ -66,8 +73,38 @@ class PostgresAgentLocks:
         if connection is not None:
             await connection.close()
 
+    def _abandon(self, round_: Round) -> None:
+        """Lets a round that overran its bound unwind on its own: psycopg may take seconds to cancel a query.
+
+        The caller does not wait for it, so the bound holds however long the unwinding takes; the round closes its
+        own connection when it ends.
+        """
+        self._abandoned.add(round_)
+        round_.add_done_callback(self._forget)
+        round_.cancel()
+
+    def _forget(self, round_: Round) -> None:
+        self._abandoned.discard(round_)
+        if not round_.cancelled():
+            round_.exception()
+
+    async def _round(
+        self, connection: psycopg.AsyncConnection | None, by_key: dict[int, str]
+    ) -> tuple[psycopg.AsyncConnection, set[int]]:
+        """Confirms the held locks and takes the free ones; a round that fails closes the connection it used."""
+        opened = connection or await self._open()
+        try:
+            held = set(await self._keys_held(opened))
+            free = [key for key in by_key if key not in held]
+            if free:
+                held |= await self._take(opened, free)
+        except BaseException:
+            await opened.close()
+            raise
+        return opened, held
+
     async def _open(self) -> psycopg.AsyncConnection:
-        self._connection = await psycopg.AsyncConnection.connect(
+        return await psycopg.AsyncConnection.connect(
             host=self._database.host,
             port=self._database.port,
             dbname=self._database.dbname,
@@ -76,7 +113,6 @@ class PostgresAgentLocks:
             connect_timeout=math.ceil(self._timeout),
             autocommit=True,
         )
-        return self._connection
 
     @staticmethod
     async def _keys_held(connection: psycopg.AsyncConnection) -> list[int]:
