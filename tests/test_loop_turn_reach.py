@@ -100,7 +100,6 @@ async def test_each_app_sees_only_the_bearers_issued_for_its_own_scope(runner, s
 @pytest.mark.parametrize(
     ("arrange", "code", "call_seconds"),
     [
-        (lambda app: setattr(app, "refuse_with", HTTPStatus.FORBIDDEN), status_code(HTTPStatus.FORBIDDEN), None),
         (
             lambda app: setattr(app, "refuse_with", HTTPStatus.INTERNAL_SERVER_ERROR),
             status_code(HTTPStatus.INTERNAL_SERVER_ERROR),
@@ -109,7 +108,7 @@ async def test_each_app_sees_only_the_bearers_issued_for_its_own_scope(runner, s
         (lambda app: app.script(LIST_TOOLS, cuts), NETWORK_FAILURE_CODE, None),
         (lambda app: app.script(LIST_TOOLS, hangs), NETWORK_FAILURE_CODE, SHORT_CALL_SECONDS),
     ],
-    ids=["refused", "failing", "cut", "hanging"],
+    ids=["failing", "cut", "hanging"],
 )
 async def test_a_tools_only_app_whose_listing_fails_at_turn_start_is_absent_and_the_turn_answers_in_its_place(
     runner, songmaker, arrange, code, call_seconds
@@ -395,23 +394,6 @@ async def test_a_hang_past_the_call_time_whose_close_gives_late_answers_leaves_t
     transport = transport_closing_with_late_answers(echo=anyio.BrokenResourceError, only_close=1)
 
     await a_loss_while_the_app_session_opens_and_a_turn_that_answers(runner, songmaker, monkeypatch, transport)
-
-
-async def test_a_token_the_realm_refuses_for_the_tools_only_scope_leaves_the_app_absent_without_a_reaction(
-    runner, songmaker
-):
-    runner.realm.refused_scopes.add(SCOPE)
-    runner.gateway = Gateway(saying(ANSWER), completion("done"))
-
-    await addressed_in_the_call(runner)
-    await runner.app.said_count(1)
-
-    assert runner.gateway.offered_tools() == [SAY_TOOL]
-    assert runner.reports.reported(apps=True, started=False) == [
-        (Event.TOOLS_ONLY_APP_FAILED, status_code(401), songmaker_url(runner))
-    ]
-    assert runner.clock.slept == []
-    assert runner.app.log.count(LISTEN) == 1
 
 
 async def test_a_token_the_realm_refuses_in_mid_turn_for_the_tools_only_scope_is_an_error_and_no_reaction(

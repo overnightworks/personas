@@ -11,6 +11,7 @@ import math
 import re
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Final
 
 from agents.backend import TurnStopped
@@ -76,7 +77,7 @@ BACKOFF_CAP_SECONDS: Final = 30.0
 DEFAULT_BUDGET_PAUSE_CAP_SECONDS: Final = 300.0
 """The longest wait after a turn the gateway refused for a spent budget, unless the file sets another."""
 SUSPENDED_RETRY_SECONDS: Final = 30.0
-"""How often a suspended loop asks the realm and then the app again."""
+"""How often a suspended loop, and a tools-only app the realm refused, ask the realm and then the app again."""
 TURN_ROLE: Final[AgentRole] = "user"
 """The app role a turn acts under: an agent holds no admin right."""
 SENTENCES_AHEAD: Final = 1
@@ -347,6 +348,23 @@ def reaction_to(failure: CallFailure, *, already_renewed: bool) -> Reaction | Su
             return Suspend(status_code(status))
         case _:
             return Reaction.BACKOFF
+
+
+def refusal_retry_at(now: float) -> float:
+    """When an app the realm refused an agent is asked again, from the ``now`` of the refusal."""
+    return now + SUSPENDED_RETRY_SECONDS
+
+
+def is_not_granted(failure: CallFailure) -> bool:
+    """Whether a failure says the realm does not grant the agent an app: the realm refuses its token request, or the
+    app itself answers 401 or 403."""
+    match failure:
+        case TokenStatusFailure(status=status):
+            return status < HTTPStatus.INTERNAL_SERVER_ERROR
+        case StatusFailure(status=status):
+            return status in {HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN}
+        case _:
+            return False
 
 
 def is_voice_app(has_voice: bool, declared: Iterable[ToolDeclaration]) -> bool:
