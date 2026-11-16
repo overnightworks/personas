@@ -3,6 +3,6 @@ agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
 role = "builder"
 base = "4520c60a09dbf15f939c83997a7399733484f6e6"
 branch = "claude/issue-262-the-mind-s-history-has-a-fenced-store-in"
-scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/entries.py", "src/personas/main.py", "src/personas/memory.py", "src/personas/migrations/versions", "src/personas/readiness.py", "tests"]
+scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/decision.py", "src/personas/entries.py", "src/personas/failures.py", "src/personas/loop.py", "src/personas/main.py", "src/personas/memory.py", "src/personas/migrations/versions", "src/personas/mind.py", "src/personas/readiness.py", "src/personas/turning.py", "tests"]
 opened_commit = "b6b52a353c11542c0e9888363fa9b7b955888e76"
 whole_reason = "one schema expansion with its codec and fenced store, which only make sense together"
