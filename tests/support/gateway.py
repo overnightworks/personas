@@ -367,6 +367,22 @@ class Gateway(FakeGateway):
             for each in message["content"].splitlines()
         ]
 
+    def body_of(self, request_number: int) -> JsonObject:
+        """The request that arrived as this number (from one), as the gateway received it."""
+        return json.loads(self.requests[request_number - 1].content)
+
+    def rounds(self) -> list[int]:
+        """The numbers (from one) of the requests that decide a hold: the last message of each tells he is held."""
+        return [
+            number
+            for number, _ in enumerate(self.requests, start=1)
+            if self.body_of(number)["messages"][-1]["content"].startswith('{"held"')
+        ]
+
+    def hold_told(self, request_number: int) -> JsonObject:
+        """What the request that arrived as this number (from one) told him of the hold."""
+        return json.loads(self.body_of(request_number)["messages"][-1]["content"])["held"]
+
     def user_of(self, request_number: int) -> str:
         """The ``user`` the request that arrived as this number (from one) carried."""
         return json.loads(self.requests[request_number - 1].content)["user"]

@@ -337,6 +337,7 @@ class AgentLoop:
                 continue
             read_at = self._boundaries.clock.wall()
             self._take_lines(place, window, read_at, serves_view=place in serving_view)
+            await self._turning.hold(session, place, window)
             await self._remembering.keep(WindowRead(self._agent.client_id, self._app.mcp_url, place, window, read_at))
         return lost
 

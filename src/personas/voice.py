@@ -4,6 +4,7 @@ the one playing."""
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from typing import TYPE_CHECKING
 
 from agents.backend import TurnStopKind, TurnStopped
@@ -48,7 +49,7 @@ class Speaking:
     sent and its line awaited only before the turn's deadline: a request or line that has not come by then ends the
     turn as ``limit_exceeded``. Each sentence sent enters the agent's history as a ``SaidAloud`` however its request
     ends. A refusal, a stop included, ends the speech and is reported; the turn goes on without it. The turn's tally
-    counts each sentence sent and each silent round.
+    counts each sentence sent and each silent round. His own stop (``cut``) is no refusal and is not reported.
     """
 
     def __init__(
@@ -80,6 +81,11 @@ class Speaking:
         self._reader = ReplyReader()
         self._queue: asyncio.Queue[str | None] = asyncio.Queue()
         self._silenced = False
+        self.was_cut = False
+        self.saying: str | None = None
+        """The sentence the app last answered as spoken, the one he is in while he plays."""
+        self.unsaid: deque[str] = deque()
+        """The sentences heard that the app has not answered as spoken, the one in flight first."""
         self._idle = asyncio.Event()
         self._idle.set()
         self._deadline: asyncio.Task[None] | None = None
@@ -90,7 +96,20 @@ class Speaking:
         if isinstance(reading.opening, StayedSilent):
             self._tally.silent_count += 1
         for sentence in reading.sentences:
+            self.unsaid.append(sentence)
             self._queue.put_nowait(sentence)
+
+    def cut(self) -> tuple[str, ...]:
+        """His own stop: no sentence is sent from now on and the speech ends once the one in flight is answered; the
+        sentences not yet said are returned."""
+        unsaid = tuple(self.unsaid)
+        self.was_cut = self._silenced = True
+        self.unsaid.clear()
+        self._queue.put_nowait(None)
+        return unsaid
+
+    def seconds_left(self) -> float:
+        return remaining_seconds(self._clock.now(), self._started, self._max_duration_seconds)
 
     def end(self) -> None:
         """No more events come: ``play`` ends once the queued sentences are spoken."""
@@ -146,10 +165,19 @@ class Speaking:
                 self._stop_past_deadline()
             return
         if isinstance(outcome, SpeakRefusal):
-            self._report(Event.SPEAK_REFUSED, outcome.value)
+            if not (self.was_cut and outcome is SpeakRefusal.STOPPED):
+                self._report(Event.SPEAK_REFUSED, outcome.value)
             self._silenced = True
-        elif isinstance(outcome, Spoken):
+        else:
+            self._said(sentence, spoken=isinstance(outcome, Spoken))
+
+    def _said(self, sentence: str, *, spoken: bool) -> None:
+        """The app took the sentence, voiced or written: it is no longer unsaid."""
+        if not self.was_cut:
+            self.unsaid.popleft()
+        if spoken:
             self._answered_spoken += 1
+            self.saying = sentence
 
     def _fold_lines(self) -> None:
         """Counts the lines that entered since the last count and moves the mark past them, so that the history's
