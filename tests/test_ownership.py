@@ -271,15 +271,29 @@ async def test_a_refused_write_stops_the_agent_and_a_later_round_that_holds_him_
     assert pod.histories.generations[AGENT] == 2
 
 
+@dataclass
+class HistoriesWrittenUntilTheTakeover(KeptHistories):
+    """Histories whose former owner's last write commits as the takeover renews the generation: what loads before the
+    renewal lacks it."""
+
+    last_written: dict[str, KeptHistory] = field(default_factory=dict[str, KeptHistory])
+
+    async def take_over(self, client_id: str) -> int:
+        self.kept[client_id] = self.last_written[client_id]
+        return await super().take_over(client_id)
+
+
 async def test_an_agent_taken_over_is_served_with_the_history_kept_after_the_takeover(clock):
-    kept = KeptHistory(3, (said(4, "four"),), 1, ())
-    pod = Pod(clock, ScriptedLocks(clock, {AGENT}), histories=KeptHistories(kept={AGENT: kept}))
+    before = KeptHistory(3, (said(4, "four"),), 1, ())
+    after = KeptHistory(3, (said(4, "four"), said(5, "five")), 1, ())
+    histories = HistoriesWrittenUntilTheTakeover(kept={AGENT: before}, last_written={AGENT: after})
+    pod = Pod(clock, ScriptedLocks(clock, {AGENT}), histories=histories)
     task = pod.start()
     await pod.until_spent(AGENT)
 
     await pod.stopped(task)
 
-    assert [owned.history for owned in pod.served_with] == [kept]
+    assert [owned.history for owned in pod.served_with] == [after]
 
 
 class UnreachableHistories(KeptHistories):
