@@ -162,6 +162,28 @@ class TurnTold:
     through: int
 
 
+@dataclass(frozen=True)
+class HistoryDelta:
+    """What one agent's history gained and lost since its last write: the entries appended, the first of them at the
+    ordinal ``first``, the turns answered, and ``left_out``, the ordinal of the oldest entry it still holds; every older
+    entry has left it, and so has every answered turn that told none of the rest."""
+
+    first: int
+    entries: tuple[Entry, ...] = field(repr=False)
+    told: tuple[TurnTold, ...]
+    left_out: int
+
+
+@dataclass(frozen=True)
+class KeptHistory:
+    """One agent's history as the store keeps it: its entries in order, the first of them at the ordinal ``first``,
+    and his answered turns that tell one of them, oldest first."""
+
+    first: int
+    entries: tuple[Entry, ...] = field(repr=False)
+    told: tuple[TurnTold, ...]
+
+
 STORED_KIND_KEY: Final = "entry"
 """The key of a stored entry that names its kind."""
 _ENTRY_KINDS: Final = (("line", KeptLine), ("view", ViewSeen), ("act", ActDone), ("speech", SaidAloud))
