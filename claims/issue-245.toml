@@ -1,8 +1,0 @@
-claim_id = "4a0cc52bc20d4112845220726122ba4f"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "594a94c76d304b1c711ca220a91361fc5a4736d8"
-branch = "claude/issue-245-shared-gate-pinned-to-quality-v0-21-1"
-scope = [".github/workflows", "README.md", "quality/config.toml", "sonar-project.properties"]
-opened_commit = "359290dca48f4b0d047d1c87fbc57e7e76517dd8"
-whole_reason = "one shared-gate pin raised across the three workflows that call it, with what its releases require of callers"
