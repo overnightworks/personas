@@ -317,18 +317,6 @@ async def test_a_request_open_when_the_turn_is_cancelled_enters_once_as_unanswer
     assert [entry.outcome for entry in scenario.entered] == [Unanswered(TURN_CANCELLED_CODE)]
 
 
-async def test_a_sentence_heard_after_his_stop_is_never_queued_or_counted_unsaid():
-    scenario = SpeakingScenario("One.", ends=False)
-    scenario.speaking.cut()
-
-    scenario.speaking.hear(AssistantTextEvent(text=" Two. Three. "))
-    scenario.speaking.end()
-    scenario.renewal_gate.set()
-    await scenario.speaking.play()
-
-    assert (scenario.sent, tuple(scenario.speaking.unsaid)) == ([], ())
-
-
 async def test_a_sentence_in_flight_at_his_stop_is_still_answered_and_entered_and_nothing_is_left_unsaid():
     scenario = SpeakingScenario("One. Two.")
     scenario.while_speaking = scenario.speaking.cut

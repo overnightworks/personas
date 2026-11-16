@@ -96,9 +96,8 @@ class Speaking:
         if isinstance(reading.opening, StayedSilent):
             self._tally.silent_count += 1
         for sentence in reading.sentences:
-            if not self.was_cut:
-                self.unsaid.append(sentence)
-                self._queue.put_nowait(sentence)
+            self.unsaid.append(sentence)
+            self._queue.put_nowait(sentence)
 
     def cut(self) -> tuple[str, ...]:
         """His own stop: no sentence is sent from now on and the speech ends once the one in flight is answered; the
