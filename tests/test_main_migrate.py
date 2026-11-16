@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import secrets
-import string
 import sys
 from typing import TYPE_CHECKING
 
@@ -13,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from personas.config import CONFIG_ENVIRONMENT_VARIABLE
 from personas.failures import STORE_UNREACHABLE_CODE
 from personas.main import CONFIGURATION_ERROR_EXIT_CODE, MIGRATE_COMMAND, STORE_ERROR_EXIT_CODE, command_line, main
-from tests.support.postgres import kept_lines, migrated_to, revision_of, run_sql, tables_of
+from tests.support.postgres import at_an_unknown_revision, kept_lines, migrated_to, revision_of, run_sql, tables_of
 
 if TYPE_CHECKING:
     from tests.support.configfiles import Files
@@ -91,8 +89,7 @@ def test_migrating_a_database_at_a_revision_it_does_not_know_changes_nothing_and
     files, database, monkeypatch, restored_logging
 ):
     files.use_database(database)
-    newer = "".join(secrets.choice(string.ascii_lowercase) for _ in range(12))
-    run_sql(database, f"UPDATE alembic_version SET version_num = '{newer}'")  # noqa: S608 - a test-generated name
+    newer = at_an_unknown_revision(database)
 
     migrate(files, monkeypatch)
 

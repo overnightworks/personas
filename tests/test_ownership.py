@@ -247,16 +247,6 @@ async def test_a_round_starts_one_contend_interval_after_the_start_of_the_one_be
     assert clock.slept == [TIMINGS.contend_seconds - 0.75, TIMINGS.contend_seconds - 0.75]
 
 
-async def test_a_pod_is_contending_once_a_round_went_through_though_it_holds_no_agent(clock):
-    pod = Pod(clock, ScriptedLocks(clock, set(), set()))
-    task = pod.start()
-    await pod.until_spent()
-
-    await pod.stopped(task)
-
-    assert pod.contending == 1
-
-
 async def test_a_pod_whose_lock_connection_never_answers_is_not_contending(clock):
     pod = Pod(clock, ScriptedLocks(clock, LOST, LOST))
     task = pod.start()

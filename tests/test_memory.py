@@ -7,7 +7,6 @@ import contextlib
 import json
 import math
 import secrets
-import string
 import time
 import traceback
 from collections import Counter
@@ -40,6 +39,7 @@ from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import LIMIT_SECONDS, active, formatted, invited, paused
 from tests.support.postgres import (
     Forwarder,
+    at_an_unknown_revision,
     kept_lines,
     lines_table_locked,
     migrated_to,
@@ -318,8 +318,7 @@ async def test_a_schema_at_a_known_revision_behind_its_head_ends_the_write(unmig
 
 
 async def test_a_database_at_a_revision_the_scripts_do_not_know_is_served(store, database):
-    newer = "".join(secrets.choice(string.ascii_lowercase) for _ in range(12))
-    run_sql(database, f"UPDATE alembic_version SET version_num = '{newer}'")  # noqa: S608 - a test-generated name
+    at_an_unknown_revision(database)
 
     await store.keep(a_read(line(1, "Kept on a newer schema")))
 
