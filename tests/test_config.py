@@ -435,7 +435,7 @@ def test_a_tools_only_app_has_its_call_bound_and_the_default_call_bound_unless_s
         (lambda text: text + TOOLS_ONLY_TABLE + "call_seconds = 0\n", "apps.1.call_seconds", "greater than 0"),
     ],
     ids=[
-        "a tools-only app without tools",
+        "a tools-only app without a call bound",
         "no listening app",
         "no call time",
     ],
