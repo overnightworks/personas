@@ -1,0 +1,8 @@
+claim_id = "ff1d856029f9430dbedc346abc8b8bba"
+agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
+role = "builder"
+base = "cd936dc16d31ccbeba9e1d232eb16fa1c0f63ef9"
+branch = "claude/issue-251-tools-only-app-follows-the-realm"
+scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas", "tests"]
+opened_commit = "83c1e8943c57f990945cd16b695f08ca2d819540"
+whole_reason = "one behaviour of the tools-only path across token request, turn assembly and its log lines, with its proof"
