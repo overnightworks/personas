@@ -1,8 +1,0 @@
-claim_id = "a8f23b41e98b4930b2f31ec6abf3930f"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "a085f65b2cbefd8153b4ad8826aad14a49a1d625"
-branch = "claude/issue-248-personas-pins-agents-v0-50-0"
-scope = ["README.md", "docs/ARCHITECTURE.md", "pyproject.toml", "tests", "uv.lock"]
-opened_commit = "166e06d83c517e30d0df614c8526e6bab7d5ec44"
-whole_reason = "one library pin with its test-fake adaptation, proof through the loop and documentation"
