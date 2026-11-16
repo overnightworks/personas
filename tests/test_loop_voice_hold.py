@@ -2,19 +2,26 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import replace
+from http import HTTPStatus
 
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL, VoiceState
 
+from personas import app_session
+from personas.decision import status_code
+from personas.failures import Unreachable, leaves_of
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, say_in_the_call
 from tests.support.fakes import COMPLETED_TURN
 from tests.support.gateway import BUDGET_SPENT, say
-from tests.support.hopin import SAY_TOOL
+from tests.support.hopin import CALL, LIMIT_SECONDS, SAY_TOOL
+from tests.support.transport import transport_closing_with_late_answers
 from tests.support.voice import TWO_SENTENCES, a_voice_call, holding_sentence_ends, sentences_spoken
+from tests.support.wire import cuts, refuses_with_a_server_error
 
 pytestmark = pytest.mark.anyio
 
@@ -24,7 +31,7 @@ FIRST, SECOND = TWO_SENTENCES.split(". ")[0] + ".", TWO_SENTENCES.split(". ")[1]
 
 
 def deciding(tool: str, hold_id: str = HOLD_ID):
-    return tool_round(tool_call(f"decide-{hold_id}", tool, {"id": hold_id}))
+    return tool_round(tool_call(f"{tool}-{hold_id}", tool, {"id": hold_id}))
 
 
 async def held_in_the_first_sentence(runner, *replies, said=(SAID,), hold_id: str = HOLD_ID):
@@ -287,3 +294,69 @@ async def test_the_round_runs_on_the_hold_model_when_one_is_set_and_on_his_own_m
 
     (number,) = runner.gateway.rounds()
     assert runner.gateway.body_of(number)["model"] == (hold_model or runner.gateway.body_of(1)["model"])
+
+
+async def test_a_decision_the_app_could_not_take_is_told_to_him_as_not_made_and_he_decides_again(runner):
+    await held_in_the_first_sentence(
+        runner, completion(TWO_SENTENCES), deciding(CONTINUE_SPEAKING_TOOL), deciding(STOP_SPEAKING_TOOL), completion()
+    )
+    runner.app.script(CALL, refuses_with_a_server_error)
+
+    assert await decided(runner) == ["stopped"]
+
+    (number,) = runner.gateway.rounds()
+    (failed,) = runner.gateway.tool_results(number + 1)
+    assert failed.startswith("Error")
+    assert runner.reports.reported(apps=True, started=False)[0].code == status_code(HTTPStatus.INTERNAL_SERVER_ERROR)
+    assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
+
+
+async def test_a_call_of_his_that_is_no_decision_and_a_second_decision_are_refused_in_the_round(runner):
+    replies = [
+        tool_round(say("early", PLACE_ID)),
+        deciding(CONTINUE_SPEAKING_TOOL),
+        deciding(STOP_SPEAKING_TOOL),
+        completion(),
+    ]
+    await held_in_the_first_sentence(runner, completion(TWO_SENTENCES), *replies)
+
+    assert await decided(runner) == ["continued"]
+    await runner.app.spoken_count(2)
+    runner.app.end_sentence()
+    await runner.reports.until_a_turn_completed()
+
+    (number,) = runner.gateway.rounds()
+    results = runner.gateway.tool_results(number + 3)
+    assert [result.startswith("Error") for result in results] == [True, False, True]
+    assert runner.app.hold_calls == [(CONTINUE_SPEAKING_TOOL, HOLD_ID)]
+    assert runner.app.said == []
+
+
+async def test_a_decision_whose_call_fails_beside_a_defect_ends_the_runner_loud_with_both(runner, monkeypatch):
+    monkeypatch.setattr(
+        app_session, "streamable_http_client", transport_closing_with_late_answers(echo=RuntimeError, only_close=1)
+    )
+    await held_in_the_first_sentence(runner, completion(TWO_SENTENCES), deciding(CONTINUE_SPEAKING_TOOL))
+    runner.app.script(CALL, cuts)
+
+    assert runner.task is not None
+    async with asyncio.timeout(LIMIT_SECONDS):
+        (ended,) = await asyncio.gather(runner.task, return_exceptions=True)
+
+    assert sorted(type(leaf).__name__ for leaf in leaves_of(ended)) == [RuntimeError.__name__, Unreachable.__name__]
+    assert runner.reports.codes_of(Event.HOLD_DECIDED) == []
+
+
+async def test_a_hold_with_no_words_when_his_speech_is_over_is_stopped_undecided_and_no_round_runs(runner):
+    await held_in_the_first_sentence(runner, completion(TWO_SENTENCES), said=(("Ada", ""),))
+    await window_read_after_the_hold(runner)
+
+    await runner.app.spoken_count(1)
+    runner.app.end_sentence()
+    await runner.app.spoken_count(2)
+    runner.app.end_sentence()
+
+    assert await decided(runner) == ["undecided"]
+    await runner.reports.until_a_turn_completed()
+    assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
+    assert runner.gateway.rounds() == []

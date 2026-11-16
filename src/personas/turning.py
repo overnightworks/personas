@@ -285,6 +285,9 @@ class _HeldTools:
         return tuple(each.declaration for each in self.tools)
 
 
+type _Hearing = asyncio.Task[FinalEvent | None]
+
+
 @dataclass
 class _Voiced:
     """One spoken turn's speech, with what a round at a hold of his starts from."""
@@ -297,7 +300,6 @@ class _Voiced:
     speaking: Speaking
     record: TaskRecord
     inbox: _HoldInbox
-    hearing: asyncio.Task[FinalEvent | None] | None = None
 
 
 @dataclass(frozen=True)
@@ -515,8 +517,8 @@ class Turning:
         try:
             async with asyncio.TaskGroup() as group:
                 playing = group.create_task(voiced.speaking.play())
-                hearing = voiced.hearing = group.create_task(self._hear_events(events, voiced, tally))
-                group.create_task(self._decide_holds(voiced))
+                hearing = group.create_task(self._hear_events(events, voiced, tally))
+                group.create_task(self._decide_holds(voiced, hearing))
                 group.create_task(_close_when_over(voiced.inbox, playing, hearing))
         finally:
             self._listening = None
@@ -556,15 +558,15 @@ class Turning:
         self._decided[place] = hold_id
         self._report(Event.HOLD_DECIDED, outcome.value, None, None)
 
-    async def _decide_holds(self, voiced: _Voiced) -> None:
+    async def _decide_holds(self, voiced: _Voiced, hearing: _Hearing) -> None:
         """Starts a round for each hold that may be told, until the speech is over; a hold no round took by then is
         stopped."""
         while (hold := await voiced.inbox.next_hold()) is not None:
-            await self._decide_hold(voiced, hold)
+            await self._decide_hold(voiced, hearing, hold)
         if (hold := voiced.inbox.undecided) is not None:
             await self._end_hold(voiced, hold, HoldOutcome.UNDECIDED)
 
-    async def _decide_hold(self, voiced: _Voiced, hold: Held) -> None:
+    async def _decide_hold(self, voiced: _Voiced, hearing: _Hearing, hold: Held) -> None:
         """One round on a backend of its own beside the run parked at the hold: his history as it stands and the
         telling of the hold, on his persona and tools. Without a decision he stops and says nothing."""
         admitted, speaking, inbox = voiced.admitted, voiced.speaking, voiced.inbox
@@ -592,7 +594,7 @@ class Turning:
             }
         )
         tools = tuple(
-            HandTool(each.declaration, partial(self._answer_round, voiced, hold, each.declaration.name))
+            HandTool(each.declaration, partial(self._answer_round, voiced, hearing, hold, each.declaration.name))
             for each in voiced.held.tools
         )
         person = TurnPerson(admitted.facts.principal, TURN_ROLE, admitted.groups)
@@ -605,11 +607,11 @@ class Turning:
         except TurnStopped:
             pass
         if self._decided.get(admitted.place) != hold.id:
-            self._cut_speech(voiced)
+            self._cut_speech(voiced, hearing)
             await self._end_hold(voiced, hold, HoldOutcome.UNDECIDED)
 
     async def _answer_round(
-        self, voiced: _Voiced, hold: Held, name: str, _principal: Principal, _arguments: JsonObject
+        self, voiced: _Voiced, hearing: _Hearing, hold: Held, name: str, _principal: Principal, _arguments: JsonObject
     ) -> ToolOutcome:
         """A call of the round: only his two decisions reach the app, for the hold he was told."""
         outcomes = {CONTINUE_SPEAKING_TOOL: HoldOutcome.CONTINUED, STOP_SPEAKING_TOOL: HoldOutcome.STOPPED}
@@ -618,19 +620,18 @@ class Turning:
             return ToolOutcome(_DECIDING_FIRST_TEXT, is_error=True)
         if self._decided.get(voiced.admitted.place) == hold.id:
             return ToolOutcome(_DECIDED_TEXT, is_error=True)
-        told = _CONTINUED_TEXT if outcome is HoldOutcome.CONTINUED else self._cut_speech(voiced)
+        told = _CONTINUED_TEXT if outcome is HoldOutcome.CONTINUED else self._cut_speech(voiced, hearing)
         if not await self._end_hold(voiced, hold, outcome):
             return ToolOutcome(_APP_FAILED_TEXT, is_error=True)
         return ToolOutcome(told, is_error=False)
 
     @staticmethod
-    def _cut_speech(voiced: _Voiced) -> str:
+    def _cut_speech(voiced: _Voiced, hearing: _Hearing) -> str:
         """His stop at once: no unsent sentence is spoken, the parked reply is dropped with its waiting call; the result
         tells what was left unsaid."""
         waiting = voiced.inbox.waiting
         told = told_stop(voiced.speaking.cut(), None if waiting is None else waiting.name)
-        if voiced.hearing is not None:
-            voiced.hearing.cancel()
+        hearing.cancel()
         return told
 
     async def _end_hold(self, voiced: _Voiced, hold: Held, outcome: HoldOutcome) -> bool:
