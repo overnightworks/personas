@@ -149,6 +149,28 @@ async def test_closing_a_pod_whose_round_was_cancelled_waits_until_the_session_t
         assert not closed_early
 
 
+async def test_closing_a_pod_whose_caller_was_cancelled_after_its_round_succeeded_frees_its_agents(
+    pod, other_pod, monkeypatch
+):
+    take = PostgresAgentLocks._take  # noqa: SLF001 - places the cancellation at the end of the round
+    caller: asyncio.Task[frozenset[str]]
+
+    async def take_then_cancel_the_caller(connection, keys):
+        taken = await take(connection, keys)
+        caller.cancel()
+        return taken
+
+    monkeypatch.setattr(PostgresAgentLocks, "_take", staticmethod(take_then_cancel_the_caller))
+    caller = asyncio.create_task(pod.hold([AGENT]))
+    with pytest.raises(asyncio.CancelledError) as cancelled:
+        await caller
+
+    await pod.close()
+
+    assert await other_pod.hold([AGENT]) == {AGENT}
+    assert isinstance(cancelled.value, asyncio.CancelledError)
+
+
 async def test_a_server_that_cannot_be_reached_is_a_lost_connection(database):
     locks = PostgresAgentLocks(replace(database, host="127.0.0.1", port=CLOSED_PORT), TIMINGS)
 
