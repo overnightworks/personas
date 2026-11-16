@@ -121,7 +121,7 @@ from personas.decision import (
     turn_messages,
     untold_words,
     view_turn_due,
-    wakes_him,
+    waking_line,
     with_due,
     without_due,
 )
@@ -587,16 +587,17 @@ def test_a_window_is_perceived_from_its_checkpoint(checkpoint, window, expected)
 @pytest.mark.parametrize(
     ("taken", "serves_view", "expected"),
     [
-        (({},), False, True),
-        (({"own": True},), False, False),
-        (({"own": True}, {}), False, True),
-        ((), False, False),
-        (({"act": True},), False, False),
-        (({"act": True}, {}), False, True),
-        (({"own": True, "act": True},), False, False),
-        (({},), True, False),
-        (({"act": True},), True, False),
-        (({"own": True}, {}, {"act": True}), True, False),
+        (({},), False, 1),
+        (({"own": True},), False, None),
+        (({"own": True}, {}), False, 2),
+        ((), False, None),
+        (({"act": True},), False, None),
+        (({"act": True}, {}), False, 2),
+        (({"own": True, "act": True},), False, None),
+        (({}, {}, {"own": True}, {"act": True}), False, 2),
+        (({},), True, None),
+        (({"act": True},), True, None),
+        (({"own": True}, {}, {"act": True}), True, None),
     ],
     ids=[
         "someone else's line",
@@ -606,15 +607,20 @@ def test_a_window_is_perceived_from_its_checkpoint(checkpoint, window, expected)
         "an act line",
         "an act line beside a line said",
         "his own act line",
+        "lines said, then his own and an act",
         "a line at a place with a view",
         "an act line at a place with a view",
         "lines of every kind at a place with a view",
     ],
 )
-def test_a_line_wakes_him_unless_it_is_his_own_or_an_act_or_the_place_serves_a_view(taken, serves_view, expected):
+def test_the_newest_line_that_is_neither_his_own_nor_an_act_wakes_him_unless_the_place_serves_a_view(
+    taken, serves_view, expected
+):
     lines = [line(seq, "Hello everyone", **marks) for seq, marks in enumerate(taken, 1)]
 
-    assert wakes_him(lines, serves_view=serves_view) is expected
+    waking = waking_line(lines, serves_view=serves_view)
+
+    assert (None if waking is None else waking.seq) == expected
 
 
 CALL_AT_A = AppPlace("https://a.test/mcp", PlaceRef(kind="call", id="room-1"))
@@ -691,6 +697,22 @@ def test_a_place_that_became_due_meanwhile_keeps_its_newer_occasion_and_only_lin
         CALL_AT_B: Lines("g1", frozenset({4, 7}), missed=True),
     }
     assert list(turns.due) == [CALL_AT_A, TABLE_AT_A, CALL_AT_B]
+
+
+def test_lines_of_one_generation_join_in_the_trace_of_the_newer_lines_whichever_was_due_first():
+    older, newer = "trace-of-the-older-lines", "trace-of-the-newer-lines"
+    turns = _due_in_order((CALL_AT_A, Lines("g1", frozenset({1, 2}), missed=False, traceparent=older)))
+
+    joined = with_due(turns, CALL_AT_A, Lines("g1", frozenset({3}), missed=False, traceparent=newer), NOW)
+    retried = due_again(
+        _due_in_order((CALL_AT_A, Lines("g1", frozenset({3}), missed=False, traceparent=newer))),
+        CALL_AT_A,
+        Lines("g1", frozenset({1, 2}), missed=False, traceparent=older),
+        NOW,
+    )
+
+    for after in (joined, retried):
+        assert _occasions(after) == {CALL_AT_A: Lines("g1", frozenset({1, 2, 3}), missed=False, traceparent=newer)}
 
 
 def _since(turns: Turns, at: AppPlace) -> float:

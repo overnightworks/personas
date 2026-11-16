@@ -18,7 +18,18 @@ from tests.support.fakes import CANCELLED_TURN, SweepClock
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
 from tests.support.history import after_start, entry, history_of, said_and_taken, settled, view_entry, woke_at_table
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import CALL, READ, SAY_TOOL, active, invited, lines_of, paused
+from tests.support.hopin import (
+    CALL,
+    READ,
+    SAY_TOOL,
+    a_traceparent,
+    active,
+    invited,
+    lines_of,
+    paused,
+    trace_id_of,
+    written_by_the_runner,
+)
 from tests.support.realm import AGENT_NAME
 from tests.support.songmaker import CREATE_SONG, GENERATE_SONG
 from tests.support.wire import cuts
@@ -190,6 +201,17 @@ async def test_a_view_that_moves_to_a_revision_waiting_for_him_gets_one_turn_tol
     assert opening.system == runner.files.persona_prompt
     assert sorted(runner.gateway.offered_tools()) == sorted([SAY_TOOL, CREATE_SONG, GENERATE_SONG])
     assert len(runner.gateway.requests) == 1
+
+
+async def test_a_turn_a_view_woke_writes_its_end_in_the_trace_the_view_moved_in(runner, written):
+    runner.app.stand(SUBJECT, at_table())
+    traceparent = a_traceparent()
+    runner.app.show_view(TABLE.id, 1, a_state(), traceparent=traceparent)
+    runner.start()
+    await runner.reports.until_a_turn_ended()
+
+    (ended,) = [line for line in written_by_the_runner(written) if line["event"] == "turn.ended"]
+    assert ended["trace_id"] == trace_id_of(traceparent)
 
 
 @pytest.mark.parametrize(

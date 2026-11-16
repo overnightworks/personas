@@ -715,10 +715,12 @@ def _take_after(window: PlaceWindow, last_seq: int) -> Perception:
     )
 
 
-def wakes_him(new: Iterable[PlaceEntry], *, serves_view: bool) -> bool:
-    """Whether the lines taken at a place make a turn due: at a place with a view none does, since its view alone calls
-    him; at any other place a line that is neither his own nor an act does."""
-    return not serves_view and any(not (line.own or line.act) for line in new)
+def waking_line(new: Sequence[PlaceEntry], *, serves_view: bool) -> PlaceEntry | None:
+    """The newest of the lines taken at a place that makes a turn due, none when none does: at a place with a view none
+    does, since its view alone calls him; at any other place a line that is neither his own nor an act does."""
+    if serves_view:
+        return None
+    return next((line for line in reversed(new) if not (line.own or line.act)), None)
 
 
 def offered_declarations(
@@ -747,18 +749,22 @@ def call_within_bound(made: int, bound: int) -> bool:
 @dataclass(frozen=True)
 class Lines:
     """Why a written turn runs: the lines of one visit's window taken since his last turn there, which the history
-    holds, and whether older ones were never seen."""
+    holds, and whether older ones were never seen. ``traceparent`` is the trace the newest line that made the turn due
+    entered in, which the turn continues; none opens a trace of its own."""
 
     generation: str
     seqs: frozenset[int]
     missed: bool
+    traceparent: str | None = None
 
 
 @dataclass(frozen=True)
 class Waiting:
-    """Why a view turn runs: the place's view waits for the agent at this revision, which the history holds."""
+    """Why a view turn runs: the place's view waits for the agent at this revision, which the history holds.
+    ``traceparent`` is the trace the view moved to it in, which the turn continues; none opens a trace of its own."""
 
     revision: int
+    traceparent: str | None = None
 
 
 type Occasion = Lines | Waiting
@@ -792,8 +798,10 @@ class Turns:
 
 
 def _joined(held: Occasion | None, occasion: Occasion) -> Occasion:
+    """Lines of one generation join in the trace of the newer ones; any other occasion replaces what was held."""
     if isinstance(held, Lines) and isinstance(occasion, Lines) and held.generation == occasion.generation:
-        return Lines(held.generation, held.seqs | occasion.seqs, held.missed or occasion.missed)
+        newer = max(held, occasion, key=lambda lines: max(lines.seqs, default=0))
+        return Lines(held.generation, held.seqs | occasion.seqs, held.missed or occasion.missed, newer.traceparent)
     return occasion
 
 
