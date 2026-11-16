@@ -59,7 +59,7 @@ class Files:
                 f'[gateway]\nbackend = "litellm"\napi_group = "{API_GROUP}"\n'
                 f'[gateway.gateway]\norigin = "{GATEWAY_ORIGIN}"\nkey_file = "{self.key_path}"\n'
             )
-            tools = f'tools = ["say"]\nmax_tool_calls = {MAX_TOOL_CALLS}\n'
+            tools = f"max_tool_calls = {MAX_TOOL_CALLS}\n"
             persona = f'persona_file = "{self.persona_path}"\n'
         return (
             'token_endpoint = "https://realm.test/protocol/openid-connect/token"\n'

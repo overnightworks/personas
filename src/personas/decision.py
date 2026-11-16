@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Final
 
 from agents.backend import TurnStopped
 from agents.member import (
+    ACCEPT_INVITATION_TOOL,
     SPEAK_TOOL,
     AcceptInvitationRefusal,
     PlaceEntry,
@@ -49,6 +50,7 @@ from personas.entries import (
     told_time,
 )
 from personas.failures import CallFailure, StatusFailure, TokenStatusFailure, UnusableAnswer, leaves_of
+from personas.recall import RECALL_TOOL
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -61,6 +63,9 @@ if TYPE_CHECKING:
     from personas.secret import Secret
 
 CALL_PLACE_KIND: Final = "call"
+RESERVED_TOOLS: Final = frozenset({ACCEPT_INVITATION_TOOL, SPEAK_TOOL, RECALL_TOOL})
+"""The names the runner calls or answers itself in every turn: the accept of an invitation, the voice's ``speak`` and
+the lookup's ``recall``."""
 RENEW_BEFORE_EXPIRY_SECONDS: Final = 60.0
 """A token is renewed once this little of its lifetime remains, so no call carries an expired one."""
 NETWORK_FAILURE_CODE: Final = "network"
@@ -693,11 +698,14 @@ def wakes_him(new: Iterable[PlaceEntry], *, serves_view: bool) -> bool:
     return not serves_view and any(not (line.own or line.act) for line in new)
 
 
-def bound_declarations(declared: Sequence[ToolDeclaration], names: Sequence[str]) -> tuple[ToolDeclaration, ...]:
-    """The declarations of the bound tools the app lists, in binding order; a bound tool it does not list is left out
-    and a listed tool that is not bound never enters."""
-    by_name = {declaration.name: declaration for declaration in declared}
-    return tuple(by_name[name] for name in names if name in by_name)
+def offered_declarations(
+    declared: Sequence[ToolDeclaration], taken: frozenset[str]
+) -> tuple[tuple[ToolDeclaration, ...], int]:
+    """The declarations an app offers to a turn in its listing's order, and how many names it offers that an earlier
+    app already holds. The runner's reserved names are never offered and never counted."""
+    offered = tuple(each for each in declared if each.name not in RESERVED_TOOLS)
+    kept = tuple(each for each in offered if each.name not in taken)
+    return kept, len(offered) - len(kept)
 
 
 def turn_call_bound(bounds: Iterable[int]) -> int | None:

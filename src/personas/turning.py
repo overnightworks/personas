@@ -22,11 +22,11 @@ from personas.decision import (
     TurnTold,
     act_outcome,
     arrived_since,
-    bound_declarations,
     call_within_bound,
     decisive_failure,
     failure_code,
     held_told,
+    offered_declarations,
     turn_call_bound,
     turn_messages,
 )
@@ -66,7 +66,7 @@ if TYPE_CHECKING:
 
     from personas.app_session import AppSession, SessionOpener
     from personas.clock import Clock
-    from personas.config import AgentCredentials, AppTarget, ToolBinding
+    from personas.config import AgentCredentials, AppTarget
     from personas.decision import Arrived, Occasion, Present, Token
     from personas.entries import History
     from personas.mind import Mind
@@ -102,10 +102,9 @@ async def _final_event_of(events: AsyncIterator[TurnEvent], tally: TurnTally) ->
 
 @dataclass(frozen=True)
 class TurnSetup:
-    """What an agent's turn in an app is made of: the persona, the tools bound and the backend that runs it."""
+    """What an agent's turn in an app is made of: the persona and the backend that runs it."""
 
     persona: AgentDefinition
-    binding: ToolBinding
     backend: BackendFactory
 
 
@@ -234,11 +233,12 @@ class Turning:
         use_current_token: Callable[[AppSession], Awaitable[None]],
         report: Callable[[Event, str | None, AppTarget | None, CallFailure | None], None],
         report_pause: Callable[[float, str], None],
+        report_tools_left_out: Callable[[AppTarget, int], None],
         remembering: Remembering,
     ) -> None:
         self._agent = agent
         self._app = app
-        self._apps = tuple((each, each.binding) for each in apps if each.binding is not None)
+        self._apps = tuple((each, each.max_tool_calls) for each in apps if each.max_tool_calls is not None)
         self._tokens = tokens
         self._open_session = open_session
         self._mind = mind
@@ -247,6 +247,8 @@ class Turning:
         self._use_current_token = use_current_token
         self._report = report
         self._report_pause = report_pause
+        self._report_tools_left_out = report_tools_left_out
+        self._left_out_reported: set[str] = set()
         self._remembering = remembering
 
     async def take(self, setup: TurnSetup, admitted: Admitted, record: TaskRecord, tally: TurnTally) -> None:
@@ -339,7 +341,7 @@ class Turning:
         hand_off: StepTimer,
     ) -> None:
         raise_if_cancelled()
-        held = await self._hold_tools(setup, session, record, admitted)
+        held = await self._hold_tools(session, record, admitted)
         system = f"{setup.persona.prompt}\n\n{REPLY_RULES}" if admitted.aloud else setup.persona.prompt
         request = TurnRequest(
             agent=setup.persona.name,
@@ -410,36 +412,65 @@ class Turning:
         speaking.end()
         return final
 
-    async def _hold_tools(
-        self, setup: TurnSetup, session: AppSession, record: TaskRecord, admitted: Admitted
-    ) -> _HeldTools:
+    async def _hold_tools(self, session: AppSession, record: TaskRecord, admitted: Admitted) -> _HeldTools:
         """The lookup when the configuration has a memory, then the tools of the place's app, of each app named in the
         admission and of each tools-only app that answers, in the configuration's order, each app counting its own
         calls.
 
-        Of each app only the bound tools it lists now are held, none when it lists none. Another app whose listing
-        fails is left out and reported once, and the turn holds the rest.
+        Of each app every tool it lists now is held but the runner's reserved names and those an earlier app holds,
+        none when it lists none. Another app whose listing fails is left out and reported once, and the turn holds the
+        rest.
         """
-        own = bound_declarations(await self._list_tools(self._app, session), setup.binding.tools)
+        own = await self._list_tools(self._app, session)
         hold = _Hold(admitted.history)
         tools: list[HandTool] = []
         bounds: list[int] = []
+        taken = frozenset[str]()
         lookup = self._remembering.lookup
         if lookup is not None:
             tools.append(HandTool(RECALL_DECLARATION, partial(self._look, lookup, _Calls(lookup.calls), admitted)))
             bounds.append(lookup.calls)
-        for app, binding in self._apps:
-            calls = _Calls(binding.max_tool_calls)
+        for app, max_calls in self._apps:
+            calls = _Calls(max_calls)
             if app.mcp_url == self._app.mcp_url:
-                lent = [HandTool(each, partial(self._relay, session, each.name, calls, hold)) for each in own]
+                declared = own
             elif not app.listens or app.mcp_url in admitted.apps:
-                lent = await self._list_elsewhere(app, binding, calls, hold, record)
+                found = await self._list_elsewhere(app, record)
+                if found is None:
+                    continue
+                declared = found
             else:
                 continue
-            if lent:
-                tools.extend(lent)
+            offered, left_out = offered_declarations(declared, taken)
+            self._tools_left_out(app, left_out)
+            taken |= {each.name for each in offered}
+            if offered:
+                tools.extend(self._hand_tools(app, session, offered, calls, hold, record))
                 bounds.append(calls.bound)
         return _HeldTools(tuple(tools), turn_call_bound(bounds))
+
+    def _hand_tools(
+        self,
+        app: AppTarget,
+        session: AppSession,
+        offered: tuple[ToolDeclaration, ...],
+        calls: _Calls,
+        hold: _Hold,
+        record: TaskRecord,
+    ) -> list[HandTool]:
+        if app.mcp_url == self._app.mcp_url:
+            return [HandTool(each, partial(self._relay, session, each.name, calls, hold)) for each in offered]
+        return [HandTool(each, partial(self._relay_elsewhere, app, each.name, calls, hold, record)) for each in offered]
+
+    def _tools_left_out(self, app: AppTarget, count: int) -> None:
+        """Reports an app's names left out for an earlier app's, once until the loop's session ends."""
+        if count and app.mcp_url not in self._left_out_reported:
+            self._left_out_reported.add(app.mcp_url)
+            self._report_tools_left_out(app, count)
+
+    def new_session(self) -> None:
+        """The loop's app session starts: a name left out is reported again."""
+        self._left_out_reported.clear()
 
     async def _look(
         self, lookup: LookupBounds, calls: _Calls, admitted: Admitted, _principal: Principal, arguments: JsonObject
@@ -462,16 +493,13 @@ class Turning:
             return ToolOutcome(STORE_DID_NOT_ANSWER_TEXT, is_error=True)
         return ToolOutcome(lookup_result(found, lookup.result_bytes), is_error=False)
 
-    async def _list_elsewhere(
-        self, app: AppTarget, binding: ToolBinding, calls: _Calls, hold: _Hold, record: TaskRecord
-    ) -> list[HandTool] | None:
-        """The hand tools of the bound tools another app lists, or ``None`` after the report of its failed listing."""
+    async def _list_elsewhere(self, app: AppTarget, record: TaskRecord) -> tuple[ToolDeclaration, ...] | None:
+        """The tools another app lists, or ``None`` after the report of its failed listing."""
         declared = await self._ask_elsewhere(app, partial(self._list_tools, app), record, opening=True)
         if isinstance(declared, CallFailure):
             self._report(_failure_event(app), failure_code(declared), app, declared)
             return None
-        listed = bound_declarations(declared, binding.tools)
-        return [HandTool(each, partial(self._relay_elsewhere, app, each.name, calls, hold, record)) for each in listed]
+        return declared
 
     async def _list_tools(self, app: AppTarget, session: AppSession) -> tuple[ToolDeclaration, ...]:
         with stepping(step_timer("tool_list.ended", self._agent.client_id, app.mcp_url), turn_goes_on=app != self._app):

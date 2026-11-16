@@ -41,6 +41,7 @@ class Event(Enum):
     SPEAK_REFUSED = auto()
     TOOLS_ONLY_APP_FAILED = auto()
     HELD_APP_FAILED = auto()
+    TOOLS_LEFT_OUT = auto()
     STORE_FAILED = auto()
     STORE_RESUMED = auto()
     SWEPT = auto()
@@ -55,7 +56,8 @@ class StateChange:
     The sweep belongs to no agent and no app, and says how many lines it removed. The lock of an agent taken or lost
     belongs to no app. The start says the model the agent's
     turns run on, when it has a persona. An invitation the loop leaves out says its place's kind and the reason as the
-    code. A pause of his turns says its reason as the code and its wait in seconds. A call that failed
+    code. A pause of his turns says its reason as the code and its wait in seconds. Tools left out for an
+    earlier app's of the same name say how many. A call that failed
     says its failure: the line holds its HTTP status, the MCP method that failed and a closed reason.
     """
 
@@ -67,6 +69,7 @@ class StateChange:
     place_kind: str | None = None
     seconds: float | None = None
     model: str | None = None
+    tool_count: int | None = None
     failure: CallFailure | None = None
 
 
@@ -85,6 +88,7 @@ _LINE_OF: Final = {
     Event.SPEAK_REFUSED: (logging.INFO, "speak.refused"),
     Event.TOOLS_ONLY_APP_FAILED: (logging.WARNING, "tools_only_app.failed"),
     Event.HELD_APP_FAILED: (logging.WARNING, "held_app.failed"),
+    Event.TOOLS_LEFT_OUT: (logging.INFO, "tools.left_out"),
     Event.STORE_FAILED: (logging.WARNING, "store.failed"),
     Event.STORE_RESUMED: (logging.INFO, "store.resumed"),
     Event.SWEPT: (logging.INFO, "lines.swept"),
@@ -113,6 +117,8 @@ def _fields_of(change: StateChange) -> dict[str, str | int | float]:
         fields["place_kind"] = change.place_kind
     if change.seconds is not None:
         fields["pause_ms"] = round(change.seconds * 1000, 3)
+    if change.tool_count is not None:
+        fields["tool_count"] = change.tool_count
     if change.model is not None:
         fields["model"] = change.model
     return fields
