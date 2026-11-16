@@ -3,6 +3,7 @@ generation of the pod that owns the agent."""
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
@@ -12,7 +13,7 @@ from personas.entries import HistoryDelta, KeptHistory, Lines, TurnTold, ViewSee
 from personas.failures import StaleGenerationError, StoreDefect
 from personas.memory import PostgresHistoryStore
 from tests.support.history import APP, LATER, MORNING, TABLE, a_sentence, a_view, an_act, said
-from tests.support.postgres import run_sql
+from tests.support.postgres import run_sql, uncommitted_behind_a_lock, until_a_statement_waits
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -23,6 +24,7 @@ pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 
 AGENT = "agent-mozart"
 OTHER_AGENT = "agent-ada"
+LIMIT_SECONDS = 10
 
 
 @pytest.fixture
@@ -88,6 +90,24 @@ async def test_entries_that_left_the_history_and_the_turns_that_told_only_them_a
     await histories.append(AGENT, mine, appended(2, said(3, "c"), told=[a_turn(3, 2)], first_told=2, left_out=1))
 
     assert await histories.load(AGENT) == KeptHistory(1, (said(2, "b"), said(3, "c")), 1, (a_turn(2, 1), a_turn(3, 2)))
+
+
+async def test_a_load_that_meets_a_write_in_flight_gives_the_history_before_or_after_it_never_a_mix(
+    histories, database
+):
+    mine = await histories.take_over(AGENT)
+    await histories.append(AGENT, mine, appended(0, said(1, "a"), said(2, "b"), told=[a_turn(1), a_turn(2, 1)]))
+    before = await histories.load(AGENT)
+    first_left = ("DELETE FROM history_entries WHERE ordinal < 1", "DELETE FROM answered_turns WHERE through <= 1")
+
+    with uncommitted_behind_a_lock(database, "answered_turns", first_left) as commit:
+        loading = asyncio.create_task(histories.load(AGENT))
+        async with asyncio.timeout(LIMIT_SECONDS):
+            await until_a_statement_waits(database)
+        commit()
+        loaded = await loading
+
+    assert loaded in (before, await histories.load(AGENT))
 
 
 async def test_a_delta_written_again_after_an_unknown_outcome_changes_nothing(histories):

@@ -42,6 +42,7 @@ from sqlalchemy import (
     or_,
     select,
     text,
+    union_all,
 )
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import InterfaceError, OperationalError, SQLAlchemyError
@@ -496,26 +497,28 @@ class PostgresHistoryStore(_PostgresStore):
             )
 
     async def load(self, client_id: str) -> KeptHistory:
-        """The agent's history as the writes left it; a stored value that is no entry or turn is a ``StoreDefect``."""
-        entries = (
-            select(_HISTORY_ENTRIES.c.ordinal, _HISTORY_ENTRIES.c.entry)
-            .where(_HISTORY_ENTRIES.c.client_id == client_id)
-            .order_by(_HISTORY_ENTRIES.c.ordinal)
-        )
-        turns = (
-            select(_ANSWERED_TURNS.c.ordinal, _ANSWERED_TURNS.c.turn)
-            .where(_ANSWERED_TURNS.c.client_id == client_id)
-            .order_by(_ANSWERED_TURNS.c.ordinal)
-        )
+        """The agent's history as one committed write left it; a stored value that is no entry or turn is a
+        ``StoreDefect``."""
+        # One statement reads both tables in one snapshot: two would let a write commit between them.
+        stored = union_all(
+            select(literal(False).label("is_turn"), _HISTORY_ENTRIES.c.ordinal, _HISTORY_ENTRIES.c.entry).where(
+                _HISTORY_ENTRIES.c.client_id == client_id
+            ),
+            select(literal(True), _ANSWERED_TURNS.c.ordinal, _ANSWERED_TURNS.c.turn).where(
+                _ANSWERED_TURNS.c.client_id == client_id
+            ),
+        ).subquery()
+        statement = select(stored).order_by(stored.c.is_turn, stored.c.ordinal)
         async with self._bounded_transaction() as connection:
-            entry_rows = (await connection.execute(entries)).all()
-            turn_rows = (await connection.execute(turns)).all()
+            rows = (await connection.execute(statement)).all()
+        entry_rows = [(ordinal, value) for is_turn, ordinal, value in rows if not is_turn]
+        turn_rows = [(ordinal, value) for is_turn, ordinal, value in rows if is_turn]
         try:
             return KeptHistory(
-                entry_rows[0].ordinal if entry_rows else 0,
-                tuple(entry_from_stored(json.loads(row.entry)) for row in entry_rows),
-                turn_rows[0].ordinal if turn_rows else 0,
-                tuple(turn_from_stored(json.loads(row.turn)) for row in turn_rows),
+                entry_rows[0][0] if entry_rows else 0,
+                tuple(entry_from_stored(json.loads(value)) for _, value in entry_rows),
+                turn_rows[0][0] if turn_rows else 0,
+                tuple(turn_from_stored(json.loads(value)) for _, value in turn_rows),
             )
         except ValueError:
             raise StoreDefect(STORE_DEFECT_CODE) from None
