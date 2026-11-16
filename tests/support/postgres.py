@@ -132,13 +132,17 @@ def waiting_statements(target: DatabaseTarget) -> int:
     """How many statements of this database wait for a lock right now."""
     engine = engine_of(target.dbname)
     try:
-        with engine.connect() as connection:
-            return connection.execute(
-                text("SELECT count(*) FROM pg_stat_activity WHERE datname = :name AND wait_event_type = 'Lock'"),
-                {"name": target.dbname},
-            ).scalar_one()
+        return _waiting_statements_through(engine, target.dbname)
     finally:
         engine.dispose()
+
+
+def _waiting_statements_through(engine: Engine, database: str) -> int:
+    with engine.connect() as connection:
+        return connection.execute(
+            text("SELECT count(*) FROM pg_stat_activity WHERE datname = :name AND wait_event_type = 'Lock'"),
+            {"name": database},
+        ).scalar_one()
 
 
 @contextmanager
@@ -173,9 +177,13 @@ def uncommitted_behind_a_lock(
 
 
 async def until_a_statement_waits(target: DatabaseTarget) -> None:
-    """Returns once a statement of this database waits for a lock."""
-    while not await asyncio.to_thread(waiting_statements, target):
-        continue
+    """Returns once a statement of this database waits for a lock; one engine asks on every pass."""
+    engine = engine_of(target.dbname)
+    try:
+        while not await asyncio.to_thread(_waiting_statements_through, engine, target.dbname):
+            continue
+    finally:
+        engine.dispose()
 
 
 class Forwarder:

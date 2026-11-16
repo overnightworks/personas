@@ -1,11 +1,11 @@
 """The memory: personas' Postgres, which holds the lines every agent read, verbatim, and each agent's history, and the
 migration that owns its schema.
 
-The runner writes, searches and sweeps through ``PostgresLineStore`` and the ``memory`` commands list and erase through
-it; ``PostgresHistoryStore`` keeps each agent's history for the pod that owns him; ``migrate`` is the only code that
-changes the schema. A line is keyed by the agent, the app, the place, the visit and its ``seq``, so reading a window
-again changes nothing and the time of the first read stands. No database error reaches a log or a traceback with a
-parameter or a row in it.
+The runner writes, searches and sweeps through ``PostgresLineStore``; ``PostgresHistoryStore`` keeps each agent's
+history for the pod that owns him; the ``memory`` commands list through both and erase through ``PostgresMemory``;
+``migrate`` is the only code that changes the schema. A line is keyed by the agent, the app, the place, the visit and
+its ``seq``, so reading a window again changes nothing and the time of the first read stands. No database error
+reaches a log or a traceback with a parameter or a row in it.
 """
 
 from __future__ import annotations
