@@ -318,6 +318,10 @@ async def test_a_schema_at_a_known_revision_behind_its_head_ends_the_write(unmig
         await store.close()
 
 
+async def test_a_schema_check_on_a_database_at_its_head_answers(store):
+    await store.require_head()
+
+
 async def test_a_database_at_a_revision_the_scripts_do_not_know_is_served(store, database):
     at_an_unknown_revision(database)
 
