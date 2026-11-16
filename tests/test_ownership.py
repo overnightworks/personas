@@ -41,13 +41,19 @@ class After:
 class ScriptedLocks:
     """The lock connection as a script: each round answers with the agents held, or loses the connection.
 
-    The round after the script blocks, which is its end. A round takes the seconds the test names on the clock.
+    The round after the script blocks, which is its end. A round takes the seconds the test names on the clock, and
+    each round is noted in ``trail`` when the test gives one.
     """
 
     def __init__(
-        self, clock: FakeClock, *rounds: set[str] | LockConnectionLost | After, seconds_per_round: float = 0.0
+        self,
+        clock: FakeClock,
+        *rounds: set[str] | LockConnectionLost | After,
+        seconds_per_round: float = 0.0,
+        trail: list[tuple[str, str]] | None = None,
     ) -> None:
         self._clock = clock
+        self._trail = trail
         self._rounds = list(rounds)
         self._seconds_per_round = seconds_per_round
         self.spent = asyncio.Event()
@@ -57,6 +63,8 @@ class ScriptedLocks:
 
     async def hold(self, client_ids: Sequence[str]) -> frozenset[str]:
         self.asked.append(client_ids)
+        if self._trail is not None:
+            self._trail.append(("hold", ",".join(client_ids)))
         self._clock.time += self._seconds_per_round
         if not self._rounds:
             self.spent.set()
@@ -87,9 +95,19 @@ class GraceGatedClock(FakeClock):
         await super().sleep(seconds)
 
 
+def _open_gate() -> asyncio.Event:
+    gate = asyncio.Event()
+    gate.set()
+    return gate
+
+
 @dataclass
 class Pod:
-    """A pod's ownership over a scripted lock connection, serving agents that record when they start and end."""
+    """A pod's ownership over a scripted lock connection, serving agents that record when they start and end.
+
+    An agent that is cancelled sets its ``winding_down`` event and ends once ``unwinding`` is set, which a test closes
+    to hold the agents in the middle of stopping.
+    """
 
     clock: FakeClock
     locks: ScriptedLocks
@@ -97,6 +115,8 @@ class Pod:
     defect_of: dict[str, Exception] = field(default_factory=dict[str, Exception])
     events: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
     reports: Reports = field(default_factory=Reports)
+    unwinding: asyncio.Event = field(default_factory=_open_gate)
+    winding_down: defaultdict[str, asyncio.Event] = field(default_factory=lambda: defaultdict(asyncio.Event))
     contending: int = 0
 
     def __post_init__(self) -> None:
@@ -111,6 +131,8 @@ class Pod:
             await asyncio.Event().wait()
             raise AssertionError("an agent ended")  # pragma: no cover
         finally:
+            self.winding_down[client_id].set()
+            await self.unwinding.wait()
             self.events.append(("ended", client_id))
 
     def _contending(self) -> None:
@@ -164,27 +186,48 @@ async def test_an_agent_is_not_served_before_the_grace_has_passed_after_its_lock
     assert before_the_grace == []
 
 
+def rounds_in(events: list[tuple[str, str]]) -> list[int]:
+    """The positions in the events at which a round of the lock connection began."""
+    return [position for position, (what, _) in enumerate(events) if what == "hold"]
+
+
 async def test_an_agent_whose_lock_is_no_longer_held_is_stopped_and_has_ended_before_the_next_round(clock):
-    locks = ScriptedLocks(clock, {AGENT}, After((AGENT,), set()))
-    pod = Pod(clock, locks)
+    events: list[tuple[str, str]] = []
+    unwinding = asyncio.Event()
+    locks = ScriptedLocks(clock, {AGENT}, After((AGENT,), set()), trail=events)
+    pod = Pod(clock, locks, events=events, unwinding=unwinding)
     task = pod.start()
+    async with asyncio.timeout(LIMIT_SECONDS):
+        await pod.winding_down[AGENT].wait()
+    reported_while_stopping = pod.reports.reported()
+    unwinding.set()
     await pod.until_spent()
 
     await pod.stopped(task)
 
-    assert pod.events == [("started", AGENT), ("ended", AGENT)]
+    assert reported_while_stopping == [(Event.TAKEN, None)]
+    assert ("ended", AGENT) in events[: rounds_in(events)[2]]
     assert pod.reports.reported() == [(Event.TAKEN, None), (Event.LOST, "hold_lost")]
 
 
 async def test_a_lost_lock_connection_stops_every_agent_and_the_pod_takes_them_again_when_it_holds_them(clock):
-    locks = ScriptedLocks(clock, {AGENT, OTHER_AGENT}, After((AGENT, OTHER_AGENT), LOST), {AGENT})
-    pod = Pod(clock, locks, agents=(AGENT, OTHER_AGENT))
+    events: list[tuple[str, str]] = []
+    unwinding = asyncio.Event()
+    locks = ScriptedLocks(clock, {AGENT, OTHER_AGENT}, After((AGENT, OTHER_AGENT), LOST), {AGENT}, trail=events)
+    pod = Pod(clock, locks, agents=(AGENT, OTHER_AGENT), events=events, unwinding=unwinding)
     task = pod.start()
+    async with asyncio.timeout(LIMIT_SECONDS):
+        await pod.winding_down[AGENT].wait()
+        await pod.winding_down[OTHER_AGENT].wait()
+    unwinding.set()
     await pod.until_spent()
 
     await pod.stopped(task)
 
-    assert pod.events == [
+    before_the_third_round = events[: rounds_in(events)[2]]
+    assert ("ended", AGENT) in before_the_third_round
+    assert ("ended", OTHER_AGENT) in before_the_third_round
+    assert [each for each in events if each[0] != "hold"] == [
         ("started", AGENT),
         ("started", OTHER_AGENT),
         ("ended", AGENT),
