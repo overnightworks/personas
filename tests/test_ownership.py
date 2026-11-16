@@ -1,5 +1,6 @@
-"""Which pod serves an agent: only while it holds the agent's lock, only after the grace, and never after the hold is
-lost; the pod's lock connection is scripted and its clock is the fake one."""
+"""Which pod serves an agent: only while it holds the agent's lock, only after the grace, never after the hold is lost
+or a write of his history was refused; the pod's lock connection is scripted, its histories kept in memory and its
+clock is the fake one."""
 
 from __future__ import annotations
 
@@ -11,14 +12,20 @@ from typing import TYPE_CHECKING
 import pytest
 
 from personas.config import OwnershipTimings
+from personas.entries import KeptHistory
+from personas.failures import StaleGenerationError, StoreUnavailable
 from personas.ownership import LockConnectionLost, LockedOwnership
 from personas.reporting import Event
 from tests.support.fakes import FakeClock, Reports
+from tests.support.history import said
 from tests.support.hopin import LIMIT_SECONDS
+from tests.support.ownership import KeptHistories
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from typing import NoReturn
+
+    from personas.ownership import Owned
 
 pytestmark = pytest.mark.anyio
 
@@ -79,18 +86,23 @@ class ScriptedLocks:
         return frozenset(answer)
 
 
-class GraceGatedClock(FakeClock):
-    """A fake clock whose sleep of the grace waits until the test opens it; every other sleep returns at once."""
+class GatedClock(FakeClock):
+    """A fake clock whose sleep of the cancel margin, and of the grace when the test names it, each wait until the test
+    opens their gate; every other sleep returns at once."""
 
-    def __init__(self, grace_seconds: float) -> None:
+    def __init__(self, *, gating_the_grace: bool = False) -> None:
         super().__init__()
-        self._grace_seconds = grace_seconds
-        self.opened = asyncio.Event()
+        gated = (
+            (TIMINGS.cancel_margin_seconds, TIMINGS.grace_seconds)
+            if gating_the_grace
+            else (TIMINGS.cancel_margin_seconds,)
+        )
+        self.gates = {seconds: asyncio.Event() for seconds in gated}
 
     async def sleep(self, seconds: float) -> None:
-        if seconds == self._grace_seconds:
+        if seconds in self.gates:
             self.slept.append(seconds)
-            await self.opened.wait()
+            await self.gates[seconds].wait()
             return
         await super().sleep(seconds)
 
@@ -113,6 +125,9 @@ class Pod:
     locks: ScriptedLocks
     agents: Sequence[str] = (AGENT,)
     defect_of: dict[str, Exception] = field(default_factory=dict[str, Exception])
+    histories: KeptHistories = field(default_factory=KeptHistories)
+    served_with: list[Owned] = field(default_factory=list["Owned"])
+    served_again: asyncio.Event = field(default_factory=asyncio.Event)
     events: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
     reports: Reports = field(default_factory=Reports)
     unwinding: asyncio.Event = field(default_factory=_open_gate)
@@ -120,14 +135,18 @@ class Pod:
     contending: int = 0
 
     def __post_init__(self) -> None:
-        self.ownership = LockedOwnership(self.locks, self.clock, TIMINGS, self.reports)
+        self.ownership = LockedOwnership(self.locks, self.histories, self.clock, TIMINGS, self.reports)
 
-    async def _serve_agent(self, client_id: str) -> NoReturn:
+    async def _serve_agent(self, owned: Owned) -> NoReturn:
+        client_id = owned.client_id
         self.events.append(("started", client_id))
+        self.served_with.append(owned)
+        if len(self.served_with) > 1:
+            self.served_again.set()
         self.locks.served[client_id].set()
         try:
             if client_id in self.defect_of:
-                raise self.defect_of[client_id]
+                raise self.defect_of.pop(client_id)
             await asyncio.Event().wait()
             raise AssertionError("an agent ended")  # pragma: no cover
         finally:
@@ -156,8 +175,8 @@ class Pod:
 
 
 @pytest.fixture
-def clock() -> FakeClock:
-    return FakeClock()
+def clock() -> GatedClock:
+    return GatedClock()
 
 
 async def test_an_agent_whose_lock_is_held_is_served_and_one_whose_lock_another_pod_holds_is_not(clock):
@@ -172,13 +191,13 @@ async def test_an_agent_whose_lock_is_held_is_served_and_one_whose_lock_another_
 
 
 async def test_an_agent_is_not_served_before_the_grace_has_passed_after_its_lock_was_taken():
-    clock = GraceGatedClock(TIMINGS.grace_seconds)
+    clock = GatedClock(gating_the_grace=True)
     pod = Pod(clock, ScriptedLocks(clock, {AGENT}, {AGENT}, {AGENT}))
     task = pod.start()
     await pod.until_spent()
 
     before_the_grace = list(pod.events)
-    clock.opened.set()
+    clock.gates[TIMINGS.grace_seconds].set()
     async with asyncio.timeout(LIMIT_SECONDS):
         await pod.locks.served[AGENT].wait()
     await pod.stopped(task)
@@ -208,6 +227,78 @@ async def test_an_agent_whose_lock_is_no_longer_held_is_stopped_and_has_ended_be
     assert reported_while_stopping == [(Event.TAKEN, None)]
     assert ("ended", AGENT) in events[: rounds_in(events)[2]]
     assert pod.reports.reported() == [(Event.TAKEN, None), (Event.LOST, "hold_lost")]
+
+
+async def test_a_stop_that_outlasts_the_cancel_margin_writes_one_line_for_the_agent_and_the_loss_once_it_ended(clock):
+    unwinding = asyncio.Event()
+    pod = Pod(clock, ScriptedLocks(clock, {AGENT}, After((AGENT,), set())), unwinding=unwinding)
+    task = pod.start()
+    async with asyncio.timeout(LIMIT_SECONDS):
+        await pod.winding_down[AGENT].wait()
+    clock.gates[TIMINGS.cancel_margin_seconds].set()
+    await pod.reports.until(Event.STOP_OVERRAN, limit_seconds=LIMIT_SECONDS)
+    reported_while_stopping = pod.reports.reported()
+    unwinding.set()
+    await pod.until_spent()
+
+    await pod.stopped(task)
+
+    assert reported_while_stopping == [(Event.TAKEN, None), (Event.STOP_OVERRAN, None)]
+    assert pod.reports.reported() == [(Event.TAKEN, None), (Event.STOP_OVERRAN, None), (Event.LOST, "hold_lost")]
+
+
+async def test_a_refused_write_stops_the_agent_and_a_later_round_that_holds_him_serves_him_under_a_new_generation(
+    clock,
+):
+    pod = Pod(
+        clock,
+        ScriptedLocks(clock, {AGENT}, After((AGENT,), {AGENT}), {AGENT}),
+        defect_of={AGENT: StaleGenerationError()},
+    )
+    task = pod.start()
+    await pod.until_spent(AGENT)
+    async with asyncio.timeout(LIMIT_SECONDS):
+        await pod.served_again.wait()
+
+    await pod.stopped(task)
+
+    assert [each for each in pod.events if each[0] != "hold"][:3] == [
+        ("started", AGENT),
+        ("ended", AGENT),
+        ("started", AGENT),
+    ]
+    assert pod.reports.reported()[:3] == [(Event.TAKEN, None), (Event.LOST, "generation_stale"), (Event.TAKEN, None)]
+    assert pod.histories.generations[AGENT] == 2
+
+
+async def test_an_agent_taken_over_is_served_with_the_history_kept_after_the_takeover(clock):
+    kept = KeptHistory(3, (said(4, "four"),), 1, ())
+    pod = Pod(clock, ScriptedLocks(clock, {AGENT}), histories=KeptHistories(kept={AGENT: kept}))
+    task = pod.start()
+    await pod.until_spent(AGENT)
+
+    await pod.stopped(task)
+
+    assert [owned.history for owned in pod.served_with] == [kept]
+
+
+class UnreachableHistories(KeptHistories):
+    """Histories whose store cannot be reached at a takeover."""
+
+    async def take_over(self, client_id: str) -> int:
+        raise StoreUnavailable("store_unreachable")
+
+
+async def test_a_takeover_the_store_cannot_take_now_is_reported_and_the_agent_is_not_served(clock):
+    pod = Pod(clock, ScriptedLocks(clock, {AGENT}), histories=UnreachableHistories())
+    task = pod.start()
+    await pod.until_spent()
+    await pod.reports.until(Event.LOST, limit_seconds=LIMIT_SECONDS)
+
+    await pod.stopped(task)
+
+    assert pod.events == []
+    assert pod.reports.reported()[:2] == [(Event.TAKEN, None), (Event.LOST, "store_unreachable")]
 
 
 async def test_a_lost_lock_connection_stops_every_agent_and_the_pod_takes_them_again_when_it_holds_them(clock):

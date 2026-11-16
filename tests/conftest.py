@@ -40,7 +40,7 @@ from tests.support.fakes import (
 )
 from tests.support.gateway import Gateway, RoundBackend
 from tests.support.hopin import AGENT_SUBJECT, ISSUER, PLAY_TOOL, FakeApp, configure_logging_into, formatted
-from tests.support.ownership import AllAgentsOwned
+from tests.support.ownership import AllAgentsOwned, KeptHistories
 from tests.support.realm import TOKEN_ENDPOINT, FakeRealm
 from tests.support.songmaker import CALLS, ToolsOnlyApp
 from tests.support.songmaker import SCOPE as TOOLS_ONLY_SCOPE
@@ -151,6 +151,7 @@ class Harness:
         self.other_apps: list[FakeApp] = []
         self.lines: LineStore | None = None
         self.swept: SweptStore | None = None
+        self.histories = KeptHistories()
         self.handed: list[tuple[HandTool, ...]] = []
         """The tools each turn's backend was handed, in the order handed."""
         self.backends: list[RoundBackend] = []
@@ -233,7 +234,7 @@ class Harness:
             ready=FileReadyMarker(self.ready_file),
             backend=self._backend,
             lines=self.lines,
-            ownership=AllAgentsOwned(),
+            ownership=AllAgentsOwned(self.histories),
             swept=self.swept,
         )
         self.task = asyncio.create_task(run_with_sweep(self.config, boundaries))

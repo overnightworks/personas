@@ -29,12 +29,14 @@ from personas.decision import (
     decisive_failure,
     failure_code,
     forget_gone,
+    history_delta,
     is_defect,
     is_voice_app,
     left_out_for,
     left_standing,
     lends_tools,
     perceive,
+    present_of,
     reaction_to,
     renewal_due,
     speaks_aloud,
@@ -46,11 +48,11 @@ from personas.decision import (
     waking_line,
 )
 from personas.entries import Lines, ViewSeen, Visit, Waiting, WindowRead, taken_lines
-from personas.failures import CallFailure, leaves_of, raise_if_cancelled
+from personas.failures import CallFailure, StoreUnavailable, leaves_of, raise_if_cancelled
 from personas.mind import Mind
 from personas.recall import LookupBounds
 from personas.remembering import LineStore, Remembering
-from personas.reporting import Event, Reporter, StateChange, TurnTally, start_turn_tally, step_timer
+from personas.reporting import Event, Reporter, StateChange, StoreOutage, TurnTally, start_turn_tally, step_timer
 from personas.task_record import (
     TaskRecord,
     ending_loud_when_cancelled,
@@ -69,7 +71,7 @@ if TYPE_CHECKING:
     from personas.clock import Clock
     from personas.config import AgentCredentials, AppTarget, Config
     from personas.decision import Checkpoint
-    from personas.ownership import Ownership
+    from personas.ownership import Owned, Ownership
     from personas.readiness import ReadyMarker
     from personas.tokens import TokenSource
     from personas.turning import BackendFactory
@@ -530,22 +532,53 @@ async def _run_loop(loop: AgentLoop, agent_task: asyncio.Task[object]) -> None:
     return await ending_loud_when_cancelled(loop.run(), partial(unrequested_unless_cancelling, agent_task))
 
 
+async def _write_through(mind: Mind, owned: Owned, boundaries: Boundaries) -> NoReturn:
+    """Writes what his present gained after each take and each answered turn. A write the store could not take is
+    reported once per outage and retried after a backoff, with whatever was gained meanwhile; a write the fence refused
+    raises ``StaleGenerationError``, which stops him on this pod."""
+    written = mind.present
+    outage = StoreOutage(lambda event, code: boundaries.report(StateChange(event, owned.client_id, None, code)))
+    failures = 0
+    changed = mind.present_changed()
+    while True:
+        await changed.wait()
+        changed.clear()
+        current = mind.present
+        delta = history_delta(written, current)
+        if delta is None:
+            continue
+        try:
+            await owned.write(delta)
+        except StoreUnavailable as unavailable:
+            outage.failed(unavailable.code)
+            failures += 1
+            changed.set()
+            await boundaries.clock.sleep(backoff_delay(failures))
+            continue
+        outage.answered()
+        failures = 0
+        written = current
+
+
 async def run_all(config: Config, boundaries: Boundaries, ownership: Ownership) -> NoReturn:
     """One loop for every app that listens, for each agent while this pod owns it; a loop never ends on its own."""
     memory = config.memory
     lookup = None if memory is None else LookupBounds(memory.lookup_calls, memory.lookup_bytes)
     agents = {agent.client_id: agent for agent in config.agents}
 
-    async def serve_agent(client_id: str) -> NoReturn:
-        """Every loop of the agent, over a history of his own that a new owner starts empty."""
+    async def serve_agent(owned: Owned) -> NoReturn:
+        """Every loop of the agent, over the history he was taken over with, which is written through as it grows."""
         agent_task = asyncio.current_task()
         assert agent_task is not None  # noqa: S101 - an agent is served inside its own task
-        mind = Mind(config.history_bytes, config.history_keep_bytes, config.budget_pause_cap_seconds)
+        present = present_of(owned.history)
+        mind = Mind(config.history_bytes, config.history_keep_bytes, config.budget_pause_cap_seconds, present)
+        agent = agents[owned.client_id]
         async with asyncio.TaskGroup() as group:
+            group.create_task(_write_through(mind, owned, boundaries))
             for app in config.apps:
                 if app.listens:
                     group.create_task(
-                        _run_loop(AgentLoop(agents[client_id], app, boundaries, mind, config.apps, lookup), agent_task)
+                        _run_loop(AgentLoop(agent, app, boundaries, mind, config.apps, lookup), agent_task)
                     )
         raise AssertionError("a loop ended")  # pragma: no cover
 

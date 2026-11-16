@@ -48,18 +48,18 @@ class Event(Enum):
     SWEPT = auto()
     TAKEN = auto()
     LOST = auto()
+    STOP_OVERRAN = auto()
 
 
 @dataclass(frozen=True)
 class StateChange:
     """One change of an agent's loop for one app, with the refusal or failure code if any.
 
-    The sweep belongs to no agent and no app, and says how many lines it removed. The lock of an agent taken or lost
-    belongs to no app. The start says the model the agent's
-    turns run on, when it has a persona. An invitation the loop leaves out says its place's kind and the reason as the
-    code. A pause of his turns says its reason as the code and its wait in seconds. Tools left out for an
-    earlier app's of the same name say how many. A call that failed
-    says its failure: the line holds its HTTP status, the MCP method that failed and a closed reason.
+    The sweep belongs to no agent and no app, and says how many lines it removed. The lock of an agent taken, lost or
+    slow to stop belongs to no app. The start says the model the agent's turns run on, when it has a persona. An
+    invitation the loop leaves out says its place's kind and the reason as the code. A pause of his turns says its
+    reason as the code and its wait in seconds. Tools left out for an earlier app's of the same name say how many. A
+    call that failed says its failure: the line holds its HTTP status, the MCP method that failed and a closed reason.
     """
 
     event: Event
@@ -96,6 +96,7 @@ _LINE_OF: Final = {
     Event.SWEPT: (logging.INFO, "lines.swept"),
     Event.TAKEN: (logging.INFO, "agent.taken"),
     Event.LOST: (logging.WARNING, "agent.lost"),
+    Event.STOP_OVERRAN: (logging.WARNING, "agent.stop_overran"),
 }
 
 

@@ -11,6 +11,7 @@ from agents.backend.fake_gateway import completion
 from agents.turn import Principal, person_fingerprint
 
 from personas.decision import BACKOFF_BASE_SECONDS
+from personas.entries import HistoryDelta, KeptLine
 from personas.failures import STORE_UNREACHABLE_CODE, StoreUnavailable
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
@@ -43,6 +44,7 @@ from tests.support.history import (
 )
 from tests.support.hopin import ACCEPTED_NAME, ISSUER, PLAY_TOOL, active, paused
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
+from tests.support.ownership import KeptHistories
 from tests.support.realm import AGENT_NAME
 from tests.support.voice import a_voice_call
 
@@ -246,6 +248,35 @@ async def test_the_history_is_told_with_no_memory_and_with_a_store_that_is_down_
     assert [code for event, code in runner.reports.reported() if event is Event.STORE_FAILED] == [
         STORE_UNREACHABLE_CODE
     ] * (failures)
+
+
+class HistoriesDownForTheRemark(KeptHistories):
+    """Histories whose store cannot take the first write that holds the remark, an act that wakes no turn and is
+    the last thing taken."""
+
+    refused: bool = False
+
+    async def append(self, client_id: str, generation: int, delta: HistoryDelta) -> None:
+        holds_the_remark = any(isinstance(each, KeptLine) and each.text == REMARK for each in delta.entries)
+        if holds_the_remark and not self.refused:
+            self.refused = True
+            raise StoreUnavailable(STORE_UNREACHABLE_CODE)
+        await super().append(client_id, generation, delta)
+
+
+async def test_a_write_of_the_history_the_store_cannot_take_is_reported_once_and_tried_again_until_it_is_taken(
+    runner,
+):
+    runner.histories = HistoriesDownForTheRemark()
+    await restarted_in_the_call(runner)
+    await said_and_taken(runner.app, PLACE_ID, REMARK, act=True)
+    await runner.reports.until(Event.STORE_RESUMED)
+
+    entries = [entry for _, delta in runner.histories.written for entry in delta.entries]
+    assert [each.text for each in entries if isinstance(each, KeptLine)] == [REMARK]
+    assert [code for event, code in runner.reports.reported() if event is Event.STORE_FAILED] == [
+        STORE_UNREACHABLE_CODE
+    ]
 
 
 async def test_a_view_turn_starts_at_once_told_what_the_history_holds_while_a_window_read_of_another_app_is_held(

@@ -42,7 +42,9 @@ from sqlalchemy import (
     or_,
     select,
     text,
+    true,
     union_all,
+    update,
 )
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import InterfaceError, OperationalError, SQLAlchemyError
@@ -73,7 +75,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable, Generator
     from datetime import datetime
 
-    from sqlalchemy import Delete
+    from sqlalchemy import ColumnElement, Delete, Update
 
     from personas.config import DatabaseTarget
     from personas.entries import HistoryDelta, WindowRead
@@ -552,24 +554,34 @@ class PostgresHistoryStore(_PostgresStore):
 
 class PostgresMemory(_PostgresStore):
     """Everything the agents keep in the database, as ``personas memory erase`` deletes it: their lines, history
-    entries and answered turns, all of them or none."""
+    entries and answered turns, all of them or none.
+
+    An erase renews the generation of each agent it erases in the same transaction, so his owner's next write is
+    refused: the owner stops him and takes him over again from the erased history, instead of writing back what it
+    still holds in memory."""
 
     async def erase_agent(self, client_id: str) -> MemoryErased:
-        """Deletes the agent's lines and history in one transaction and returns how much; his generation stays, so a
-        pod that lost him still cannot write."""
+        """Deletes the agent's lines and history in one transaction, renewing his generation, and returns how much."""
         return await self._erase(
             delete(_LINES).where(_LINES.c.client_id == client_id),
             delete(_HISTORY_ENTRIES).where(_HISTORY_ENTRIES.c.client_id == client_id),
             delete(_ANSWERED_TURNS).where(_ANSWERED_TURNS.c.client_id == client_id),
+            _renewed(_AGENT_OWNER.c.client_id == client_id),
         )
 
     async def erase_all(self) -> MemoryErased:
-        """Deletes every agent's lines and history in one transaction and returns how much; the schema and the
-        generations stay."""
-        return await self._erase(delete(_LINES), delete(_HISTORY_ENTRIES), delete(_ANSWERED_TURNS))
+        """Deletes every agent's lines and history in one transaction, renewing every generation, and returns how
+        much; the schema stays."""
+        return await self._erase(delete(_LINES), delete(_HISTORY_ENTRIES), delete(_ANSWERED_TURNS), _renewed(true()))
 
-    async def _erase(self, lines: Delete, entries: Delete, answered_turns: Delete) -> MemoryErased:
+    async def _erase(self, lines: Delete, entries: Delete, answered_turns: Delete, owners: Update) -> MemoryErased:
         async with self._bounded_transaction() as connection:
+            await connection.execute(owners)
             erased_lines = (await connection.execute(lines)).rowcount
             erased_entries = (await connection.execute(entries)).rowcount
             return MemoryErased(erased_lines, erased_entries, (await connection.execute(answered_turns)).rowcount)
+
+
+def _renewed(owners: ColumnElement[bool]) -> Update:
+    """Renews the generation of each agent ``owners`` selects; an agent never taken has none to renew."""
+    return update(_AGENT_OWNER).where(owners).values(generation=_AGENT_OWNER.c.generation + 1)
