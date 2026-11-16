@@ -29,7 +29,6 @@ if TYPE_CHECKING:
 URL_ENVIRONMENT_VARIABLE = "PERSONAS_TEST_POSTGRES_URL"
 WRAPPER = "scripts/test_postgres.sh"
 DATABASE_NAME_BYTES = 8
-UNKNOWN_REVISION_LETTERS = 12
 LOOPBACK = "127.0.0.1"
 FORWARD_CHUNK_BYTES = 65536
 
@@ -124,7 +123,7 @@ def run_sql(target: DatabaseTarget, statement: str) -> None:
 
 def at_an_unknown_revision(target: DatabaseTarget) -> str:
     """Sets the database to a revision the migration scripts do not know and returns it."""
-    unknown = "".join(secrets.choice(string.ascii_lowercase) for _ in range(UNKNOWN_REVISION_LETTERS))
+    unknown = "".join(secrets.choice(string.ascii_lowercase) for _ in range(12))
     run_sql(target, f"UPDATE alembic_version SET version_num = '{unknown}'")  # noqa: S608 - a test-generated name
     return unknown
 
