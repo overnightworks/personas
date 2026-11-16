@@ -603,7 +603,7 @@ class Turning:
         try:
             async with voiced.setup.backend(tools) as backend, aclosing(backend.run(request, person)) as events:
                 async for _ in events:
-                    pass
+                    continue
         except RelayFailed:
             raise
         except TurnStopped:
