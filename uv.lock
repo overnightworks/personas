@@ -569,8 +569,8 @@ wheels = [
 
 [[package]]
 name = "overnightworks-agents"
-version = "0.50.0"
-source = { git = "https://github.com/overnightworks/agents?rev=v0.50.0#b8568cbf2d46aa0d88db19d6e9011bdf8c682ac5" }
+version = "0.51.0"
+source = { git = "https://github.com/overnightworks/agents?rev=v0.51.0#38cfc9974b53a959e7943d824156728c19804f29" }
 dependencies = [
     { name = "pydantic" },
     { name = "ruamel-yaml" },
@@ -587,6 +587,7 @@ mcp-server = [
     { name = "overnightworks-logline" },
 ]
 voice = [
+    { name = "overnightworks-logline" },
     { name = "syntok" },
 ]
 
@@ -637,7 +638,7 @@ requires-dist = [
     { name = "httpx2", specifier = ">=2.16.0" },
     { name = "mcp", specifier = ">=2.3.0" },
     { name = "mcp-types", specifier = ">=2.3.0" },
-    { name = "overnightworks-agents", extras = ["backend", "voice"], git = "https://github.com/overnightworks/agents?rev=v0.50.0" },
+    { name = "overnightworks-agents", extras = ["backend", "voice"], git = "https://github.com/overnightworks/agents?rev=v0.51.0" },
     { name = "overnightworks-logline", git = "https://github.com/overnightworks/logline?rev=v0.4.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.12" },
@@ -647,7 +648,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "anyio", specifier = ">=4.16.0" },
-    { name = "overnightworks-agents", extras = ["mcp-server"], git = "https://github.com/overnightworks/agents?rev=v0.50.0" },
+    { name = "overnightworks-agents", extras = ["mcp-server"], git = "https://github.com/overnightworks/agents?rev=v0.51.0" },
     { name = "pyright", specifier = ">=1.1.414" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-cov", specifier = ">=7.0.0" },
