@@ -412,7 +412,7 @@ PLACES_WITH_A_VIEW = [
 async def test_the_lines_of_a_place_enter_his_history_before_the_view_of_that_wake_and_only_the_view_woke_the_turn(
     runner, place
 ):
-    said = ("first", "second")
+    said = ("opening line", "second")
     shown = joined_at(runner, place, said=said, awaits_you=True)
     await runner.gateway.until_turns(1, why="view")
     await settled(runner.app)
