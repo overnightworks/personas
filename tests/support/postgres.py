@@ -213,14 +213,19 @@ def tables_of(target: DatabaseTarget) -> list[str]:
 
 
 def lock_holders(target: DatabaseTarget) -> list[int]:
-    """The backend of each session holding an advisory lock of the two-integer form, as often as it holds one."""
+    """The backend of each session holding an advisory lock of the two-integer form in the target's database.
+
+    A session appears as often as it holds a lock; those of other databases on the server are not seen."""
     engine = engine_of(target.dbname)
     try:
         with engine.connect() as connection:
             return [
                 pid
                 for (pid,) in connection.execute(
-                    text("SELECT pid FROM pg_locks WHERE locktype = 'advisory' AND objsubid = 2 AND granted")
+                    text(
+                        "SELECT pid FROM pg_locks WHERE locktype = 'advisory' AND objsubid = 2 AND granted "
+                        "AND database = (SELECT oid FROM pg_database WHERE datname = current_database())"
+                    )
                 )
             ]
     finally:
