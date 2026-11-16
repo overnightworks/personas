@@ -148,6 +148,23 @@ class KeptVisit:
     last_read_at: datetime
 
 
+@dataclass(frozen=True)
+class KeptAgentHistory:
+    """What one agent's history holds: how many entries and answered turns, and the time of its first and last entry."""
+
+    client_id: str
+    entries: int
+    answered_turns: int
+    first_at: datetime
+    last_at: datetime
+
+
+@dataclass(frozen=True)
+class HistoryErased:
+    entries: int
+    answered_turns: int
+
+
 def _url(target: DatabaseTarget) -> URL:
     return URL.create(
         POSTGRES_DRIVER,
@@ -502,3 +519,45 @@ class PostgresHistoryStore(_PostgresStore):
             )
         except ValueError:
             raise StoreDefect(STORE_DEFECT_CODE) from None
+
+    async def kept_histories(self, client_id: str | None) -> tuple[KeptAgentHistory, ...]:
+        """Every agent's history, or that of one agent, ordered by agent; no entry's content."""
+        turns = (
+            select(_ANSWERED_TURNS.c.client_id, func.count().label("answered"))
+            .group_by(_ANSWERED_TURNS.c.client_id)
+            .subquery()
+        )
+        statement = (
+            select(
+                _HISTORY_ENTRIES.c.client_id,
+                func.count(),
+                func.coalesce(func.max(turns.c.answered), 0),
+                func.min(_HISTORY_ENTRIES.c.at),
+                func.max(_HISTORY_ENTRIES.c.at),
+            )
+            .outerjoin(turns, turns.c.client_id == _HISTORY_ENTRIES.c.client_id)
+            .group_by(_HISTORY_ENTRIES.c.client_id)
+            .order_by(_HISTORY_ENTRIES.c.client_id)
+        )
+        if client_id is not None:
+            statement = statement.where(_HISTORY_ENTRIES.c.client_id == client_id)
+        async with self._bounded_transaction() as connection:
+            rows = (await connection.execute(statement)).all()
+        return tuple(KeptAgentHistory(*row) for row in rows)
+
+    async def erase_agent(self, client_id: str) -> HistoryErased:
+        """Deletes the agent's history in one transaction and returns how much; his generation stays, so a pod that
+        lost him still cannot write."""
+        return await self._erase(
+            delete(_HISTORY_ENTRIES).where(_HISTORY_ENTRIES.c.client_id == client_id),
+            delete(_ANSWERED_TURNS).where(_ANSWERED_TURNS.c.client_id == client_id),
+        )
+
+    async def erase_all(self) -> HistoryErased:
+        """Deletes every agent's history in one transaction and returns how much; the generations stay."""
+        return await self._erase(delete(_HISTORY_ENTRIES), delete(_ANSWERED_TURNS))
+
+    async def _erase(self, entries: Delete, answered_turns: Delete) -> HistoryErased:
+        async with self._bounded_transaction() as connection:
+            erased_entries = (await connection.execute(entries)).rowcount
+            return HistoryErased(erased_entries, (await connection.execute(answered_turns)).rowcount)

@@ -13,10 +13,10 @@ import pytest
 from agents.member import PlaceEntry, PlaceRef
 
 from personas.config import CONFIG_ENVIRONMENT_VARIABLE
-from personas.entries import Visit, WindowRead
+from personas.entries import HistoryDelta, KeptHistory, KeptLine, Lines, TurnTold, Visit, WindowRead
 from personas.failures import STORE_DEFECT_CODE, STORE_UNREACHABLE_CODE
 from personas.main import CONFIGURATION_ERROR_EXIT_CODE, STORE_ERROR_EXIT_CODE, main
-from personas.memory import PostgresLineStore
+from personas.memory import PostgresHistoryStore, PostgresLineStore
 from tests.support.fakes import WALL_START, window_of
 from tests.support.postgres import kept_lines, run_sql
 
@@ -56,6 +56,25 @@ class Spoken:
             entries.append(PlaceEntry(seq=seq, kind="message", name=name, text=text, own=False))
         return tuple(entries)
 
+    def history(self, count: int, hours_after_start: float) -> tuple[KeptLine, ...]:
+        """Lines as a history holds them, first read an hour apart from the given hour on."""
+        lines = self.lines(1, count)
+        return tuple(
+            KeptLine(
+                FIRST_VISIT,
+                each.seq,
+                WALL_START + timedelta(hours=hours_after_start + index),
+                each.name,
+                each.kind,
+                each.text,
+                own=False,
+                spoken=False,
+                cut=False,
+                act=False,
+            )
+            for index, each in enumerate(lines)
+        )
+
 
 def a_read(client_id: str, visit: Visit, lines: tuple[PlaceEntry, ...], hours_after_start: float) -> WindowRead:
     window = window_of(*lines, generation=visit.generation)
@@ -86,16 +105,70 @@ def three_visits_of_two_agents(target: DatabaseTarget, spoken: Spoken) -> None:
     )
 
 
+def a_turn_through(through: int, hours_after_start: float) -> TurnTold:
+    occasion = Lines(FIRST_VISIT.generation, frozenset({through}), missed=False)
+    at = WALL_START + timedelta(hours=hours_after_start)
+    return TurnTold(at, APP, FIRST_VISIT.place, occasion, aloud=False, through=through)
+
+
+def histories_kept(target: DatabaseTarget, *histories: tuple[str, HistoryDelta]) -> None:
+    async def append_each() -> None:
+        store = PostgresHistoryStore(target)
+        try:
+            for client_id, delta in histories:
+                await store.append(client_id, await store.take_over(client_id), delta)
+        finally:
+            await store.close()
+
+    asyncio.run(append_each())
+
+
+def history_loaded(target: DatabaseTarget, client_id: str) -> KeptHistory:
+    async def load() -> KeptHistory:
+        store = PostgresHistoryStore(target)
+        try:
+            return await store.load(client_id)
+        finally:
+            await store.close()
+
+    return asyncio.run(load())
+
+
+def histories_of_two_agents(target: DatabaseTarget, spoken: Spoken) -> None:
+    """Three entries and two answered turns of the agent, one entry of the other."""
+    turns = (a_turn_through(1, 0.5), a_turn_through(3, 2.5))
+    histories_kept(
+        target,
+        (AGENT, HistoryDelta(0, spoken.history(3, 0), turns, left_out=0)),
+        (OTHER_AGENT, HistoryDelta(0, spoken.history(1, 5), (), left_out=0)),
+    )
+
+
 def configured_for(files: Files, target: DatabaseTarget, monkeypatch: pytest.MonkeyPatch) -> None:
     files.text += files.memory_table()
     files.use_database(target)
     monkeypatch.setenv(CONFIG_ENVIRONMENT_VARIABLE, str(files.write()[CONFIG_ENVIRONMENT_VARIABLE]))
 
 
+def printed_tables(output: str) -> tuple[list[list[str]], list[list[str]]]:
+    """The two tab-separated tables a list printed, the visits and the histories, each below its header."""
+    records = list(csv.reader(io.StringIO(output), dialect="excel-tab"))
+    gap = records.index([])
+    return records[1:gap], records[gap + 2 :]
+
+
+def listed_histories(output: str) -> set[tuple[str, int, int, datetime, datetime]]:
+    """The histories a list printed: agent, entries, answered turns, first and last entry time."""
+    return {
+        (agent, int(entries), int(turns), datetime.fromisoformat(first), datetime.fromisoformat(last))
+        for agent, entries, turns, first, last in printed_tables(output)[1]
+    }
+
+
 def listed(output: str) -> set[tuple[str, str, str, str, str, int, datetime, datetime]]:
     """The visits a list printed, read as tab-separated records below the header."""
     rows = set()
-    for record in list(csv.reader(io.StringIO(output), dialect="excel-tab"))[1:]:
+    for record in printed_tables(output)[0]:
         agent, app, kind, place_id, generation, count, first, last = record
         rows.add(
             (
@@ -196,7 +269,7 @@ def test_erasing_one_agent_removes_its_lines_keeps_the_others_and_prints_the_num
     main(arguments=["memory", "erase", "--agent", AGENT])
 
     output = capsys.readouterr()
-    assert output.out == "4 lines erased\n"
+    assert output.out == "4 lines, 0 history entries and 0 answered turns erased\n"
     assert agents_kept(database) == [OTHER_AGENT, OTHER_AGENT]
     no_content_in(output.out + output.err + caplog.text, spoken, files)
 
@@ -211,7 +284,7 @@ def test_erasing_all_removes_every_line_and_a_later_write_through_the_store_is_k
 
     main(arguments=list(ERASE_ALL))
 
-    assert capsys.readouterr().out == "6 lines erased\n"
+    assert capsys.readouterr().out == "6 lines, 0 history entries and 0 answered turns erased\n"
     assert agents_kept(database) == []
     kept_by_the_store(database, a_read(AGENT, FIRST_VISIT, spoken.lines(1, 1), 4))
     assert agents_kept(database) == [AGENT]
@@ -226,7 +299,7 @@ def test_erasing_an_agent_without_lines_prints_zero_also_when_the_configuration_
 
     main(arguments=["memory", "erase", "--agent", REMOVED_AGENT])
 
-    assert capsys.readouterr().out == "0 lines erased\n"
+    assert capsys.readouterr().out == "0 lines, 0 history entries and 0 answered turns erased\n"
     assert len(agents_kept(database)) == 6
 
 
@@ -350,4 +423,66 @@ def test_a_window_read_again_after_its_agent_was_erased_is_kept_again(files, dat
     kept_by_the_store(database, in_the_call)
 
     assert agents_kept(database) == [AGENT, AGENT]
-    assert capsys.readouterr().out == "2 lines erased\n"
+    assert capsys.readouterr().out == "2 lines, 0 history entries and 0 answered turns erased\n"
+
+
+@pytest.mark.postgres
+def test_the_list_shows_one_row_per_agents_history_with_its_counts_and_first_and_last_entry_and_no_content(
+    files, database, monkeypatch, capsys, caplog
+):
+    spoken = Spoken()
+    histories_of_two_agents(database, spoken)
+    configured_for(files, database, monkeypatch)
+
+    main(arguments=list(LIST))
+
+    output = capsys.readouterr()
+    assert listed_histories(output.out) == {
+        (AGENT, 3, 2, WALL_START, WALL_START + timedelta(hours=2)),
+        (OTHER_AGENT, 1, 0, WALL_START + timedelta(hours=5), WALL_START + timedelta(hours=5)),
+    }
+    assert listed(output.out) == set()
+    no_content_in(output.out + output.err + caplog.text, spoken, files)
+
+
+@pytest.mark.postgres
+def test_the_list_for_one_agent_shows_only_that_agents_history(files, database, monkeypatch, capsys):
+    histories_of_two_agents(database, Spoken())
+    configured_for(files, database, monkeypatch)
+
+    main(arguments=[*LIST, "--agent", OTHER_AGENT])
+
+    hour = WALL_START + timedelta(hours=5)
+    assert listed_histories(capsys.readouterr().out) == {(OTHER_AGENT, 1, 0, hour, hour)}
+
+
+@pytest.mark.postgres
+def test_erasing_one_agent_removes_his_lines_entries_and_answered_turns_and_keeps_the_others(
+    files, database, monkeypatch, capsys
+):
+    spoken = Spoken()
+    three_visits_of_two_agents(database, spoken)
+    histories_of_two_agents(database, spoken)
+    others_before = history_loaded(database, OTHER_AGENT)
+    configured_for(files, database, monkeypatch)
+
+    main(arguments=["memory", "erase", "--agent", AGENT])
+
+    assert capsys.readouterr().out == "4 lines, 3 history entries and 2 answered turns erased\n"
+    assert history_loaded(database, AGENT) == KeptHistory(0, (), ())
+    assert history_loaded(database, OTHER_AGENT) == others_before
+
+
+@pytest.mark.postgres
+def test_erasing_all_removes_every_history_and_the_next_owner_writes_a_new_one(files, database, monkeypatch, capsys):
+    spoken = Spoken()
+    histories_of_two_agents(database, spoken)
+    configured_for(files, database, monkeypatch)
+
+    main(arguments=list(ERASE_ALL))
+
+    assert capsys.readouterr().out == "0 lines, 4 history entries and 2 answered turns erased\n"
+    assert history_loaded(database, OTHER_AGENT) == KeptHistory(0, (), ())
+    again = spoken.history(1, 6)
+    histories_kept(database, (AGENT, HistoryDelta(0, again, (), left_out=0)))
+    assert history_loaded(database, AGENT) == KeptHistory(0, again, ())

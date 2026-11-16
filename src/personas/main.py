@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from agents.tools import HandTool
 
     from personas.config import DatabaseTarget
-    from personas.memory import KeptVisit, PostgresLineStore
+    from personas.memory import KeptAgentHistory, KeptVisit, PostgresLineStore
     from personas.ownership import Ownership
     from personas.sweep import SweptStore
     from personas.turning import BackendFactory
@@ -51,6 +51,7 @@ MEMORY_COMMAND: Final = "memory"
 LIST_COMMAND: Final = "list"
 ERASE_COMMAND: Final = "erase"
 VISIT_COLUMNS: Final = ("agent", "app", "place_kind", "place_id", "generation", "lines", "first_read", "last_read")
+HISTORY_COLUMNS: Final = ("agent", "history_entries", "answered_turns", "first_at", "last_at")
 
 
 def _gateway_backends(gateway: AgentConfig | None) -> BackendFactory | None:
@@ -220,18 +221,37 @@ def _print_visits(visits: Iterable[KeptVisit]) -> None:
         rows.writerow((each.client_id, each.visit.app, place.kind, place.id, each.visit.generation, each.lines, *times))
 
 
-async def _perform_memory(target: DatabaseTarget, request: argparse.Namespace) -> None:
-    from personas.memory import PostgresLineStore
+def _print_histories(histories: Iterable[KeptAgentHistory]) -> None:
+    """A blank line, then tab-separated below the visits."""
+    sys.stdout.write("\n")
+    rows = csv.writer(sys.stdout, dialect="excel-tab", lineterminator="\n")
+    rows.writerow(HISTORY_COLUMNS)
+    for each in histories:
+        times = (each.first_at.isoformat(), each.last_at.isoformat())
+        rows.writerow((each.client_id, each.entries, each.answered_turns, *times))
 
-    store = PostgresLineStore(target)
+
+async def _perform_memory(target: DatabaseTarget, request: argparse.Namespace) -> None:
+    from personas.memory import PostgresHistoryStore, PostgresLineStore
+
+    lines, histories = PostgresLineStore(target), PostgresHistoryStore(target)
     try:
         if request.command == LIST_COMMAND:
-            _print_visits(await store.kept_visits(request.agent))
+            _print_visits(await lines.kept_visits(request.agent))
+            _print_histories(await histories.kept_histories(request.agent))
             return
-        erased = await (store.erase_all() if request.every_agent else store.erase_agent(request.agent))
-        sys.stdout.write(f"{erased} lines erased\n")
+        if request.every_agent:
+            erased_lines, erased_history = await lines.erase_all(), await histories.erase_all()
+        else:
+            erased_lines = await lines.erase_agent(request.agent)
+            erased_history = await histories.erase_agent(request.agent)
+        sys.stdout.write(
+            f"{erased_lines} lines, {erased_history.entries} history entries"
+            f" and {erased_history.answered_turns} answered turns erased\n"
+        )
     finally:
-        await store.close()
+        await lines.close()
+        await histories.close()
 
 
 def _memory(config: Config, request: argparse.Namespace) -> None:

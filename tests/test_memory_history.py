@@ -114,4 +114,3 @@ async def test_a_stored_entry_that_is_no_entry_loads_as_a_defect_that_holds_none
 
     assert "held" not in str(defect.value)
     assert defect.value.__cause__ is None
-
