@@ -90,10 +90,14 @@ async def test_every_request_of_a_turn_carries_its_trace_and_the_requests_of_the
     assert set(outside_the_turn) == {None}
 
 
+def all_written_lines(written):
+    return [json.loads(line) for line in written.getvalue().splitlines()]
+
+
 async def test_the_gateway_request_of_a_turn_and_its_tool_call_carry_the_trace_of_the_turn(runner, written):
     await a_written_turn(runner)
 
-    lines = [json.loads(line) for line in written.getvalue().splitlines()]
+    lines = all_written_lines(written)
     (ended,) = [line for line in lines if line["event"] == "turn.ended"]
     tool_calls = [line for line in lines if line["event"] == "tool_call.ended"]
     headers = [request.headers.get("traceparent") for request in runner.gateway.requests]
@@ -107,7 +111,7 @@ async def test_the_gateway_request_of_a_turn_and_its_tool_call_carry_the_trace_o
 async def test_the_gateway_request_line_agents_writes_for_a_turn_carries_the_trace_of_the_turn(runner, written):
     await a_written_turn(runner)
 
-    lines = [json.loads(line) for line in written.getvalue().splitlines()]
+    lines = all_written_lines(written)
     (ended,) = [line for line in lines if line["event"] == "turn.ended"]
     requests = [line for line in lines if line["event"] == "model_request.ended"]
     assert requests
