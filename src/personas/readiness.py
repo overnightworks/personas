@@ -25,7 +25,6 @@ class ReadyMarker(Protocol):
 class FileReadyMarker:
     def __init__(self, path: Path) -> None:
         self._path = path
-        self._announced = False
 
     def clear(self) -> None:
         try:
@@ -34,10 +33,7 @@ class FileReadyMarker:
             raise ReadinessError(f"cannot remove the ready file {self._path}") from None
 
     def announce(self) -> None:
-        if self._announced:
-            return
         try:
             self._path.touch()
         except OSError:
             raise ReadinessError(f"cannot create the ready file {self._path}") from None
-        self._announced = True
