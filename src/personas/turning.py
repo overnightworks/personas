@@ -767,7 +767,9 @@ class Turning:
         with stepping(step_timer("tool_list.ended", self._agent.client_id, app.mcp_url), turn_goes_on=app != self._app):
             return await session.declared_tools()
 
-    async def _decided_apart(self, _principal: Principal, _arguments: JsonObject) -> ToolOutcome:
+    async def _decided_apart(  # NOSONAR(S7503) HandToolHandler is async
+        self, _principal: Principal, _arguments: JsonObject
+    ) -> ToolOutcome:
         return ToolOutcome(_APART_TEXT, is_error=True)
 
     def _held(self, hold: _Hold) -> ToolOutcome | None:
