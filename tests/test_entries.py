@@ -2,19 +2,40 @@
 
 from __future__ import annotations
 
+import json
 import secrets
+from datetime import timedelta, timezone
 
 import pytest
 from agents.member import (
     PlaceEntry,
     PlaceView,
+    SpeakRefusal,
+    Written,
 )
 
-from personas.entries import Answered, KeptLine, ViewSeen, taken_lines, told_entry, told_line, told_outcome
+from personas.entries import (
+    Answered,
+    KeptLine,
+    Lines,
+    TurnTold,
+    Unanswered,
+    ViewSeen,
+    Waiting,
+    entry_from_stored,
+    stored_entry,
+    stored_turn,
+    taken_lines,
+    told_entry,
+    told_line,
+    told_outcome,
+    turn_from_stored,
+)
 from tests.support.history import (
     APP,
     LATER,
     MORNING,
+    NOON,
     TABLE,
     a_sentence,
     an_act,
@@ -87,3 +108,64 @@ def test_a_spoken_sentence_shows_no_text_in_its_repr_nor_in_the_history_that_hol
 
     assert marker not in repr(sentence)
     assert marker not in repr(history_holding((sentence,)))
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        KeptLine(MORNING, 2**70, LATER, "Ada", "message", "a\x00b \ud800", own=False, spoken=True, cut=True, act=True),
+        said(1, "plain"),
+        ViewSeen(
+            APP,
+            TABLE,
+            PlaceView(revision=3, awaits_you=False, state={"z": 1.5, "a": [1, None, "x"]}, traceparent=None),
+            LATER.astimezone(timezone(timedelta(hours=2))),
+        ),
+        an_act(arguments={"z": 0.1, "a": {"b": [True]}}, outcome=Answered("seen", is_error=True, image_shown=True)),
+        an_act(outcome=Unanswered("cancelled")),
+        a_sentence(),
+        a_sentence(outcome=Written(written=True)),
+        a_sentence(outcome=SpeakRefusal.HELD),
+        a_sentence(outcome=Unanswered("network")),
+    ],
+    ids=[
+        "line with every mark",
+        "plain line",
+        "view",
+        "act answered",
+        "act unanswered",
+        "sentence spoken",
+        "sentence written",
+        "sentence refused",
+        "sentence unanswered",
+    ],
+)
+def test_every_entry_kind_comes_back_from_its_stored_json_as_it_went_in(entry):
+    stored = json.dumps(stored_entry(entry))
+
+    back = entry_from_stored(json.loads(stored))
+
+    assert back == entry
+    assert json.dumps(stored_entry(back)) == stored
+    assert json.dumps(told_entry(back)) == json.dumps(told_entry(entry))
+
+
+@pytest.mark.parametrize(
+    "turn",
+    [
+        TurnTold(LATER, APP, NOON.place, Lines("noon", frozenset({1, 2**65}), missed=True, traceparent="tp"), True, 7),
+        TurnTold(LATER, APP, TABLE, Waiting(4), aloud=False, through=0),
+    ],
+    ids=["for lines", "at a view"],
+)
+def test_an_answered_turn_comes_back_from_its_stored_json_as_it_went_in(turn):
+    stored = json.dumps(stored_turn(turn))
+
+    back = turn_from_stored(json.loads(stored))
+
+    assert back == turn
+
+
+def test_a_stored_value_that_names_no_kind_of_entry_is_refused():
+    with pytest.raises(ValueError, match="no kind of entry"):
+        entry_from_stored(stored_entry(said(1, "plain")) | {"entry": "dream"})
