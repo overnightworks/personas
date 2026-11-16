@@ -3,6 +3,7 @@ carry that trace to the app."""
 
 from __future__ import annotations
 
+import json
 import time
 from http import HTTPStatus
 from urllib.parse import urlsplit
@@ -12,6 +13,7 @@ from agents.backend.fake_gateway import Reply
 
 from personas.decision import NO_ANSWER_REASON
 from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
+from tests.support.fakes import FakeClock
 from tests.support.gateway import Gateway, says
 from tests.support.hopin import LIST_TOOLS, LISTEN, lines_of, written_by_the_runner
 
@@ -88,6 +90,20 @@ async def test_every_request_of_a_turn_carries_its_trace_and_the_requests_of_the
     assert set(outside_the_turn) == {None}
 
 
+async def test_the_gateway_request_of_a_turn_and_its_tool_call_carry_the_trace_of_the_turn(runner, written):
+    await a_written_turn(runner)
+
+    lines = [json.loads(line) for line in written.getvalue().splitlines()]
+    (ended,) = [line for line in lines if line["event"] == "turn.ended"]
+    tool_calls = [line for line in lines if line["event"] == "tool_call.ended"]
+    headers = [request.headers.get("traceparent") for request in runner.gateway.requests]
+    assert headers
+    assert None not in headers
+    assert {header.split("-")[1] for header in headers if header is not None} == {ended["trace_id"]}
+    assert tool_calls
+    assert {line["trace_id"] for line in tool_calls} == {ended["trace_id"]}
+
+
 async def test_a_turn_that_lists_another_apps_tools_writes_the_steps_of_each_app_and_its_token_request_in_its_trace(
     runner, songmaker, written
 ):
@@ -141,18 +157,19 @@ async def test_a_failed_step_of_another_app_is_written_as_a_handled_failure(runn
 
 
 async def test_a_turn_due_again_after_a_pause_waits_from_the_pause_end(runner, caplog, monkeypatch):
-    skew = 0.0
-    real_perf_counter = time.perf_counter
-    real_sleep = runner.clock.sleep
     passed_after_pause = 5.0
+    real_perf_counter = time.perf_counter
 
-    async def sleeping(seconds: float) -> None:
-        nonlocal skew
-        skew += seconds + passed_after_pause
-        await real_sleep(seconds)
+    class PausingClock(FakeClock):
+        skew = 0.0
 
-    monkeypatch.setattr(time, "perf_counter", lambda: real_perf_counter() + skew)
-    monkeypatch.setattr(runner.clock, "sleep", sleeping)
+        async def sleep(self, seconds: float) -> None:
+            self.skew += seconds + passed_after_pause
+            await super().sleep(seconds)
+
+    clock = PausingClock()
+    runner.clock = clock
+    monkeypatch.setattr(time, "perf_counter", lambda: real_perf_counter() + clock.skew)
     runner.gateway = Gateway(Reply(status=HTTPStatus.TOO_MANY_REQUESTS), *says(PLACE_ID, "Here."))
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
@@ -160,4 +177,4 @@ async def test_a_turn_due_again_after_a_pause_waits_from_the_pause_end(runner, c
 
     waits = [line["duration_ms"] for line in lines_of(caplog.get_records("call"), "turn_wait.ended")]
     assert len(waits) == 2
-    assert waits[1] == pytest.approx(passed_after_pause * 1000, abs=1000)
+    assert waits[1] == pytest.approx(passed_after_pause * 1000, abs=500)
