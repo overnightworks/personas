@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import secrets
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import anyio
 import pytest
@@ -18,6 +19,9 @@ from personas.reporting import Event, start_turn_tally
 from personas.voice import Speaking
 from tests.support.fakes import FakeClock
 from tests.support.voice import HeldSleeps
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 pytestmark = pytest.mark.anyio
 
@@ -87,6 +91,7 @@ class SpeakingScenario:
         self.renewal_started = asyncio.Event()
         self._speak_seconds = speak_seconds
         self._line_follows = line_follows
+        self.while_speaking: Callable[[], object] | None = None
         self.speaking = Speaking(
             self,
             APP,
@@ -117,6 +122,8 @@ class SpeakingScenario:
 
     async def speak(self, place: PlaceRef, sentence: str) -> SpeakAnswer | SpeakRefusal:
         self.sent.append(sentence)
+        if self.while_speaking is not None:
+            self.while_speaking()
         if self._answers_lost:
             await asyncio.Event().wait()
         self.clock.time += self._speak_seconds
@@ -308,3 +315,27 @@ async def test_a_request_open_when_the_turn_is_cancelled_enters_once_as_unanswer
     with pytest.raises(asyncio.CancelledError):
         await playing
     assert [entry.outcome for entry in scenario.entered] == [Unanswered(TURN_CANCELLED_CODE)]
+
+
+async def test_a_sentence_heard_after_his_stop_is_never_queued_or_counted_unsaid():
+    scenario = SpeakingScenario("One.", ends=False)
+    scenario.speaking.cut()
+
+    scenario.speaking.hear(AssistantTextEvent(text=" Two. Three. "))
+    scenario.speaking.end()
+    scenario.renewal_gate.set()
+    await scenario.speaking.play()
+
+    assert (scenario.sent, tuple(scenario.speaking.unsaid)) == ([], ())
+
+
+async def test_a_sentence_in_flight_at_his_stop_is_still_answered_and_entered_and_nothing_is_left_unsaid():
+    scenario = SpeakingScenario("One. Two.")
+    scenario.while_speaking = scenario.speaking.cut
+    scenario.renewal_gate.set()
+    HeldSleeps(scenario)
+
+    await scenario.speaking.play()
+
+    assert (scenario.sent, tuple(scenario.speaking.unsaid), scenario.speaking.saying) == (["One."], (), "One.")
+    assert len(scenario.entered) == 1
