@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from agents.mcp_server.place_store import ListeningTurn, PlaceSignal, Resubscribed
+from agents.mcp_server.place_store import LapseRun, ListeningTurn, PlaceSignal, Resubscribed
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Collection
@@ -60,5 +60,6 @@ class MemoryPlaceStore:
     async def listeners(self, uri: str) -> frozenset[Principal]:
         return frozenset(who for who, uris in self._streams.values() if uri in uris)
 
-    async def lapse_due(self, claimer: str) -> None:
+    async def lapse_due(self, claimer: str) -> LapseRun:
         del claimer
+        return LapseRun()
