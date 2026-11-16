@@ -1,0 +1,8 @@
+claim_id = "693d374fe0bc411fbfe04d1f115d8db2"
+agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
+role = "builder"
+base = "58900bd58e05e639b852eb419b89e698ff412f00"
+branch = "claude/issue-252-a-turn-binds-every-tool"
+scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas", "tests"]
+opened_commit = "558e12c6fd0c5c98999c755a0c5bf6e83d458736"
+whole_reason = "one change of where a turn's tools come from: the configuration, the turn's assembly and its proof"
