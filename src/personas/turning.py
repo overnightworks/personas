@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from contextlib import AsyncExitStack, aclosing
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Final
 
@@ -571,10 +571,12 @@ class Turning:
         telling of the hold, on his persona and tools. Without a decision he stops and says nothing."""
         admitted, speaking, inbox = voiced.admitted, voiced.speaking, voiced.inbox
         inbox.told = hold.speech
+        turn = voiced.turn
+        current = TurnTold(
+            turn.at, turn.app, turn.place, turn.occasion, aloud=turn.aloud, through=self._mind.history.taken
+        )
         told = (
-            *turn_messages(
-                admitted.facts.name, self._mind.present, replace(voiced.turn, through=self._mind.history.taken)
-            ),
+            *turn_messages(admitted.facts.name, self._mind.present, current),
             told_hold(
                 hold.id,
                 hold.speech,
