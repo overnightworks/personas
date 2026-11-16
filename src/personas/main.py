@@ -11,7 +11,7 @@ import signal
 import sys
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final, NoReturn
+from typing import TYPE_CHECKING, Final, NoReturn, Protocol
 
 import httpx2
 from agents.backend.gateway import GatewayBackend
@@ -25,7 +25,7 @@ from personas.locks import PostgresAgentLocks
 from personas.loop import Boundaries, run_all
 from personas.ownership import LockedOwnership
 from personas.readiness import FileReadyMarker, ReadinessError, ReadyMarker
-from personas.reporting import carry_trace, log_state_change
+from personas.reporting import StateChange, StoreOutage, carry_trace, log_state_change
 from personas.sweep import sweep_lines
 from personas.tokens import HttpTokenSource
 
@@ -64,13 +64,20 @@ def _gateway_backends(gateway: AgentConfig | None) -> BackendFactory | None:
     return backend
 
 
+class SchemaChecked(Protocol):
+    async def require_head(self) -> None:
+        """Raises ``SchemaNotAtHeadError`` when the schema is behind; ``StoreUnavailable`` when it cannot tell now."""
+        ...
+
+
 @dataclass(frozen=True, kw_only=True)
 class SweepingBoundaries(Boundaries):
-    """The loops' boundaries, the ownership they run under and the store the sweep erases from, none without a
-    memory."""
+    """The loops' boundaries, the ownership they run under, the store the sweep erases from and the store whose
+    schema the runner checks before it starts, none without a memory."""
 
     ownership: Ownership
     swept: SweptStore | None = None
+    schema: SchemaChecked | None = None
 
 
 @asynccontextmanager
@@ -110,14 +117,33 @@ async def real_boundaries(config: Config, ready: ReadyMarker) -> AsyncGenerator[
                 lines=lines,
                 ownership=LockedOwnership(locks, clock, config.ownership, log_state_change),
                 swept=lines,
+                schema=lines,
             )
     finally:
         # Closing the connection frees the pod's locks: the loops have ended by now, so the next owner may start.
         await locks.close()
 
 
+async def _schema_at_head(schema: SchemaChecked, config: Config, boundaries: SweepingBoundaries) -> None:
+    """Waits until the memory's database answers, an outage reported once, and raises ``SchemaNotAtHeadError`` when
+    its schema is behind; the loops and the ready marker wait for it."""
+    outage = StoreOutage(lambda event, code: boundaries.report(StateChange(event, None, None, code)))
+    while True:
+        try:
+            await schema.require_head()
+        except StoreUnavailable as unavailable:
+            outage.failed(unavailable.code)
+        else:
+            outage.answered()
+            return
+        await boundaries.clock.sleep(config.ownership.contend_seconds)
+
+
 async def run_with_sweep(config: Config, boundaries: SweepingBoundaries) -> NoReturn:
-    """The loops, and beside them the sweep when the configuration has a memory; a defect of either ends both."""
+    """Once the memory's schema is at its head, the loops, and beside them the sweep when the configuration has a
+    memory; a defect of either ends both."""
+    if boundaries.schema is not None:
+        await _schema_at_head(boundaries.schema, config, boundaries)
     async with asyncio.TaskGroup() as group:
         group.create_task(run_all(config, boundaries, boundaries.ownership))
         if config.memory is not None and boundaries.swept is not None:

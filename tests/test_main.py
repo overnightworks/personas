@@ -19,10 +19,11 @@ from logline import current_traceparent, unit_trace
 
 from personas.app_session import open_mcp_session
 from personas.config import CONFIG_ENVIRONMENT_VARIABLE, load_config
-from personas.failures import SchemaNotAtHeadError, leaves_of
+from personas.failures import STORE_UNREACHABLE_CODE, SchemaNotAtHeadError, StoreUnavailable, leaves_of
 from personas.main import (
     READINESS_ERROR_EXIT_CODE,
     STORE_ERROR_EXIT_CODE,
+    SchemaChecked,
     SweepingBoundaries,
     configure_logging,
     main,
@@ -119,6 +120,8 @@ class World:
         self.app.stand(AGENT_SUBJECT, invited("room-7", "inv-3"))
         self.on_joined: Callable[[], None] = self._stop
         self.lines: LineStore | None = None
+        self.schema: SchemaChecked | None = None
+        self.events: list[Event] = []
 
     @staticmethod
     def _stop() -> None:
@@ -126,6 +129,7 @@ class World:
 
     def _report(self, change: StateChange) -> None:
         log_state_change(change)
+        self.events.append(change.event)
         if change.event is Event.JOINED:
             self.on_joined()
 
@@ -153,6 +157,7 @@ class World:
                 ready=ready,
                 backend=gateway_backend,
                 lines=self.lines,
+                schema=self.schema,
                 ownership=NotingTheMarker(self.ownership, self.files.ready_path, self.marker_when_ownership_started),
             )
 
@@ -180,6 +185,31 @@ def test_the_marker_is_created_when_the_runner_contends_for_its_agents_and_stays
     with pytest.raises(ExceptionGroup):
         world.start()
 
+    assert world.files.ready_path.exists()
+
+
+class AnswersOnItsSecondAsk:
+    """A memory database that cannot be reached at the first check of its schema and is at its head at the second."""
+
+    def __init__(self) -> None:
+        self.asked = 0
+
+    async def require_head(self) -> None:
+        self.asked += 1
+        if self.asked == 1:
+            raise StoreUnavailable(STORE_UNREACHABLE_CODE)
+
+
+def test_a_runner_whose_database_cannot_be_reached_reports_it_once_and_starts_once_the_schema_answers(world):
+    world.schema = AnswersOnItsSecondAsk()
+
+    with pytest.raises(ExceptionGroup):
+        world.start()
+
+    assert [each for each in world.events if each in {Event.STORE_FAILED, Event.STORE_RESUMED}] == [
+        Event.STORE_FAILED,
+        Event.STORE_RESUMED,
+    ]
     assert world.files.ready_path.exists()
 
 
@@ -394,6 +424,48 @@ def test_the_real_boundaries_run_turns_through_the_gateway_exactly_when_the_conf
     backend = asyncio.run(composed_backend())
 
     assert isinstance(backend, GatewayBackend) is binds_tools
+
+
+class ReadyTooEarlyError(Exception):
+    """The runner announced it is ready."""
+
+
+class MarkerThatMustStayAbsent:
+    """A file marker that stops the runner when it is announced, so a runner that would go on ends."""
+
+    def __init__(self, marker: FileReadyMarker) -> None:
+        self._marker = marker
+
+    def clear(self) -> None:
+        self._marker.clear()
+
+    def announce(self) -> None:
+        self._marker.announce()
+        raise ReadyTooEarlyError
+
+
+@pytest.mark.postgres
+def test_a_runner_whose_database_is_behind_its_head_stops_before_it_writes_its_ready_marker(
+    files, database, monkeypatch, capsys
+):
+    from tests.support.postgres import run_sql
+
+    files.text += files.memory_table(lines_keep_days="inf")
+    files.use_database(database)
+    monkeypatch.setenv(CONFIG_ENVIRONMENT_VARIABLE, files.write()[CONFIG_ENVIRONMENT_VARIABLE])
+    run_sql(database, "UPDATE alembic_version SET version_num = '0001'")
+
+    @asynccontextmanager
+    async def real_with_a_watched_marker(config: Config, ready: ReadyMarker) -> AsyncGenerator[SweepingBoundaries]:
+        async with real_boundaries(config, MarkerThatMustStayAbsent(FileReadyMarker(config.ready_file))) as boundaries:
+            yield boundaries
+
+    with pytest.raises(SystemExit) as stopped:
+        main(real_with_a_watched_marker)
+
+    assert stopped.value.code == STORE_ERROR_EXIT_CODE
+    assert capsys.readouterr().err.startswith("personas: memory:")
+    assert not files.ready_path.exists()
 
 
 @pytest.mark.parametrize("has_memory", [True, False], ids=["memory table", "no memory table"])

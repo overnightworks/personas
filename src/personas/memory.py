@@ -316,6 +316,12 @@ class _PostgresStore:
                 raise asyncio.CancelledError from None
             raise
 
+    async def require_head(self) -> None:
+        """Raises ``SchemaNotAtHeadError`` when the schema is behind this release's head, or ``StoreUnavailable`` or
+        ``StoreDefect`` with a code when it cannot tell now."""
+        async with self._bounded_transaction():
+            pass
+
     async def _require_head(self, connection: AsyncConnection) -> None:
         if self._schema_checked:
             return
