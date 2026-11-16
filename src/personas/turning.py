@@ -678,17 +678,11 @@ class Turning:
             bounds.append(lookup.calls)
         for app, max_calls in self._apps:
             calls = _Calls(max_calls)
-            if app.mcp_url == self._app.mcp_url:
-                declared = own
-            elif (app.listens and app.mcp_url not in admitted.apps) or (
-                not app.listens and self._mind.holds_back(app.mcp_url, self._clock.now())
-            ):
+            declared = (
+                own if app.mcp_url == self._app.mcp_url else await self._declared_elsewhere(app, admitted, record)
+            )
+            if declared is None:
                 continue
-            else:
-                found = await self._list_elsewhere(app, record)
-                if found is None:
-                    continue
-                declared = found
             offered, left_out = offered_declarations(declared, taken)
             self._tools_left_out(app, left_out)
             taken |= {each.name for each in offered}
@@ -743,6 +737,17 @@ class Turning:
         if found is None:
             return ToolOutcome(STORE_DID_NOT_ANSWER_TEXT, is_error=True)
         return ToolOutcome(lookup_result(found, lookup.result_bytes), is_error=False)
+
+    async def _declared_elsewhere(
+        self, app: AppTarget, admitted: Admitted, record: TaskRecord
+    ) -> tuple[ToolDeclaration, ...] | None:
+        """The tools another app lists for the turn, or ``None`` when the turn holds none of its: a listening app the
+        admission does not name, a tools-only app the realm holds back, or an app whose listing failed."""
+        if app.listens and app.mcp_url not in admitted.apps:
+            return None
+        if not app.listens and self._mind.holds_back(app.mcp_url, self._clock.now()):
+            return None
+        return await self._list_elsewhere(app, record)
 
     async def _list_elsewhere(self, app: AppTarget, record: TaskRecord) -> tuple[ToolDeclaration, ...] | None:
         """The tools another app lists, or ``None`` after the report of its failed listing."""
