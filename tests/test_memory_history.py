@@ -104,10 +104,15 @@ async def test_a_write_with_a_generation_that_is_not_current_is_refused_and_chan
     assert await histories.load(AGENT) == before
 
 
-async def test_a_stored_entry_that_is_no_entry_loads_as_a_defect_that_holds_none_of_it(histories, database):
+@pytest.mark.parametrize(
+    "stored",
+    ['{"entry": "dream", "text": "held"}', "null", '["held"]', '"held"'],
+    ids=["unknown kind", "null", "array", "string"],
+)
+async def test_a_stored_entry_that_is_no_entry_loads_as_a_defect_that_holds_none_of_it(histories, database, stored):
     mine = await histories.take_over(AGENT)
     await histories.append(AGENT, mine, appended(0, said(1, "kept")))
-    run_sql(database, """UPDATE history_entries SET entry = '{"entry": "dream", "text": "held"}'""")
+    run_sql(database, f"UPDATE history_entries SET entry = '{stored}'")  # noqa: S608 - a test-chosen value
 
     with pytest.raises(StoreDefect) as defect:
         await histories.load(AGENT)
