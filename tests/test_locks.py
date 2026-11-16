@@ -21,6 +21,7 @@ pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 AGENT = "agent-mozart"
 OTHER_AGENT = "agent-ada"
 CLOSED_PORT = 1
+CLOSE_PATIENCE_SECONDS = 0.2
 TIMINGS = OwnershipTimings(heartbeat_timeout_seconds=1.0)
 
 
@@ -108,6 +109,44 @@ async def test_a_round_on_a_connection_that_goes_dark_is_cut_at_the_heartbeat_ti
             assert time.monotonic() - started < TIMINGS.heartbeat_timeout_seconds + TIMINGS.cancel_margin_seconds
         finally:
             await locks.close()
+
+
+async def test_a_round_cut_at_the_heartbeat_timeout_leaves_the_pod_no_second_connection_while_it_unwinds(database):
+    forwarder = Forwarder(database)
+    async with forwarder.serving() as through:
+        locks = PostgresAgentLocks(through, TIMINGS)
+        try:
+            await locks.hold([AGENT])
+            forwarder.go_dark()
+            with pytest.raises(LockConnectionLost):
+                await locks.hold([AGENT])
+
+            with pytest.raises(LockConnectionLost):
+                await locks.hold([AGENT])
+        finally:
+            forwarder.reset_dark()
+            await locks.close()
+
+
+async def test_closing_a_pod_whose_round_was_cancelled_waits_until_the_session_the_round_used_has_ended(database):
+    forwarder = Forwarder(database)
+    async with forwarder.serving() as through:
+        locks = PostgresAgentLocks(through, TIMINGS)
+        await locks.hold([AGENT])
+        forwarder.go_dark()
+        round_ = asyncio.create_task(locks.hold([AGENT]))
+        await forwarder.dropped.wait()
+        round_.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await round_
+
+        closing = asyncio.create_task(locks.close())
+        closed_early, _ = await asyncio.wait({closing}, timeout=CLOSE_PATIENCE_SECONDS)
+        forwarder.reset_dark()
+        async with asyncio.timeout(LIMIT_SECONDS):
+            await closing
+
+        assert not closed_early
 
 
 async def test_a_server_that_cannot_be_reached_is_a_lost_connection(database):
