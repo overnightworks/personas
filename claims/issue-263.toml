@@ -1,0 +1,8 @@
+claim_id = "c7ea4b7901c240baba5d2534212d0fef"
+agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
+role = "builder"
+base = "9399639bfffd21286f8a6a96171e761aa83421ff"
+branch = "claude/issue-263-an-agent-taken-over-resumes-his-history"
+scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/loop.py", "src/personas/main.py", "src/personas/memory.py", "src/personas/mind.py", "src/personas/ownership.py", "src/personas/reporting.py", "tests"]
+opened_commit = "0190129e42a20e1999b10dfcdfe73c33987384dc"
+whole_reason = "one move of the history to Postgres: the write-through and the load on takeover, which only prove each other together"
