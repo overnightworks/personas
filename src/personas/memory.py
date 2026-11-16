@@ -322,6 +322,7 @@ class _PostgresStore:
         """Raises ``SchemaNotAtHeadError`` when the schema is behind this release's head, or ``StoreUnavailable`` or
         ``StoreDefect`` with a code when it cannot tell now."""
         async with self._bounded_transaction():
+            # Opening the transaction checks the schema; the check is the whole work.
             pass
 
     async def _require_head(self, connection: AsyncConnection) -> None:
