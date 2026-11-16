@@ -15,17 +15,17 @@ from personas.decision import NO_ANSWER_REASON
 from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import FakeClock
 from tests.support.gateway import Gateway, says
-from tests.support.hopin import LIST_TOOLS, LISTEN, lines_of, written_by_the_runner
+from tests.support.hopin import LIST_TOOLS, LISTEN, a_traceparent, lines_of, trace_id_of, written_by_the_runner
 
 pytestmark = pytest.mark.anyio
 
 STEPS = ("turn_wait.ended", "token_hold.ended", "session_open.ended", "tool_list.ended", "turn_setup.ended")
 
 
-async def a_written_turn(runner) -> None:
+async def a_written_turn(runner, traceparent: str | None = None) -> None:
     runner.gateway = Gateway(*says(PLACE_ID, "Here."))
     await restarted_in_the_call(runner)
-    say_in_the_call(runner, ADDRESSED)
+    say_in_the_call(runner, ADDRESSED, traceparent=traceparent)
     await runner.reports.until_a_turn_ended()
 
 
@@ -88,6 +88,48 @@ async def test_every_request_of_a_turn_carries_its_trace_and_the_requests_of_the
     assert None not in in_the_turn
     assert outside_the_turn
     assert set(outside_the_turn) == {None}
+
+
+async def test_a_turn_woken_by_a_line_writes_its_wait_its_steps_and_its_end_in_the_trace_the_line_entered_in(
+    runner, written
+):
+    traceparent = a_traceparent()
+    await a_written_turn(runner, traceparent)
+
+    lines = written_by_the_runner(written)
+    for event in ("turn.ended", *STEPS):
+        (line,) = [each for each in lines if each["event"] == event]
+        assert line["trace_id"] == trace_id_of(traceparent)
+
+
+async def test_the_requests_of_a_turn_woken_by_a_line_pass_the_trace_the_line_entered_in_to_the_app_and_the_gateway(
+    runner,
+):
+    traceparent = a_traceparent()
+    await a_written_turn(runner, traceparent)
+
+    to_the_app = [header for method, header in runner.app.traceparents if method == LIST_TOOLS]
+    to_the_gateway = [request.headers.get("traceparent") for request in runner.gateway.requests]
+    assert to_the_app
+    assert to_the_gateway
+    assert {None if header is None else trace_id_of(header) for header in to_the_app + to_the_gateway} == {
+        trace_id_of(traceparent)
+    }
+
+
+@pytest.mark.parametrize(
+    "traceparent",
+    [pytest.param(None, id="none"), pytest.param("not-a-traceparent", id="a malformed one")],
+)
+async def test_a_turn_woken_by_a_line_without_a_trace_it_can_continue_opens_a_trace_of_its_own(
+    runner, written, traceparent
+):
+    await a_written_turn(runner, traceparent)
+
+    lines = written_by_the_runner(written)
+    traces = {line["trace_id"] for line in lines if line["event"] in {"turn.ended", *STEPS}}
+    (trace_id,) = traces
+    assert trace_id is not None
 
 
 def all_written_lines(written):

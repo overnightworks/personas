@@ -45,7 +45,7 @@ from personas.decision import (
     turn_ending,
     turn_invalid,
     view_turn_due,
-    wakes_him,
+    waking_line,
 )
 from personas.entries import ViewSeen, Visit, WindowRead, taken_lines
 from personas.failures import CallFailure, leaves_of, raise_if_cancelled
@@ -369,7 +369,7 @@ class AgentLoop:
                 continue
             self._mind.take((seen,))
             if view_turn_due(self._turned_revisions.get(place), seen.view):
-                self._mind.due(at, Waiting(seen.view.revision), time.perf_counter())
+                self._mind.due(at, Waiting(seen.view.revision, seen.view.traceparent), time.perf_counter())
             elif not seen.view.awaits_you:
                 self._mind.undue(partial(eq, at))
 
@@ -406,22 +406,25 @@ class AgentLoop:
         self._mind.wake()
 
     def _take_lines(self, place: PlaceRef, window: PlaceWindow, read_at: datetime, *, serves_view: bool) -> None:
-        """Moves the place's checkpoint and takes the new lines into the agent's history; ``wakes_him`` decides whether
-        they make a turn due. No await stands in it."""
+        """Moves the place's checkpoint and takes the new lines into the agent's history; ``waking_line`` decides
+        whether they make a turn due, and in whose trace. No await stands in it."""
         perception = perceive(window, self._checkpoints[place])
         self._checkpoints[place] = perception.checkpoint
         self._mind.take(taken_lines(Visit(self._app.mcp_url, place, window.generation), perception.new, read_at))
-        if wakes_him(perception.new, serves_view=serves_view):
-            lines = Lines(window.generation, frozenset(line.seq for line in perception.new), perception.missed)
+        waking = waking_line(perception.new, serves_view=serves_view)
+        if waking is not None:
+            seqs = frozenset(line.seq for line in perception.new)
+            lines = Lines(window.generation, seqs, perception.missed, waking.traceparent)
             self._mind.due(AppPlace(self._app.mcp_url, place), lines, time.perf_counter())
 
     def _start_turn(
         self, turns: asyncio.TaskGroup, setup: TurnSetup, place: PlaceRef, admitted: Admitted, due_since: float
     ) -> None:
-        """Starts the turn in a trace of its own, which its task, its done callback and its step lines share and the
-        loop's own lines do not. The turn's wait, from ``due_since`` to now, ends here; a pause that ended later than
-        ``due_since`` says the place was due only from then."""
-        with unit_trace(None):
+        """Starts the turn in the trace of what made it due, or in a trace of its own when that carries none or one
+        logline cannot read; its task, its done callback and its step lines share that trace and the loop's own lines
+        do not. The turn's wait, from ``due_since`` to now, ends here; a pause that ended later than ``due_since`` says
+        the place was due only from then."""
+        with unit_trace(admitted.occasion.traceparent):
             step_timer(
                 "turn_wait.ended",
                 self._agent.client_id,

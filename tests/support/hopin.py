@@ -185,6 +185,7 @@ class Line:
     spoken: bool = False
     cut: bool = False
     act: bool = False
+    traceparent: str | None = None
 
 
 def active(place_id: str, kind: str = "call", *, serves_view: bool = False) -> Standing:
@@ -230,6 +231,15 @@ def lines_of(records: list[logging.LogRecord], event: str | None = None) -> list
     """The runner's lines among ``records`` as their JSON holds them, only those of ``event`` when it is given."""
     lines = [{"event": record.getMessage(), **fields_of(record)} for record in records if record.name == "personas"]
     return lines if event is None else [line for line in lines if line["event"] == event]
+
+
+def a_traceparent() -> str:
+    """A W3C ``traceparent`` of a new, sampled trace, as an app stores the trace a line entered or a view moved in."""
+    return f"00-{secrets.token_hex(16)}-{secrets.token_hex(8)}-01"
+
+
+def trace_id_of(traceparent: str) -> str:
+    return traceparent.split("-")[1]
 
 
 def written_by_the_runner(written: io.StringIO) -> list[dict[str, object]]:
@@ -406,11 +416,13 @@ class FakeApp:
         spoken: bool = False,
         cut: bool = False,
         act: bool = False,
+        traceparent: str | None = None,
     ) -> int:
-        """Adds a line to a place and signals its window to every member standing there, once it is visible."""
+        """Adds a line, entered in ``traceparent``, to a place and signals its window to every member standing there,
+        once it is visible."""
         place_lines = self.lines.setdefault(place_id, [])
         seq = place_lines[-1].seq + 1 if place_lines else 1
-        place_lines.append(Line(seq, author, name, text, spoken, cut, act))
+        place_lines.append(Line(seq, author, name, text, spoken, cut, act, traceparent))
         del place_lines[:-WINDOW_LINES]
         self.content.add(text)
         self._signal_window(place_id)
@@ -451,9 +463,20 @@ class FakeApp:
             self.voice_states[place_id] = state
         self._signal_window(place_id)
 
-    def show_view(self, place_id: str, revision: int, state: dict[str, Any], *, awaits_you: bool = True) -> None:
-        """Sets a place's view for every member standing there and signals it, as an app does once it is visible."""
-        self.views[place_id] = PlaceView(revision=revision, awaits_you=awaits_you, state=dict(state))
+    def show_view(
+        self,
+        place_id: str,
+        revision: int,
+        state: dict[str, Any],
+        *,
+        awaits_you: bool = True,
+        traceparent: str | None = None,
+    ) -> None:
+        """Sets a place's view, moved in ``traceparent``, for every member standing there and signals it, as an app
+        does once it is visible."""
+        self.views[place_id] = PlaceView(
+            revision=revision, awaits_you=awaits_you, state=dict(state), traceparent=traceparent
+        )
         self.content.update(value for value in state.values() if isinstance(value, str))
         for subject, standings in self.standings.items():
             for each in standings:
@@ -561,6 +584,7 @@ class FakeApp:
                 spoken=line.spoken,
                 cut=line.cut,
                 act=line.act,
+                traceparent=line.traceparent,
             )
             for line in self.lines.get(place.id, [])
         )
