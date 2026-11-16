@@ -7,7 +7,7 @@ import itertools
 import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, cast
 
 from agents.member import (
     PartialSpeech,
@@ -199,9 +199,9 @@ def stored_entry(entry: Entry) -> JsonObject:
     return {STORED_KIND_KEY: _KIND_OF_ENTRY[type(entry)]} | _ANY_ENTRY.dump_python(entry, mode="json")
 
 
-def entry_from_stored(stored: JsonObject) -> Entry:
+def entry_from_stored(stored: object) -> Entry:
     """The entry ``stored_entry`` made ``stored`` of; a value it did not make raises a ``ValueError``."""
-    kind = stored.get(STORED_KIND_KEY)
+    kind = cast("dict[str, object]", stored).get(STORED_KIND_KEY) if isinstance(stored, dict) else None
     if not isinstance(kind, str) or kind not in _STORED_ENTRIES:
         raise ValueError("the stored value names no kind of entry")
     return _STORED_ENTRIES[kind].validate_python(stored)

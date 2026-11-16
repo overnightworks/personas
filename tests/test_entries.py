@@ -166,6 +166,11 @@ def test_an_answered_turn_comes_back_from_its_stored_json_as_it_went_in(turn):
     assert back == turn
 
 
-def test_a_stored_value_that_names_no_kind_of_entry_is_refused():
+@pytest.mark.parametrize(
+    "stored",
+    [stored_entry(said(1, "plain")) | {"entry": "dream"}, None, ["plain"], "plain"],
+    ids=["unknown kind", "null", "array", "string"],
+)
+def test_a_stored_value_that_names_no_kind_of_entry_is_refused(stored):
     with pytest.raises(ValueError, match="no kind of entry"):
-        entry_from_stored(stored_entry(said(1, "plain")) | {"entry": "dream"})
+        entry_from_stored(stored)
