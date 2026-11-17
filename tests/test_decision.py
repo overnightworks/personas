@@ -100,7 +100,7 @@ from personas.failures import StatusFailure, TokenStatusFailure, Unreachable, Un
 from personas.recall import RECALL_TOOL
 from personas.secret import Secret
 from tests.support.fakes import line, window_of
-from tests.support.history import MORNING, TABLE, a_view
+from tests.support.history import MORNING, OTHER_TABLE, TABLE, a_view
 from tests.support.hopin import GENERATION
 from tests.support.pictures import a_picture
 from tests.support.standings import active, invited, paused
@@ -771,9 +771,6 @@ def test_a_turn_ends_with_the_outcome_and_reason_its_ending_gives(ended, ending)
     given = {"cancelled": False, "error": None, "stop_code": None, "answered": False} | ended
 
     assert turn_ending(**given) == ending
-
-
-OTHER_TABLE = PlaceRef(kind="table", id="table-2")
 
 
 def serving(place: PlaceRef = TABLE, *, state: StandingState = StandingState.ACTIVE) -> Standing:

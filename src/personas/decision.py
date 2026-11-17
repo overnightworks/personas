@@ -4,8 +4,8 @@ The loop in ``loop`` performs these decisions; nothing here reads a clock or a s
 rule is called with the values it judges. What his next request holds is ``present``'s, and which place has a turn
 due is ``due``'s.
 
-It imports ``entries`` and ``recall`` and is imported by ``present`` and ``due``: ``entries`` <- ``recall`` <-
-``decision`` <- ``present`` <- ``due``.
+Within the pure chain it imports ``entries`` and ``recall`` and is imported by ``present`` and ``due``: ``entries``
+<- ``recall`` <- ``decision`` <- ``present`` <- ``due``.
 """
 
 from __future__ import annotations

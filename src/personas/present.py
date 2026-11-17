@@ -1,8 +1,8 @@
 """What his next request holds: the history and the answered turns kept present, what entered since a mark, and the
 messages they are told in; with no process, network or clock.
 
-It imports ``entries`` and ``decision`` and is imported by ``due``: ``entries`` <- ``recall`` <- ``decision`` <-
-``present`` <- ``due``.
+Within the pure chain it imports ``entries`` and ``decision`` and is imported by ``due``: ``entries`` <- ``recall`` <-
+``decision`` <- ``present`` <- ``due``.
 """
 
 from __future__ import annotations

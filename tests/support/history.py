@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 from agents.member import STANDING_URI, PlaceRef, PlaceView, Spoken
 
-from personas.entries import ActDone, Answered, KeptLine, SaidAloud, ViewSeen, Visit
+from personas.entries import ActDone, Answered, History, KeptLine, SaidAloud, ViewSeen, Visit
 from personas.present import EMPTY_PRESENT, Present, taken_into
 from tests.support.call import PERSON
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
@@ -16,6 +16,7 @@ from tests.support.hopin import FakeApp
 from tests.support.standings import active
 
 TABLE = PlaceRef(kind="table", id="table-1")
+OTHER_TABLE = PlaceRef(kind="table", id="table-2")
 OTHER_CALL_ID = "room-9"
 SPEAKER = "Ada"
 REMARK = "Play the jack."
@@ -206,6 +207,10 @@ async def shows(app, revision: int, state=None, *, awaits_you: bool = False) -> 
 
 
 LATER = datetime(2026, 11, 10, 18, 0, tzinfo=UTC)
+
+
+ONCE_DROPPED = History((), left_out=1, heard=0)
+"""A history whose bound dropped one entry and that holds none."""
 
 
 MORNING = Visit("https://app.test/mcp", PlaceRef(kind="call", id="room-7"), "morning")

@@ -29,7 +29,7 @@ from personas.due import (
     without_due,
 )
 from personas.entries import History, Lines, Reading, Waiting
-from tests.support.history import APP, TABLE, said
+from tests.support.history import APP, ONCE_DROPPED, TABLE, said
 from tests.support.standings import active, paused
 
 CALL_AT_A = AppPlace("https://a.test/mcp", PlaceRef(kind="call", id="room-1"))
@@ -244,9 +244,6 @@ def test_a_due_place_of_an_app_leaves_with_its_call_or_table_and_stays_while_it_
     leaving = left_standing(app, standings)
 
     assert [leaving(at) for at in due] == [False, False, True, False]
-
-
-ONCE_DROPPED = History((), left_out=1, heard=0)
 
 
 def test_the_places_and_lines_a_turn_is_due_for_show_no_name_no_text_and_no_state_in_their_repr():

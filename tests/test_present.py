@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 import pytest
-from agents.member import PlaceRef, PlaceView, SpeakRefusal, Spoken, Written
+from agents.member import PlaceView, SpeakRefusal, Spoken, Written
 from agents.turn import MAX_EVENT_BYTES
 
 from personas.decision import TURN_CANCELLED_CODE, AppPlace
@@ -33,6 +33,8 @@ from tests.support.history import (
     LATER,
     MORNING,
     NOON,
+    ONCE_DROPPED,
+    OTHER_TABLE,
     ROOMY_BYTES,
     TABLE,
     a_sentence,
@@ -45,9 +47,6 @@ from tests.support.history import (
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
-
-
-ONCE_DROPPED = History((), left_out=1, heard=0)
 
 
 def history_after(history: History, new: Iterable[Entry], size_bytes: int) -> History:
@@ -116,9 +115,6 @@ def test_a_view_another_places_turn_told_first_is_named_by_the_woke_revision_of_
     *_, own = (json.loads(each) for each in turn_messages("Mozart", present, for_the_view))
 
     assert (own["entries"], own["woke"]["revision"]) == ([], 2)
-
-
-OTHER_TABLE = PlaceRef(kind="table", id="table-2")
 
 
 @pytest.fixture
