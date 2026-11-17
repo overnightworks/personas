@@ -23,6 +23,7 @@ from personas.config import Config, ConfigError, load_config
 from personas.failures import SchemaNotAtHeadError, StoreDefect, StoreUnavailable, leaves_of
 from personas.locks import PostgresAgentLocks
 from personas.loop import Boundaries, run_all
+from personas.memory import PostgresHistoryStore, PostgresLineStore, PostgresMemory, migrate
 from personas.ownership import LockedOwnership
 from personas.readiness import FileReadyMarker, ReadinessError, ReadyMarker
 from personas.reporting import StateChange, StoreOutage, carry_trace, log_state_change
@@ -36,7 +37,7 @@ if TYPE_CHECKING:
     from agents.tools import HandTool
 
     from personas.config import DatabaseTarget
-    from personas.memory import KeptAgentHistory, KeptVisit, PostgresLineStore
+    from personas.memory import KeptAgentHistory, KeptVisit
     from personas.ownership import Ownership
     from personas.sweep import SweptStore
     from personas.turning import BackendFactory
@@ -72,8 +73,8 @@ class SchemaChecked(Protocol):
 
 @dataclass(frozen=True, kw_only=True)
 class SweepingBoundaries(Boundaries):
-    """The loops' boundaries, the ownership they run under, the store the sweep erases from and the store whose
-    schema the runner checks before it starts, none without a memory."""
+    """The loops' boundaries, the ownership they run under, the store the sweep erases from, none without a memory,
+    and the store whose schema the runner checks before it starts."""
 
     ownership: Ownership
     swept: SweptStore | None = None
@@ -82,15 +83,10 @@ class SweepingBoundaries(Boundaries):
 
 @asynccontextmanager
 async def _line_store(config: Config) -> AsyncGenerator[PostgresLineStore | None]:
-    """The store the configuration names, opened on its first write; without a memory table there is none.
-
-    The store's library is loaded only here, so a runner without a memory never imports it.
-    """
+    """The store the configuration names, opened on its first write; without a memory table there is none."""
     if config.memory is None:
         yield None
         return
-    from personas.memory import PostgresLineStore
-
     store = PostgresLineStore(config.database)
     try:
         yield store
@@ -102,6 +98,7 @@ async def _line_store(config: Config) -> AsyncGenerator[PostgresLineStore | None
 async def real_boundaries(config: Config, ready: ReadyMarker) -> AsyncGenerator[SweepingBoundaries]:
     clock = SystemClock()
     locks = PostgresAgentLocks(config.database, config.ownership)
+    histories = PostgresHistoryStore(config.database)
     try:
         async with (
             httpx2.AsyncClient(event_hooks={"request": [carry_trace]}) as token_client,
@@ -115,18 +112,19 @@ async def real_boundaries(config: Config, ready: ReadyMarker) -> AsyncGenerator[
                 ready=ready,
                 backend=_gateway_backends(config.gateway),
                 lines=lines,
-                ownership=LockedOwnership(locks, clock, config.ownership, log_state_change),
+                ownership=LockedOwnership(locks, histories, clock, config.ownership, log_state_change),
                 swept=lines,
-                schema=lines,
+                schema=histories,
             )
     finally:
+        await histories.close()
         # Closing the connection frees the pod's locks: the loops have ended by now, so the next owner may start.
         await locks.close()
 
 
 async def _schema_at_head(schema: SchemaChecked, config: Config, boundaries: SweepingBoundaries) -> None:
-    """Waits until the memory's database answers, an outage reported once, and raises ``SchemaNotAtHeadError`` when
-    its schema is behind; the loops and the ready marker wait for it."""
+    """Waits until the database answers, an outage reported once, and raises ``SchemaNotAtHeadError`` when its schema
+    is behind; the loops and the ready marker wait for it."""
     outage = StoreOutage(lambda event, code: boundaries.report(StateChange(event, None, None, code)))
     while True:
         try:
@@ -140,7 +138,7 @@ async def _schema_at_head(schema: SchemaChecked, config: Config, boundaries: Swe
 
 
 async def run_with_sweep(config: Config, boundaries: SweepingBoundaries) -> NoReturn:
-    """Once the memory's schema is at its head, the loops, and beside them the sweep when the configuration has a
+    """Once the database's schema is at its head, the loops, and beside them the sweep when the configuration has a
     memory; a defect of either ends both."""
     if boundaries.schema is not None:
         await _schema_at_head(boundaries.schema, config, boundaries)
@@ -211,13 +209,6 @@ def _memory_request(arguments: Sequence[str]) -> argparse.Namespace:
     return parser.parse_args(arguments)
 
 
-def _database_of_memory(config: Config, command: str) -> DatabaseTarget:
-    if config.memory is None:
-        sys.stderr.write(f"personas: memory: the table is required to {command}\n")
-        raise SystemExit(CONFIGURATION_ERROR_EXIT_CODE)
-    return config.database
-
-
 @contextmanager
 def _stopping_on_store_failure() -> Generator[None]:
     """A failure of the store ends the command with its code or its revisions, and no traceback."""
@@ -232,8 +223,6 @@ def _stopping_on_store_failure() -> Generator[None]:
 
 
 def _migrate(config: Config) -> None:
-    from personas.memory import migrate
-
     with _stopping_on_store_failure():
         migrate(config.database)
 
@@ -258,8 +247,6 @@ def _print_histories(histories: Iterable[KeptAgentHistory]) -> None:
 
 
 async def _list_memory(target: DatabaseTarget, client_id: str | None) -> None:
-    from personas.memory import PostgresHistoryStore, PostgresLineStore
-
     lines, histories = PostgresLineStore(target), PostgresHistoryStore(target)
     try:
         _print_visits(await lines.kept_visits(client_id))
@@ -270,8 +257,6 @@ async def _list_memory(target: DatabaseTarget, client_id: str | None) -> None:
 
 
 async def _erase_memory(target: DatabaseTarget, request: argparse.Namespace) -> None:
-    from personas.memory import PostgresMemory
-
     memory = PostgresMemory(target)
     try:
         erased = await (memory.erase_all() if request.every_agent else memory.erase_agent(request.agent))
@@ -290,9 +275,8 @@ async def _perform_memory(target: DatabaseTarget, request: argparse.Namespace) -
 
 
 def _memory(config: Config, request: argparse.Namespace) -> None:
-    target = _database_of_memory(config, request.command)
     with _stopping_on_store_failure():
-        asyncio.run(_perform_memory(target, request))
+        asyncio.run(_perform_memory(config.database, request))
 
 
 def _run_runner(config: Config, compose: Compose) -> None:

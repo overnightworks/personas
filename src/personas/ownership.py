@@ -4,14 +4,19 @@ Several pods run side by side against one database. Each holds one connection of
 agent it serves, so a pod that dies frees its agents at once. A pod that cannot confirm its locks stops serving, and a
 pod that takes an agent waits longer than the pod it takes over from needs to notice and stop, so no two pods speak
 for one agent. ``config.py`` refuses a grace that is not longer than that.
+
+Taking an agent renews his generation, which fences every write of his history: a pod that wrote under an older one
+has lost him, and stops serving him.
 """
 
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass, replace
+from functools import partial
 from typing import TYPE_CHECKING, Protocol
 
-from personas.failures import STORE_UNREACHABLE_CODE
+from personas.failures import STORE_UNREACHABLE_CODE, StaleGenerationError, StoreUnavailable
 from personas.reporting import Event, StateChange, StoreOutage
 
 if TYPE_CHECKING:
@@ -20,13 +25,59 @@ if TYPE_CHECKING:
 
     from personas.clock import Clock
     from personas.config import OwnershipTimings
+    from personas.entries import HistoryDelta, KeptHistory
     from personas.reporting import Reporter
 
-type ServeAgent = Callable[[str], Awaitable[NoReturn]]
-"""Runs everything one agent does, until it is cancelled."""
 
 LOST_HOLD_CODE = "hold_lost"
 """The code of an agent whose lock this pod no longer holds."""
+STALE_GENERATION_CODE = "generation_stale"
+"""The code of an agent whose history refused this pod's write: another owner has taken him since."""
+
+
+class AgentHistories(Protocol):
+    """Where each agent's history is kept, fenced by the generation of his owner."""
+
+    async def take_over(self, client_id: str) -> int:
+        """Renews the agent's generation and returns it."""
+        ...
+
+    async def load(self, client_id: str) -> KeptHistory:
+        """The agent's history as the store keeps it."""
+        ...
+
+    async def append(self, client_id: str, generation: int, delta: HistoryDelta) -> None:
+        """Writes the delta while ``generation`` is current, or raises ``StaleGenerationError``."""
+        ...
+
+
+@dataclass(frozen=True)
+class Owned:
+    """An agent this pod took over: his history as the store kept it then, and the write of what it gains, fenced by
+    the generation taken."""
+
+    client_id: str
+    history: KeptHistory
+    write: Callable[[HistoryDelta], Awaitable[None]]
+
+
+async def taken_over(histories: AgentHistories, client_id: str) -> Owned:
+    """Takes the agent over and loads his history after it, so every write before the takeover is in what loads."""
+    generation = await histories.take_over(client_id)
+    history = await histories.load(client_id)
+    return Owned(client_id, history, partial(histories.append, client_id, generation))
+
+
+type ServeAgent = Callable[[Owned], Awaitable[NoReturn]]
+"""Runs everything one agent does, until it is cancelled or a write of his history is refused."""
+
+
+@dataclass(frozen=True)
+class _Serving:
+    """An agent this pod serves, and the moment his stop began, from which the cancel margin counts once."""
+
+    task: asyncio.Task[None]
+    stopping: asyncio.Event
 
 
 class LockConnectionLost(Exception):  # noqa: N818 - named for the state of the connection
@@ -59,11 +110,21 @@ class LockedOwnership:
 
     Each round runs at ``contend_seconds`` from the start of the one before, so a hold that fails is noticed within
     ``contend_seconds`` plus the heartbeat timeout of the last round that confirmed it. Stopping cancels the agent's
-    loops and the turns under them and waits until they ended.
+    loops and the turns under them and waits until they ended; a stop that outlasts the cancel margin is reported,
+    since the grace of a taker counts on it, whether the hold was lost, a write was refused or the pod stops. An agent
+    whose takeover failed or whose write was refused stops, and is taken again in the next round that holds him.
     """
 
-    def __init__(self, locks: AgentLocks, clock: Clock, timings: OwnershipTimings, report: Reporter) -> None:
+    def __init__(
+        self,
+        locks: AgentLocks,
+        histories: AgentHistories,
+        clock: Clock,
+        timings: OwnershipTimings,
+        report: Reporter,
+    ) -> None:
         self._locks = locks
+        self._histories = histories
         self._clock = clock
         self._timings = timings
         self._report = report
@@ -71,39 +132,81 @@ class LockedOwnership:
     async def serve(
         self, client_ids: Sequence[str], serve_agent: ServeAgent, contending: Callable[[], None]
     ) -> NoReturn:
-        serving: dict[str, asyncio.Task[None]] = {}
+        serving: dict[str, _Serving] = {}
         outage = StoreOutage(lambda event, code: self._report(StateChange(event, None, None, code)))
         contended = False
         async with asyncio.TaskGroup() as group:
-            while True:
-                started = self._clock.now()
-                try:
-                    held = await self._locks.hold(client_ids)
-                except LockConnectionLost:
-                    outage.failed(STORE_UNREACHABLE_CODE)
-                    held = frozenset[str]()
-                else:
-                    outage.answered()
-                    if not contended:
-                        contended = True
-                        contending()
-                await self._stop(serving, [each for each in serving if each not in held])
-                for each in client_ids:
-                    if each in held and each not in serving:
-                        self._report(StateChange(Event.TAKEN, each, None))
-                        serving[each] = group.create_task(self._serve_after_grace(each, serve_agent))
-                await self._clock.sleep(max(0.0, started + self._timings.contend_seconds - self._clock.now()))
+            try:
+                while True:
+                    started = self._clock.now()
+                    try:
+                        held = await self._locks.hold(client_ids)
+                    except LockConnectionLost:
+                        outage.failed(STORE_UNREACHABLE_CODE)
+                        held = frozenset[str]()
+                    else:
+                        outage.answered()
+                        if not contended:
+                            contended = True
+                            contending()
+                    for each in [each for each, agent in serving.items() if agent.task.done()]:
+                        del serving[each]
+                    await self._stop(serving, [each for each in serving if each not in held])
+                    for each in client_ids:
+                        if each in held and each not in serving:
+                            self._report(StateChange(Event.TAKEN, each, None))
+                            stopping = asyncio.Event()
+                            task = group.create_task(self._serve_after_grace(each, serve_agent, stopping))
+                            serving[each] = _Serving(task, stopping)
+                    await self._clock.sleep(max(0.0, started + self._timings.contend_seconds - self._clock.now()))
+            finally:
+                await self._cancelled_until_ended(serving)
 
-    async def _serve_after_grace(self, client_id: str, serve_agent: ServeAgent) -> None:
-        await self._clock.sleep(self._timings.grace_seconds)
-        await serve_agent(client_id)
+    async def _serve_after_grace(self, client_id: str, serve_agent: ServeAgent, stopping: asyncio.Event) -> None:
+        overrun = asyncio.create_task(self._overran_after(client_id, stopping))
+        try:
+            await self._clock.sleep(self._timings.grace_seconds)
+            try:
+                owned = await taken_over(self._histories, client_id)
+            except StoreUnavailable as outage:
+                self._report(StateChange(Event.LOST, client_id, None, outage.code))
+                return
+            try:
+                await serve_agent(replace(owned, write=partial(_noting_refusal, owned.write, stopping)))
+            except* StaleGenerationError:
+                self._report(StateChange(Event.LOST, client_id, None, STALE_GENERATION_CODE))
+        finally:
+            overrun.cancel()
 
-    async def _stop(self, serving: dict[str, asyncio.Task[None]], client_ids: Iterable[str]) -> None:
+    async def _overran_after(self, client_id: str, stopping: asyncio.Event) -> None:
+        """Reports the agent once his stop outlasts the cancel margin, whatever began it and however many causes
+        followed; cancelled once he ended."""
+        await stopping.wait()
+        await self._clock.sleep(self._timings.cancel_margin_seconds)
+        self._report(StateChange(Event.STOP_OVERRAN, client_id, None))
+
+    async def _stop(self, serving: dict[str, _Serving], client_ids: Iterable[str]) -> None:
         """Cancels the agents and waits until their loops and turns ended; the failure of one is the group's."""
         stopped = {each: serving.pop(each) for each in client_ids}
-        for task in stopped.values():
-            task.cancel()
-        if stopped:
-            await asyncio.wait(stopped.values())
+        await self._cancelled_until_ended(stopped)
         for each in stopped:
             self._report(StateChange(Event.LOST, each, None, LOST_HOLD_CODE))
+
+    async def _cancelled_until_ended(self, agents: dict[str, _Serving]) -> None:
+        """Begins each agent's stop, cancels him and waits until he ended."""
+        for agent in agents.values():
+            agent.stopping.set()
+            agent.task.cancel()
+        if agents:
+            await asyncio.wait([agent.task for agent in agents.values()])
+
+
+async def _noting_refusal(
+    write: Callable[[HistoryDelta], Awaitable[None]], stopping: asyncio.Event, delta: HistoryDelta
+) -> None:
+    """Writes the delta; a refusal sets ``stopping``, since the agent's stop begins with it."""
+    try:
+        await write(delta)
+    except StaleGenerationError:
+        stopping.set()
+        raise

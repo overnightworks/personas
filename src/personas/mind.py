@@ -34,20 +34,23 @@ if TYPE_CHECKING:
 
 
 class Mind:
-    """Holds one agent's present and turns in memory for the life of the runner; the rules that bound the history and
-    move the turns are ``decision``'s. Each method is synchronous, so a loop changes it between its awaits."""
+    """Holds one agent's present and turns in memory while this pod serves him, from the present his history resumed
+    as; the rules that bound the history and move the turns are ``decision``'s. Each method is synchronous, so a loop
+    changes it between its awaits."""
 
     def __init__(
         self,
         history_bytes: int,
         history_keep_bytes: int,
         budget_pause_cap_seconds: float,
+        present: Present = EMPTY_PRESENT,
     ) -> None:
         self._history_bytes = history_bytes
         self._history_keep_bytes = history_keep_bytes
         self._budget_pause_cap_seconds = budget_pause_cap_seconds
         self._unanswered_turns = 0
-        self._present = EMPTY_PRESENT
+        self._present = present
+        self._present_changed = asyncio.Event()
         self._turns = Turns()
         self._placed = frozenset[str]()
         self._not_granted: dict[str, float] = {}
@@ -71,11 +74,16 @@ class Mind:
         previous, self._next_take = self._next_take, asyncio.Event()
         self._present = taken_into(self._present, taken, self._history_bytes, self._history_keep_bytes)
         previous.set()
+        self._present_changed.set()
 
     def next_take(self) -> asyncio.Event:
         """The event the next take sets. A waiter reads it in the same synchronous step as the history it judges, so a
         take made after that step sets it."""
         return self._next_take
+
+    def present_changed(self) -> asyncio.Event:
+        """The event a take and an answered turn set, which stays set until its waiter clears it."""
+        return self._present_changed
 
     def unanswered(self, *, budget_spent: bool, now: float) -> float:
         """A turn of his ended without an answer, refused for a spent budget or not: no turn of his starts for the
@@ -93,6 +101,7 @@ class Mind:
         """A turn of his ended with an answer: the wait starts over and its message joins the present."""
         self._unanswered_turns = 0
         self._present = answered_into(self._present, turn)
+        self._present_changed.set()
 
     def stand_at(self, app: str, *, holds: bool) -> None:
         """Records whether he holds an active place at ``app``, as its loop last read his standing."""

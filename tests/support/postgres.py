@@ -280,3 +280,15 @@ def terminate_backend(target: DatabaseTarget, pid: int) -> None:
             connection.execute(text("SELECT pg_terminate_backend(:pid)"), {"pid": pid})
     finally:
         engine.dispose()
+
+
+def answered_turns_kept(target: DatabaseTarget, client_id: str) -> int:
+    """How many answered turns of the agent the history's store holds."""
+    engine = engine_of(target.dbname)
+    try:
+        with engine.connect() as connection:
+            return connection.execute(
+                text("SELECT count(*) FROM answered_turns WHERE client_id = :client_id"), {"client_id": client_id}
+            ).scalar_one()
+    finally:
+        engine.dispose()

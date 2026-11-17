@@ -14,7 +14,7 @@ from agents.member import PlaceEntry, PlaceRef
 
 from personas.config import CONFIG_ENVIRONMENT_VARIABLE
 from personas.entries import HistoryDelta, KeptHistory, KeptLine, Lines, TurnTold, Visit, WindowRead
-from personas.failures import STORE_DEFECT_CODE, STORE_UNREACHABLE_CODE
+from personas.failures import STORE_DEFECT_CODE, STORE_UNREACHABLE_CODE, StaleGenerationError
 from personas.main import CONFIGURATION_ERROR_EXIT_CODE, STORE_ERROR_EXIT_CODE, main
 from personas.memory import PostgresHistoryStore, PostgresLineStore
 from tests.support.fakes import WALL_START, window_of
@@ -141,6 +141,33 @@ def histories_of_two_agents(target: DatabaseTarget, spoken: Spoken) -> None:
         (AGENT, HistoryDelta(0, spoken.history(3, 0), 0, turns, left_out=0)),
         (OTHER_AGENT, HistoryDelta(0, spoken.history(1, 5), 0, (), left_out=0)),
     )
+
+
+def written_under(target: DatabaseTarget, client_id: str, generation: int, delta: HistoryDelta) -> bool:
+    """Whether the store took the delta under ``generation``, or refused it as stale."""
+
+    async def append() -> bool:
+        store = PostgresHistoryStore(target)
+        try:
+            await store.append(client_id, generation, delta)
+        except StaleGenerationError:
+            return False
+        finally:
+            await store.close()
+        return True
+
+    return asyncio.run(append())
+
+
+def taken_over(target: DatabaseTarget, client_id: str) -> int:
+    async def take_over() -> int:
+        store = PostgresHistoryStore(target)
+        try:
+            return await store.take_over(client_id)
+        finally:
+            await store.close()
+
+    return asyncio.run(take_over())
 
 
 def configured_for(files: Files, target: DatabaseTarget, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -342,15 +369,17 @@ def test_a_memory_command_used_wrongly_is_refused_with_its_usage_and_every_line_
     assert len(agents_kept(database)) == 6
 
 
-@pytest.mark.parametrize("arguments", [LIST, ERASE_ALL], ids=["list", "erase"])
-def test_a_memory_command_without_a_memory_table_stops_and_names_the_table(files, monkeypatch, capsys, arguments):
+@pytest.mark.postgres
+def test_a_memory_command_needs_the_database_table_alone_since_every_agent_keeps_a_history(
+    files, database, monkeypatch, capsys
+):
+    histories_of_two_agents(database, Spoken())
+    files.use_database(database)
     monkeypatch.setenv(CONFIG_ENVIRONMENT_VARIABLE, str(files.write()[CONFIG_ENVIRONMENT_VARIABLE]))
 
-    with pytest.raises(SystemExit) as stopped:
-        main(arguments=list(arguments))
+    main(arguments=list(ERASE_ALL))
 
-    assert stopped.value.code == CONFIGURATION_ERROR_EXIT_CODE
-    assert "personas: memory: the table is required" in capsys.readouterr().err
+    assert capsys.readouterr().out == "0 lines, 4 history entries and 2 answered turns erased\n"
 
 
 @pytest.mark.parametrize("arguments", [LIST, ERASE_ALL], ids=["list", "erase"])
@@ -489,3 +518,19 @@ def test_erasing_all_removes_every_history_and_the_next_owner_writes_a_new_one(f
     again = spoken.history(1, 6)
     histories_kept(database, (AGENT, HistoryDelta(0, again, 0, (), left_out=0)))
     assert history_loaded(database, AGENT) == KeptHistory(0, again, 0, ())
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("arguments", [ERASE_AGENT, ERASE_ALL], ids=["agent", "all"])
+def test_an_erase_refuses_every_later_write_of_the_owner_who_held_the_agent_before_it(
+    files, database, monkeypatch, capsys, arguments
+):
+    spoken = Spoken()
+    owner = taken_over(database, AGENT)
+    configured_for(files, database, monkeypatch)
+
+    main(arguments=list(arguments))
+
+    capsys.readouterr()
+    assert not written_under(database, AGENT, owner, HistoryDelta(0, spoken.history(1, 0), 0, (), left_out=0))
+    assert history_loaded(database, AGENT) == KeptHistory(0, (), 0, ())

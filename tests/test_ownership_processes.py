@@ -1,5 +1,5 @@
 """Two runner processes against one Postgres, one app, one realm and one gateway: each agent is served by one of them,
-and the other takes it over when its holder is killed, stopped or loses its lock connection."""
+the other takes it over when its holder is killed, stopped or loses its lock connection, and resumes his history."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from tests.support.call import ADDRESSED, PERSON, PLACE_ID
 from tests.support.gateway import say, says
 from tests.support.hopin import AGENT_SUBJECT, active
 from tests.support.pods import SECOND_AGENT, Pods, Runner, serving_pods, until
-from tests.support.postgres import lock_holders, terminate_backend
+from tests.support.postgres import answered_turns_kept, lock_holders, terminate_backend
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -31,6 +31,8 @@ SLACK_SECONDS = 3.0
 FIRST_ANSWER = "the first answer"
 SECOND_ANSWER = "the second answer"
 LATER_LINE = "And are you still there?"
+AN_ACT = "Ada plays the queen."
+STALE_GENERATION = "generation_stale"
 
 
 @pytest.fixture
@@ -148,3 +150,54 @@ async def test_a_line_that_a_killed_holder_answered_gets_no_second_turn_from_the
 
     assert [turn.woke_seqs for turn in pods.gateway.turns("lines")] == [[first_line], [later_line]]
     assert (pods.calls_of("first", "say"), pods.calls_of("second", "say")) == (1, 1)
+
+
+async def test_after_a_sigkill_of_the_holder_the_takers_next_turn_carries_the_earlier_answered_messages_byte_for_byte(
+    pods, database
+):
+    pods.script_gateway(*says(PLACE_ID, FIRST_ANSWER, SECOND_ANSWER))
+    pods.app.stand(AGENT_SUBJECT, active(PLACE_ID))
+    holder, other = await holder_and_other(pods)
+    await until(lambda: pods.app.window_reads(PLACE_ID) > 0, "the holder read the place")
+    pods.app.speak(PLACE_ID, PERSON, "Ada", ADDRESSED)
+    await pods.app.said_count(1)
+    await until(lambda: answered_turns_kept(database, AGENT) == 1, "the holder kept the answered turn")
+
+    await holder.kill()
+    await until(lambda: is_listening(other, AGENT), "the other pod listens for the agent")
+    reads_by_the_holder = pods.app.window_reads(PLACE_ID)
+    await until(lambda: pods.app.window_reads(PLACE_ID) > reads_by_the_holder, "the other pod read the place")
+    pods.app.speak(PLACE_ID, PERSON, "Ada", LATER_LINE)
+    await pods.app.said_count(2)
+
+    first, second = pods.gateway.turns("lines")
+    assert second.texts[: len(first.texts)] == first.texts
+    assert len(second.texts) == len(first.texts) + 1
+
+
+async def test_an_erase_refuses_the_holders_next_write_so_he_stops_and_serves_the_agent_again_from_the_erased_history(
+    pods, database
+):
+    pods.script_gateway(*says(PLACE_ID, FIRST_ANSWER, SECOND_ANSWER))
+    pods.app.stand(AGENT_SUBJECT, active(PLACE_ID))
+    holder = pods.start("first")
+    await until(lambda: is_listening(holder, AGENT), "the holder serves the agent")
+    await until(lambda: pods.app.window_reads(PLACE_ID) > 0, "the holder read the place")
+    pods.app.speak(PLACE_ID, PERSON, "Ada", ADDRESSED)
+    await pods.app.said_count(1)
+    await until(lambda: answered_turns_kept(database, AGENT) == 1, "the holder kept the answered turn")
+
+    assert await pods.command("first", "memory", "erase", "--agent", AGENT) == 0
+    pods.app.speak(PLACE_ID, PERSON, "Ada", AN_ACT, act=True)
+    await until(lambda: holder.lines("agent.lost", AGENT), "the holder stopped the agent")
+    await until(lambda: len(holder.lines("loop.started", AGENT)) == 2, "the holder serves the agent again")
+    reads_before = pods.app.window_reads(PLACE_ID)
+    await until(lambda: pods.app.window_reads(PLACE_ID) > reads_before, "the holder read the place again")
+    pods.app.speak(PLACE_ID, PERSON, "Ada", LATER_LINE)
+    await pods.app.said_count(2)
+
+    ((_, lost),) = holder.lines("agent.lost", AGENT)
+    assert lost["reason"] == STALE_GENERATION
+    first, second = pods.gateway.turns("lines")
+    assert first.texts[-1] not in second.texts
+    assert len(second.texts) == len(first.texts)

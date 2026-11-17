@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 SCOPE = "mcp-hopin"
 SECOND_AGENT = "agent-ada"
 SECOND_SUBJECT = "ada-subject"
-ENTRY_POINT_CALL = "from personas.main import main; main()"
+ENTRY_POINT_CALL = "from personas.main import command_line; command_line()"
 """What the console script `personas` runs; the test environment does not install the project's scripts."""
 POLL_SECONDS = 0.05
 PROCESS_LIMIT_SECONDS = 60
@@ -194,17 +194,26 @@ class Pods:
         configuration.write_text(text + self.ownership_table, encoding="utf-8")
         process = subprocess.Popen(  # noqa: S603 - the interpreter running the tests
             [sys.executable, "-c", ENTRY_POINT_CALL],
-            env={
-                **os.environ,
-                CONFIG_ENVIRONMENT_VARIABLE: str(configuration),
-                "PYTHONPATH": str(Path(personas.__file__).parent.parent),
-            },
+            env=_environment(configuration),
             stdout=subprocess.PIPE,
             stderr=(directory / "stderr").open("w"),
             text=True,
         )
         self.runners[label] = Runner(label, process, ready_file)
         return self.runners[label]
+
+    async def command(self, label: str, *arguments: str) -> int:
+        """Runs a command of ``personas`` with the configuration of the pod started as ``label``; its exit code."""
+        configuration = self.files.config_path.parent / label / "personas.toml"
+        process = await asyncio.to_thread(
+            subprocess.run,  # noqa: S603 - the interpreter running the tests
+            [sys.executable, "-c", ENTRY_POINT_CALL, *arguments],
+            env=_environment(configuration),
+            capture_output=True,
+            timeout=PROCESS_LIMIT_SECONDS,
+            check=False,
+        )
+        return process.returncode
 
     def script_gateway(self, *replies: Reply) -> None:
         """The gateway answers from now on with these replies, in turn, the last one repeating."""
@@ -223,6 +232,14 @@ class Pods:
             if runner.process.poll() is None:
                 runner.process.kill()
                 runner.process.wait()
+
+
+def _environment(configuration: Path) -> dict[str, str]:
+    return {
+        **os.environ,
+        CONFIG_ENVIRONMENT_VARIABLE: str(configuration),
+        "PYTHONPATH": str(Path(personas.__file__).parent.parent),
+    }
 
 
 @contextmanager

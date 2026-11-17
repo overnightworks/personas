@@ -41,6 +41,8 @@ from personas.entries import (
     Answered,
     Entry,
     History,
+    HistoryDelta,
+    KeptHistory,
     KeptLine,
     Lines,
     Occasion,
@@ -579,10 +581,17 @@ def _not_his_own(entry: Entry) -> bool:
 @dataclass(frozen=True)
 class Present:
     """What one agent's next request holds besides its header and its own turn: the history and the answered turns whose
-    messages are still in it, oldest first."""
+    messages are still in it, oldest first. ``told_left_out`` counts the answered turns that ever left it, so the turn
+    ``told[i]`` was the ``told_left_out + i``-th answered."""
 
     history: History
     told: tuple[TurnTold, ...] = ()
+    told_left_out: int = 0
+
+    @property
+    def answered(self) -> int:
+        """How many answered turns ever entered it."""
+        return self.told_left_out + len(self.told)
 
 
 EMPTY_PRESENT: Final = Present(History((), left_out=0, heard=0))
@@ -616,10 +625,11 @@ def taken_into(present: Present, new: Iterable[Entry], history_bytes: int, keep_
             heard += _not_his_own(entry)
     grown = History(entries, present.history.left_out, heard)
     if sum(map(entry_size, entries)) <= history_bytes:
-        return Present(grown, present.told)
+        return Present(grown, present.told, present.told_left_out)
     cut = _step_cut(grown, (each.through for each in present.told), keep_bytes)
     history = History(entries[cut - grown.left_out :], cut, heard)
-    return Present(history, tuple(each for each in present.told if _stays_told(each, cut)))
+    told = tuple(each for each in present.told if _stays_told(each, cut))
+    return Present(history, told, present.told_left_out + len(present.told) - len(told))
 
 
 def answered_into(present: Present, turn: TurnTold) -> Present:
@@ -627,7 +637,26 @@ def answered_into(present: Present, turn: TurnTold) -> Present:
     whose entries all left in a step while it ran has no message left to tell."""
     if not _stays_told(turn, present.history.left_out):
         return present
-    return Present(present.history, (*present.told, turn))
+    return Present(present.history, (*present.told, turn), present.told_left_out)
+
+
+def history_delta(written: Present, current: Present) -> HistoryDelta | None:
+    """What ``current`` gained and lost since ``written``, an earlier value of the same present that the store holds;
+    ``None`` when nothing. What entered and left again between the two is never written."""
+    first = max(written.history.taken, current.history.left_out)
+    first_told = max(written.answered, current.told_left_out)
+    entries = current.history.entries[first - current.history.left_out :]
+    told = current.told[first_told - current.told_left_out :]
+    if not entries and not told and current.history.left_out == written.history.left_out:
+        return None
+    return HistoryDelta(first, entries, first_told, told, current.history.left_out)
+
+
+def present_of(kept: KeptHistory) -> Present:
+    """The present a history the store keeps resumes as: what he heard before the store's oldest entry is not
+    counted, since only a change of the count matters to what arrives next."""
+    heard = sum(map(_not_his_own, kept.entries))
+    return Present(History(kept.entries, kept.first, heard), kept.told, kept.first_told)
 
 
 @dataclass(frozen=True)

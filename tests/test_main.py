@@ -446,12 +446,14 @@ class MarkerThatMustStayAbsent:
 
 
 @pytest.mark.postgres
+@pytest.mark.parametrize("has_memory", [True, False], ids=["memory table", "no memory table"])
 def test_a_runner_whose_database_is_behind_its_head_stops_before_it_writes_its_ready_marker(
-    files, database, monkeypatch, capsys
+    files, database, monkeypatch, capsys, has_memory
 ):
     from tests.support.postgres import run_sql
 
-    files.text += files.memory_table(lines_keep_days="inf")
+    if has_memory:
+        files.text += files.memory_table(lines_keep_days="inf")
     files.use_database(database)
     monkeypatch.setenv(CONFIG_ENVIRONMENT_VARIABLE, files.write()[CONFIG_ENVIRONMENT_VARIABLE])
     run_sql(database, "UPDATE alembic_version SET version_num = '0001'")
