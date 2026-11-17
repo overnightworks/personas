@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import TYPE_CHECKING
 
+import anyio
 import pytest
 
 from personas.config import OwnershipTimings
@@ -119,7 +120,8 @@ class Pod:
     """A pod's ownership over a scripted lock connection, serving agents that record when they start and end.
 
     An agent that is cancelled, or whose write another pod's takeover refused, sets its ``winding_down`` event and
-    ends once ``unwinding`` is set, which a test closes to hold the agents in the middle of stopping. An agent in
+    ends once ``unwinding`` is set, which a test closes to hold the agents in the middle of stopping; a cancel does not
+    cut that short, as it does not cut short a turn stuck in a call, and sets its ``cancelled`` event. An agent in
     ``refused_writes`` is taken over by another pod and then writes, once he is served.
     """
 
@@ -135,6 +137,7 @@ class Pod:
     reports: Reports = field(default_factory=Reports)
     unwinding: asyncio.Event = field(default_factory=_open_gate)
     winding_down: defaultdict[str, asyncio.Event] = field(default_factory=lambda: defaultdict(asyncio.Event))
+    cancelled: defaultdict[str, asyncio.Event] = field(default_factory=lambda: defaultdict(asyncio.Event))
     contending: int = 0
 
     def __post_init__(self) -> None:
@@ -155,10 +158,24 @@ class Pod:
                 await owned.write(HistoryDelta(0, (), 0, (), 0))
             await asyncio.Event().wait()
             raise AssertionError("an agent ended")  # pragma: no cover
+        except asyncio.CancelledError:
+            self.cancelled[client_id].set()
+            raise
         finally:
             self.winding_down[client_id].set()
+            try:
+                await self._unwound(client_id)
+            finally:
+                self.events.append(("ended", client_id))
+
+    async def _unwound(self, client_id: str) -> None:
+        """Returns once ``unwinding`` is set; a cancel meanwhile is noted and passed on after it."""
+        try:
             await self.unwinding.wait()
-            self.events.append(("ended", client_id))
+        except asyncio.CancelledError:
+            self.cancelled[client_id].set()
+            await self.unwinding.wait()
+            raise
 
     def _contending(self) -> None:
         self.contending += 1
@@ -242,28 +259,33 @@ class StopCause(Enum):
 
 
 @pytest.mark.parametrize(
-    ("cause", "lost"),
+    ("causes", "lost"),
     [
-        (StopCause.HOLD_LOST, "hold_lost"),
-        (StopCause.WRITE_REFUSED, "generation_stale"),
-        (StopCause.POD_CANCELLED, None),
+        ((StopCause.HOLD_LOST,), "hold_lost"),
+        ((StopCause.WRITE_REFUSED,), "generation_stale"),
+        ((StopCause.POD_CANCELLED,), None),
+        ((StopCause.WRITE_REFUSED, StopCause.HOLD_LOST), "hold_lost"),
+        ((StopCause.WRITE_REFUSED, StopCause.POD_CANCELLED), None),
     ],
 )
 async def test_a_stop_that_outlasts_the_cancel_margin_writes_one_line_for_the_agent_and_the_loss_once_it_ended(
-    clock, cause, lost
+    clock, causes, lost
 ):
     unwinding = asyncio.Event()
-    rounds = ({AGENT}, After((AGENT,), set())) if cause is StopCause.HOLD_LOST else ({AGENT},)
-    refused_writes = {AGENT} if cause is StopCause.WRITE_REFUSED else set[str]()
+    rounds = ({AGENT}, After((AGENT,), set())) if StopCause.HOLD_LOST in causes else ({AGENT},)
+    refused_writes = {AGENT} if StopCause.WRITE_REFUSED in causes else set[str]()
     pod = Pod(clock, ScriptedLocks(clock, *rounds), unwinding=unwinding, refused_writes=refused_writes)
     task = pod.start()
-    if cause is StopCause.POD_CANCELLED:
+    if StopCause.POD_CANCELLED in causes:
         await pod.until_spent(AGENT)
         task.cancel()
     async with asyncio.timeout(LIMIT_SECONDS):
         await pod.winding_down[AGENT].wait()
+        if causes != (StopCause.WRITE_REFUSED,):
+            await pod.cancelled[AGENT].wait()
     clock.gates[TIMINGS.cancel_margin_seconds].set()
     await pod.reports.until(Event.STOP_OVERRAN, limit_seconds=LIMIT_SECONDS)
+    await anyio.wait_all_tasks_blocked()
     reported_while_stopping = pod.reports.reported()
     unwinding.set()
     if lost is not None:

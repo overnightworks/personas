@@ -72,6 +72,14 @@ type ServeAgent = Callable[[Owned], Awaitable[NoReturn]]
 """Runs everything one agent does, until it is cancelled or a write of his history is refused."""
 
 
+@dataclass(frozen=True)
+class _Serving:
+    """An agent this pod serves, and the moment his stop began, from which the cancel margin counts once."""
+
+    task: asyncio.Task[None]
+    stopping: asyncio.Event
+
+
 class LockConnectionLost(Exception):  # noqa: N818 - named for the state of the connection
     """The lock connection ended or did not answer in time: the locks it held are gone or no longer known to be held."""
 
@@ -124,7 +132,7 @@ class LockedOwnership:
     async def serve(
         self, client_ids: Sequence[str], serve_agent: ServeAgent, contending: Callable[[], None]
     ) -> NoReturn:
-        serving: dict[str, asyncio.Task[None]] = {}
+        serving: dict[str, _Serving] = {}
         outage = StoreOutage(lambda event, code: self._report(StateChange(event, None, None, code)))
         contended = False
         async with asyncio.TaskGroup() as group:
@@ -141,74 +149,64 @@ class LockedOwnership:
                         if not contended:
                             contended = True
                             contending()
-                    for each in [each for each, task in serving.items() if task.done()]:
+                    for each in [each for each, agent in serving.items() if agent.task.done()]:
                         del serving[each]
                     await self._stop(serving, [each for each in serving if each not in held])
                     for each in client_ids:
                         if each in held and each not in serving:
                             self._report(StateChange(Event.TAKEN, each, None))
-                            serving[each] = group.create_task(self._serve_after_grace(each, serve_agent))
+                            stopping = asyncio.Event()
+                            task = group.create_task(self._serve_after_grace(each, serve_agent, stopping))
+                            serving[each] = _Serving(task, stopping)
                     await self._clock.sleep(max(0.0, started + self._timings.contend_seconds - self._clock.now()))
             finally:
                 await self._cancelled_until_ended(serving)
 
-    async def _serve_after_grace(self, client_id: str, serve_agent: ServeAgent) -> None:
-        await self._clock.sleep(self._timings.grace_seconds)
+    async def _serve_after_grace(self, client_id: str, serve_agent: ServeAgent, stopping: asyncio.Event) -> None:
+        overrun = asyncio.create_task(self._overran_after(client_id, stopping))
         try:
-            owned = await taken_over(self._histories, client_id)
-        except StoreUnavailable as outage:
-            self._report(StateChange(Event.LOST, client_id, None, outage.code))
-            return
-        refused = asyncio.Event()
-        overrun = asyncio.create_task(self._overran_after(client_id, refused))
-        try:
-            await serve_agent(replace(owned, write=partial(_noting_refusal, owned.write, refused)))
-        except* StaleGenerationError:
-            self._report(StateChange(Event.LOST, client_id, None, STALE_GENERATION_CODE))
+            await self._clock.sleep(self._timings.grace_seconds)
+            try:
+                owned = await taken_over(self._histories, client_id)
+            except StoreUnavailable as outage:
+                self._report(StateChange(Event.LOST, client_id, None, outage.code))
+                return
+            try:
+                await serve_agent(replace(owned, write=partial(_noting_refusal, owned.write, stopping)))
+            except* StaleGenerationError:
+                self._report(StateChange(Event.LOST, client_id, None, STALE_GENERATION_CODE))
         finally:
             overrun.cancel()
 
-    async def _overran_after(self, client_id: str, refused: asyncio.Event) -> None:
-        """Reports the agent once his stop after a refused write outlasts the cancel margin; cancelled once he ended."""
-        await refused.wait()
+    async def _overran_after(self, client_id: str, stopping: asyncio.Event) -> None:
+        """Reports the agent once his stop outlasts the cancel margin, whatever began it and however many causes
+        followed; cancelled once he ended."""
+        await stopping.wait()
         await self._clock.sleep(self._timings.cancel_margin_seconds)
         self._report(StateChange(Event.STOP_OVERRAN, client_id, None))
 
-    async def _stop(self, serving: dict[str, asyncio.Task[None]], client_ids: Iterable[str]) -> None:
+    async def _stop(self, serving: dict[str, _Serving], client_ids: Iterable[str]) -> None:
         """Cancels the agents and waits until their loops and turns ended; the failure of one is the group's."""
         stopped = {each: serving.pop(each) for each in client_ids}
         await self._cancelled_until_ended(stopped)
         for each in stopped:
             self._report(StateChange(Event.LOST, each, None, LOST_HOLD_CODE))
 
-    async def _cancelled_until_ended(self, agents: dict[str, asyncio.Task[None]]) -> None:
-        """Cancels the agents and waits until they ended, reporting each stop that overran."""
-        for task in agents.values():
-            task.cancel()
+    async def _cancelled_until_ended(self, agents: dict[str, _Serving]) -> None:
+        """Begins each agent's stop, cancels him and waits until he ended."""
+        for agent in agents.values():
+            agent.stopping.set()
+            agent.task.cancel()
         if agents:
-            await self._ended(agents)
-
-    async def _ended(self, stopped: dict[str, asyncio.Task[None]]) -> None:
-        """Waits until the stopped agents ended, reporting each that is still running once the cancel margin passed."""
-        ended = asyncio.ensure_future(asyncio.wait(stopped.values()))
-        margin = asyncio.ensure_future(self._clock.sleep(self._timings.cancel_margin_seconds))
-        try:
-            await asyncio.wait((ended, margin), return_when=asyncio.FIRST_COMPLETED)
-            for each, task in stopped.items():
-                if not task.done():
-                    self._report(StateChange(Event.STOP_OVERRAN, each, None))
-            await ended
-        finally:
-            margin.cancel()
-            ended.cancel()
+            await asyncio.wait([agent.task for agent in agents.values()])
 
 
 async def _noting_refusal(
-    write: Callable[[HistoryDelta], Awaitable[None]], refused: asyncio.Event, delta: HistoryDelta
+    write: Callable[[HistoryDelta], Awaitable[None]], stopping: asyncio.Event, delta: HistoryDelta
 ) -> None:
-    """Writes the delta; a refusal sets ``refused``, since the agent's stop begins with it."""
+    """Writes the delta; a refusal sets ``stopping``, since the agent's stop begins with it."""
     try:
         await write(delta)
     except StaleGenerationError:
-        refused.set()
+        stopping.set()
         raise
