@@ -265,6 +265,45 @@ async def test_a_line_the_killed_holders_turn_was_answering_gets_no_turn_on_the_
     assert (pods.calls_of("first", "say"), pods.calls_of("second", "say")) == (0, 1)
 
 
+async def test_a_line_whose_turn_a_sigterm_cut_before_it_spoke_gets_exactly_one_turn_on_the_pod_that_takes_over(pods):
+    pods.script_gateway(*says(PLACE_ID, FIRST_ANSWER, SECOND_ANSWER))
+    pods.app.stand(AGENT_SUBJECT, active(PLACE_ID))
+    holder, _ = await holder_and_other(pods)
+    await until(lambda: pods.app.window_reads(PLACE_ID) > 0, "the holder read the place")
+    pods.gateway.hold_request(1)
+    line = pods.app.speak(PLACE_ID, PERSON, "Ada", ADDRESSED)
+    await pods.gateway.until_requested(1)
+
+    assert await holder.terminate() == 0
+    await pods.app.said_count(1)
+    later_line = pods.app.speak(PLACE_ID, PERSON, "Ada", LATER_LINE)
+    await pods.app.said_count(2)
+
+    woken = [turn.woke_seqs for turn in pods.gateway.turns("lines")]
+    assert (woken[0], len(woken), max(woken[1])) == ([line], 2, later_line)
+    assert (pods.calls_of("first", "say"), pods.calls_of("second", "say")) == (0, 2)
+
+
+async def test_a_line_whose_turn_had_spoken_when_a_sigterm_cut_it_gets_no_turn_on_the_pod_that_takes_over(pods):
+    pods.script_gateway(tool_round(say(FIRST_ANSWER)), *says(PLACE_ID, SECOND_ANSWER))
+    pods.app.stand(AGENT_SUBJECT, active(PLACE_ID))
+    holder, other = await holder_and_other(pods)
+    await until(lambda: pods.app.window_reads(PLACE_ID) > 0, "the holder read the place")
+    pods.gateway.hold_request(2)
+    line = pods.app.speak(PLACE_ID, PERSON, "Ada", ADDRESSED)
+    await pods.gateway.until_requested(2)
+
+    assert await holder.terminate() == 0
+    await until(lambda: is_listening(other, AGENT), "the other pod listens for the agent")
+    reads_by_the_holder = pods.app.window_reads(PLACE_ID)
+    await until(lambda: pods.app.window_reads(PLACE_ID) > reads_by_the_holder, "the other pod read the place")
+    later_line = pods.app.speak(PLACE_ID, PERSON, "Ada", LATER_LINE)
+    await pods.app.said_count(2)
+
+    assert [turn.woke_seqs for turn in pods.gateway.turns("lines")] == [[line], [later_line]]
+    assert (pods.calls_of("first", "say"), pods.calls_of("second", "say")) == (1, 1)
+
+
 async def test_a_pause_the_killed_holder_left_holds_the_turn_on_the_pod_that_takes_over_until_it_ends(pods):
     pods.script_gateway(*[BUDGET_SPENT] * REFUSALS_BEFORE_A_LONG_PAUSE, *says(PLACE_ID, FIRST_ANSWER))
     pods.app.stand(AGENT_SUBJECT, active(PLACE_ID))

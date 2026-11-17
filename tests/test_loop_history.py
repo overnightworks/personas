@@ -23,7 +23,7 @@ from personas.failures import (
 )
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
-from tests.support.fakes import SweepClock, memory_target
+from tests.support.fakes import FakeClock, SweepClock, memory_target
 from tests.support.gateway import BUDGET_SPENT, Gateway, says, says_after_a_hold
 from tests.support.history import (
     OTHER_CALL_ID,
@@ -50,7 +50,7 @@ from tests.support.history import (
     woke_at_table,
     written_turns,
 )
-from tests.support.hopin import ACCEPTED_NAME, ISSUER, PLAY_TOOL, active, paused
+from tests.support.hopin import ACCEPTED_NAME, ISSUER, LIMIT_SECONDS, PLAY_TOOL, active, paused
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.ownership import KeptHistories
 from tests.support.realm import AGENT_NAME
@@ -369,6 +369,40 @@ async def test_a_write_the_store_fails_while_the_pod_stops_is_reported_unless_fe
 
     assert isinstance(ended, asyncio.CancelledError)
     assert [each for event, each in runner.reports.reported() if event is Event.STORE_FAILED] == codes
+
+
+@dataclass
+class HistoriesSlowToStop(HistoriesHungOnTheRemark):
+    """Histories whose write in flight when the pod stops takes ``seconds`` on ``clock`` to end, and whose every write
+    after it hangs: a store that holds the stop up for its whole margin."""
+
+    clock: FakeClock = field(default_factory=FakeClock)
+    seconds: float = 0.0
+
+    async def write(self, client_id: str, generation: int, delta: HistoryDelta | None, turns: KeptTurns) -> None:
+        if self.hung.is_set():
+            await asyncio.Event().wait()
+        try:
+            await super().write(client_id, generation, delta, turns)
+        finally:
+            if self.hung.is_set():
+                self.clock.time += self.seconds
+
+
+async def test_a_stop_whose_margin_the_write_in_flight_took_gives_the_last_write_no_time_and_reports_it(runner):
+    margin = 3600.0
+    runner.histories = HistoriesSlowToStop(clock=runner.clock, seconds=margin)
+    runner.config = replace(runner.config, ownership=replace(runner.config.ownership, cancel_margin_seconds=margin))
+    await restarted_in_the_call(runner)
+    await said_and_taken(runner.app, PLACE_ID, REMARK, act=True)
+    await runner.histories.hung.wait()
+
+    runner.task.cancel()
+    async with asyncio.timeout(LIMIT_SECONDS):
+        (ended,) = await asyncio.gather(runner.task, return_exceptions=True)
+
+    assert isinstance(ended, asyncio.CancelledError)
+    assert [each for event, each in runner.reports.reported() if event is Event.STORE_FAILED] == [STORE_TIMEOUT_CODE]
 
 
 async def test_a_write_of_the_history_the_store_cannot_take_is_reported_once_and_tried_again_until_it_is_taken(

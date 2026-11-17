@@ -6,15 +6,30 @@ import json
 import secrets
 from datetime import UTC, datetime
 
+import pytest
 from agents.member import PlaceRef, PlaceView
 
 from personas.decision import (
     BACKOFF_BASE_SECONDS,
     BACKOFF_CAP_SECONDS,
+    TURN_CANCELLED_CODE,
     AppPlace,
     turn_messages,
 )
-from personas.entries import KeptLine, Lines, Occasion, TurnTold, ViewSeen, Visit, Waiting, entry_size
+from personas.entries import (
+    ActDone,
+    Entry,
+    KeptLine,
+    Lines,
+    Occasion,
+    SaidAloud,
+    TurnTold,
+    Unanswered,
+    ViewSeen,
+    Visit,
+    Waiting,
+    entry_size,
+)
 from personas.mind import Mind
 
 READ_AT = datetime(2026, 11, 11, 20, 0, tzinfo=UTC)
@@ -117,6 +132,39 @@ def test_one_turn_runs_at_a_time_and_the_next_goes_to_the_place_that_waited_long
     mind.release()
 
     assert _claimed(mind, TABLE_AT_A.app, NOW) == (TABLE_AT_A, Waiting(2))
+
+
+CUT_IN_FLIGHT = Unanswered(TURN_CANCELLED_CODE)
+CALLED_AGAIN = (CALL_AT_B, Waiting(1))
+TABLE_WAITING = (TABLE_AT_A, Waiting(2))
+
+
+@pytest.mark.parametrize(
+    ("stopping", "taken", "due_after"),
+    [
+        (True, (), [CALLED_AGAIN, TABLE_WAITING]),
+        (True, (said(CALL, 1, "a line of someone else's"),), [CALLED_AGAIN, TABLE_WAITING]),
+        (True, (ActDone(CALL.app, "say", {}, CUT_IN_FLIGHT, READ_AT),), [TABLE_WAITING]),
+        (True, (SaidAloud(CALL.app, CALL.place, "Hello.", CUT_IN_FLIGHT, READ_AT),), [TABLE_WAITING]),
+        (False, (), [TABLE_WAITING]),
+    ],
+    ids=["stop-before-it-spoke", "stop-after-others-spoke", "stop-after-a-call", "stop-after-a-sentence", "no-stop"],
+)
+def test_a_turn_his_stop_cuts_before_it_spoke_leaves_its_place_due_first_and_any_other_cut_turn_leaves_none(
+    stopping: bool, taken: tuple[Entry, ...], due_after: list[tuple[AppPlace, Occasion]]
+):
+    mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
+    mind.due(CALL_AT_B, Waiting(1), NOW)
+    mind.due(TABLE_AT_A, Waiting(2), NOW)
+    assert _claimed(mind, CALL_AT_B.app, NOW) == (CALL_AT_B, Waiting(1))
+    mind.take(taken)
+
+    if stopping:
+        mind.stopping()
+    mind.cut()
+    mind.release()
+
+    assert [(at, due.occasion) for at, due in mind.turn_state().turns.due.items()] == due_after
 
 
 def test_a_turn_without_an_answer_is_due_again_once_the_running_turn_ends_and_a_newer_occasion_stays():
