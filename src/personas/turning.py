@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Final
 from agents.agent_file import TurnRequest
 from agents.backend import TurnPerson, TurnStopped
 from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL
-from agents.tools import HandTool, ToolDeclaration, ToolEffect, ToolOutcome
+from agents.tools import HandTool, ToolDeclaration, ToolOutcome
 from agents.turn import RejectionCode, Turn, TurnMessage, TurnRole
 from agents.turn_events import FinalEvent, ToolCallEvent
 from agents.voice.reply import REPLY_RULES
@@ -23,16 +23,11 @@ from personas.decision import (
     Held,
     HoldOutcome,
     act_outcome,
-    call_within_bound,
-    decisive_failure,
     failure_code,
-    hold_stated,
-    hold_tellable,
     is_not_granted,
     offered_declarations,
     round_seconds,
     turn_call_bound,
-    untold_words,
 )
 from personas.entries import (
     ActDone,
@@ -45,8 +40,10 @@ from personas.entries import (
     told_stop,
     told_words,
 )
-from personas.failures import CallFailure, Unreachable, leaves_of, raise_if_cancelled, task_is_being_cancelled
-from personas.present import arrived_since, held_told, turn_messages
+from personas.failures import CallFailure, leaves_of, raise_if_cancelled, task_is_being_cancelled
+from personas.held_tools import Calls, HeldTools, HoldBack
+from personas.holds import DECISION_CALLS, DECISION_DECLARATIONS, HoldInbox, close_when_over
+from personas.present import held_told, turn_messages
 from personas.recall import (
     LOOKUPS_SPENT_TEXT,
     RECALL_DECLARATION,
@@ -63,8 +60,8 @@ from personas.task_record import (
     ending_with_recorded_defect,
     failure_held_by,
     failures_leaving_with,
-    unreachable_unless_cancelling,
 )
+from personas.turn_sessions import TurnSessions
 from personas.voice import Speaking
 
 if TYPE_CHECKING:
@@ -74,7 +71,7 @@ if TYPE_CHECKING:
 
     from agents.agent_file import AgentDefinition
     from agents.backend import AgentBackend, TurnEvent
-    from agents.member import PartialSpeech, PlaceRef, PlaceWindow
+    from agents.member import PlaceRef, PlaceWindow
     from agents.turn import FailureCode, JsonObject, Principal
     from logline import StepTimer
 
@@ -84,10 +81,9 @@ if TYPE_CHECKING:
     from personas.decision import Token
     from personas.entries import History, Occasion
     from personas.mind import Mind
-    from personas.present import Arrived, Present
+    from personas.present import Present
     from personas.recall import LookupBounds
     from personas.remembering import Remembering
-    from personas.secret import Secret
     from personas.task_record import TaskRecord
     from personas.tokens import TokenFacts, TokenSource
 
@@ -104,27 +100,6 @@ _APART_TEXT: Final = (
 _DECIDING_FIRST_TEXT: Final = "a hold is decided first: call continue_speaking or stop_speaking"
 _DECIDED_TEXT: Final = "this hold is decided"
 _CONTINUED_TEXT: Final = '{"continued": true}'
-_DECISION_CALLS: Final = 1
-_DECISION_DECLARATIONS: Final = tuple(
-    ToolDeclaration(
-        name=name,
-        description=description,
-        parameters={
-            "type": "object",
-            "properties": {"id": {"type": "string", "description": "The id of the hold you were told."}},
-            "required": ["id"],
-            "additionalProperties": False,
-        },
-        effect=ToolEffect.SIDE_EFFECTING,
-    )
-    for name, description in (
-        (
-            CONTINUE_SPEAKING_TOOL,
-            "Lets the sentence you were held in go on to its end, and your next sentences follow.",
-        ),
-        (STOP_SPEAKING_TOOL, "Drops the rest of the sentence you were held in and everything you had not yet said."),
-    )
-)
 
 
 def _failure_event(app: AppTarget) -> Event:
@@ -140,11 +115,6 @@ async def _final_event_of(events: AsyncIterator[TurnEvent], tally: TurnTally) ->
         elif isinstance(event, FinalEvent):
             final = event
     return final
-
-
-async def _close_when_over(inbox: _HoldInbox, *speech: asyncio.Task[object]) -> None:
-    await asyncio.wait(speech)
-    inbox.close()
 
 
 @dataclass(frozen=True)
@@ -186,104 +156,6 @@ class _Sizing:
         return InputSizes(self._request[0], self._request[1], self._results, self._images)
 
 
-@dataclass
-class _Calls:
-    """How many calls an app took in this turn, against its own bound."""
-
-    bound: int
-    made: int = 0
-
-    def take(self) -> bool:
-        if not call_within_bound(self.made, self.bound):
-            return False
-        self.made += 1
-        return True
-
-    def close(self) -> None:
-        """The app takes no more calls in this turn."""
-        self.made = self.bound
-
-
-class _HoldInbox:
-    """What the window says of him while a spoken turn runs: the hold that stands, the call that waits, and what people
-    say over him, with what a round told him of it."""
-
-    def __init__(self) -> None:
-        self.hold: Held | None = None
-        self.waiting: ToolCallEvent | None = None
-        self.told: tuple[PartialSpeech, ...] | None = None
-        self._said: tuple[PartialSpeech, ...] = ()
-        self._taken: str | None = None
-        self._closed = False
-        self._changed = asyncio.Event()
-
-    def hear(self, window: PlaceWindow) -> None:
-        self.hold = hold_stated(window, self.hold)
-        self._said = () if window.talked_over is None else window.talked_over.speech
-        self._changed.set()
-
-    def untold(self) -> tuple[PartialSpeech, ...]:
-        """What people said over him since a round told him of it, once; nothing before a round has."""
-        if self.told is None:
-            return ()
-        words = untold_words(self._said, self.told)
-        if words:
-            self.told = self._said
-        return words
-
-    def close(self) -> None:
-        self._closed = True
-        self._changed.set()
-
-    @property
-    def undecided(self) -> Held | None:
-        return self.hold if self.hold is not None and self.hold.id != self._taken else None
-
-    async def next_hold(self) -> Held | None:
-        while not self._closed:
-            hold = self.undecided
-            if hold is not None and hold_tellable(hold):
-                self._taken = hold.id
-                return hold
-            self._changed.clear()
-            await self._changed.wait()
-        return None
-
-
-@dataclass
-class _Hold:
-    """Whether a call of the turn is held back: once, when an entry not his own entered his history since the turn's
-    admission, and again when people said words over him that no round told him."""
-
-    admitted: History = field(repr=False)
-    inbox: _HoldInbox | None
-    spent: bool = False
-
-    def holding(self, current: History) -> Arrived | None:
-        """What arrived for the first call that finds news; every later call of the turn is let through."""
-        if self.spent:
-            return None
-        arrived = arrived_since(current, self.admitted)
-        self.spent = arrived is not None
-        return arrived
-
-    def said_over_him(self) -> tuple[PartialSpeech, ...]:
-        return () if self.inbox is None else self.inbox.untold()
-
-
-@dataclass(frozen=True)
-class _HeldTools:
-    """What a turn holds: the hand tools of every app that answered, and the calls the turn may make in all."""
-
-    tools: tuple[HandTool, ...]
-    max_tool_calls: int | None
-    inbox: _HoldInbox | None = None
-
-    @property
-    def declarations(self) -> tuple[ToolDeclaration, ...]:
-        return tuple(each.declaration for each in self.tools)
-
-
 type _Hearing = asyncio.Task[FinalEvent | None]
 
 
@@ -295,10 +167,10 @@ class _Voiced:
     admitted: Admitted
     turn: TurnTold
     request: TurnRequest
-    held: _HeldTools
+    held: HeldTools
     speaking: Speaking
     record: TaskRecord
-    inbox: _HoldInbox
+    inbox: HoldInbox
 
 
 @dataclass(frozen=True)
@@ -355,8 +227,7 @@ class Turning:
         self._agent = agent
         self._app = app
         self._apps = tuple((each, each.max_tool_calls) for each in apps if each.max_tool_calls is not None)
-        self._tokens = tokens
-        self._open_session = open_session
+        self._sessions = TurnSessions(agent, app, tokens, open_session)
         self._mind = mind
         self._clock = clock
         self._current_token = current_token
@@ -366,7 +237,7 @@ class Turning:
         self._report_tools_left_out = report_tools_left_out
         self._left_out_reported: set[str] = set()
         self._remembering = remembering
-        self._listening: tuple[PlaceRef, _HoldInbox] | None = None
+        self._listening: tuple[PlaceRef, HoldInbox] | None = None
         self._decided: dict[PlaceRef, str] = {}
 
     async def take(self, setup: TurnSetup, admitted: Admitted, record: TaskRecord, tally: TurnTally) -> None:
@@ -439,7 +310,7 @@ class Turning:
             with stepping(step_timer("token_hold.ended", agent, self._app.mcp_url, started_at=begun)):
                 token = await self._current_token()
             async with AsyncExitStack() as opened:
-                session = await self._opened(opened, self._app, token.value, measured=True)
+                session = await self._sessions.opened(opened, self._app, token.value, measured=True)
                 try:
                     await self._run_session_body(setup, admitted, turn, told, session, record, sizing, tally, hand_off)
                 except Exception as error:
@@ -518,7 +389,7 @@ class Turning:
                 playing = group.create_task(voiced.speaking.play())
                 hearing = group.create_task(self._hear_events(events, voiced, tally))
                 group.create_task(self._decide_holds(voiced, hearing))
-                group.create_task(_close_when_over(voiced.inbox, playing, hearing))
+                group.create_task(close_when_over(voiced.inbox, playing, hearing))
         finally:
             self._listening = None
         return None if hearing.cancelled() else hearing.result()
@@ -639,7 +510,7 @@ class Turning:
         """Sends his decision in a session of its own; says if the app answered."""
         place = voiced.admitted.place
         try:
-            answer = await self._ask_elsewhere(
+            answer = await self._sessions.ask_elsewhere(
                 self._app,
                 lambda session: (
                     session.continue_speaking(place, hold.id)
@@ -656,7 +527,7 @@ class Turning:
         self._hold_decided(place, hold.id, outcome)
         return True
 
-    async def _hold_tools(self, session: AppSession, record: TaskRecord, admitted: Admitted) -> _HeldTools:
+    async def _hold_tools(self, session: AppSession, record: TaskRecord, admitted: Admitted) -> HeldTools:
         """The lookup when the configuration has a memory, then the tools of the place's app, of each app named in the
         admission and of each tools-only app the realm grants and that answers, in the configuration's order, each app
         counting its own calls.
@@ -666,17 +537,17 @@ class Turning:
         rest.
         """
         own = await self._list_tools(self._app, session)
-        inbox = _HoldInbox() if admitted.aloud else None
-        hold = _Hold(admitted.history, inbox)
+        inbox = HoldInbox() if admitted.aloud else None
+        hold = HoldBack(admitted.history, inbox)
         tools: list[HandTool] = []
         bounds: list[int] = []
         taken = frozenset[str]()
         lookup = self._remembering.lookup
         if lookup is not None:
-            tools.append(HandTool(RECALL_DECLARATION, partial(self._look, lookup, _Calls(lookup.calls), admitted)))
+            tools.append(HandTool(RECALL_DECLARATION, partial(self._look, lookup, Calls(lookup.calls), admitted)))
             bounds.append(lookup.calls)
         for app, max_calls in self._apps:
-            calls = _Calls(max_calls)
+            calls = Calls(max_calls)
             declared = (
                 own if app.mcp_url == self._app.mcp_url else await self._declared_elsewhere(app, admitted, record)
             )
@@ -689,17 +560,17 @@ class Turning:
                 tools.extend(self._hand_tools(app, session, offered, calls, hold, record))
                 bounds.append(calls.bound)
         if inbox is not None:
-            tools.extend(HandTool(each, self._decided_apart) for each in _DECISION_DECLARATIONS)
-            bounds.append(_DECISION_CALLS)
-        return _HeldTools(tuple(tools), turn_call_bound(bounds), inbox)
+            tools.extend(HandTool(each, self._decided_apart) for each in DECISION_DECLARATIONS)
+            bounds.append(DECISION_CALLS)
+        return HeldTools(tuple(tools), turn_call_bound(bounds), inbox)
 
     def _hand_tools(
         self,
         app: AppTarget,
         session: AppSession,
         offered: tuple[ToolDeclaration, ...],
-        calls: _Calls,
-        hold: _Hold,
+        calls: Calls,
+        hold: HoldBack,
         record: TaskRecord,
     ) -> list[HandTool]:
         if app.mcp_url == self._app.mcp_url:
@@ -717,7 +588,7 @@ class Turning:
         self._left_out_reported.clear()
 
     async def _look(
-        self, lookup: LookupBounds, calls: _Calls, admitted: Admitted, _principal: Principal, arguments: JsonObject
+        self, lookup: LookupBounds, calls: Calls, admitted: Admitted, _principal: Principal, arguments: JsonObject
     ) -> ToolOutcome:
         """Looks up what the agent's own place held before its history: nothing enters the history, and a lookup is
         never held back."""
@@ -750,7 +621,7 @@ class Turning:
 
     async def _list_elsewhere(self, app: AppTarget, record: TaskRecord) -> tuple[ToolDeclaration, ...] | None:
         """The tools another app lists, or ``None`` after the report of its failed listing."""
-        declared = await self._ask_elsewhere(app, partial(self._list_tools, app), record, opening=True)
+        declared = await self._sessions.ask_elsewhere(app, partial(self._list_tools, app), record, opening=True)
         if isinstance(declared, CallFailure):
             if not app.listens and is_not_granted(declared):
                 if self._mind.refused(app.mcp_url, self._clock.now()):
@@ -771,7 +642,7 @@ class Turning:
     ) -> ToolOutcome:
         return ToolOutcome(_APART_TEXT, is_error=True)
 
-    def _held(self, hold: _Hold) -> ToolOutcome | None:
+    def _held(self, hold: HoldBack) -> ToolOutcome | None:
         """The result of a call that is not sent, or ``None`` when the call goes on. It is asked before any await."""
         arrived = hold.holding(self._mind.history)
         if arrived is not None:
@@ -781,7 +652,7 @@ class Turning:
         return None
 
     async def _relay(
-        self, session: AppSession, name: str, calls: _Calls, hold: _Hold, _principal: Principal, arguments: JsonObject
+        self, session: AppSession, name: str, calls: Calls, hold: HoldBack, _principal: Principal, arguments: JsonObject
     ) -> ToolOutcome:
         if (held := self._held(hold)) is not None:
             return held
@@ -800,8 +671,8 @@ class Turning:
         self,
         app: AppTarget,
         name: str,
-        calls: _Calls,
-        hold: _Hold,
+        calls: Calls,
+        hold: HoldBack,
         record: TaskRecord,
         _principal: Principal,
         arguments: JsonObject,
@@ -812,7 +683,10 @@ class Turning:
             return ToolOutcome(_CALL_BOUND_TEXT, is_error=True)
         try:
             answer = await self._recorded_as_act(
-                app, name, arguments, self._ask_elsewhere(app, lambda session: session.invoke(name, arguments), record)
+                app,
+                name,
+                arguments,
+                self._sessions.ask_elsewhere(app, lambda session: session.invoke(name, arguments), record),
             )
         except Exception as error:
             raise RelayFailed(error) from None
@@ -844,61 +718,3 @@ class Turning:
             outcome = None if ended is None else act_outcome(ended, cancelling=task_is_being_cancelled())
             if outcome is not None:
                 self._mind.take((ActDone(app.mcp_url, name, arguments, outcome, self._clock.wall()),))
-
-    async def _ask_elsewhere[Answer](
-        self,
-        app: AppTarget,
-        ask: Callable[[AppSession], Awaitable[Answer]],
-        record: TaskRecord,
-        *,
-        opening: bool = False,
-    ) -> Answer | CallFailure:
-        """Asks another app in a session of its own, under the token for its own scope; ``opening`` says the turn
-        waits for the session's opening, which is then a step of its own.
-
-        The session lives only for this request. A failure of the call, a session that died of its own child and
-        an expiry of the app's call time come back as the failure; any other error is raised, and a turn whose
-        place left stops. A defect recorded in the turn ends the request, raised from the failure.
-        """
-        try:
-            return await ending_loud_when_cancelled(
-                self._within_call_time(app, ask, record, opening=opening), unreachable_unless_cancelling
-            )
-        except Exception as error:
-            raise_if_cancelled()
-            failure = decisive_failure(tuple(leaves_of(error)), already_renewed=False)
-            if failure is None:
-                raise
-            defect = record.defect
-            if defect is not None:
-                raise defect from failure
-            return failure
-
-    async def _opened(self, opened: AsyncExitStack, app: AppTarget, token: Secret, *, measured: bool) -> AppSession:
-        """The session at ``app``, closed with ``opened``; its opening is a step when ``measured``."""
-        if not measured:
-            return await opened.enter_async_context(self._open_session(app, token))
-        with stepping(
-            step_timer("session_open.ended", self._agent.client_id, app.mcp_url), turn_goes_on=app != self._app
-        ):
-            return await opened.enter_async_context(self._open_session(app, token))
-
-    async def _within_call_time[Answer](
-        self, app: AppTarget, ask: Callable[[AppSession], Awaitable[Answer]], record: TaskRecord, *, opening: bool
-    ) -> Answer:
-        """The token, the session and the request, all under the call time of the app."""
-        bound = asyncio.timeout(app.call_seconds)
-        try:
-            async with bound:
-                granted = await self._tokens.fetch(self._agent, app.scope)
-                async with AsyncExitStack() as opened:
-                    session = await self._opened(opened, app, granted.value, measured=opening)
-                    try:
-                        return await ask(session)
-                    except Exception as error:
-                        record.note(error)
-                        raise
-        except TimeoutError:
-            if not bound.expired():
-                raise
-            raise Unreachable("the app did not answer in time") from None
