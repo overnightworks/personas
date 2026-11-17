@@ -75,7 +75,7 @@ type ServeAgent = Callable[[Owned], Awaitable[NoReturn]]
 
 
 class _Stop:
-    """The moment an agent's stop began, from which the cancel margin counts once, and whether a write of his is in
+    """The moment an agent's stop began, from which the cancel margin counts, and whether a write of his is in
     flight: such a write is bounded and reported by the agent himself, so a slow store is not his stop's overrun."""
 
     def __init__(self) -> None:
@@ -91,6 +91,10 @@ class _Stop:
         finally:
             self._writes_in_flight -= 1
             self._write_ended.set()
+
+    @property
+    def write_in_flight(self) -> bool:
+        return self._writes_in_flight > 0
 
     async def until_no_write_in_flight(self) -> None:
         while self._writes_in_flight:
@@ -206,10 +210,16 @@ class LockedOwnership:
 
     async def _overran_after(self, client_id: str, stop: _Stop) -> None:
         """Reports the agent once his stop outlasts the cancel margin, whatever began it and however many causes
-        followed, and no write of his is in flight any more; cancelled once he ended."""
+        followed; cancelled once he ended.
+
+        A write in flight when the margin ends is the store's delay, not his: he has the margin again once it ended,
+        since the write often ends in a task of his whose end reaches him, and the flush of his stop, only later.
+        """
         await stop.began.wait()
         await self._clock.sleep(self._timings.cancel_margin_seconds)
-        await stop.until_no_write_in_flight()
+        while stop.write_in_flight:
+            await stop.until_no_write_in_flight()
+            await self._clock.sleep(self._timings.cancel_margin_seconds)
         self._report(StateChange(Event.STOP_OVERRAN, client_id, None))
 
     async def _stop(self, serving: dict[str, _Serving], client_ids: Iterable[str]) -> None:

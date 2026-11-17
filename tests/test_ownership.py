@@ -123,7 +123,8 @@ class Pod:
     ends once ``unwinding`` is set, which a test closes to hold the agents in the middle of stopping; a cancel does not
     cut that short, as it does not cut short a turn stuck in a call, and sets its ``cancelled`` event. An agent in
     ``refused_writes`` is taken over by another pod and then writes, once he is served. An agent that
-    ``writes_on_his_stop`` writes once his stop begins, before he unwinds.
+    ``writes_on_his_stop`` writes once his stop begins, before he unwinds; one that ``writes_through_a_child`` also
+    writes, while served, in a task of his group, which his stop cancels and waits for before that write.
     """
 
     clock: FakeClock
@@ -132,6 +133,7 @@ class Pod:
     defect_of: dict[str, Exception] = field(default_factory=dict[str, Exception])
     refused_writes: set[str] = field(default_factory=set[str])
     writes_on_his_stop: bool = False
+    writes_through_a_child: bool = False
     histories: KeptHistories = field(default_factory=KeptHistories)
     served_with: list[Owned] = field(default_factory=list["Owned"])
     served_again: asyncio.Event = field(default_factory=asyncio.Event)
@@ -158,6 +160,10 @@ class Pod:
             if client_id in self.refused_writes:
                 await self.histories.take_over(client_id)
                 await owned.write(HistoryDelta(0, (), 0, (), 0), NO_TURNS_KEPT)
+            if self.writes_through_a_child:
+                async with asyncio.TaskGroup() as group:
+                    group.create_task(self._written_through(owned))
+                    await asyncio.Event().wait()
             await asyncio.Event().wait()
             raise AssertionError("an agent ended")  # pragma: no cover
         except asyncio.CancelledError:
@@ -171,6 +177,10 @@ class Pod:
                 await self._unwound(client_id)
             finally:
                 self.events.append(("ended", client_id))
+
+    @staticmethod
+    async def _written_through(owned: Owned) -> None:
+        await owned.write(HistoryDelta(0, (), 0, (), 0), NO_TURNS_KEPT)
 
     async def _unwound(self, client_id: str) -> None:
         """Returns once ``unwinding`` is set; a cancel meanwhile is noted and passed on after it."""
@@ -304,41 +314,56 @@ async def test_a_stop_that_outlasts_the_cancel_margin_writes_one_line_for_the_ag
 
 @dataclass
 class HistoriesSlowAtTheStop(KeptHistories):
-    """Histories whose writes hold until ``release`` is set: a store slow to take the write of a stop."""
+    """Histories whose writes hold until ``release`` is set, through a cancel too: a store slow to take a write."""
 
     writing: asyncio.Event = field(default_factory=asyncio.Event)
     release: asyncio.Event = field(default_factory=asyncio.Event)
 
     async def write(self, client_id: str, generation: int, delta: HistoryDelta | None, turns: KeptTurns) -> None:
         self.writing.set()
-        await self.release.wait()
+        try:
+            await self.release.wait()
+        except asyncio.CancelledError:
+            await self.release.wait()
+            raise
         await super().write(client_id, generation, delta, turns)
 
 
 @pytest.mark.parametrize(
-    ("ends_with_the_write", "reported"),
+    ("writes_through_a_child", "ends_with_the_write", "reported"),
     [
-        (True, [(Event.TAKEN, None)]),
-        (False, [(Event.TAKEN, None), (Event.STOP_OVERRAN, None)]),
+        (False, True, [(Event.TAKEN, None)]),
+        (True, True, [(Event.TAKEN, None)]),
+        (False, False, [(Event.TAKEN, None), (Event.STOP_OVERRAN, None)]),
     ],
 )
 async def test_a_write_in_flight_when_the_cancel_margin_ends_writes_no_overrun_line_unless_the_stop_outlasts_it(
-    clock, ends_with_the_write, reported
+    clock, writes_through_a_child, ends_with_the_write, reported
 ):
     histories = HistoriesSlowAtTheStop()
     unwinding = asyncio.Event()
     if ends_with_the_write:
         unwinding.set()
-    pod = Pod(clock, ScriptedLocks(clock, {AGENT}), histories=histories, unwinding=unwinding, writes_on_his_stop=True)
+    pod = Pod(
+        clock,
+        ScriptedLocks(clock, {AGENT}),
+        histories=histories,
+        unwinding=unwinding,
+        writes_on_his_stop=True,
+        writes_through_a_child=writes_through_a_child,
+    )
     task = pod.start()
     await pod.until_spent(AGENT)
     task.cancel()
     async with asyncio.timeout(LIMIT_SECONDS):
         await histories.writing.wait()
-    clock.gates[TIMINGS.cancel_margin_seconds].set()
+    margin = clock.gates[TIMINGS.cancel_margin_seconds]
+    margin.set()
     await anyio.wait_all_tasks_blocked()
+    margin.clear()
     histories.release.set()
     if not ends_with_the_write:
+        margin.set()
         await pod.reports.until(Event.STOP_OVERRAN, limit_seconds=LIMIT_SECONDS)
         unwinding.set()
     async with asyncio.timeout(LIMIT_SECONDS):
