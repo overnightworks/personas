@@ -31,20 +31,16 @@ def test_migrating_an_empty_database_creates_the_schema_and_migrating_again_chan
     target = unmigrated_database
     files.use_database(target)
     migrate(files, monkeypatch)
-    run_sql(
-        unmigrated_database,
-        "INSERT INTO lines VALUES ('a','b','c','d','e',1,now(),'f','g','h',false,false,false,false)",
-    )
-    after_the_first = (tables_of(unmigrated_database), kept_lines(unmigrated_database, "client_id, seq, first_read_at"))
+    run_sql(target, "INSERT INTO lines VALUES ('a','b','c','d','e',1,now(),'f','g','h',false,false,false,false)")
+    after_the_first = (tables_of(target), revision_of(target), kept_lines(target, "client_id, seq, first_read_at"))
 
     migrate(files, monkeypatch)
 
-    after_the_second = (
-        tables_of(unmigrated_database),
-        kept_lines(unmigrated_database, "client_id, seq, first_read_at"),
-    )
+    after_the_second = (tables_of(target), revision_of(target), kept_lines(target, "client_id, seq, first_read_at"))
 
-    assert "lines" in after_the_first[0]
+    tables, revision, _ = after_the_first
+    assert {"alembic_version", "lines"} <= set(tables)
+    assert revision is not None
     assert after_the_second == after_the_first
 
 
