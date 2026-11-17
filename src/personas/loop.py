@@ -474,6 +474,8 @@ class AgentLoop:
             answered=tally.answered,
         )
         tally.end(ending)
+        if cancelled and not tally.answered and not turn.cancel_requested:
+            self._mind.cut()
         self._mind.release()
 
     def _report_pause(self, seconds: float, code: str) -> None:
@@ -572,6 +574,7 @@ class _WriteThrough:
         self._written = mind.present
         self._written_turns: KeptTurns = owned.history.turns
         self._paused = (mind.turn_state().turns.not_before, owned.history.turns.paused_until)
+        self._stop_deadline: float | None = None
 
     async def run(self) -> NoReturn:
         failures = 0
@@ -608,11 +611,16 @@ class _WriteThrough:
             self._paused = (state.turns.not_before, paused_until)
         self._mind.written(changes)
 
-    async def flush_on_stop(self, margin_seconds: float) -> None:
-        """Writes what the stop cut off, within ``margin_seconds``; a write the time or the store did not take is
-        reported and the stop goes on, and one the fence refused is left, since another pod serves him now."""
+    def stopping(self, margin_seconds: float) -> None:
+        """His stop begins now; it has ``margin_seconds`` to end."""
+        self._stop_deadline = self._boundaries.clock.now() + margin_seconds
+
+    async def flush_on_stop(self) -> None:
+        """Writes what the stop cut off, within what is left of its margin; a write the time or the store did not take
+        is reported and the stop goes on, and one the fence refused is left, since another pod serves him now."""
+        assert self._stop_deadline is not None  # noqa: S101 - a stop begins before the agent's task is cancelled
         try:
-            async with asyncio.timeout(margin_seconds):
+            async with asyncio.timeout(max(0.0, self._stop_deadline - self._boundaries.clock.now())):
                 await self.flush()
         except TimeoutError:
             self._outage.failed(STORE_TIMEOUT_CODE)
@@ -653,9 +661,16 @@ async def run_all(config: Config, boundaries: Boundaries, ownership: Ownership) 
                         group.create_task(
                             _run_loop(AgentLoop(agent, app, boundaries, mind, config.apps, lookup), agent_task)
                         )
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    # The agent's cancel lands here before the group cancels his loops and turns, so a turn it cuts
+                    # finds his mind stopping.
+                    mind.stopping()
+                    write_through.stopping(config.ownership.cancel_margin_seconds)
         finally:
             if agent_task.cancelling():
-                await write_through.flush_on_stop(config.ownership.cancel_margin_seconds)
+                await write_through.flush_on_stop()
         raise AssertionError("a loop ended")  # pragma: no cover
 
     await ownership.serve(list(agents), serve_agent, boundaries.ready.announce)

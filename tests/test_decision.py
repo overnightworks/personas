@@ -52,6 +52,7 @@ from personas.decision import (
     Accept,
     AppPlace,
     Arrived,
+    Claim,
     Due,
     Held,
     Joined,
@@ -78,6 +79,7 @@ from personas.decision import (
     budget_pause,
     call_within_bound,
     claimed,
+    cut_by_stop,
     decisive_failure,
     due_again,
     failure_code,
@@ -802,6 +804,34 @@ def test_a_released_turn_leaves_what_is_due_and_lets_the_next_one_start():
     assert after.running is False
     assert after.due == running.due
     assert claimed(after, CALL_AT_A.app, NOW) is not None
+
+
+@pytest.mark.parametrize(
+    ("meanwhile", "occasion"),
+    [
+        (Lines("g1", frozenset({3}), missed=False), Lines("g1", frozenset({1, 2, 3}), missed=False)),
+        (Lines("g2", frozenset({1}), missed=False), Lines("g2", frozenset({1}), missed=False)),
+    ],
+    ids=["same-generation", "new-generation"],
+)
+def test_a_turn_his_stop_cut_before_it_spoke_is_due_first_joined_with_what_made_its_place_due_meanwhile(
+    meanwhile, occasion
+):
+    claim = Claim(CALL_AT_A, Due(Lines("g1", frozenset({1, 2}), missed=False), NOW - 7), mark=0)
+    turns = replace(_due_in_order((CALL_AT_B, Waiting(1)), (CALL_AT_A, meanwhile)), running=True)
+
+    after = cut_by_stop(turns, claim, History((), left_out=0, heard=0))
+
+    assert list(after.due) == [CALL_AT_A, CALL_AT_B]
+    assert (after.due[CALL_AT_A].occasion, after.due[CALL_AT_A].since) == (occasion, NOW - 7)
+
+
+def test_a_turn_his_stop_cut_after_the_bound_dropped_entries_since_its_claim_counts_as_spoken_and_is_not_due():
+    claim = Claim(CALL_AT_A, Due(Waiting(1), NOW), mark=0)
+
+    after = cut_by_stop(Turns(running=True), claim, ONCE_DROPPED)
+
+    assert after.due == {}
 
 
 def test_the_places_that_leave_are_no_longer_due_and_the_rest_keep_their_order():

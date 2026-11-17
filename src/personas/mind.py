@@ -13,11 +13,13 @@ from personas.decision import (
     EMPTY_PRESENT,
     NO_TURNS,
     AppPlace,
+    Claim,
     TurnState,
     answered_into,
     backoff_delay,
     budget_pause,
     claimed,
+    cut_by_stop,
     due_again,
     held_apps,
     pause_left,
@@ -62,6 +64,8 @@ class Mind:
         self._written_changes = 0
         self._next_write = asyncio.Event()
         self._turns = resumed.turns
+        self._claim: Claim | None = None
+        self._stopping = False
         self._checkpoints = resumed.checkpoints
         self._placed = frozenset[str]()
         self._not_granted: dict[str, float] = {}
@@ -224,6 +228,7 @@ class Mind:
         if taken is None:
             return None
         self._turns, at, due = taken
+        self._claim = Claim(at, due, self._present.history.taken)
         self._change()
         return at, due
 
@@ -231,9 +236,25 @@ class Mind:
         """The seconds a pause still holds the turn of the place that has waited longest, when it is at ``app``."""
         return pause_left(self._turns, app, now)
 
+    def stopping(self) -> None:
+        """This pod stops serving him; a SIGKILL never gets here."""
+        self._stopping = True
+
+    def cut(self) -> None:
+        """The running turn was cancelled before its answer, and not for its place. While he stops, a turn that relayed
+        no call and sent no sentence leaves its place due again, so the pod that takes him over answers it once."""
+        if not self._stopping:
+            return
+        assert self._claim is not None  # noqa: S101 - a turn runs only from its claim until its release
+        turns = cut_by_stop(self._turns, self._claim, self._present.history)
+        if turns != self._turns:
+            self._turns = turns
+            self._change()
+
     def release(self) -> None:
         """The running turn ended: every loop of his may claim now."""
         self._turns = released(self._turns)
+        self._claim = None
         self.wake()
 
     def wake(self) -> None:

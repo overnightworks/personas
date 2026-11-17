@@ -860,6 +860,36 @@ def released(turns: Turns) -> Turns:
     return Turns(False, turns.due, turns.not_before)
 
 
+@dataclass(frozen=True)
+class Claim:
+    """The running turn's place, what it was due for, and how many entries his history had taken when it was claimed."""
+
+    at: AppPlace
+    due: Due
+    mark: int
+
+
+def spoke_since(history: History, mark: int) -> bool:
+    """Whether a call was relayed or a sentence sent for him since ``history`` had taken ``mark`` entries. A call of a
+    tool the app hints is read-only counts too, since the hint is only the app's word. Entries the bound dropped since
+    then may have been either, so a history that dropped any of them says he did."""
+    return history.left_out > mark or any(
+        isinstance(entry, ActDone | SaidAloud) for entry in _entered_since(history, mark)
+    )
+
+
+def cut_by_stop(turns: Turns, claim: Claim, history: History) -> Turns:
+    """The turns once his stop cut the claimed turn. One that spoke leaves nothing due, since a line said twice is worse
+    than one left unanswered. One that did not leaves its place due again first, for what it was due for joined with
+    what made it due meanwhile, so the pod that takes him over answers it once."""
+    if spoke_since(history, claim.mark):
+        return turns
+    held = turns.due.get(claim.at)
+    occasion = claim.due.occasion if held is None else _joined(claim.due.occasion, held.occasion)
+    rest = {at: due for at, due in turns.due.items() if at != claim.at}
+    return Turns(turns.running, {claim.at: Due(occasion, claim.due.since), **rest}, turns.not_before)
+
+
 def left_standing(app: str, standings: tuple[Standing, ...]) -> Callable[[AppPlace], bool]:
     """Whether a due place is one of ``app`` that is no active window place any more; a view place is one."""
     active = {AppPlace(app, place) for place in active_window_places(standings)}
