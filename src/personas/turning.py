@@ -23,18 +23,15 @@ from personas.decision import (
     Held,
     HoldOutcome,
     act_outcome,
-    arrived_since,
     call_within_bound,
     decisive_failure,
     failure_code,
-    held_told,
     hold_stated,
     hold_tellable,
     is_not_granted,
     offered_declarations,
     round_seconds,
     turn_call_bound,
-    turn_messages,
     untold_words,
 )
 from personas.entries import (
@@ -49,6 +46,7 @@ from personas.entries import (
     told_words,
 )
 from personas.failures import CallFailure, Unreachable, leaves_of, raise_if_cancelled, task_is_being_cancelled
+from personas.present import arrived_since, held_told, turn_messages
 from personas.recall import (
     LOOKUPS_SPENT_TEXT,
     RECALL_DECLARATION,
@@ -83,9 +81,10 @@ if TYPE_CHECKING:
     from personas.app_session import AppSession, SessionOpener
     from personas.clock import Clock
     from personas.config import AgentCredentials, AppTarget
-    from personas.decision import Arrived, Present, Token
+    from personas.decision import Token
     from personas.entries import History, Occasion
     from personas.mind import Mind
+    from personas.present import Arrived, Present
     from personas.recall import LookupBounds
     from personas.remembering import Remembering
     from personas.secret import Secret

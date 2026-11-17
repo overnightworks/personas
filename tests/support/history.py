@@ -8,8 +8,8 @@ from datetime import UTC, datetime, timedelta
 
 from agents.member import STANDING_URI, PlaceRef, PlaceView, Spoken
 
-from personas.decision import EMPTY_PRESENT, taken_into
 from personas.entries import ActDone, Answered, KeptLine, SaidAloud, Visit
+from personas.present import EMPTY_PRESENT, taken_into
 from tests.support.call import PERSON
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import FakeApp, active

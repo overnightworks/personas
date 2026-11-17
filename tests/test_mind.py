@@ -9,13 +9,7 @@ from datetime import UTC, datetime
 import pytest
 from agents.member import PlaceRef, PlaceView
 
-from personas.decision import (
-    BACKOFF_BASE_SECONDS,
-    BACKOFF_CAP_SECONDS,
-    TURN_CANCELLED_CODE,
-    AppPlace,
-    turn_messages,
-)
+from personas.decision import BACKOFF_BASE_SECONDS, BACKOFF_CAP_SECONDS, TURN_CANCELLED_CODE, AppPlace
 from personas.entries import (
     ActDone,
     Entry,
@@ -31,6 +25,7 @@ from personas.entries import (
     entry_size,
 )
 from personas.mind import Mind
+from personas.present import turn_messages
 
 READ_AT = datetime(2026, 11, 11, 20, 0, tzinfo=UTC)
 CALL = Visit("https://app.test/mcp", PlaceRef(kind="call", id="room-7"), "generation-1")

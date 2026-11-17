@@ -4,16 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from personas.decision import (
-    EMPTY_PRESENT,
-    Present,
-    answered_into,
-    history_delta,
-    present_of,
-    taken_into,
-    turn_messages,
-)
 from personas.entries import HistoryDelta, KeptHistory, Lines, TurnTold, entry_size
+from personas.present import EMPTY_PRESENT, Present, answered_into, history_delta, present_of, taken_into, turn_messages
 from tests.support.history import APP, LATER, MORNING, ROOMY_BYTES, an_act, said
 
 if TYPE_CHECKING:
