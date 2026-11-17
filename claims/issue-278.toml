@@ -1,7 +1,0 @@
-claim_id = "f06ebbfb386748b8a0bec387b4e750b7"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "99524de76de807000fa13603d6ad65f1fed73b73"
-branch = "claude/issue-278-personas-reviewed-against-the-contract-i"
-scope = ["docs/VISION.md"]
-opened_commit = "692efc0e7cb9256901caeaa6c69fa81cfbaca903"
