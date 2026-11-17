@@ -3,6 +3,6 @@ agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
 role = "builder"
 base = "4b0dd10671f91a34e325cc9d2f287fce6b91b9ba"
 branch = "claude/issue-268-a-turn-a-graceful-stop-cut-before-it-spo"
-scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/decision.py", "src/personas/entries.py", "src/personas/loop.py", "src/personas/memory.py", "tests"]
+scope = ["README.md", "docs/ARCHITECTURE.md", "src/personas/decision.py", "src/personas/entries.py", "src/personas/loop.py", "src/personas/memory.py", "src/personas/mind.py", "src/personas/ownership.py", "tests"]
 opened_commit = "526ece731a5792fea0d21df572252ac4f658dbd4"
 whole_reason = "one rule for a cut turn's line, which only the two-process takeover proves"
