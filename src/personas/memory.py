@@ -140,6 +140,7 @@ _AGENT_TURNS: Final = Table(
     MetaData(),
     Column("client_id", Text, primary_key=True),
     Column("turns", Text),
+    Column("generation", BigInteger),
 )
 _AGENT_OWNER: Final = Table(
     "agent_owner",
@@ -462,7 +463,8 @@ class PostgresHistoryStore(_PostgresStore):
     """
 
     async def take_over(self, client_id: str) -> int:
-        """Renews the agent's generation and returns it: every write with an older one is refused from now on."""
+        """Renews the agent's generation and returns it: every write with an older one is refused from now on. His kept
+        turns come along when they are of the generation before; older ones are dropped, so he resumes without any."""
         statement = (
             insert(_AGENT_OWNER)
             .values(client_id=client_id, generation=1)
@@ -470,7 +472,14 @@ class PostgresHistoryStore(_PostgresStore):
             .returning(_AGENT_OWNER.c.generation)
         )
         async with self._bounded_transaction() as connection:
-            return (await connection.execute(statement)).scalar_one()
+            generation = (await connection.execute(statement)).scalar_one()
+            await connection.execute(_turns_carried(_AGENT_OWNER.c.client_id == client_id))
+            await connection.execute(
+                delete(_AGENT_TURNS).where(
+                    _AGENT_TURNS.c.client_id == client_id, _AGENT_TURNS.c.generation != generation
+                )
+            )
+            return generation
 
     async def generation(self, client_id: str) -> int | None:
         """The agent's current generation; none before his first owner took him."""
@@ -493,8 +502,10 @@ class PostgresHistoryStore(_PostgresStore):
             stored = json.dumps(stored_turns(turns), ensure_ascii=False)
             await connection.execute(
                 insert(_AGENT_TURNS)
-                .values(client_id=client_id, turns=stored)
-                .on_conflict_do_update(index_elements=[_AGENT_TURNS.c.client_id], set_={"turns": stored})
+                .values(client_id=client_id, turns=stored, generation=generation)
+                .on_conflict_do_update(
+                    index_elements=[_AGENT_TURNS.c.client_id], set_={"turns": stored, "generation": generation}
+                )
             )
             if delta is not None:
                 await self._append(connection, client_id, delta)
@@ -584,7 +595,8 @@ class PostgresMemory(_PostgresStore):
 
     An erase renews the generation of each agent it erases in the same transaction, so his owner's next write is
     refused: the owner stops him and takes him over again from the erased history, instead of writing back what it
-    still holds in memory. His kept turns stay, so where reading his places stands holds across the erase."""
+    still holds in memory. His kept turns stay and come along to the renewed generation, so where reading his places
+    stands holds across the erase."""
 
     async def erase_agent(self, client_id: str) -> MemoryErased:
         """Deletes the agent's lines and history in one transaction, renewing his generation, and returns how much."""
@@ -592,17 +604,20 @@ class PostgresMemory(_PostgresStore):
             delete(_LINES).where(_LINES.c.client_id == client_id),
             delete(_HISTORY_ENTRIES).where(_HISTORY_ENTRIES.c.client_id == client_id),
             delete(_ANSWERED_TURNS).where(_ANSWERED_TURNS.c.client_id == client_id),
-            _renewed(_AGENT_OWNER.c.client_id == client_id),
+            _AGENT_OWNER.c.client_id == client_id,
         )
 
     async def erase_all(self) -> MemoryErased:
         """Deletes every agent's lines and history in one transaction, renewing every generation, and returns how
         much; the schema stays."""
-        return await self._erase(delete(_LINES), delete(_HISTORY_ENTRIES), delete(_ANSWERED_TURNS), _renewed(true()))
+        return await self._erase(delete(_LINES), delete(_HISTORY_ENTRIES), delete(_ANSWERED_TURNS), true())
 
-    async def _erase(self, lines: Delete, entries: Delete, answered_turns: Delete, owners: Update) -> MemoryErased:
+    async def _erase(
+        self, lines: Delete, entries: Delete, answered_turns: Delete, owners: ColumnElement[bool]
+    ) -> MemoryErased:
         async with self._bounded_transaction() as connection:
-            await connection.execute(owners)
+            await connection.execute(_renewed(owners))
+            await connection.execute(_turns_carried(owners))
             erased_lines = (await connection.execute(lines)).rowcount
             erased_entries = (await connection.execute(entries)).rowcount
             return MemoryErased(erased_lines, erased_entries, (await connection.execute(answered_turns)).rowcount)
@@ -611,3 +626,21 @@ class PostgresMemory(_PostgresStore):
 def _renewed(owners: ColumnElement[bool]) -> Update:
     """Renews the generation of each agent ``owners`` selects; an agent never taken has none to renew."""
     return update(_AGENT_OWNER).where(owners).values(generation=_RENEWED_GENERATION)
+
+
+def _turns_carried(owners: ColumnElement[bool]) -> Update:
+    """Carries the kept turns of each agent ``owners`` selects to his renewed generation, when they are of the one just
+    before it.
+
+    A release that keeps no turns renews the generation without carrying them and writes his history past them, so
+    turns of any older generation no longer say where reading his places stands.
+    """
+    return (
+        update(_AGENT_TURNS)
+        .where(
+            _AGENT_TURNS.c.client_id == _AGENT_OWNER.c.client_id,
+            _AGENT_TURNS.c.generation == _AGENT_OWNER.c.generation - 1,
+            owners,
+        )
+        .values(generation=_AGENT_OWNER.c.generation)
+    )

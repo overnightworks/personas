@@ -14,4 +14,5 @@ def upgrade() -> None:
         "agent_turns",
         sa.Column("client_id", sa.Text, primary_key=True),
         sa.Column("turns", sa.Text, nullable=False),
+        sa.Column("generation", sa.BigInteger, nullable=False),
     )

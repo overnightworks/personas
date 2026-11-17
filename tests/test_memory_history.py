@@ -23,7 +23,7 @@ from personas.entries import (
     ViewSeen,
 )
 from personas.failures import StaleGenerationError, StoreDefect
-from personas.memory import PostgresHistoryStore
+from personas.memory import PostgresHistoryStore, PostgresMemory
 from tests.support.history import APP, LATER, MORNING, TABLE, a_sentence, a_view, an_act, said
 from tests.support.postgres import run_sql, uncommitted_behind_a_lock, until_a_statement_waits
 
@@ -166,6 +166,49 @@ async def test_the_turns_written_last_load_with_the_history_whether_a_delta_came
     await histories.write(AGENT, mine, None, paused)
 
     assert await histories.load(AGENT) == KeptHistory(0, (said(1, "kept"),), 0, (), paused)
+
+
+def some_turns() -> KeptTurns:
+    reading = Reading("first-generation", 3, VoiceState.UNAVAILABLE)
+    due = KeptDue(APP, TABLE, Lines("first-generation", frozenset({4}), missed=False, traceparent=None))
+    return KeptTurns((KeptCheckpoint(APP, TABLE, reading),), (due,), 1, LATER)
+
+
+async def nothing_between(database: DatabaseTarget) -> None:
+    pass
+
+
+async def erased(database: DatabaseTarget) -> None:
+    memory = PostgresMemory(database)
+    try:
+        await memory.erase_agent(AGENT)
+    finally:
+        await memory.close()
+
+
+async def taken_over_by_a_release_that_keeps_no_turns(database: DatabaseTarget) -> None:
+    run_sql(database, "UPDATE agent_owner SET generation = generation + 1")
+
+
+@pytest.mark.parametrize(
+    ("between", "resumed"),
+    [
+        (nothing_between, some_turns()),
+        (erased, some_turns()),
+        (taken_over_by_a_release_that_keeps_no_turns, NO_TURNS_KEPT),
+    ],
+    ids=["nothing", "an erase", "a release that keeps no turns"],
+)
+async def test_a_takeover_resumes_the_turns_unless_a_release_that_keeps_none_served_him_since(
+    histories, database, between, resumed
+):
+    mine = await histories.take_over(AGENT)
+    await histories.write(AGENT, mine, None, some_turns())
+    await between(database)
+
+    await histories.take_over(AGENT)
+
+    assert (await histories.load(AGENT)).turns == resumed
 
 
 @pytest.mark.parametrize(
