@@ -276,7 +276,9 @@ async def test_a_pause_the_killed_holder_left_holds_the_turn_on_the_pod_that_tak
     )
 
     await holder.kill()
-    await pods.gateway.until_requested(REFUSALS_BEFORE_A_LONG_PAUSE + 1)
+    await until(
+        lambda: pods.gateway.arrivals > REFUSALS_BEFORE_A_LONG_PAUSE, "the pod that took over asked for the turn"
+    )
     requested_at = time.monotonic()
     await pods.app.said_count(1)
 
