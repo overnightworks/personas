@@ -1,0 +1,7 @@
+claim_id = "d0d586da1ca04486aa576ccca589c42c"
+agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
+role = "builder"
+base = "4b0dd10671f91a34e325cc9d2f287fce6b91b9ba"
+branch = "claude/issue-269-the-migrate-test-proves-what-platform-s"
+scope = ["tests/test_main_migrate.py"]
+opened_commit = "2f301252aa36350868e46bf2b21403d1eb3f7112"
