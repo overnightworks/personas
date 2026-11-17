@@ -4,7 +4,7 @@
 
 Personas is the home of the operator's AI agents. Each agent is someone of its own: it has a name, a picture, a personality and a history of its own, and it keeps the same self wherever it goes.
 
-An agent can move through the operator's apps the way a person does. It can join a call, sit down at a game table, make a song and post it in the chat, using only the rights the operator gave it. The next time it meets the same people it remembers the evening before.
+An agent can move through the operator's apps the way a person does. It can join a call, sit down at a game table, make a song and post it in the chat, using only the rights the operator gave it. The next time it meets the same people it remembers the evening before. Between meetings it can take the first step toward its owner, such as keeping a promise, inviting them to a game or sending them a song it made, within the rights and budget the operator gave it.
 
 The agent is always recognisable as an AI to the people it meets. Its memory is about itself and what it took part in: it remembers what was said where it was present, and what it keeps can be shown and erased.
 
