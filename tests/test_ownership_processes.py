@@ -207,6 +207,27 @@ async def test_an_erase_refuses_the_holders_next_write_so_he_stops_and_serves_th
     assert len(second.texts) == len(first.texts)
 
 
+async def test_a_line_taken_just_before_an_erase_refused_the_write_that_held_it_gets_one_turn_once_he_is_served_again(
+    pods, database
+):
+    pods.script_gateway(*says(PLACE_ID, FIRST_ANSWER, SECOND_ANSWER))
+    pods.app.stand(AGENT_SUBJECT, active(PLACE_ID))
+    holder = pods.start("first")
+    await until(lambda: is_listening(holder, AGENT), "the holder serves the agent")
+    await until(lambda: pods.app.window_reads(PLACE_ID) > 0, "the holder read the place")
+    first_line = pods.app.speak(PLACE_ID, PERSON, "Ada", ADDRESSED)
+    await pods.app.said_count(1)
+    await until(lambda: answered_turns_kept(database, AGENT) == 1, "the holder kept the answered turn")
+
+    assert await pods.command("first", "memory", "erase", "--agent", AGENT) == 0
+    line = pods.app.speak(PLACE_ID, PERSON, "Ada", LATER_LINE)
+    await until(lambda: holder.lines("agent.lost", AGENT), "the holder stopped the agent")
+    await pods.app.said_count(2)
+
+    assert [turn.woke_seqs for turn in pods.gateway.turns("lines")] == [[first_line], [line]]
+    assert pods.calls_of("first", "say") == 2
+
+
 async def test_a_line_said_while_the_holder_is_dead_gets_exactly_one_turn_on_the_pod_that_takes_over(pods):
     pods.script_gateway(*says(PLACE_ID, FIRST_ANSWER, SECOND_ANSWER))
     pods.app.stand(AGENT_SUBJECT, active(PLACE_ID))
