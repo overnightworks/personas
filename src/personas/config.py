@@ -19,7 +19,8 @@ step until what stays fits ``history_keep_bytes``, which is never above ``histor
 ``budget_pause_cap_seconds`` is the longest wait between his turns while the gateway refuses them for a spent budget.
 The required ``[database]`` table names the Postgres database the runner shares with its other pods: its host, port,
 database, user, the file holding the password and ``write_seconds``, the bound on one write or read. A pod serves an
-agent only while it holds that agent's advisory lock there. The optional ``[ownership]`` table sets how the pods
+agent only while it holds that agent's advisory lock there, so two client ids whose locks share one key are
+refused. The optional ``[ownership]`` table sets how the pods
 share the agents: ``contend_seconds`` is how often a pod checks its locks and takes the free ones,
 ``heartbeat_timeout_seconds`` how long one such check may take, ``cancel_margin_seconds`` the time a pod that lost
 its hold is given to stop its loops and ``grace_seconds`` how long a pod that took an agent waits before it
@@ -57,6 +58,7 @@ from pydantic import (
 )
 
 from personas.decision import BACKOFF_BASE_SECONDS, DEFAULT_BUDGET_PAUSE_CAP_SECONDS, TURN_ROLE
+from personas.locks import key_of
 from personas.recall import SMALLEST_RESULT_BYTES
 from personas.secret import Secret
 
@@ -293,6 +295,8 @@ class _FileModel(_Entry):
     def _one_entry_per_agent(cls, agents: tuple[_AgentEntry, ...]) -> tuple[_AgentEntry, ...]:
         if len({agent.client_id for agent in agents}) != len(agents):
             raise ValueError("a client_id is listed twice")
+        if len({key_of(agent.client_id) for agent in agents}) != len(agents):
+            raise ValueError("two client_ids share one lock key; rename one of them")
         return agents
 
     @classmethod

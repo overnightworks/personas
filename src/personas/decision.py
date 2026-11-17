@@ -10,6 +10,7 @@ import json
 import math
 import re
 from dataclasses import dataclass, field, replace
+from datetime import timedelta
 from enum import StrEnum
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Final
@@ -42,10 +43,14 @@ from personas.entries import (
     Entry,
     History,
     HistoryDelta,
+    KeptCheckpoint,
+    KeptDue,
     KeptHistory,
     KeptLine,
+    KeptTurns,
     Lines,
     Occasion,
+    Reading,
     SaidAloud,
     SpeechOutcome,
     TurnTold,
@@ -63,6 +68,7 @@ from personas.recall import RECALL_TOOL
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
+    from datetime import datetime
 
     from agents.member import FigureRef, Invitation, VoiceName
     from agents.tools import ToolDeclaration, ToolOutcome
@@ -442,16 +448,6 @@ class Joined:
 @dataclass(frozen=True)
 class Paused:
     """The sponsor is away: lines said meanwhile are never taken."""
-
-
-@dataclass(frozen=True)
-class Reading:
-    """What the last read of a window stated: its generation, the last seq taken and, when the app stated one, the
-    state of his voice at the place."""
-
-    generation: str
-    last_seq: int
-    voice_state: VoiceState | None = None
 
 
 type Checkpoint = Restarted | Joined | Paused | Reading
@@ -868,6 +864,50 @@ def left_standing(app: str, standings: tuple[Standing, ...]) -> Callable[[AppPla
     """Whether a due place is one of ``app`` that is no active window place any more; a view place is one."""
     active = {AppPlace(app, place) for place in active_window_places(standings)}
     return lambda at: at.app == app and at not in active
+
+
+@dataclass(frozen=True)
+class TurnState:
+    """What a pod that takes him over needs of his turns: the turns, where reading each of his window places stands,
+    and how many of his turns in a row ended without an answer."""
+
+    turns: Turns = field(default_factory=Turns)
+    checkpoints: Mapping[AppPlace, Checkpoint] = field(default_factory=dict[AppPlace, Checkpoint])
+    unanswered: int = 0
+
+
+NO_TURNS: Final = TurnState()
+"""The turns of an agent no pod served before: none due, no checkpoint, no pause."""
+
+
+def pause_deadline(not_before: float, now: float, wall: datetime) -> datetime | None:
+    """The wall time at which a pause that holds his turns until ``not_before`` ends, read at ``now`` on the same
+    monotonic scale and at ``wall``; none once it is over."""
+    return wall + timedelta(seconds=not_before - now) if not_before > now else None
+
+
+def kept_turns(state: TurnState, paused_until: datetime | None) -> KeptTurns:
+    """His turns as the store keeps them. A running turn is not kept, so a pod that takes him over never answers what
+    it was answering again; a place whose window was said before or while its sponsor was away keeps no checkpoint,
+    since it resumes as such."""
+    checkpoints = tuple(
+        KeptCheckpoint(at.app, at.place, None if isinstance(checkpoint, Joined) else checkpoint)
+        for at, checkpoint in state.checkpoints.items()
+        if isinstance(checkpoint, Joined | Reading)
+    )
+    due = tuple(KeptDue(at.app, at.place, held.occasion) for at, held in state.turns.due.items())
+    return KeptTurns(checkpoints, due, state.unanswered, paused_until)
+
+
+def resumed_turns(kept: KeptTurns, now: float, wall: datetime, since: float) -> TurnState:
+    """The turns a pod resumes him with at ``now`` and ``wall``: each kept due place due from ``since``, a
+    ``time.perf_counter`` value, in the kept order, and the kept pause holding his turns for what is left of it."""
+    left = 0.0 if kept.paused_until is None else max(0.0, (kept.paused_until - wall).total_seconds())
+    due = {AppPlace(held.app, held.place): Due(held.occasion, since) for held in kept.due}
+    checkpoints: dict[AppPlace, Checkpoint] = {
+        AppPlace(held.app, held.place): Joined() if held.reading is None else held.reading for held in kept.checkpoints
+    }
+    return TurnState(Turns(due=due, not_before=now + left), checkpoints, kept.unanswered)
 
 
 class WakeReason(StrEnum):

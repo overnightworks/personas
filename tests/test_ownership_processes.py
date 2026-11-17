@@ -11,7 +11,7 @@ from agents.backend.fake_gateway import tool_round
 
 from personas.config import OwnershipTimings
 from tests.support.call import ADDRESSED, PERSON, PLACE_ID
-from tests.support.gateway import say, says
+from tests.support.gateway import BUDGET_SPENT, say, says
 from tests.support.hopin import AGENT_SUBJECT, active
 from tests.support.pods import SECOND_AGENT, Pods, Runner, serving_pods, until
 from tests.support.postgres import answered_turns_kept, lock_holders, terminate_backend
@@ -33,6 +33,10 @@ SECOND_ANSWER = "the second answer"
 LATER_LINE = "And are you still there?"
 AN_ACT = "Ada plays the queen."
 STALE_GENERATION = "generation_stale"
+REFUSALS_BEFORE_A_LONG_PAUSE = 4
+"""Turns refused for a spent budget in a row until the pause outlasts a takeover: it doubles from one second."""
+EARLY_LOG_SECONDS = 0.5
+"""How much later than the pause began its line may reach the test."""
 
 
 @pytest.fixture
@@ -201,3 +205,83 @@ async def test_an_erase_refuses_the_holders_next_write_so_he_stops_and_serves_th
     first, second = pods.gateway.turns("lines")
     assert first.texts[-1] not in second.texts
     assert len(second.texts) == len(first.texts)
+
+
+async def test_a_line_taken_just_before_an_erase_refused_the_write_that_held_it_gets_one_turn_once_he_is_served_again(
+    pods, database
+):
+    pods.script_gateway(*says(PLACE_ID, FIRST_ANSWER, SECOND_ANSWER))
+    pods.app.stand(AGENT_SUBJECT, active(PLACE_ID))
+    holder = pods.start("first")
+    await until(lambda: is_listening(holder, AGENT), "the holder serves the agent")
+    await until(lambda: pods.app.window_reads(PLACE_ID) > 0, "the holder read the place")
+    first_line = pods.app.speak(PLACE_ID, PERSON, "Ada", ADDRESSED)
+    await pods.app.said_count(1)
+    await until(lambda: answered_turns_kept(database, AGENT) == 1, "the holder kept the answered turn")
+
+    assert await pods.command("first", "memory", "erase", "--agent", AGENT) == 0
+    line = pods.app.speak(PLACE_ID, PERSON, "Ada", LATER_LINE)
+    await until(lambda: holder.lines("agent.lost", AGENT), "the holder stopped the agent")
+    await pods.app.said_count(2)
+
+    assert [turn.woke_seqs for turn in pods.gateway.turns("lines")] == [[first_line], [line]]
+    assert pods.calls_of("first", "say") == 2
+
+
+async def test_a_line_said_while_the_holder_is_dead_gets_exactly_one_turn_on_the_pod_that_takes_over(pods):
+    pods.script_gateway(*says(PLACE_ID, FIRST_ANSWER, SECOND_ANSWER))
+    pods.app.stand(AGENT_SUBJECT, active(PLACE_ID))
+    holder, _ = await holder_and_other(pods)
+    await until(lambda: pods.app.window_reads(PLACE_ID) > 0, "the holder read the place")
+
+    await holder.kill()
+    line = pods.app.speak(PLACE_ID, PERSON, "Ada", ADDRESSED)
+    await pods.app.said_count(1)
+    later_line = pods.app.speak(PLACE_ID, PERSON, "Ada", LATER_LINE)
+    await pods.app.said_count(2)
+
+    woken = [turn.woke_seqs for turn in pods.gateway.turns("lines")]
+    assert (woken[0], len(woken), max(woken[1])) == ([line], 2, later_line)
+    assert (pods.calls_of("first", "say"), pods.calls_of("second", "say")) == (0, 2)
+
+
+async def test_a_line_the_killed_holders_turn_was_answering_gets_no_turn_on_the_pod_that_takes_over(pods):
+    pods.script_gateway(*says(PLACE_ID, FIRST_ANSWER, SECOND_ANSWER))
+    pods.app.stand(AGENT_SUBJECT, active(PLACE_ID))
+    holder, other = await holder_and_other(pods)
+    await until(lambda: pods.app.window_reads(PLACE_ID) > 0, "the holder read the place")
+    pods.gateway.hold_request(1)
+    pods.app.speak(PLACE_ID, PERSON, "Ada", ADDRESSED)
+    await pods.gateway.until_requested(1)
+
+    await holder.kill()
+    await until(lambda: is_listening(other, AGENT), "the other pod listens for the agent")
+    reads_by_the_holder = pods.app.window_reads(PLACE_ID)
+    await until(lambda: pods.app.window_reads(PLACE_ID) > reads_by_the_holder, "the other pod read the place")
+    later_line = pods.app.speak(PLACE_ID, PERSON, "Ada", LATER_LINE)
+    await pods.app.said_count(1)
+
+    assert [turn.woke_seqs for turn in pods.gateway.turns("lines")] == [[later_line]]
+    assert (pods.calls_of("first", "say"), pods.calls_of("second", "say")) == (0, 1)
+
+
+async def test_a_pause_the_killed_holder_left_holds_the_turn_on_the_pod_that_takes_over_until_it_ends(pods):
+    pods.script_gateway(*[BUDGET_SPENT] * REFUSALS_BEFORE_A_LONG_PAUSE, *says(PLACE_ID, FIRST_ANSWER))
+    pods.app.stand(AGENT_SUBJECT, active(PLACE_ID))
+    holder, _ = await holder_and_other(pods)
+    await until(lambda: pods.app.window_reads(PLACE_ID) > 0, "the holder read the place")
+    pods.app.speak(PLACE_ID, PERSON, "Ada", ADDRESSED)
+    await until(
+        lambda: len(holder.lines("turns.paused", AGENT)) == REFUSALS_BEFORE_A_LONG_PAUSE, "the holder paused long"
+    )
+
+    await holder.kill()
+    await until(
+        lambda: pods.gateway.arrivals > REFUSALS_BEFORE_A_LONG_PAUSE, "the pod that took over asked for the turn"
+    )
+    requested_at = time.monotonic()
+    await pods.app.said_count(1)
+
+    paused_at, paused = holder.lines("turns.paused", AGENT)[-1]
+    assert requested_at >= paused_at + paused["pause_ms"] / 1000 - EARLY_LOG_SECONDS
+    assert (pods.calls_of("first", "say"), pods.calls_of("second", "say")) == (0, 1)

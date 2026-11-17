@@ -18,11 +18,9 @@ from agents.turn import Principal
 from logline.testing import configured
 
 from personas.app_session import READ_SECONDS, open_mcp_session
-from personas.config import DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES, MemoryTarget, Voice, load_config
-from personas.decision import DEFAULT_BUDGET_PAUSE_CAP_SECONDS
+from personas.config import MemoryTarget, Voice, load_config
 from personas.loop import AgentLoop, Boundaries
 from personas.main import SweepingBoundaries, run_with_sweep
-from personas.mind import Mind
 from personas.readiness import FileReadyMarker
 from personas.reporting import carry_trace, log_state_change
 from personas.secret import Secret
@@ -37,6 +35,7 @@ from tests.support.fakes import (
     app_target,
     credentials,
     grant,
+    unstored_mind,
 )
 from tests.support.gateway import Gateway, RoundBackend
 from tests.support.hopin import AGENT_SUBJECT, ISSUER, PLAY_TOOL, FakeApp, configure_logging_into, formatted
@@ -84,7 +83,7 @@ class Scenario:
             credentials(),
             app_target(),
             boundaries,
-            Mind(DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES, DEFAULT_BUDGET_PAUSE_CAP_SECONDS),
+            unstored_mind(),
             (app_target(),),
             None,
         )

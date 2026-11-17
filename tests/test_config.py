@@ -109,6 +109,14 @@ def test_a_file_that_cannot_be_read_stops_the_start_and_names_its_path(files, mo
         (lambda text: text + "max_turns = 50\nturn_period_seconds = 3600\n", "turn_period_seconds"),
         (lambda text: text + APP_TABLE, "apps"),
         (lambda text: text + "[[agents]]" + text.split("[[agents]]")[1], "agents"),
+        (
+            lambda text: (
+                text.replace('"agent-mozart"', '"agent-43985"')
+                + "[[agents]]"
+                + text.split("[[agents]]")[1].replace('"agent-mozart"', '"agent-56563"')
+            ),
+            "agents",
+        ),
         (lambda text: text.replace("[[agents]]", "[[agents"), "TOML"),
         (lambda text: _with_ready_file(text, None), "ready_file"),
         (lambda text: _with_ready_file(text, ""), "ready_file"),
@@ -132,6 +140,7 @@ def test_a_file_that_cannot_be_read_stops_the_start_and_names_its_path(files, mo
         "turn_period_seconds set",
         "app URL listed twice",
         "client id listed twice",
+        "client ids whose lock keys collide",
         "not TOML",
         "ready file missing",
         "ready file empty",

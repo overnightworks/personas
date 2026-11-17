@@ -32,15 +32,17 @@ from personas.decision import (
     history_delta,
     is_defect,
     is_voice_app,
+    kept_turns,
     left_out_for,
     left_standing,
     lends_tools,
+    pause_deadline,
     perceive,
     present_of,
     reaction_to,
     renewal_due,
+    resumed_turns,
     speaks_aloud,
-    sync_checkpoints,
     sync_turned_revisions,
     turn_ending,
     turn_invalid,
@@ -48,7 +50,15 @@ from personas.decision import (
     waking_line,
 )
 from personas.entries import Lines, ViewSeen, Visit, Waiting, WindowRead, taken_lines
-from personas.failures import CallFailure, StoreUnavailable, leaves_of, raise_if_cancelled
+from personas.failures import (
+    STORE_TIMEOUT_CODE,
+    CallFailure,
+    StaleGenerationError,
+    StoreDefect,
+    StoreUnavailable,
+    leaves_of,
+    raise_if_cancelled,
+)
 from personas.mind import Mind
 from personas.recall import LookupBounds
 from personas.remembering import LineStore, Remembering
@@ -70,7 +80,7 @@ if TYPE_CHECKING:
     from personas.app_session import AppSession, SessionOpener
     from personas.clock import Clock
     from personas.config import AgentCredentials, AppTarget, Config
-    from personas.decision import Checkpoint
+    from personas.entries import KeptTurns
     from personas.ownership import Owned, Ownership
     from personas.readiness import ReadyMarker
     from personas.tokens import TokenSource
@@ -166,7 +176,6 @@ class AgentLoop:
         self._suspension: str | None = None
         self._backing_off = False
         self._standings: tuple[Standing, ...] = ()
-        self._checkpoints: dict[PlaceRef, Checkpoint] = {}
         self._turned_revisions: dict[PlaceRef, int] = {}
         self._turn: ActiveTurn | None = None
         self._pause_wake: asyncio.Task[None] | None = None
@@ -256,7 +265,7 @@ class AgentLoop:
         standing = await session.read_standing()
         self._resume_if_unwell()
         self._memory = forget_gone(self._memory, standing.standings)
-        self._checkpoints = sync_checkpoints(self._checkpoints, standing.standings, self._standings)
+        self._mind.sync_checkpoints(self._app.mcp_url, standing.standings, self._standings)
         self._standings = standing.standings
         self._turned_revisions = sync_turned_revisions(self._turned_revisions, standing.standings)
         self._mind.undue(left_standing(self._app.mcp_url, standing.standings))
@@ -312,7 +321,7 @@ class AgentLoop:
             await self._use_current_token(session)
             refusal = await session.accept(accept)
             if refusal is None:
-                self._checkpoints[accept.place] = Joined()
+                self._mind.move_checkpoint(AppPlace(self._app.mcp_url, accept.place), Joined())
                 self._report(Event.JOINED)
                 continue
             self._memory, is_news = after_refusal(self._memory, accept, refusal)
@@ -332,7 +341,7 @@ class AgentLoop:
             await self._use_current_token(session)
             window = await session.read_place(place)
             if window is None:
-                del self._checkpoints[place]
+                self._mind.move_checkpoint(AppPlace(self._app.mcp_url, place), None)
                 lost = True
                 continue
             read_at = self._boundaries.clock.wall()
@@ -375,7 +384,8 @@ class AgentLoop:
 
     async def _start_due_turn(self, turns: asyncio.TaskGroup) -> None:
         """Starts the turn of the place that has waited longest when it is in this app and none of his runs. The claim
-        and the turn's start share one synchronous step."""
+        and the turn's start share one synchronous step; the turn waits until the claim is kept, so a pod that takes
+        him over before then answers the place instead of him."""
         setup = self._turn_setup
         if setup is None:
             return
@@ -386,13 +396,14 @@ class AgentLoop:
             self._wake_when_pause_over(turns, now)
             return
         at, due = claim
+        claimed = self._mind.changes()
         occasion = due.occasion
         if isinstance(occasion, Waiting):
             self._turned_revisions[at.place] = occasion.revision
-        aloud = speaks_aloud(self._voice_app, occasion, self._checkpoints.get(at.place))
+        aloud = speaks_aloud(self._voice_app, occasion, self._mind.checkpoint(at))
         apps = self._mind.held_apps(self._app.mcp_url)
         admitted = Admitted(facts, at.place, occasion, self._mind.present, self._boundaries.clock.wall(), aloud, apps)
-        self._start_turn(turns, setup, at.place, admitted, due.since)
+        self._start_turn(turns, setup, at.place, admitted, due.since, claimed)
 
     def _wake_when_pause_over(self, turns: asyncio.TaskGroup, now: float) -> None:
         """A pause holds the turn of the place at this app that has waited longest: one waiter of this loop wakes
@@ -408,17 +419,26 @@ class AgentLoop:
     def _take_lines(self, place: PlaceRef, window: PlaceWindow, read_at: datetime, *, serves_view: bool) -> None:
         """Moves the place's checkpoint and takes the new lines into the agent's history; ``waking_line`` decides
         whether they make a turn due, and in whose trace. No await stands in it."""
-        perception = perceive(window, self._checkpoints[place])
-        self._checkpoints[place] = perception.checkpoint
+        at = AppPlace(self._app.mcp_url, place)
+        checkpoint = self._mind.checkpoint(at)
+        assert checkpoint is not None  # noqa: S101 - the standing read before gave every active window place one
+        perception = perceive(window, checkpoint)
+        self._mind.move_checkpoint(at, perception.checkpoint)
         self._mind.take(taken_lines(Visit(self._app.mcp_url, place, window.generation), perception.new, read_at))
         waking = waking_line(perception.new, serves_view=serves_view)
         if waking is not None:
             seqs = frozenset(line.seq for line in perception.new)
             lines = Lines(window.generation, seqs, perception.missed, waking.traceparent)
-            self._mind.due(AppPlace(self._app.mcp_url, place), lines, time.perf_counter())
+            self._mind.due(at, lines, time.perf_counter())
 
     def _start_turn(
-        self, turns: asyncio.TaskGroup, setup: TurnSetup, place: PlaceRef, admitted: Admitted, due_since: float
+        self,
+        turns: asyncio.TaskGroup,
+        setup: TurnSetup,
+        place: PlaceRef,
+        admitted: Admitted,
+        due_since: float,
+        claimed: int,
     ) -> None:
         """Starts the turn in the trace of what made it due, or in a trace of its own when that carries none or one
         logline cannot read; its task, its done callback and its step lines share that trace and the loop's own lines
@@ -432,9 +452,14 @@ class AgentLoop:
                 started_at=min(due_since, time.perf_counter()),
             ).end()
             tally = start_turn_tally(self._agent.client_id, self._app.mcp_url)
-            task = turns.create_task(self._turning.take(setup, admitted, TaskRecord(), tally))
+            task = turns.create_task(self._take_once_kept(claimed, setup, admitted, tally))
             self._turn = ActiveTurn(task, place, tally)
             task.add_done_callback(self._turn_over)
+
+    async def _take_once_kept(self, claimed: int, setup: TurnSetup, admitted: Admitted, tally: TurnTally) -> None:
+        """Takes the turn once the ``claimed``-th change of his mind, its claim, is kept in the store."""
+        await self._mind.until_written(claimed)
+        await self._turning.take(setup, admitted, TaskRecord(), tally)
 
     def _turn_over(self, task: asyncio.Task[None]) -> None:
         """The one writer of ``turn.ended``, whatever way the task ended."""
@@ -532,32 +557,71 @@ async def _run_loop(loop: AgentLoop, agent_task: asyncio.Task[object]) -> None:
     return await ending_loud_when_cancelled(loop.run(), partial(unrequested_unless_cancelling, agent_task))
 
 
-async def _write_through(mind: Mind, owned: Owned, boundaries: Boundaries) -> NoReturn:
-    """Writes what his present gained after each take and each answered turn. A write the store could not take is
-    reported once per outage and retried after a backoff, with whatever was gained meanwhile; a write the fence refused
-    raises ``StaleGenerationError``, which stops him on this pod."""
-    written = mind.present
-    outage = StoreOutage(lambda event, code: boundaries.report(StateChange(event, owned.client_id, None, code)))
-    failures = 0
-    changed = mind.present_changed()
-    while True:
-        await changed.wait()
-        changed.clear()
-        current = mind.present
-        delta = history_delta(written, current)
-        if delta is None:
-            continue
-        try:
-            await owned.write(delta)
-        except StoreUnavailable as unavailable:
-            outage.failed(unavailable.code)
-            failures += 1
-            changed.set()
-            await boundaries.clock.sleep(backoff_delay(failures))
-            continue
-        outage.answered()
+class _WriteThrough:
+    """Writes what his present gained and how his turns changed, after each change of his mind. A write the store
+    could not take is reported once per outage and retried after a backoff, with whatever changed meanwhile; a write
+    the fence refused raises ``StaleGenerationError``, which stops him on this pod."""
+
+    def __init__(self, mind: Mind, owned: Owned, boundaries: Boundaries) -> None:
+        self._mind = mind
+        self._owned = owned
+        self._boundaries = boundaries
+        self._outage = StoreOutage(
+            lambda event, code: boundaries.report(StateChange(event, owned.client_id, None, code))
+        )
+        self._written = mind.present
+        self._written_turns: KeptTurns = owned.history.turns
+        self._paused = (mind.turn_state().turns.not_before, owned.history.turns.paused_until)
+
+    async def run(self) -> NoReturn:
         failures = 0
-        written = current
+        changed = self._mind.changed()
+        while True:
+            await changed.wait()
+            changed.clear()
+            try:
+                await self.flush()
+            except StoreUnavailable as unavailable:
+                self._outage.failed(unavailable.code)
+                failures += 1
+                changed.set()
+                await self._boundaries.clock.sleep(backoff_delay(failures))
+                continue
+            self._outage.answered()
+            failures = 0
+
+    async def flush(self) -> None:
+        """Writes whatever changed since the last write that was taken; nothing when nothing did. Either way the mind
+        learns that what changed up to now is kept."""
+        changes = self._mind.changes()
+        present = self._mind.present
+        state = self._mind.turn_state()
+        not_before, paused_until = self._paused
+        if state.turns.not_before != not_before:
+            clock = self._boundaries.clock
+            paused_until = pause_deadline(state.turns.not_before, clock.now(), clock.wall())
+        delta = history_delta(self._written, present)
+        turns = kept_turns(state, paused_until)
+        if delta is not None or turns != self._written_turns:
+            await self._owned.write(delta, turns)
+            self._written, self._written_turns = present, turns
+            self._paused = (state.turns.not_before, paused_until)
+        self._mind.written(changes)
+
+    async def flush_on_stop(self, margin_seconds: float) -> None:
+        """Writes what the stop cut off, within ``margin_seconds``; a write the time or the store did not take is
+        reported and the stop goes on, and one the fence refused is left, since another pod serves him now."""
+        try:
+            async with asyncio.timeout(margin_seconds):
+                await self.flush()
+        except TimeoutError:
+            self._outage.failed(STORE_TIMEOUT_CODE)
+        except StoreUnavailable as unavailable:
+            self._outage.failed(unavailable.code)
+        except StoreDefect as defect:
+            self._outage.failed(str(defect))
+        except StaleGenerationError:
+            return
 
 
 async def run_all(config: Config, boundaries: Boundaries, ownership: Ownership) -> NoReturn:
@@ -570,16 +634,28 @@ async def run_all(config: Config, boundaries: Boundaries, ownership: Ownership) 
         """Every loop of the agent, over the history he was taken over with, which is written through as it grows."""
         agent_task = asyncio.current_task()
         assert agent_task is not None  # noqa: S101 - an agent is served inside its own task
-        present = present_of(owned.history)
-        mind = Mind(config.history_bytes, config.history_keep_bytes, config.budget_pause_cap_seconds, present)
+        clock = boundaries.clock
+        resumed = resumed_turns(owned.history.turns, clock.now(), clock.wall(), time.perf_counter())
+        mind = Mind(
+            config.history_bytes,
+            config.history_keep_bytes,
+            config.budget_pause_cap_seconds,
+            present_of(owned.history),
+            resumed,
+        )
         agent = agents[owned.client_id]
-        async with asyncio.TaskGroup() as group:
-            group.create_task(_write_through(mind, owned, boundaries))
-            for app in config.apps:
-                if app.listens:
-                    group.create_task(
-                        _run_loop(AgentLoop(agent, app, boundaries, mind, config.apps, lookup), agent_task)
-                    )
+        write_through = _WriteThrough(mind, owned, boundaries)
+        try:
+            async with asyncio.TaskGroup() as group:
+                group.create_task(write_through.run())
+                for app in config.apps:
+                    if app.listens:
+                        group.create_task(
+                            _run_loop(AgentLoop(agent, app, boundaries, mind, config.apps, lookup), agent_task)
+                        )
+        finally:
+            if agent_task.cancelling():
+                await write_through.flush_on_stop(config.ownership.cancel_margin_seconds)
         raise AssertionError("a loop ended")  # pragma: no cover
 
     await ownership.serve(list(agents), serve_agent, boundaries.ready.announce)

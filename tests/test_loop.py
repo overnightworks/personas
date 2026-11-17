@@ -16,10 +16,9 @@ from agents.turn import RejectionCode
 from logline.testing import configured
 from mcp_types import INVALID_PARAMS
 
-from personas.config import DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES, load_config
+from personas.config import load_config
 from personas.decision import (
     BACKOFF_CAP_SECONDS,
-    DEFAULT_BUDGET_PAUSE_CAP_SECONDS,
     NETWORK_FAILURE_CODE,
     NO_FINAL_EVENT_REASON,
     RENEW_BEFORE_EXPIRY_SECONDS,
@@ -31,7 +30,6 @@ from personas.decision import (
 )
 from personas.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer, leaves_of
 from personas.loop import AgentLoop, Boundaries
-from personas.mind import Mind
 from personas.reporting import Event
 from tests.support.fakes import (
     FakeClock,
@@ -44,6 +42,7 @@ from tests.support.fakes import (
     line,
     read_of,
     refused_turn,
+    unstored_mind,
     window_of,
 )
 from tests.support.gateway import Gateway, says
@@ -394,7 +393,7 @@ class ScriptedSessions:
             self.config.agents[0],
             self.config.apps[0],
             boundaries,
-            Mind(DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES, DEFAULT_BUDGET_PAUSE_CAP_SECONDS),
+            unstored_mind(),
             self.config.apps,
             None,
         )
@@ -669,7 +668,7 @@ class TokenFetchSwallowingTheCancellation:
             config.agents[0],
             config.apps[0],
             boundaries,
-            Mind(DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES, DEFAULT_BUDGET_PAUSE_CAP_SECONDS),
+            unstored_mind(),
             config.apps,
             None,
         )

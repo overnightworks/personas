@@ -7,7 +7,7 @@ import itertools
 import json
 import secrets
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 import pytest
@@ -52,6 +52,7 @@ from personas.decision import (
     Accept,
     AppPlace,
     Arrived,
+    Due,
     Held,
     Joined,
     Memory,
@@ -59,12 +60,12 @@ from personas.decision import (
     Perception,
     Present,
     Reaction,
-    Reading,
     Restarted,
     Suspend,
     Token,
     TurnEnding,
     Turns,
+    TurnState,
     UnrecognisedRefusal,
     accepts_for,
     act_outcome,
@@ -90,6 +91,7 @@ from personas.decision import (
     is_not_granted,
     is_voice_app,
     jsonrpc_code,
+    kept_turns,
     left_out_for,
     left_standing,
     lends_tools,
@@ -97,6 +99,7 @@ from personas.decision import (
     offered_declarations,
     own_spoken_lines_since,
     past_deadline,
+    pause_deadline,
     pause_left,
     paused_for,
     perceive,
@@ -104,6 +107,7 @@ from personas.decision import (
     released,
     remaining_seconds,
     renewal_due,
+    resumed_turns,
     sets_where_reading_starts,
     speaks_aloud,
     speech_outcome,
@@ -122,7 +126,19 @@ from personas.decision import (
     with_due,
     without_due,
 )
-from personas.entries import Answered, Entry, History, KeptLine, Lines, TurnTold, Unanswered, ViewSeen, Visit, Waiting
+from personas.entries import (
+    Answered,
+    Entry,
+    History,
+    KeptLine,
+    Lines,
+    Reading,
+    TurnTold,
+    Unanswered,
+    ViewSeen,
+    Visit,
+    Waiting,
+)
 from personas.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer
 from personas.recall import RECALL_TOOL
 from personas.secret import Secret
@@ -1947,3 +1963,25 @@ def test_the_words_said_over_him_that_were_not_told_are_each_partial_with_words_
     said, told, untold
 ):
     assert untold_words(said, told) == untold
+
+
+def test_turns_kept_and_resumed_keep_the_due_order_and_the_checkpoints_but_no_running_turn_and_only_the_pause_left():
+    first, second, said_before = CALL_AT_A, CALL_AT_B, TABLE_AT_A
+    lines = Lines("visit", frozenset({4}), missed=False)
+    state = TurnState(
+        Turns(True, {second: Due(lines, 1.0), first: Due(Waiting(3), 2.0)}, not_before=50.0),
+        {first: Joined(), second: Reading("visit", 4), said_before: Restarted()},
+        unanswered=3,
+    )
+    wall = datetime(2026, 11, 17, tzinfo=UTC)
+
+    kept = kept_turns(state, pause_deadline(50.0, 20.0, wall))
+    resumed = resumed_turns(kept, 100.0, wall + timedelta(seconds=10), 7.0)
+
+    assert resumed == TurnState(
+        Turns(False, {second: Due(lines, 7.0), first: Due(Waiting(3), 7.0)}, not_before=120.0),
+        {first: Joined(), second: Reading("visit", 4)},
+        unanswered=3,
+    )
+    assert list(resumed.turns.due) == [second, first]
+    assert pause_deadline(10.0, 20.0, wall) is None

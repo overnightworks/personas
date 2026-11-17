@@ -18,6 +18,7 @@ from agents.member import (
     SpeakAnswer,
     SpeakRefusal,
     Spoken,
+    VoiceState,
     Written,
 )
 from agents.turn import JsonObject  # noqa: TC002 - pydantic resolves the fields' types at run time
@@ -178,15 +179,60 @@ class HistoryDelta:
 
 
 @dataclass(frozen=True)
+class Reading:
+    """What the last read of a window stated: its generation, the last seq taken and, when the app stated one, the
+    state of his voice at the place."""
+
+    generation: str
+    last_seq: int
+    voice_state: VoiceState | None = None
+
+
+@dataclass(frozen=True)
+class KeptCheckpoint:
+    """Where reading one of his window places stands, as the store keeps it: its last read, or none for a place he
+    joined and has not read since. A place with no kept checkpoint resumes as one whose window was said before."""
+
+    app: str
+    place: PlaceRef
+    reading: Reading | None
+
+
+@dataclass(frozen=True)
+class KeptDue:
+    """A place of his that has a turn due, and what for, as the store keeps it."""
+
+    app: str
+    place: PlaceRef
+    occasion: Occasion
+
+
+@dataclass(frozen=True)
+class KeptTurns:
+    """His turns as the store keeps them: where reading each place stands, the places that have a turn due in the
+    order they became due, how many of his turns in a row ended without an answer, and the wall time before which no
+    turn of his may start, if a pause was set."""
+
+    checkpoints: tuple[KeptCheckpoint, ...] = ()
+    due: tuple[KeptDue, ...] = ()
+    unanswered: int = 0
+    paused_until: datetime | None = None
+
+
+NO_TURNS_KEPT: Final = KeptTurns()
+
+
+@dataclass(frozen=True)
 class KeptHistory:
     """One agent's history as the store keeps it: its entries in order, the first of them at the ordinal ``first``,
     and his answered turns that tell one of them in the order they were answered, the first of them at the ordinal
-    ``first_told``."""
+    ``first_told``, and his turns as the last write left them."""
 
     first: int
     entries: tuple[Entry, ...] = field(repr=False)
     first_told: int
     told: tuple[TurnTold, ...]
+    turns: KeptTurns = NO_TURNS_KEPT
 
 
 STORED_KIND_KEY: Final = "entry"
@@ -196,6 +242,7 @@ _STORED_ENTRIES: Final = {kind: TypeAdapter(of_kind) for kind, of_kind in _ENTRY
 _KIND_OF_ENTRY: Final = {of_kind: kind for kind, of_kind in _ENTRY_KINDS}
 _ANY_ENTRY: Final = TypeAdapter[Entry](Entry)
 _STORED_TURN: Final = TypeAdapter(TurnTold)
+_STORED_TURNS: Final = TypeAdapter(KeptTurns)
 
 
 def stored_entry(entry: Entry) -> JsonObject:
@@ -220,6 +267,16 @@ def stored_turn(turn: TurnTold) -> JsonObject:
 def turn_from_stored(stored: JsonObject) -> TurnTold:
     """The answered turn ``stored_turn`` made ``stored`` of; a value it did not make raises a ``ValueError``."""
     return _STORED_TURN.validate_python(stored)
+
+
+def stored_turns(turns: KeptTurns) -> JsonObject:
+    """His kept turns as a JSON object, which ``turns_from_stored`` turns back into equal turns."""
+    return _STORED_TURNS.dump_python(turns, mode="json")
+
+
+def turns_from_stored(stored: JsonObject) -> KeptTurns:
+    """The kept turns ``stored_turns`` made ``stored`` of; a value it did not make raises a ``ValueError``."""
+    return _STORED_TURNS.validate_python(stored)
 
 
 def entry_time(entry: Entry) -> datetime:
