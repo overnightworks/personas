@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from personas.decision import (
     EMPTY_PRESENT,
+    NO_TURNS,
     AppPlace,
     TurnState,
     answered_into,
@@ -49,7 +50,7 @@ class Mind:
         history_keep_bytes: int,
         budget_pause_cap_seconds: float,
         present: Present = EMPTY_PRESENT,
-        resumed: TurnState = TurnState(),  # noqa: B008 - an immutable value
+        resumed: TurnState = NO_TURNS,
     ) -> None:
         self._history_bytes = history_bytes
         self._history_keep_bytes = history_keep_bytes

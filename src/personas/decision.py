@@ -876,6 +876,10 @@ class TurnState:
     unanswered: int = 0
 
 
+NO_TURNS: Final = TurnState()
+"""The turns of an agent no pod served before: none due, no checkpoint, no pause."""
+
+
 def pause_deadline(not_before: float, now: float, wall: datetime) -> datetime | None:
     """The wall time at which a pause that holds his turns until ``not_before`` ends, read at ``now`` on the same
     monotonic scale and at ``wall``; none once it is over."""
