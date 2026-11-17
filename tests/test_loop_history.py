@@ -251,15 +251,15 @@ async def test_the_history_is_told_with_no_memory_and_with_a_store_that_is_down_
 
 
 class HistoriesDownForTheRemark(KeptHistories):
-    """Histories whose store cannot take the first write that holds the remark, an act that wakes no turn and is
-    the last thing taken."""
+    """Histories whose store cannot take the first two writes that hold the remark, an act that wakes no turn and is
+    the last thing taken: one outage of two failed writes."""
 
-    refused: bool = False
+    refusals_left: int = 2
 
     async def append(self, client_id: str, generation: int, delta: HistoryDelta) -> None:
         holds_the_remark = any(isinstance(each, KeptLine) and each.text == REMARK for each in delta.entries)
-        if holds_the_remark and not self.refused:
-            self.refused = True
+        if holds_the_remark and self.refusals_left:
+            self.refusals_left -= 1
             raise StoreUnavailable(STORE_UNREACHABLE_CODE)
         await super().append(client_id, generation, delta)
 

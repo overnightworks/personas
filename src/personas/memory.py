@@ -138,6 +138,8 @@ _AGENT_OWNER: Final = Table(
     Column("client_id", Text, primary_key=True),
     Column("generation", BigInteger),
 )
+_RENEWED_GENERATION: Final = _AGENT_OWNER.c.generation + 1
+"""An agent's next generation, which a takeover and an erase both set: every write under the one before is refused."""
 
 
 @dataclass(frozen=True)
@@ -454,9 +456,7 @@ class PostgresHistoryStore(_PostgresStore):
         statement = (
             insert(_AGENT_OWNER)
             .values(client_id=client_id, generation=1)
-            .on_conflict_do_update(
-                index_elements=[_AGENT_OWNER.c.client_id], set_={"generation": _AGENT_OWNER.c.generation + 1}
-            )
+            .on_conflict_do_update(index_elements=[_AGENT_OWNER.c.client_id], set_={"generation": _RENEWED_GENERATION})
             .returning(_AGENT_OWNER.c.generation)
         )
         async with self._bounded_transaction() as connection:
@@ -584,4 +584,4 @@ class PostgresMemory(_PostgresStore):
 
 def _renewed(owners: ColumnElement[bool]) -> Update:
     """Renews the generation of each agent ``owners`` selects; an agent never taken has none to renew."""
-    return update(_AGENT_OWNER).where(owners).values(generation=_AGENT_OWNER.c.generation + 1)
+    return update(_AGENT_OWNER).where(owners).values(generation=_RENEWED_GENERATION)
