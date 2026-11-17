@@ -301,6 +301,35 @@ async def test_a_write_in_flight_when_the_pod_stops_is_written_again_before_the_
 
 
 @dataclass
+class HistoriesHoldingTheAddressedLine(KeptHistories):
+    """Histories whose first write that holds the addressed line, and the claim of its turn with it or after it, waits
+    until ``release`` is set: a write the store is slow to take."""
+
+    reached: asyncio.Event = field(default_factory=asyncio.Event)
+    release: asyncio.Event = field(default_factory=asyncio.Event)
+
+    async def write(self, client_id: str, generation: int, delta: HistoryDelta | None, turns: KeptTurns) -> None:
+        entries = () if delta is None else delta.entries
+        if not self.reached.is_set() and any(isinstance(each, KeptLine) and each.text == ADDRESSED for each in entries):
+            self.reached.set()
+            await self.release.wait()
+        await super().write(client_id, generation, delta, turns)
+
+
+async def test_a_turn_reaches_the_gateway_only_once_the_write_that_holds_its_claim_was_taken(runner):
+    runner.histories = HistoriesHoldingTheAddressedLine()
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.histories.reached.wait()
+    await settled(runner.app)
+    requested_while_the_write_waited = runner.gateway.arrivals
+    runner.histories.release.set()
+    await runner.gateway.until_turns(1, why="lines")
+
+    assert requested_while_the_write_waited == 0
+
+
+@dataclass
 class HistoriesFailingOnTheStop(HistoriesHungOnTheRemark):
     """Histories whose first write that holds the remark hangs until it is cancelled, and whose every write after it
     fails with ``failure``: a store that does not answer while the pod stops."""

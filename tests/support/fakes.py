@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import secrets
+import sys
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -12,9 +13,17 @@ from typing import TYPE_CHECKING, Literal, NamedTuple, overload
 
 from agents.member import MemberStanding, PlaceEntry, PlaceWindow, Standing
 
-from personas.config import AgentCredentials, AppTarget, MemoryTarget
+from personas.config import (
+    DEFAULT_BUDGET_PAUSE_CAP_SECONDS,
+    DEFAULT_HISTORY_BYTES,
+    DEFAULT_HISTORY_KEEP_BYTES,
+    AgentCredentials,
+    AppTarget,
+    MemoryTarget,
+)
 from personas.decision import Accept, Refusal
 from personas.failures import CallFailure
+from personas.mind import Mind
 from personas.reporting import Event
 from personas.secret import Secret
 from personas.tokens import GrantedToken
@@ -351,3 +360,11 @@ class Reports:
             while self.turn_endings.count(COMPLETED_TURN) < count:
                 self._added.clear()
                 await self._added.wait()
+
+
+def unstored_mind() -> Mind:
+    """A mind with the default bounds that no store keeps: every change of it counts as kept at once, so a turn starts
+    as soon as it is claimed."""
+    mind = Mind(DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES, DEFAULT_BUDGET_PAUSE_CAP_SECONDS)
+    mind.written(sys.maxsize)
+    return mind

@@ -384,7 +384,8 @@ class AgentLoop:
 
     async def _start_due_turn(self, turns: asyncio.TaskGroup) -> None:
         """Starts the turn of the place that has waited longest when it is in this app and none of his runs. The claim
-        and the turn's start share one synchronous step."""
+        and the turn's start share one synchronous step; the turn waits until the claim is kept, so a pod that takes
+        him over before then answers the place instead of him."""
         setup = self._turn_setup
         if setup is None:
             return
@@ -395,13 +396,14 @@ class AgentLoop:
             self._wake_when_pause_over(turns, now)
             return
         at, due = claim
+        claimed = self._mind.changes()
         occasion = due.occasion
         if isinstance(occasion, Waiting):
             self._turned_revisions[at.place] = occasion.revision
         aloud = speaks_aloud(self._voice_app, occasion, self._mind.checkpoint(at))
         apps = self._mind.held_apps(self._app.mcp_url)
         admitted = Admitted(facts, at.place, occasion, self._mind.present, self._boundaries.clock.wall(), aloud, apps)
-        self._start_turn(turns, setup, at.place, admitted, due.since)
+        self._start_turn(turns, setup, at.place, admitted, due.since, claimed)
 
     def _wake_when_pause_over(self, turns: asyncio.TaskGroup, now: float) -> None:
         """A pause holds the turn of the place at this app that has waited longest: one waiter of this loop wakes
@@ -430,7 +432,13 @@ class AgentLoop:
             self._mind.due(at, lines, time.perf_counter())
 
     def _start_turn(
-        self, turns: asyncio.TaskGroup, setup: TurnSetup, place: PlaceRef, admitted: Admitted, due_since: float
+        self,
+        turns: asyncio.TaskGroup,
+        setup: TurnSetup,
+        place: PlaceRef,
+        admitted: Admitted,
+        due_since: float,
+        claimed: int,
     ) -> None:
         """Starts the turn in the trace of what made it due, or in a trace of its own when that carries none or one
         logline cannot read; its task, its done callback and its step lines share that trace and the loop's own lines
@@ -444,9 +452,14 @@ class AgentLoop:
                 started_at=min(due_since, time.perf_counter()),
             ).end()
             tally = start_turn_tally(self._agent.client_id, self._app.mcp_url)
-            task = turns.create_task(self._turning.take(setup, admitted, TaskRecord(), tally))
+            task = turns.create_task(self._take_once_kept(claimed, setup, admitted, tally))
             self._turn = ActiveTurn(task, place, tally)
             task.add_done_callback(self._turn_over)
+
+    async def _take_once_kept(self, claimed: int, setup: TurnSetup, admitted: Admitted, tally: TurnTally) -> None:
+        """Takes the turn once the ``claimed``-th change of his mind, its claim, is kept in the store."""
+        await self._mind.until_written(claimed)
+        await self._turning.take(setup, admitted, TaskRecord(), tally)
 
     def _turn_over(self, task: asyncio.Task[None]) -> None:
         """The one writer of ``turn.ended``, whatever way the task ended."""
@@ -578,7 +591,9 @@ class _WriteThrough:
             failures = 0
 
     async def flush(self) -> None:
-        """Writes whatever changed since the last write that was taken; nothing when nothing did."""
+        """Writes whatever changed since the last write that was taken; nothing when nothing did. Either way the mind
+        learns that what changed up to now is kept."""
+        changes = self._mind.changes()
         present = self._mind.present
         state = self._mind.turn_state()
         not_before, paused_until = self._paused
@@ -587,11 +602,11 @@ class _WriteThrough:
             paused_until = pause_deadline(state.turns.not_before, clock.now(), clock.wall())
         delta = history_delta(self._written, present)
         turns = kept_turns(state, paused_until)
-        if delta is None and turns == self._written_turns:
-            return
-        await self._owned.write(delta, turns)
-        self._written, self._written_turns = present, turns
-        self._paused = (state.turns.not_before, paused_until)
+        if delta is not None or turns != self._written_turns:
+            await self._owned.write(delta, turns)
+            self._written, self._written_turns = present, turns
+            self._paused = (state.turns.not_before, paused_until)
+        self._mind.written(changes)
 
     async def flush_on_stop(self, margin_seconds: float) -> None:
         """Writes what the stop cut off, within ``margin_seconds``; a write the time or the store did not take is
