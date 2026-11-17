@@ -54,6 +54,7 @@ from personas.failures import (
     STORE_TIMEOUT_CODE,
     CallFailure,
     StaleGenerationError,
+    StoreDefect,
     StoreUnavailable,
     leaves_of,
     raise_if_cancelled,
@@ -593,14 +594,17 @@ class _WriteThrough:
         self._paused = (state.turns.not_before, paused_until)
 
     async def flush_on_stop(self, margin_seconds: float) -> None:
-        """Writes what the stop cut off, within ``margin_seconds``; a write the time did not take is reported, and one
-        the fence refused is left, since another pod serves him now. The store turns its own failure during a stop
-        into the stop's cancellation."""
+        """Writes what the stop cut off, within ``margin_seconds``; a write the time or the store did not take is
+        reported and the stop goes on, and one the fence refused is left, since another pod serves him now."""
         try:
             async with asyncio.timeout(margin_seconds):
                 await self.flush()
         except TimeoutError:
             self._outage.failed(STORE_TIMEOUT_CODE)
+        except StoreUnavailable as unavailable:
+            self._outage.failed(unavailable.code)
+        except StoreDefect as defect:
+            self._outage.failed(str(defect))
         except StaleGenerationError:
             return
 

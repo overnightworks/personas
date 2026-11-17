@@ -13,7 +13,13 @@ from agents.turn import Principal, person_fingerprint
 
 from personas.decision import BACKOFF_BASE_SECONDS
 from personas.entries import HistoryDelta, KeptLine, KeptTurns
-from personas.failures import STORE_UNREACHABLE_CODE, StoreUnavailable
+from personas.failures import (
+    STORE_DEFECT_CODE,
+    STORE_TIMEOUT_CODE,
+    STORE_UNREACHABLE_CODE,
+    StoreDefect,
+    StoreUnavailable,
+)
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import SweepClock, memory_target
@@ -292,6 +298,41 @@ async def test_a_write_in_flight_when_the_pod_stops_is_written_again_before_the_
 
     entries = [entry for _, delta in runner.histories.written for entry in delta.entries]
     assert REMARK in [each.text for each in entries if isinstance(each, KeptLine)]
+
+
+@dataclass
+class HistoriesFailingOnTheStop(HistoriesHungOnTheRemark):
+    """Histories whose first write that holds the remark hangs until it is cancelled, and whose every write after it
+    fails with ``failure``: a store that does not answer while the pod stops."""
+
+    failure: Exception = field(default_factory=lambda: StoreUnavailable(STORE_TIMEOUT_CODE))
+
+    async def write(self, client_id: str, generation: int, delta: HistoryDelta | None, turns: KeptTurns) -> None:
+        if self.hung.is_set():
+            raise self.failure
+        await super().write(client_id, generation, delta, turns)
+
+
+@pytest.mark.parametrize(
+    ("failure", "code"),
+    [
+        (StoreUnavailable(STORE_TIMEOUT_CODE), STORE_TIMEOUT_CODE),
+        (StoreDefect(STORE_DEFECT_CODE), STORE_DEFECT_CODE),
+    ],
+)
+async def test_a_write_the_store_fails_while_the_pod_stops_is_reported_and_the_agent_ends_cancelled(
+    runner, failure, code
+):
+    runner.histories = HistoriesFailingOnTheStop(failure=failure)
+    await restarted_in_the_call(runner)
+    await said_and_taken(runner.app, PLACE_ID, REMARK, act=True)
+    await runner.histories.hung.wait()
+
+    runner.task.cancel()
+    (ended,) = await asyncio.gather(runner.task, return_exceptions=True)
+
+    assert isinstance(ended, asyncio.CancelledError)
+    assert [each for event, each in runner.reports.reported() if event is Event.STORE_FAILED] == [code]
 
 
 async def test_a_write_of_the_history_the_store_cannot_take_is_reported_once_and_tried_again_until_it_is_taken(
