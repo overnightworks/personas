@@ -1,0 +1,8 @@
+claim_id = "3d09049c8247400faf7d21475a3fb69d"
+agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
+role = "builder"
+base = "99524de76de807000fa13603d6ad65f1fed73b73"
+branch = "claude/issue-254-decision-py-and-the-hopin-fake-stay-belo"
+scope = ["src/personas", "tests"]
+opened_commit = "7a0d5c5836664c6e7b7fa9cf7dc0d9f30cb532a7"
+whole_reason = "a behaviour-preserving split of three oversized files and their imports"
