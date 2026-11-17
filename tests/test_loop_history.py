@@ -17,6 +17,7 @@ from personas.failures import (
     STORE_DEFECT_CODE,
     STORE_TIMEOUT_CODE,
     STORE_UNREACHABLE_CODE,
+    StaleGenerationError,
     StoreDefect,
     StoreUnavailable,
 )
@@ -332,27 +333,33 @@ async def test_a_turn_reaches_the_gateway_only_once_the_write_that_holds_its_cla
 @dataclass
 class HistoriesFailingOnTheStop(HistoriesHungOnTheRemark):
     """Histories whose first write that holds the remark hangs until it is cancelled, and whose every write after it
-    fails with ``failure``: a store that does not answer while the pod stops."""
+    fails with ``failure``, or hangs too without one: a store that does not answer while the pod stops."""
 
-    failure: Exception = field(default_factory=lambda: StoreUnavailable(STORE_TIMEOUT_CODE))
+    failure: Exception | None = field(default_factory=lambda: StoreUnavailable(STORE_TIMEOUT_CODE))
 
     async def write(self, client_id: str, generation: int, delta: HistoryDelta | None, turns: KeptTurns) -> None:
         if self.hung.is_set():
+            if self.failure is None:
+                await asyncio.Event().wait()
             raise self.failure
         await super().write(client_id, generation, delta, turns)
 
 
 @pytest.mark.parametrize(
-    ("failure", "code"),
+    ("failure", "codes"),
     [
-        (StoreUnavailable(STORE_TIMEOUT_CODE), STORE_TIMEOUT_CODE),
-        (StoreDefect(STORE_DEFECT_CODE), STORE_DEFECT_CODE),
+        (StoreUnavailable(STORE_TIMEOUT_CODE), [STORE_TIMEOUT_CODE]),
+        (StoreDefect(STORE_DEFECT_CODE), [STORE_DEFECT_CODE]),
+        (None, [STORE_TIMEOUT_CODE]),
+        (StaleGenerationError(), []),
     ],
+    ids=["unavailable", "defect", "past-the-margin", "fenced"],
 )
-async def test_a_write_the_store_fails_while_the_pod_stops_is_reported_and_the_agent_ends_cancelled(
-    runner, failure, code
+async def test_a_write_the_store_fails_while_the_pod_stops_is_reported_unless_fenced_and_the_agent_ends_cancelled(
+    runner, failure, codes
 ):
     runner.histories = HistoriesFailingOnTheStop(failure=failure)
+    runner.config = replace(runner.config, ownership=replace(runner.config.ownership, cancel_margin_seconds=0.05))
     await restarted_in_the_call(runner)
     await said_and_taken(runner.app, PLACE_ID, REMARK, act=True)
     await runner.histories.hung.wait()
@@ -361,7 +368,7 @@ async def test_a_write_the_store_fails_while_the_pod_stops_is_reported_and_the_a
     (ended,) = await asyncio.gather(runner.task, return_exceptions=True)
 
     assert isinstance(ended, asyncio.CancelledError)
-    assert [each for event, each in runner.reports.reported() if event is Event.STORE_FAILED] == [code]
+    assert [each for event, each in runner.reports.reported() if event is Event.STORE_FAILED] == codes
 
 
 async def test_a_write_of_the_history_the_store_cannot_take_is_reported_once_and_tried_again_until_it_is_taken(
