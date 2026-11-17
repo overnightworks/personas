@@ -35,9 +35,10 @@ from personas.reporting import Event, log_state_change
 from personas.tokens import HttpTokenSource
 from tests.support.fakes import FakeClock, credentials
 from tests.support.gateway import Gateway, says
-from tests.support.hopin import AGENT_SUBJECT, FakeApp, active, invited
+from tests.support.hopin import AGENT_SUBJECT, FakeApp
 from tests.support.ownership import AllAgentsOwned
 from tests.support.realm import FakeRealm
+from tests.support.standings import active, invited
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterable, Sequence

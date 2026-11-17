@@ -16,9 +16,12 @@ from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in
 from tests.support.gateway import Gateway, says, speaks_and_says
 from tests.support.history import REMARK, SPEAKER, bounded_history, said_and_taken, settled, waits
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import ISSUER, PLAY_TOOL, SAY_TOOL, Line, QuietApp, active, lines_of
+from tests.support.hopin import PLAY_TOOL, SAY_TOOL, QuietApp
+from tests.support.hopin_places import ISSUER, Line
+from tests.support.logs import lines_of
 from tests.support.realm import LIFETIME_SECONDS
 from tests.support.songmaker import CREATE_SONG, GENERATE_SONG
+from tests.support.standings import active
 from tests.support.voice import (
     TWO_SENTENCES,
     a_voice_call,
@@ -491,7 +494,7 @@ async def test_two_agents_in_one_place_make_no_turn_of_their_own_spoken_lines_an
 
 
 async def test_a_window_that_lost_older_lines_makes_a_turn_told_it_missed_lines(runner, monkeypatch):
-    monkeypatch.setattr("tests.support.hopin.WINDOW_LINES", 1)
+    monkeypatch.setattr("tests.support.hopin_places.WINDOW_LINES", 1)
     sleeps = holding_sentence_ends(runner)
     await a_voice_call(runner, completion(ANSWER), completion("Second answer."))
     say_in_the_call(runner, ADDRESSED)

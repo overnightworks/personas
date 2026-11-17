@@ -20,7 +20,8 @@ from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in
 from tests.support.fakes import CANCELLED_TURN, COMPLETED_TURN
 from tests.support.gateway import Gateway, says
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import DISCOVER, LIMIT_SECONDS, READ, active, paused
+from tests.support.hopin import DISCOVER, LIMIT_SECONDS, READ
+from tests.support.standings import active, paused
 from tests.support.transport import (
     ClosingHold,
     transport_closing_with_late_answers,

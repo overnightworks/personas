@@ -65,23 +65,11 @@ from personas.failures import (
 )
 from personas.secret import Secret
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import (
-    CALL,
-    LIMIT_SECONDS,
-    LIST_TOOLS,
-    LISTEN,
-    NO_METHOD,
-    READ,
-    SAY_TOOL,
-    FakeApp,
-    a_picture,
-    active,
-    base64_of,
-    configure_logging_into,
-    formatted,
-    invited,
-)
+from tests.support.hopin import CALL, LIMIT_SECONDS, LIST_TOOLS, LISTEN, NO_METHOD, READ, SAY_TOOL, FakeApp
+from tests.support.logs import configure_logging_into, formatted
 from tests.support.loopback import serving
+from tests.support.pictures import a_picture, base64_of
+from tests.support.standings import active, invited
 from tests.support.transport import (
     transport_closing_with_late_answers,
     transport_closing_with_leaves,

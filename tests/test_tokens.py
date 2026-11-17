@@ -17,7 +17,8 @@ from personas.reporting import carry_trace
 from personas.secret import Secret
 from personas.tokens import HttpTokenSource, facts_of
 from tests.support.fakes import credentials
-from tests.support.hopin import ISSUER, lines_of
+from tests.support.hopin_places import ISSUER
+from tests.support.logs import lines_of
 from tests.support.realm import jwt_of
 
 pytestmark = pytest.mark.anyio

@@ -35,8 +35,10 @@ from tests.support.history import (
     written_turns,
 )
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import ISSUER, READ, active, invited, paused
+from tests.support.hopin import READ
+from tests.support.hopin_places import ISSUER
 from tests.support.realm import AGENT_NAME
+from tests.support.standings import active, invited, paused
 from tests.support.wire import cuts
 
 pytestmark = pytest.mark.anyio

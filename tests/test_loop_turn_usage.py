@@ -12,7 +12,8 @@ from agents.turn import TOOL_IMAGE_MEDIA_TYPE
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, say, words
 from tests.support.history import REMARK, said_and_taken
-from tests.support.hopin import a_picture, base64_of, lines_of
+from tests.support.logs import lines_of
+from tests.support.pictures import a_picture, base64_of
 from tests.support.voice import a_voice_call
 
 pytestmark = pytest.mark.anyio

@@ -30,7 +30,7 @@ from personas.due import (
 )
 from personas.entries import History, Lines, Reading, Waiting
 from tests.support.history import APP, TABLE, said
-from tests.support.hopin import active, paused
+from tests.support.standings import active, paused
 
 CALL_AT_A = AppPlace("https://a.test/mcp", PlaceRef(kind="call", id="room-1"))
 CALL_AT_B = AppPlace("https://b.test/mcp", PlaceRef(kind="call", id="room-2"))

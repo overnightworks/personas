@@ -12,7 +12,8 @@ from personas.entries import ActDone, Answered, KeptLine, SaidAloud, ViewSeen, V
 from personas.present import EMPTY_PRESENT, Present, taken_into
 from tests.support.call import PERSON
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import FakeApp, active
+from tests.support.hopin import FakeApp
+from tests.support.standings import active
 
 TABLE = PlaceRef(kind="table", id="table-1")
 OTHER_CALL_ID = "room-9"

@@ -27,7 +27,8 @@ from personas.mind import Mind
 from personas.reporting import Event
 from personas.secret import Secret
 from personas.tokens import GrantedToken
-from tests.support.hopin import GENERATION, ISSUER
+from tests.support.hopin import GENERATION
+from tests.support.hopin_places import ISSUER
 from tests.support.realm import AGENT_NAME, API_GROUP, jwt_of
 
 if TYPE_CHECKING:

@@ -38,7 +38,9 @@ from tests.support.fakes import (
     unstored_mind,
 )
 from tests.support.gateway import Gateway, RoundBackend
-from tests.support.hopin import AGENT_SUBJECT, ISSUER, PLAY_TOOL, FakeApp, configure_logging_into, formatted
+from tests.support.hopin import AGENT_SUBJECT, PLAY_TOOL, FakeApp
+from tests.support.hopin_places import ISSUER
+from tests.support.logs import configure_logging_into, formatted
 from tests.support.ownership import AllAgentsOwned, KeptHistories
 from tests.support.realm import TOKEN_ENDPOINT, FakeRealm
 from tests.support.songmaker import CALLS, ToolsOnlyApp

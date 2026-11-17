@@ -101,7 +101,9 @@ from personas.recall import RECALL_TOOL
 from personas.secret import Secret
 from tests.support.fakes import line, window_of
 from tests.support.history import MORNING, TABLE, a_view
-from tests.support.hopin import GENERATION, a_picture, active, invited, paused
+from tests.support.hopin import GENERATION
+from tests.support.pictures import a_picture
+from tests.support.standings import active, invited, paused
 
 TRANSIENT_REFUSALS = [
     AcceptInvitationRefusal.SPONSOR_AWAY,

@@ -20,7 +20,8 @@ from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import SweepClock, line, window_of
 from tests.support.gateway import Gateway, says
-from tests.support.hopin import LIMIT_SECONDS, formatted, lines_of
+from tests.support.hopin import LIMIT_SECONDS
+from tests.support.logs import formatted, lines_of
 from tests.support.postgres import kept_lines, lines_table_locked, run_sql
 
 if TYPE_CHECKING:

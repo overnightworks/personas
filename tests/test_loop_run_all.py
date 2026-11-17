@@ -11,7 +11,8 @@ from personas.failures import leaves_of
 from personas.task_record import UnrequestedCancellationError
 from tests.support.call import PLACE_ID
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import LIMIT_SECONDS, active
+from tests.support.hopin import LIMIT_SECONDS
+from tests.support.standings import active
 from tests.support.transport import transport_cancelled_once
 
 pytestmark = pytest.mark.anyio

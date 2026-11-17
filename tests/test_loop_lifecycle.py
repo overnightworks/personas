@@ -35,18 +35,9 @@ from personas.failures import (
 from personas.loop import AgentLoop
 from personas.reporting import Event
 from tests.support.call import CALL_PLACE
-from tests.support.hopin import (
-    ACKNOWLEDGED,
-    CALL,
-    DISCOVER,
-    INITIALIZE,
-    LIMIT_SECONDS,
-    LISTEN,
-    READ,
-    active,
-    invited,
-)
+from tests.support.hopin import ACKNOWLEDGED, CALL, DISCOVER, INITIALIZE, LIMIT_SECONDS, LISTEN, READ
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
+from tests.support.standings import active, invited
 from tests.support.transport import transport_closing_with_late_answers, transport_whose_close_loses_a_child
 
 pytestmark = pytest.mark.anyio

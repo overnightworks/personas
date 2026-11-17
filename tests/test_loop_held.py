@@ -34,8 +34,10 @@ from tests.support.history import (
     waits,
 )
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import CALL, ISSUER, LIST_TOOLS, PLAY_TOOL, READ, SAY_TOOL, active
+from tests.support.hopin import CALL, LIST_TOOLS, PLAY_TOOL, READ, SAY_TOOL
+from tests.support.hopin_places import ISSUER
 from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG
+from tests.support.standings import active
 from tests.support.voice import HeldSleeps, a_voice_call, holding_sentence_ends
 from tests.support.wire import answers_with, cuts, hangs, hangs_once_entered, refuses_with_a_server_error
 
