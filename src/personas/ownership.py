@@ -5,8 +5,8 @@ agent it serves, so a pod that dies frees its agents at once. A pod that cannot 
 pod that takes an agent waits longer than the pod it takes over from needs to notice and stop, so no two pods speak
 for one agent. ``config.py`` refuses a grace that is not longer than that.
 
-Taking an agent renews his generation, which fences every write of his history: a pod that wrote under an older one
-has lost him, and stops serving him.
+Taking an agent renews his generation, which fences every write of his history and his turns: a pod that wrote under an
+older one has lost him, and stops serving him.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
     from personas.clock import Clock
     from personas.config import OwnershipTimings
-    from personas.entries import HistoryDelta, KeptHistory
+    from personas.entries import HistoryDelta, KeptHistory, KeptTurns
     from personas.reporting import Reporter
 
 
@@ -43,29 +43,30 @@ class AgentHistories(Protocol):
         ...
 
     async def load(self, client_id: str) -> KeptHistory:
-        """The agent's history as the store keeps it."""
+        """The agent's history and turns as the store keeps them."""
         ...
 
-    async def append(self, client_id: str, generation: int, delta: HistoryDelta) -> None:
-        """Writes the delta while ``generation`` is current, or raises ``StaleGenerationError``."""
+    async def write(self, client_id: str, generation: int, delta: HistoryDelta | None, turns: KeptTurns) -> None:
+        """Writes the delta, if any, and the turns in one transaction while ``generation`` is current, or raises
+        ``StaleGenerationError``."""
         ...
 
 
 @dataclass(frozen=True)
 class Owned:
-    """An agent this pod took over: his history as the store kept it then, and the write of what it gains, fenced by
-    the generation taken."""
+    """An agent this pod took over: his history and turns as the store kept them then, and the write of what they gain,
+    fenced by the generation taken."""
 
     client_id: str
     history: KeptHistory
-    write: Callable[[HistoryDelta], Awaitable[None]]
+    write: Callable[[HistoryDelta | None, KeptTurns], Awaitable[None]]
 
 
 async def taken_over(histories: AgentHistories, client_id: str) -> Owned:
     """Takes the agent over and loads his history after it, so every write before the takeover is in what loads."""
     generation = await histories.take_over(client_id)
     history = await histories.load(client_id)
-    return Owned(client_id, history, partial(histories.append, client_id, generation))
+    return Owned(client_id, history, partial(histories.write, client_id, generation))
 
 
 type ServeAgent = Callable[[Owned], Awaitable[NoReturn]]
@@ -202,11 +203,14 @@ class LockedOwnership:
 
 
 async def _noting_refusal(
-    write: Callable[[HistoryDelta], Awaitable[None]], stopping: asyncio.Event, delta: HistoryDelta
+    write: Callable[[HistoryDelta | None, KeptTurns], Awaitable[None]],
+    stopping: asyncio.Event,
+    delta: HistoryDelta | None,
+    turns: KeptTurns,
 ) -> None:
-    """Writes the delta; a refusal sets ``stopping``, since the agent's stop begins with it."""
+    """Writes the delta and the turns; a refusal sets ``stopping``, since the agent's stop begins with it."""
     try:
-        await write(delta)
+        await write(delta, turns)
     except StaleGenerationError:
         stopping.set()
         raise

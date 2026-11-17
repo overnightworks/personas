@@ -8,8 +8,20 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 import pytest
+from agents.member import VoiceState
 
-from personas.entries import HistoryDelta, KeptHistory, Lines, TurnTold, ViewSeen
+from personas.entries import (
+    NO_TURNS_KEPT,
+    HistoryDelta,
+    KeptCheckpoint,
+    KeptDue,
+    KeptHistory,
+    KeptTurns,
+    Lines,
+    Reading,
+    TurnTold,
+    ViewSeen,
+)
 from personas.failures import StaleGenerationError, StoreDefect
 from personas.memory import PostgresHistoryStore
 from tests.support.history import APP, LATER, MORNING, TABLE, a_sentence, a_view, an_act, said
@@ -59,9 +71,11 @@ async def test_the_history_loads_every_appended_entry_and_answered_turn_in_order
     mine = await histories.take_over(AGENT)
     others = await histories.take_over(OTHER_AGENT)
 
-    await histories.append(AGENT, mine, appended(0, said(1, "first"), an_act(), told=[a_turn(2)]))
-    await histories.append(OTHER_AGENT, others, appended(0, said(1, "not his")))
-    await histories.append(AGENT, mine, appended(2, view, a_sentence(), told=[a_turn(4, minutes=1)], first_told=1))
+    await histories.write(AGENT, mine, appended(0, said(1, "first"), an_act(), told=[a_turn(2)]), NO_TURNS_KEPT)
+    await histories.write(OTHER_AGENT, others, appended(0, said(1, "not his")), NO_TURNS_KEPT)
+    await histories.write(
+        AGENT, mine, appended(2, view, a_sentence(), told=[a_turn(4, minutes=1)], first_told=1), NO_TURNS_KEPT
+    )
 
     assert await histories.load(AGENT) == KeptHistory(
         0, (said(1, "first"), an_act(), view, a_sentence()), 0, (a_turn(2), a_turn(4, minutes=1))
@@ -72,9 +86,9 @@ async def test_answered_turns_load_in_the_order_they_were_appended_whatever_thei
     mine = await histories.take_over(AGENT)
     at_the_same_time = [a_turn(1), a_turn(2)]
     earlier = a_turn(2, minutes=-1)
-    await histories.append(AGENT, mine, appended(0, said(1, "a"), said(2, "b"), told=at_the_same_time))
+    await histories.write(AGENT, mine, appended(0, said(1, "a"), said(2, "b"), told=at_the_same_time), NO_TURNS_KEPT)
 
-    await histories.append(AGENT, mine, appended(2, told=[earlier], first_told=2))
+    await histories.write(AGENT, mine, appended(2, told=[earlier], first_told=2), NO_TURNS_KEPT)
 
     assert (await histories.load(AGENT)).told == (*at_the_same_time, earlier)
 
@@ -85,9 +99,13 @@ async def test_an_agent_with_no_history_loads_an_empty_one(histories):
 
 async def test_entries_that_left_the_history_and_the_turns_that_told_only_them_are_gone_after_the_write(histories):
     mine = await histories.take_over(AGENT)
-    await histories.append(AGENT, mine, appended(0, said(1, "a"), said(2, "b"), told=[a_turn(1), a_turn(2, 1)]))
+    await histories.write(
+        AGENT, mine, appended(0, said(1, "a"), said(2, "b"), told=[a_turn(1), a_turn(2, 1)]), NO_TURNS_KEPT
+    )
 
-    await histories.append(AGENT, mine, appended(2, said(3, "c"), told=[a_turn(3, 2)], first_told=2, left_out=1))
+    await histories.write(
+        AGENT, mine, appended(2, said(3, "c"), told=[a_turn(3, 2)], first_told=2, left_out=1), NO_TURNS_KEPT
+    )
 
     assert await histories.load(AGENT) == KeptHistory(1, (said(2, "b"), said(3, "c")), 1, (a_turn(2, 1), a_turn(3, 2)))
 
@@ -96,7 +114,9 @@ async def test_a_load_that_meets_a_write_in_flight_gives_the_history_before_or_a
     histories, database
 ):
     mine = await histories.take_over(AGENT)
-    await histories.append(AGENT, mine, appended(0, said(1, "a"), said(2, "b"), told=[a_turn(1), a_turn(2, 1)]))
+    await histories.write(
+        AGENT, mine, appended(0, said(1, "a"), said(2, "b"), told=[a_turn(1), a_turn(2, 1)]), NO_TURNS_KEPT
+    )
     before = await histories.load(AGENT)
     first_left = ("DELETE FROM history_entries WHERE ordinal < 1", "DELETE FROM answered_turns WHERE through <= 1")
 
@@ -113,9 +133,9 @@ async def test_a_load_that_meets_a_write_in_flight_gives_the_history_before_or_a
 async def test_a_delta_written_again_after_an_unknown_outcome_changes_nothing(histories):
     mine = await histories.take_over(AGENT)
     delta = appended(0, said(1, "once"), told=[a_turn(1)])
-    await histories.append(AGENT, mine, delta)
+    await histories.write(AGENT, mine, delta, NO_TURNS_KEPT)
 
-    await histories.append(AGENT, mine, delta)
+    await histories.write(AGENT, mine, delta, NO_TURNS_KEPT)
 
     assert await histories.load(AGENT) == KeptHistory(0, (said(1, "once"),), 0, (a_turn(1),))
 
@@ -126,14 +146,26 @@ async def test_a_write_with_a_generation_that_is_not_current_is_refused_and_chan
     if taken_over:
         stale = await histories.take_over(AGENT)
         current = await histories.take_over(AGENT)
-        await histories.append(AGENT, current, appended(0, said(1, "kept"), told=[a_turn(1)]))
+        await histories.write(AGENT, current, appended(0, said(1, "kept"), told=[a_turn(1)]), NO_TURNS_KEPT)
     before = await histories.load(AGENT)
     delta = appended(1, said(2, "stale"), told=[a_turn(2, 1)], first_told=1, left_out=1)
 
     with pytest.raises(StaleGenerationError):
-        await histories.append(AGENT, stale, delta)
+        await histories.write(AGENT, stale, delta, KeptTurns(unanswered=1))
 
     assert await histories.load(AGENT) == before
+
+
+async def test_the_turns_written_last_load_with_the_history_whether_a_delta_came_with_them_or_not(histories):
+    mine = await histories.take_over(AGENT)
+    due = KeptDue(APP, TABLE, Lines("first-generation", frozenset({3}), missed=True, traceparent=None))
+    reading = Reading("first-generation", 3, VoiceState.UNAVAILABLE)
+    await histories.write(AGENT, mine, appended(0, said(1, "kept")), KeptTurns((KeptCheckpoint(APP, TABLE, None),)))
+    paused = KeptTurns((KeptCheckpoint(APP, TABLE, reading),), (due,), 2, LATER)
+
+    await histories.write(AGENT, mine, None, paused)
+
+    assert await histories.load(AGENT) == KeptHistory(0, (said(1, "kept"),), 0, (), paused)
 
 
 @pytest.mark.parametrize(
@@ -143,7 +175,7 @@ async def test_a_write_with_a_generation_that_is_not_current_is_refused_and_chan
 )
 async def test_a_stored_entry_that_is_no_entry_loads_as_a_defect_that_holds_none_of_it(histories, database, stored):
     mine = await histories.take_over(AGENT)
-    await histories.append(AGENT, mine, appended(0, said(1, "kept")))
+    await histories.write(AGENT, mine, appended(0, said(1, "kept")), NO_TURNS_KEPT)
     run_sql(database, f"UPDATE history_entries SET entry = '{stored}'")  # noqa: S608 - a test-chosen value
 
     with pytest.raises(StoreDefect) as defect:

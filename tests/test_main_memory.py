@@ -13,7 +13,7 @@ import pytest
 from agents.member import PlaceEntry, PlaceRef
 
 from personas.config import CONFIG_ENVIRONMENT_VARIABLE
-from personas.entries import HistoryDelta, KeptHistory, KeptLine, Lines, TurnTold, Visit, WindowRead
+from personas.entries import NO_TURNS_KEPT, HistoryDelta, KeptHistory, KeptLine, Lines, TurnTold, Visit, WindowRead
 from personas.failures import STORE_DEFECT_CODE, STORE_UNREACHABLE_CODE, StaleGenerationError
 from personas.main import CONFIGURATION_ERROR_EXIT_CODE, STORE_ERROR_EXIT_CODE, main
 from personas.memory import PostgresHistoryStore, PostgresLineStore
@@ -115,7 +115,7 @@ def histories_kept(target: DatabaseTarget, *histories: tuple[str, HistoryDelta])
         store = PostgresHistoryStore(target)
         try:
             for client_id, delta in histories:
-                await store.append(client_id, await store.take_over(client_id), delta)
+                await store.write(client_id, await store.take_over(client_id), delta, NO_TURNS_KEPT)
         finally:
             await store.close()
 
@@ -149,7 +149,7 @@ def written_under(target: DatabaseTarget, client_id: str, generation: int, delta
     async def append() -> bool:
         store = PostgresHistoryStore(target)
         try:
-            await store.append(client_id, generation, delta)
+            await store.write(client_id, generation, delta, NO_TURNS_KEPT)
         except StaleGenerationError:
             return False
         finally:

@@ -14,7 +14,7 @@ import anyio
 import pytest
 
 from personas.config import OwnershipTimings
-from personas.entries import HistoryDelta, KeptHistory
+from personas.entries import NO_TURNS_KEPT, HistoryDelta, KeptHistory
 from personas.failures import StaleGenerationError, StoreUnavailable
 from personas.ownership import LockConnectionLost, LockedOwnership
 from personas.reporting import Event
@@ -155,7 +155,7 @@ class Pod:
                 raise self.defect_of.pop(client_id)
             if client_id in self.refused_writes:
                 await self.histories.take_over(client_id)
-                await owned.write(HistoryDelta(0, (), 0, (), 0))
+                await owned.write(HistoryDelta(0, (), 0, (), 0), NO_TURNS_KEPT)
             await asyncio.Event().wait()
             raise AssertionError("an agent ended")  # pragma: no cover
         except asyncio.CancelledError:

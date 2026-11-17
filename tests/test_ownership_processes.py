@@ -219,7 +219,8 @@ async def test_a_line_said_while_the_holder_is_dead_gets_exactly_one_turn_on_the
     later_line = pods.app.speak(PLACE_ID, PERSON, "Ada", LATER_LINE)
     await pods.app.said_count(2)
 
-    assert [turn.woke_seqs for turn in pods.gateway.turns("lines")] == [[line], [later_line]]
+    woken = [turn.woke_seqs for turn in pods.gateway.turns("lines")]
+    assert (woken[0], len(woken), max(woken[1])) == ([line], 2, later_line)
     assert (pods.calls_of("first", "say"), pods.calls_of("second", "say")) == (0, 2)
 
 

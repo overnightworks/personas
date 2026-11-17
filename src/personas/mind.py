@@ -1,6 +1,7 @@
 """One agent's mind: the present his requests hold, which is the history of the lines he took in, the views he read and
 the calls relayed for him at any of his apps with the turns that were told of it, the apps where he holds an active
-place, and the one turn he takes at a time, with the places that have one due. His loops and turns feed it and every
+place, where reading each of his window places stands, and the one turn he takes at a time, with the places that have
+one due. His loops and turns feed it and every
 turn reads it."""
 
 from __future__ import annotations
@@ -10,7 +11,8 @@ from typing import TYPE_CHECKING
 
 from personas.decision import (
     EMPTY_PRESENT,
-    Turns,
+    AppPlace,
+    TurnState,
     answered_into,
     backoff_delay,
     budget_pause,
@@ -21,6 +23,7 @@ from personas.decision import (
     paused_for,
     refusal_retry_at,
     released,
+    sync_checkpoints,
     taken_into,
     with_due,
     without_due,
@@ -29,14 +32,16 @@ from personas.decision import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
-    from personas.decision import AppPlace, Due, Present
+    from agents.member import Standing
+
+    from personas.decision import Checkpoint, Due, Present
     from personas.entries import Entry, History, Occasion, TurnTold
 
 
 class Mind:
-    """Holds one agent's present and turns in memory while this pod serves him, from the present his history resumed
-    as; the rules that bound the history and move the turns are ``decision``'s. Each method is synchronous, so a loop
-    changes it between its awaits."""
+    """Holds one agent's present and turns in memory while this pod serves him, from the present and turns his kept
+    history resumed as; the rules that bound the history and move the turns are ``decision``'s. Each method is
+    synchronous, so a loop changes it between its awaits."""
 
     def __init__(
         self,
@@ -44,14 +49,16 @@ class Mind:
         history_keep_bytes: int,
         budget_pause_cap_seconds: float,
         present: Present = EMPTY_PRESENT,
+        resumed: TurnState = TurnState(),  # noqa: B008 - an immutable value
     ) -> None:
         self._history_bytes = history_bytes
         self._history_keep_bytes = history_keep_bytes
         self._budget_pause_cap_seconds = budget_pause_cap_seconds
-        self._unanswered_turns = 0
+        self._unanswered_turns = resumed.unanswered
         self._present = present
-        self._present_changed = asyncio.Event()
-        self._turns = Turns()
+        self._changed = asyncio.Event()
+        self._turns = resumed.turns
+        self._checkpoints = resumed.checkpoints
         self._placed = frozenset[str]()
         self._not_granted: dict[str, float] = {}
         self._wake_events: list[asyncio.Event] = []
@@ -74,16 +81,46 @@ class Mind:
         previous, self._next_take = self._next_take, asyncio.Event()
         self._present = taken_into(self._present, taken, self._history_bytes, self._history_keep_bytes)
         previous.set()
-        self._present_changed.set()
+        self._changed.set()
 
     def next_take(self) -> asyncio.Event:
         """The event the next take sets. A waiter reads it in the same synchronous step as the history it judges, so a
         take made after that step sets it."""
         return self._next_take
 
-    def present_changed(self) -> asyncio.Event:
-        """The event a take and an answered turn set, which stays set until its waiter clears it."""
-        return self._present_changed
+    def changed(self) -> asyncio.Event:
+        """The event every change of his present or of what ``turn_state`` holds sets, which stays set until its
+        waiter clears it."""
+        return self._changed
+
+    def turn_state(self) -> TurnState:
+        """His turns, his checkpoints and his unanswered turns in a row, as a pod that takes him over resumes them."""
+        return TurnState(self._turns, self._checkpoints, self._unanswered_turns)
+
+    def checkpoint(self, at: AppPlace) -> Checkpoint | None:
+        """Where reading the place stands, if it is one of his window places."""
+        return self._checkpoints.get(at)
+
+    def move_checkpoint(self, at: AppPlace, checkpoint: Checkpoint | None) -> None:
+        """Reading the place stands at ``checkpoint`` now; none drops the place's checkpoint."""
+        moved = dict(self._checkpoints)
+        if checkpoint is None:
+            moved.pop(at, None)
+        else:
+            moved[at] = checkpoint
+        self._set_checkpoints(moved)
+
+    def sync_checkpoints(self, app: str, standings: tuple[Standing, ...], before: tuple[Standing, ...]) -> None:
+        """Keeps the checkpoints of ``app``'s places in line with a standing read there, given the one read before."""
+        own = {at.place: checkpoint for at, checkpoint in self._checkpoints.items() if at.app == app}
+        others = {at: checkpoint for at, checkpoint in self._checkpoints.items() if at.app != app}
+        synced = sync_checkpoints(own, standings, before)
+        self._set_checkpoints(others | {AppPlace(app, place): checkpoint for place, checkpoint in synced.items()})
+
+    def _set_checkpoints(self, checkpoints: dict[AppPlace, Checkpoint]) -> None:
+        if checkpoints != self._checkpoints:
+            self._checkpoints = checkpoints
+            self._changed.set()
 
     def unanswered(self, *, budget_spent: bool, now: float) -> float:
         """A turn of his ended without an answer, refused for a spent budget or not: no turn of his starts for the
@@ -95,13 +132,14 @@ class Mind:
             else backoff_delay(self._unanswered_turns)
         )
         self._turns = paused_for(self._turns, now, seconds)
+        self._changed.set()
         return seconds
 
     def answered(self, turn: TurnTold) -> None:
         """A turn of his ended with an answer: the wait starts over and its message joins the present."""
         self._unanswered_turns = 0
         self._present = answered_into(self._present, turn)
-        self._present_changed.set()
+        self._changed.set()
 
     def stand_at(self, app: str, *, holds: bool) -> None:
         """Records whether he holds an active place at ``app``, as its loop last read his standing."""
@@ -137,18 +175,22 @@ class Mind:
     def due(self, at: AppPlace, occasion: Occasion, since: float) -> None:
         """The place is due for ``occasion`` from ``since``, a ``time.perf_counter`` value."""
         self._turns = with_due(self._turns, at, occasion, since)
+        self._changed.set()
 
     def due_again(self, at: AppPlace, occasion: Occasion, since: float) -> None:
         """The turn at ``at`` ended without an answer: the place is due for ``occasion`` again from ``since``, the end
         of the pause the turn left, unless something newer made it due meanwhile. It waits for the running turn to
         end."""
         self._turns = due_again(self._turns, at, occasion, since)
+        self._changed.set()
 
     def undue(self, leaving: Callable[[AppPlace], bool]) -> None:
         """Drops the due places for which ``leaving`` holds; with no turn running a younger place may then go first."""
         remaining = without_due(self._turns, leaving)
         dropped = len(remaining.due) < len(self._turns.due)
         self._turns = remaining
+        if dropped:
+            self._changed.set()
         if dropped and not remaining.running:
             self.wake()
 
@@ -158,6 +200,7 @@ class Mind:
         if taken is None:
             return None
         self._turns, at, due = taken
+        self._changed.set()
         return at, due
 
     def pause_left(self, app: str, now: float) -> float:
