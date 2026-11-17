@@ -14,7 +14,7 @@ import anyio
 import pytest
 
 from personas.config import OwnershipTimings
-from personas.entries import NO_TURNS_KEPT, HistoryDelta, KeptHistory
+from personas.entries import NO_TURNS_KEPT, HistoryDelta, KeptHistory, KeptTurns
 from personas.failures import StaleGenerationError, StoreUnavailable
 from personas.ownership import LockConnectionLost, LockedOwnership
 from personas.reporting import Event
@@ -122,7 +122,8 @@ class Pod:
     An agent that is cancelled, or whose write another pod's takeover refused, sets its ``winding_down`` event and
     ends once ``unwinding`` is set, which a test closes to hold the agents in the middle of stopping; a cancel does not
     cut that short, as it does not cut short a turn stuck in a call, and sets its ``cancelled`` event. An agent in
-    ``refused_writes`` is taken over by another pod and then writes, once he is served.
+    ``refused_writes`` is taken over by another pod and then writes, once he is served. An agent that
+    ``writes_on_his_stop`` writes once his stop begins, before he unwinds.
     """
 
     clock: FakeClock
@@ -130,6 +131,7 @@ class Pod:
     agents: Sequence[str] = (AGENT,)
     defect_of: dict[str, Exception] = field(default_factory=dict[str, Exception])
     refused_writes: set[str] = field(default_factory=set[str])
+    writes_on_his_stop: bool = False
     histories: KeptHistories = field(default_factory=KeptHistories)
     served_with: list[Owned] = field(default_factory=list["Owned"])
     served_again: asyncio.Event = field(default_factory=asyncio.Event)
@@ -164,6 +166,8 @@ class Pod:
         finally:
             self.winding_down[client_id].set()
             try:
+                if self.writes_on_his_stop:
+                    await owned.write(HistoryDelta(0, (), 0, (), 0), NO_TURNS_KEPT)
                 await self._unwound(client_id)
             finally:
                 self.events.append(("ended", client_id))
@@ -296,6 +300,52 @@ async def test_a_stop_that_outlasts_the_cancel_margin_writes_one_line_for_the_ag
     assert reported_while_stopping == [(Event.TAKEN, None), (Event.STOP_OVERRAN, None)]
     loss = [] if lost is None else [(Event.LOST, lost)]
     assert pod.reports.reported() == [(Event.TAKEN, None), (Event.STOP_OVERRAN, None), *loss]
+
+
+@dataclass
+class HistoriesSlowAtTheStop(KeptHistories):
+    """Histories whose writes hold until ``release`` is set: a store slow to take the write of a stop."""
+
+    writing: asyncio.Event = field(default_factory=asyncio.Event)
+    release: asyncio.Event = field(default_factory=asyncio.Event)
+
+    async def write(self, client_id: str, generation: int, delta: HistoryDelta | None, turns: KeptTurns) -> None:
+        self.writing.set()
+        await self.release.wait()
+        await super().write(client_id, generation, delta, turns)
+
+
+@pytest.mark.parametrize(
+    ("ends_with_the_write", "reported"),
+    [
+        (True, [(Event.TAKEN, None)]),
+        (False, [(Event.TAKEN, None), (Event.STOP_OVERRAN, None)]),
+    ],
+)
+async def test_a_write_in_flight_when_the_cancel_margin_ends_writes_no_overrun_line_unless_the_stop_outlasts_it(
+    clock, ends_with_the_write, reported
+):
+    histories = HistoriesSlowAtTheStop()
+    unwinding = asyncio.Event()
+    if ends_with_the_write:
+        unwinding.set()
+    pod = Pod(clock, ScriptedLocks(clock, {AGENT}), histories=histories, unwinding=unwinding, writes_on_his_stop=True)
+    task = pod.start()
+    await pod.until_spent(AGENT)
+    task.cancel()
+    async with asyncio.timeout(LIMIT_SECONDS):
+        await histories.writing.wait()
+    clock.gates[TIMINGS.cancel_margin_seconds].set()
+    await anyio.wait_all_tasks_blocked()
+    histories.release.set()
+    if not ends_with_the_write:
+        await pod.reports.until(Event.STOP_OVERRAN, limit_seconds=LIMIT_SECONDS)
+        unwinding.set()
+    async with asyncio.timeout(LIMIT_SECONDS):
+        (ended,) = await asyncio.gather(task, return_exceptions=True)
+
+    assert isinstance(ended, asyncio.CancelledError)
+    assert pod.reports.reported() == reported
 
 
 async def test_a_refused_write_stops_the_agent_and_a_later_round_that_holds_him_serves_him_under_a_new_generation(

@@ -12,6 +12,7 @@ older one has lost him, and stops serving him.
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from functools import partial
 from typing import TYPE_CHECKING, Protocol
@@ -20,7 +21,7 @@ from personas.failures import STORE_UNREACHABLE_CODE, StaleGenerationError, Stor
 from personas.reporting import Event, StateChange, StoreOutage
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Iterable, Sequence
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable, Sequence
     from typing import NoReturn
 
     from personas.clock import Clock
@@ -73,12 +74,36 @@ type ServeAgent = Callable[[Owned], Awaitable[NoReturn]]
 """Runs everything one agent does, until it is cancelled or a write of his history is refused."""
 
 
+class _Stop:
+    """The moment an agent's stop began, from which the cancel margin counts once, and whether a write of his is in
+    flight: such a write is bounded and reported by the agent himself, so a slow store is not his stop's overrun."""
+
+    def __init__(self) -> None:
+        self.began = asyncio.Event()
+        self._writes_in_flight = 0
+        self._write_ended = asyncio.Event()
+
+    @asynccontextmanager
+    async def writing(self) -> AsyncGenerator[None]:
+        self._writes_in_flight += 1
+        try:
+            yield
+        finally:
+            self._writes_in_flight -= 1
+            self._write_ended.set()
+
+    async def until_no_write_in_flight(self) -> None:
+        while self._writes_in_flight:
+            self._write_ended.clear()
+            await self._write_ended.wait()
+
+
 @dataclass(frozen=True)
 class _Serving:
-    """An agent this pod serves, and the moment his stop began, from which the cancel margin counts once."""
+    """An agent this pod serves, and his stop."""
 
     task: asyncio.Task[None]
-    stopping: asyncio.Event
+    stop: _Stop
 
 
 class LockConnectionLost(Exception):  # noqa: N818 - named for the state of the connection
@@ -156,15 +181,15 @@ class LockedOwnership:
                     for each in client_ids:
                         if each in held and each not in serving:
                             self._report(StateChange(Event.TAKEN, each, None))
-                            stopping = asyncio.Event()
-                            task = group.create_task(self._serve_after_grace(each, serve_agent, stopping))
-                            serving[each] = _Serving(task, stopping)
+                            stop = _Stop()
+                            task = group.create_task(self._serve_after_grace(each, serve_agent, stop))
+                            serving[each] = _Serving(task, stop)
                     await self._clock.sleep(max(0.0, started + self._timings.contend_seconds - self._clock.now()))
             finally:
                 await self._cancelled_until_ended(serving)
 
-    async def _serve_after_grace(self, client_id: str, serve_agent: ServeAgent, stopping: asyncio.Event) -> None:
-        overrun = asyncio.create_task(self._overran_after(client_id, stopping))
+    async def _serve_after_grace(self, client_id: str, serve_agent: ServeAgent, stop: _Stop) -> None:
+        overrun = asyncio.create_task(self._overran_after(client_id, stop))
         try:
             await self._clock.sleep(self._timings.grace_seconds)
             try:
@@ -173,17 +198,18 @@ class LockedOwnership:
                 self._report(StateChange(Event.LOST, client_id, None, outage.code))
                 return
             try:
-                await serve_agent(replace(owned, write=partial(_noting_refusal, owned.write, stopping)))
+                await serve_agent(replace(owned, write=partial(_noting_refusal, owned.write, stop)))
             except* StaleGenerationError:
                 self._report(StateChange(Event.LOST, client_id, None, STALE_GENERATION_CODE))
         finally:
             overrun.cancel()
 
-    async def _overran_after(self, client_id: str, stopping: asyncio.Event) -> None:
+    async def _overran_after(self, client_id: str, stop: _Stop) -> None:
         """Reports the agent once his stop outlasts the cancel margin, whatever began it and however many causes
-        followed; cancelled once he ended."""
-        await stopping.wait()
+        followed, and no write of his is in flight any more; cancelled once he ended."""
+        await stop.began.wait()
         await self._clock.sleep(self._timings.cancel_margin_seconds)
+        await stop.until_no_write_in_flight()
         self._report(StateChange(Event.STOP_OVERRAN, client_id, None))
 
     async def _stop(self, serving: dict[str, _Serving], client_ids: Iterable[str]) -> None:
@@ -196,7 +222,7 @@ class LockedOwnership:
     async def _cancelled_until_ended(self, agents: dict[str, _Serving]) -> None:
         """Begins each agent's stop, cancels him and waits until he ended."""
         for agent in agents.values():
-            agent.stopping.set()
+            agent.stop.began.set()
             agent.task.cancel()
         if agents:
             await asyncio.wait([agent.task for agent in agents.values()])
@@ -204,13 +230,14 @@ class LockedOwnership:
 
 async def _noting_refusal(
     write: Callable[[HistoryDelta | None, KeptTurns], Awaitable[None]],
-    stopping: asyncio.Event,
+    stop: _Stop,
     delta: HistoryDelta | None,
     turns: KeptTurns,
 ) -> None:
-    """Writes the delta and the turns; a refusal sets ``stopping``, since the agent's stop begins with it."""
+    """Writes the delta and the turns while ``stop`` knows it is in flight; a refusal begins the agent's stop."""
     try:
-        await write(delta, turns)
+        async with stop.writing():
+            await write(delta, turns)
     except StaleGenerationError:
-        stopping.set()
+        stop.began.set()
         raise
