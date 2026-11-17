@@ -7,12 +7,13 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 from dataclasses import dataclass, field
+from enum import Enum, auto
 from typing import TYPE_CHECKING
 
 import pytest
 
 from personas.config import OwnershipTimings
-from personas.entries import KeptHistory
+from personas.entries import HistoryDelta, KeptHistory
 from personas.failures import StaleGenerationError, StoreUnavailable
 from personas.ownership import LockConnectionLost, LockedOwnership
 from personas.reporting import Event
@@ -117,14 +118,16 @@ def _open_gate() -> asyncio.Event:
 class Pod:
     """A pod's ownership over a scripted lock connection, serving agents that record when they start and end.
 
-    An agent that is cancelled sets its ``winding_down`` event and ends once ``unwinding`` is set, which a test closes
-    to hold the agents in the middle of stopping.
+    An agent that is cancelled, or whose write another pod's takeover refused, sets its ``winding_down`` event and
+    ends once ``unwinding`` is set, which a test closes to hold the agents in the middle of stopping. An agent in
+    ``refused_writes`` is taken over by another pod and then writes, once he is served.
     """
 
     clock: FakeClock
     locks: ScriptedLocks
     agents: Sequence[str] = (AGENT,)
     defect_of: dict[str, Exception] = field(default_factory=dict[str, Exception])
+    refused_writes: set[str] = field(default_factory=set[str])
     histories: KeptHistories = field(default_factory=KeptHistories)
     served_with: list[Owned] = field(default_factory=list["Owned"])
     served_again: asyncio.Event = field(default_factory=asyncio.Event)
@@ -147,6 +150,9 @@ class Pod:
         try:
             if client_id in self.defect_of:
                 raise self.defect_of.pop(client_id)
+            if client_id in self.refused_writes:
+                await self.histories.take_over(client_id)
+                await owned.write(HistoryDelta(0, (), 0, (), 0))
             await asyncio.Event().wait()
             raise AssertionError("an agent ended")  # pragma: no cover
         finally:
@@ -229,22 +235,45 @@ async def test_an_agent_whose_lock_is_no_longer_held_is_stopped_and_has_ended_be
     assert pod.reports.reported() == [(Event.TAKEN, None), (Event.LOST, "hold_lost")]
 
 
-async def test_a_stop_that_outlasts_the_cancel_margin_writes_one_line_for_the_agent_and_the_loss_once_it_ended(clock):
+class StopCause(Enum):
+    HOLD_LOST = auto()
+    WRITE_REFUSED = auto()
+    POD_CANCELLED = auto()
+
+
+@pytest.mark.parametrize(
+    ("cause", "lost"),
+    [
+        (StopCause.HOLD_LOST, "hold_lost"),
+        (StopCause.WRITE_REFUSED, "generation_stale"),
+        (StopCause.POD_CANCELLED, None),
+    ],
+)
+async def test_a_stop_that_outlasts_the_cancel_margin_writes_one_line_for_the_agent_and_the_loss_once_it_ended(
+    clock, cause, lost
+):
     unwinding = asyncio.Event()
-    pod = Pod(clock, ScriptedLocks(clock, {AGENT}, After((AGENT,), set())), unwinding=unwinding)
+    rounds = ({AGENT}, After((AGENT,), set())) if cause is StopCause.HOLD_LOST else ({AGENT},)
+    refused_writes = {AGENT} if cause is StopCause.WRITE_REFUSED else set[str]()
+    pod = Pod(clock, ScriptedLocks(clock, *rounds), unwinding=unwinding, refused_writes=refused_writes)
     task = pod.start()
+    if cause is StopCause.POD_CANCELLED:
+        await pod.until_spent(AGENT)
+        task.cancel()
     async with asyncio.timeout(LIMIT_SECONDS):
         await pod.winding_down[AGENT].wait()
     clock.gates[TIMINGS.cancel_margin_seconds].set()
     await pod.reports.until(Event.STOP_OVERRAN, limit_seconds=LIMIT_SECONDS)
     reported_while_stopping = pod.reports.reported()
     unwinding.set()
-    await pod.until_spent()
+    if lost is not None:
+        await pod.reports.until(Event.LOST, limit_seconds=LIMIT_SECONDS)
 
     await pod.stopped(task)
 
     assert reported_while_stopping == [(Event.TAKEN, None), (Event.STOP_OVERRAN, None)]
-    assert pod.reports.reported() == [(Event.TAKEN, None), (Event.STOP_OVERRAN, None), (Event.LOST, "hold_lost")]
+    loss = [] if lost is None else [(Event.LOST, lost)]
+    assert pod.reports.reported() == [(Event.TAKEN, None), (Event.STOP_OVERRAN, None), *loss]
 
 
 async def test_a_refused_write_stops_the_agent_and_a_later_round_that_holds_him_serves_him_under_a_new_generation(
