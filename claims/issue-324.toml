@@ -1,8 +1,0 @@
-claim_id = "65af2f98b9954773a140112122c3b38d"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "38f6b62ce444a41a55568a09913051e0d26a81d9"
-branch = "claude/issue-324-every-failed-step-and-every-subcommand-l"
-scope = ["docs/log.md", "src/personas/main.py", "tests/test_loop_turn_steps.py", "tests/test_main.py", "tests/test_main_memory.py", "tests/test_main_migrate.py"]
-opened_commit = "46ae1254998a217c90cf47d993ae45e2fe166db7"
-whole_reason = "the two gaps one lane left in the log reference's proof: failed step fields and LOG_LEVEL on every subcommand"
