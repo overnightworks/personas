@@ -32,7 +32,7 @@ WRITES_BEYOND_THE_POOL = 5
 HOLD_SECONDS = 1.0
 DARK_WRITE_SECONDS = 1.0
 CANCEL_WAIT_AT_LEAST_SECONDS = 4.0
-"""The driver waits for a cancelled statement's answer for seconds before it gives the connection up."""
+"""The driver gives a connection up after waiting about five seconds for a cancelled statement's answer."""
 CANCEL_WAIT_AT_MOST_SECONDS = 11.0
 """About ten seconds, the most the reference gives the cancel wait, with a second's margin."""
 DARK_LIMIT_SECONDS = 30.0

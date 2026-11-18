@@ -62,7 +62,7 @@ sets no limit of its own. (CONFIG-21)
 | `password_file` | absolute path | required | the file holding the password (CONFIG-23) |
 | `write_seconds` | number above 0, or `inf` | 2 | the bound on one write or read against a database that answers (CONFIG-24) |
 
-A connection that goes dark mid-write is given up only after the driver's own cancel wait, about ten
+A connection that goes dark mid-write is given up only after the driver's own cancel wait, about five
 seconds more. A write runs inside the listen's deadline, so a bound from about 40 seconds on, or `inf`, lets
 a dark database hold that loop until the deadline and cancel the running turn, with no `store.failed`. (CONFIG-25)
 
