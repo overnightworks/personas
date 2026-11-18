@@ -1,12 +1,20 @@
 import io
 import json
 import math
+import os
+import shutil
+import subprocess
+import sys
 from enum import Enum
+from pathlib import Path
+from types import ModuleType
 
 import pytest
 from pydantic import BaseModel, ConfigDict
 
 from configuration_release_notes import PLACEHOLDER_SENTENCE, main, notes, schema
+from personas.config import configuration_schema
+from tests.support.scripts import run_from
 
 PREVIOUS_TAG = "v2026.11.17.2"
 VERSION = "2026.11.18.1"
@@ -85,6 +93,155 @@ class TopLevelAfter(BaseModel):
     history_bytes: int | None = None
 
 
+class HistoryBefore(BaseModel):
+    history_bytes: int = 49152
+
+
+class HistoryAfter(BaseModel):
+    history_bytes: int = 1000
+
+
+class HistoryCountedInKibibytes(BaseModel):
+    history_bytes: float = 48.0
+
+
+class HistoryRequired(BaseModel):
+    history_bytes: int
+
+
+class HistoryRequiredAsText(BaseModel):
+    history_bytes: str
+
+
+class IntPort(Entry):
+    port: int
+
+
+class StrPort(Entry):
+    port: str
+
+
+class WithIntPort(BaseModel):
+    database: IntPort
+
+
+class WithStrPort(BaseModel):
+    database: StrPort
+
+
+class StringVoices(Entry):
+    names: tuple[str, ...] = ()
+
+
+class IntegerVoices(Entry):
+    names: tuple[int, ...] = ()
+
+
+class WithStringVoices(BaseModel):
+    voice: StringVoices = StringVoices()
+
+
+class WithIntegerVoices(BaseModel):
+    voice: IntegerVoices = IntegerVoices()
+
+
+class AppWithScope(Entry):
+    mcp_url: str
+    tools: list[str] = []
+    scope: str
+
+
+class WithScope(BaseModel):
+    ownership: OwnershipBefore = OwnershipBefore()
+    apps: list[AppWithScope]
+
+
+class Memory(Entry):
+    keep_days: float = 30.0
+
+
+class MemoryWithLookup(Entry):
+    keep_days: float = 30.0
+    lookup_bytes: int
+
+
+class WithMemory(BaseModel):
+    memory: Memory | None = None
+
+
+class WithLookup(BaseModel):
+    memory: MemoryWithLookup | None = None
+
+
+class AgentWithMemory(Entry):
+    client_id: str
+    memory: Memory | None = None
+
+
+class AgentWithLookup(Entry):
+    client_id: str
+    memory: MemoryWithLookup | None = None
+
+
+class MemoryWithMode(Entry):
+    keep_days: float = 30.0
+    mode: str = "x"
+
+
+class WithModedMemory(BaseModel):
+    memory: MemoryWithMode | None = None
+
+
+class WithAgentMemory(BaseModel):
+    agents: list[AgentWithMemory]
+
+
+class WithAgentLookup(BaseModel):
+    agents: list[AgentWithLookup]
+
+
+class IntPortBehindGateway(Entry):
+    port: int
+    gateway: Gateway
+
+
+class WithGateway(BaseModel):
+    database: IntPortBehindGateway
+
+
+class AgentWithScope(Entry):
+    client_id: str
+    memory: Memory | None = None
+    scope: str
+
+
+class WithOptionalAgents(BaseModel):
+    agents: list[AgentWithMemory] = []
+
+
+class WithOptionalScopedAgents(BaseModel):
+    agents: list[AgentWithScope] = []
+
+
+class DeclaresNoRules(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"refusals": []})
+
+    ownership: OwnershipAfter = OwnershipAfter()
+
+
+class RuledOwnership(Entry):
+    model_config = ConfigDict(json_schema_extra={"refusals": ["stop_seconds: must be above grace_seconds"]})
+
+    grace_seconds: float = 12.0
+    stop_seconds: float = 10.0
+
+
+class DeclaresRules(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"refusals": ["history_keep_bytes: must not be above history_bytes"]})
+
+    ownership: RuledOwnership = RuledOwnership()
+
+
 def notes_between(before: type[BaseModel], after: type[BaseModel]) -> str:
     return notes(PREVIOUS_TAG, VERSION, before.model_json_schema(), after.model_json_schema())
 
@@ -96,7 +253,8 @@ def notes_between(before: type[BaseModel], after: type[BaseModel]) -> str:
             Ownership,
             WithStop,
             "- `[ownership] stop_seconds`: added, optional, default `10.0`.\n\n"
-            "```toml\n[ownership]\nstop_seconds = 10.0\n```\n",
+            "It goes under the file's `[ownership]` header; a file without one adds the header first.\n\n"
+            "```toml\nstop_seconds = 10.0\n```\n",
             id="an optional field with its default",
         ),
         pytest.param(
@@ -114,9 +272,106 @@ def notes_between(before: type[BaseModel], after: type[BaseModel]) -> str:
         pytest.param(
             TopLevelBefore,
             TopLevelAfter,
-            "- `history_bytes`: added, optional.\n\n```toml\nhistory_bytes = <integer>\n```\n\n"
-            "- `ready_file`: now required.\n\n```toml\nready_file = <string>\n```\n",
+            "- `history_bytes`: added, optional.\n\nIt goes above the file's first table.\n\n"
+            "```toml\nhistory_bytes = <integer>\n```\n\n"
+            "- `ready_file`: now required.\n\nIt goes above the file's first table.\n\n"
+            "```toml\nready_file = <string>\n```\n",
             id="top-level fields added and made required",
+        ),
+        pytest.param(
+            WithIntPort,
+            WithStrPort,
+            "- `[database] port`: now takes `string`, was `integer`.\n\n"
+            "It goes under the file's `[database]` header.\n\n```toml\nport = <string>\n```\n",
+            id="a field whose type changed",
+        ),
+        pytest.param(
+            WithStringVoices,
+            WithIntegerVoices,
+            "- `[voice] names`: now takes `array of integer`, was `array of string`.\n\n"
+            "It goes under the file's `[voice]` header; a file without one adds the header first.\n\n"
+            "```toml\nnames = []\n```\n",
+            id="an array whose item type changed",
+        ),
+        pytest.param(
+            HistoryBefore,
+            HistoryAfter,
+            "- `history_bytes`: default now `1000`, was `49152`: set it to keep the old one.\n",
+            id="a field whose default changed",
+        ),
+        pytest.param(
+            HistoryBefore,
+            HistoryCountedInKibibytes,
+            "- `history_bytes`: now takes `number`, was `integer`; default now `48.0`, was `49152`.\n\n"
+            "It goes above the file's first table.\n\n```toml\nhistory_bytes = 48.0\n```\n",
+            id="a field whose type and default changed",
+        ),
+        pytest.param(
+            HistoryBefore,
+            HistoryRequiredAsText,
+            "- `history_bytes`: now takes `string`, was `integer`; now required.\n\n"
+            "It goes above the file's first table.\n\n```toml\nhistory_bytes = <string>\n```\n",
+            id="a field whose type changed and that became required",
+        ),
+        pytest.param(
+            HistoryRequiredAsText,
+            HistoryBefore,
+            "- `history_bytes`: now takes `integer`, was `string`; optional, default `49152`.\n\n"
+            "It goes above the file's first table.\n\n```toml\nhistory_bytes = 49152\n```\n",
+            id="a required field whose type changed and that gained a default",
+        ),
+        pytest.param(
+            Ownership,
+            WithScope,
+            "- `[[apps]] scope`: added, required.\n\nIt goes into every existing `[[apps]]` entry.\n\n"
+            "```toml\nscope = <string>\n```\n",
+            id="a required field of an array of tables, without the header that starts an entry",
+        ),
+        pytest.param(
+            WithMemory,
+            WithLookup,
+            "- `[memory] lookup_bytes`: added, required.\n\n"
+            "It goes under the file's `[memory]` header. It is required only where `[memory]` is set.\n\n"
+            "```toml\nlookup_bytes = <integer>\n```\n",
+            id="a required field of an optional table",
+        ),
+        pytest.param(
+            WithMemory,
+            WithModedMemory,
+            '- `[memory] mode`: added, optional, default `"x"`.\n\n'
+            "It goes under the file's `[memory]` header, only where `[memory]` is set.\n\n"
+            '```toml\nmode = "x"\n```\n',
+            id="an optional field of a nullable table, placed only where the table is set",
+        ),
+        pytest.param(
+            WithAgentMemory,
+            WithAgentLookup,
+            "- `[agents.memory] lookup_bytes`: added, required.\n\n"
+            "It goes under `[agents.memory]` in each `[[agents]]` entry that sets it.\n\n"
+            "```toml\nlookup_bytes = <integer>\n```\n",
+            id="a required field of an optional table inside an array of tables",
+        ),
+        pytest.param(
+            WithIntPort,
+            WithGateway,
+            "- `[database.gateway]`: added, required.\n\n```toml\n[database.gateway]\norigin = <string>\n```\n",
+            id="a required table inside a required table, placed by its own header",
+        ),
+        pytest.param(
+            WithOptionalAgents,
+            WithOptionalScopedAgents,
+            "- `[[agents]] scope`: added, required.\n\nIt goes into every existing `[[agents]]` entry.\n\n"
+            "```toml\nscope = <string>\n```\n",
+            id="a required field of an optional array of tables, needed only in the entries that exist",
+        ),
+        pytest.param(
+            DeclaresNoRules,
+            DeclaresRules,
+            "- A new rule across the fields of the top level: `history_keep_bytes: must not be above history_bytes`."
+            " A file that breaks it no longer starts.\n\n"
+            "- A new rule across the fields of `[ownership]`: `stop_seconds: must be above grace_seconds`."
+            " A file that breaks it no longer starts.\n",
+            id="rules across fields added",
         ),
     ],
 )
@@ -136,6 +391,9 @@ def test_the_notes_name_each_change_a_deployer_must_make_with_its_toml(before, a
         pytest.param(Ownership, WithoutTools, False, id="only a removal"),
         pytest.param(Ownership, WithDatabase, True, id="a required table's placeholders"),
         pytest.param(TopLevelBefore, TopLevelAfter, True, id="an optional and a required field's placeholders"),
+        pytest.param(WithIntPort, WithStrPort, True, id="a changed type's placeholder"),
+        pytest.param(HistoryBefore, HistoryAfter, False, id="only a changed default"),
+        pytest.param(DeclaresNoRules, DeclaresRules, False, id="only rules"),
     ],
 )
 def test_the_notes_explain_the_placeholder_only_when_a_block_holds_one(before, after, explained):
@@ -144,13 +402,32 @@ def test_the_notes_explain_the_placeholder_only_when_a_block_holds_one(before, a
     assert (PLACEHOLDER_SENTENCE in paragraphs) is explained
 
 
-def test_the_notes_say_so_when_no_field_changed():
-    rendered = notes_between(Ownership, Ownership)
+def test_the_notes_list_every_rule_when_the_previous_schema_names_none():
+    rendered = notes_between(Ownership, DeclaresRules)
+
+    assert f"{PREVIOUS_TAG} names no rule across fields in its schema" in rendered
+    assert rendered.endswith(
+        "- A rule across the fields of the top level: `history_keep_bytes: must not be above history_bytes`.\n\n"
+        "- A rule across the fields of `[ownership]`: `stop_seconds: must be above grace_seconds`.\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        pytest.param(Ownership, Ownership, id="no rules named"),
+        pytest.param(DeclaresRules, DeclaresRules, id="rules named"),
+        pytest.param(HistoryRequired, HistoryAfter, id="a required field given a default, which every file sets"),
+    ],
+)
+def test_the_notes_say_so_when_nothing_changed(before, after):
+    rendered = notes_between(before, after)
 
     assert rendered.splitlines() == [
         "## Configuration changes",
         "",
-        f"No field of the runner's configuration file was added, removed or made required since {PREVIOUS_TAG}.",
+        "No field of the runner's configuration file was added, removed, made required or changed in its type or"
+        f" default, and no rule across fields was added, since {PREVIOUS_TAG}.",
     ]
 
 
@@ -159,6 +436,7 @@ def test_the_notes_say_so_when_no_field_changed():
     [
         pytest.param({"properties": ["ready_file"]}, id="properties as a list"),
         pytest.param({"properties": {}, "required": "ready_file"}, id="required as a string"),
+        pytest.param({"properties": {}, "refusals": [1]}, id="refusals not sentences"),
     ],
 )
 def test_a_malformed_schema_fails_loud(malformed):
@@ -173,5 +451,118 @@ def test_the_shipped_configuration_compared_with_itself_has_no_change(monkeypatc
 
     main(["notes", PREVIOUS_TAG, VERSION])
 
-    assert json.loads(written) == schema()
+    assert json.loads(written) == configuration_schema()
     assert "No field" in capsys.readouterr().out
+
+
+def test_the_schema_of_a_tag_older_than_configuration_schema_is_its_file_models():
+    older = ModuleType("personas.config")
+    older._FileModel = OwnershipBefore  # noqa: SLF001 - the name an older tag gives its file's model
+
+    assert schema(older) == OwnershipBefore.model_json_schema()
+
+
+SCRIPT = Path(__file__).parents[2] / "scripts" / "configuration_release_notes.sh"
+UNTAGGED = "nightly"
+CONFIG_AT_TAG = """from pydantic import BaseModel
+
+
+class _FileModel(BaseModel):
+    ready_file: str
+"""
+CONFIG_AT_CHECKOUT = """from pydantic import BaseModel, ConfigDict
+
+
+class _Model(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"refusals": []})
+
+    ready_file: str
+    history_bytes: int = 1000
+
+
+def configuration_schema():
+    return _Model.model_json_schema()
+"""
+# The tag's tree is installed by uv sync; this stand-in gives it the test's own interpreter instead.
+FAKE_UV = """#!/bin/sh
+case "$1" in
+    sync)
+        while [ "$1" != --project ]; do shift; done
+        mkdir -p "$2/.venv/bin"
+        printf '#!/bin/sh\nexec "%s" "$@"\n' "{python}" > "$2/.venv/bin/python"
+        chmod +x "$2/.venv/bin/python" ;;
+    run)
+        shift 3
+        exec "{python}" "$@" ;;
+esac
+"""
+
+
+def git(tree: Path, *arguments: str) -> None:
+    subprocess.run(  # noqa: S603 - git on a repository this test made
+        [
+            "git",
+            "-C",
+            str(tree),
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@example.test",
+            "-c",
+            "commit.gpgsign=false",
+            *arguments,
+        ],  # noqa: S607 - git from PATH, as the script runs it
+        check=True,
+        capture_output=True,
+    )
+
+
+def commit_config(tree: Path, text: str, tag: str) -> None:
+    (tree / "src" / "personas" / "config.py").write_text(text)
+    git(tree, "add", "-A")
+    git(tree, "commit", "-q", "-m", f"config at {tag}")
+    git(tree, "tag", tag)
+
+
+@pytest.fixture
+def released_tree(tmp_path: Path) -> Path:
+    """A repository whose config.py changed since its newest release tag, and which carries a newer tag that names
+    no release, with the shipped script and renderer."""
+    tree = tmp_path / "tree"
+    (tree / "scripts").mkdir(parents=True)
+    (tree / "src" / "personas").mkdir(parents=True)
+    (tree / "src" / "personas" / "__init__.py").write_text("")
+    for name in (SCRIPT.name, "configuration_release_notes.py"):
+        shutil.copy2(SCRIPT.parent / name, tree / "scripts" / name)
+    git(tree, "init", "-q")
+    commit_config(tree, CONFIG_AT_TAG, PREVIOUS_TAG)
+    commit_config(tree, CONFIG_AT_CHECKOUT, UNTAGGED)
+    return tree
+
+
+@pytest.fixture
+def fake_uv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    bin_directory = tmp_path / "bin"
+    bin_directory.mkdir()
+    uv = bin_directory / "uv"
+    uv.write_text(FAKE_UV.format(python=sys.executable))
+    uv.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_directory}{os.pathsep}{os.environ['PATH']}")
+
+
+@pytest.mark.usefixtures("fake_uv")
+def test_the_script_compares_the_newest_release_tag_before_with_the_checkout_after(released_tree):
+    result = run_from(released_tree, SCRIPT, VERSION)
+
+    assert result.returncode == 0, result.stderr
+    assert f"Since {PREVIOUS_TAG}," in result.stdout
+    assert "- `history_bytes`: added, optional, default `1000`.\n" in result.stdout
+
+
+@pytest.mark.parametrize("arguments", [pytest.param((), id="none"), pytest.param(("",), id="empty")])
+def test_the_script_refuses_a_missing_version_with_its_usage(released_tree, arguments):
+    result = run_from(released_tree, SCRIPT, *arguments)
+
+    assert result.returncode == 2
+    assert "usage" in result.stderr
+    assert not result.stdout

@@ -788,4 +788,7 @@ def test_a_model_that_is_no_text_model_stops_the_start_and_names_the_field(files
 def test_a_model_without_a_persona_file_stops_the_start_and_names_the_field(files, monkeypatch, capsys, field):
     files.text = files.valid_text(binds_tools=False) + f'{field} = "text/sonnet-low"\n'
 
-    assert f"agents.0.{field}" in fails_at_start(files.write(), monkeypatch, capsys)
+    error = fails_at_start(files.write(), monkeypatch, capsys)
+
+    assert "agents.0" in error
+    assert f" {field}: " in error
