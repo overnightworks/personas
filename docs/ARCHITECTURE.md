@@ -60,7 +60,8 @@ flowchart LR
 - **Boundaries** are the token endpoint, the MCP session, the model gateway, the clock, the log, the ready
   marker (`readiness.py`) and the stores, each behind a narrow port so the loop is driven with scripted ones.
 - **Characters** (`src/characters/<name>.md`) are the agents' persona files, shipped in the image. Their
-  figures and rooms (`*.vrm`, `*.room.glb`) are written by `scripts/write_figures.py` and stay out of it.
+  figures and rooms (`*.vrm`, `*.room.glb`) are written by `scripts/write_figures.py` and never by hand; the
+  image does not hold them, and the runner does not read them.
 
 ## 3. Runtime View
 
@@ -99,7 +100,7 @@ grace outlasts the time a losing pod needs to stop him; the bound is in
 ## 4. Deployment View
 
 The image (`Dockerfile`) holds the runner and the persona files, runs as the non-root uid 1001 and starts
-`personas`, which handles SIGTERM as PID 1. It holds no configuration and no secret. The deployment in
+`personas`, which handles SIGTERM as PID 1 and exits 0 on that clean stop. It holds no configuration and no secret. The deployment in
 overnightworks/platform supplies `PERSONAS_CONFIG`, the secret files and the Postgres database, runs
 `personas migrate`, probes readiness with `test -e <ready_file>`, and may run several pods against one
 database. The runner opens no port. The release path is in the [README](../README.md).
@@ -121,9 +122,8 @@ database. The runner opens no port. The release path is in the [README](../READM
 - The mind writes through on every change, under his generation, so a write from a pod that lost him is
   refused. A restart or a takeover loads his history and turns, and his next turn is told what the holder
   before would have told, byte for byte.
-- What a pod took in after its last write is lost when it dies, and a turn running at a kill is not
-  retried. A SIGTERM hands a turn it cut to the new holder only if the turn had relayed no call and sent no
-  sentence, since a line said twice is worse than one unanswered.
+- What a pod took in after its last write is lost when it dies. Which turn a SIGTERM hands to the new holder
+  is in [the turns reference](turns.md), Pauses and retries.
 - A place read before resumes where reading stood, so a line said while no pod served him gets one turn;
   how a place reads is in [the turns reference](turns.md), Joining and reading.
 - `personas memory list` and `personas memory erase` show and erase what an agent keeps; see

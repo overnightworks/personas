@@ -15,8 +15,8 @@ a table, one model turn at a time through the operator's LiteLLM gateway.
    `PERSONAS_CONFIG` at it, with the secret files it names.
 3. `personas migrate` brings the Postgres schema to its head. Run it before the runner starts and after
    every release; it leaves a schema a newer release migrated as it is and exits 0.
-4. `personas` starts the runner. It opens no port; it creates `ready_file` once its pod has contended for
-   its agents, and the platform's probe is `test -e <ready_file>`. It stops on SIGTERM with exit code 0.
+4. `personas` starts the runner, which creates `ready_file` once its pod has contended for its agents. How
+   the platform probes it and how the runner stops are in [the architecture](docs/ARCHITECTURE.md), Deployment View.
 
 The marker says the pod is contending, not that an agent works: a wrong secret or URL shows in the
 [log](docs/log.md) as `loop.suspended` or `loop.backed_off`. What a turn is told and may do is in the
@@ -32,8 +32,7 @@ What the runner keeps in Postgres, for how long and what a restart or a takeover
 
 Each agent's character is its agent file `src/characters/<name>.md`, which the image holds at
 `/app/characters/<name>.md`, so a character changes with a release. Its figure `<name>.vrm` and its room
-`<name>.room.glb` are written by `scripts/write_figures.py` and never by hand; the runner does not read
-them and the image does not hold them. An agent's `[agents.figure]` table names the released figure that
+`<name>.room.glb` are described in [the architecture](docs/ARCHITECTURE.md), Building Block View. An agent's `[agents.figure]` table names the released figure that
 every accept carries.
 
 ## Release it
