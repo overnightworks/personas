@@ -338,9 +338,9 @@ def notes_between(before: type[BaseModel], after: type[BaseModel]) -> str:
         pytest.param(
             WithMemory,
             WithModedMemory,
-            "- `[memory] mode`: added, optional, default `\"x\"`.\n\n"
+            '- `[memory] mode`: added, optional, default `"x"`.\n\n'
             "It goes under the file's `[memory]` header, only where `[memory]` is set.\n\n"
-            "```toml\nmode = \"x\"\n```\n",
+            '```toml\nmode = "x"\n```\n',
             id="an optional field of a nullable table, placed only where the table is set",
         ),
         pytest.param(
