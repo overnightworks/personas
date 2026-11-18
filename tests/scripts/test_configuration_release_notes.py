@@ -2,15 +2,19 @@ import io
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
+import tomllib
+from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
 from types import ModuleType
+from typing import Literal
 
 import pytest
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from configuration_release_notes import PLACEHOLDER_SENTENCE, main, notes, schema
 from personas.config import configuration_schema
@@ -129,6 +133,51 @@ class WithStrPort(BaseModel):
     database: StrPort
 
 
+class LowPort(Entry):
+    port: int = Field(ge=1)
+
+
+class HighPort(Entry):
+    port: int = Field(ge=1024)
+
+
+class WithLowPort(BaseModel):
+    database: LowPort
+
+
+class WithHighPort(BaseModel):
+    database: HighPort
+
+
+class UnboundLookups(BaseModel):
+    lookup_calls: int = Field(default=2, gt=0)
+
+
+class BoundLookups(BaseModel):
+    lookup_calls: int = Field(default=2, gt=0, le=4)
+
+
+class Clip(Entry):
+    url: str
+    note: str = ""
+
+
+class TwoGestures(Entry):
+    gestures: dict[Literal["wave", "nod"], Clip] = {}
+
+
+class OneGesture(Entry):
+    gestures: dict[Literal["wave"], Clip] = {}
+
+
+class WithTwoGestures(BaseModel):
+    figure: TwoGestures
+
+
+class WithOneGesture(BaseModel):
+    figure: OneGesture
+
+
 class StringVoices(Entry):
     names: tuple[str, ...] = ()
 
@@ -223,6 +272,54 @@ class WithOptionalScopedAgents(BaseModel):
     agents: list[AgentWithScope] = []
 
 
+class AgentWithVoice(Entry):
+    client_id: str
+    memory: Memory | None = None
+    voice: Gateway | None = None
+
+
+class WithAgentVoice(BaseModel):
+    agents: list[AgentWithVoice]
+
+
+class WithNoClips(BaseModel):
+    clips: list[Clip] = []
+
+
+class WithOneClip(BaseModel):
+    clips: list[Clip] = [Clip(url="https://clip.test")]
+
+
+class OwnershipOnly(BaseModel):
+    ownership: OwnershipBefore = OwnershipBefore()
+
+
+class TunedOwnershipOnly(BaseModel):
+    ownership: OwnershipBefore = OwnershipBefore(grace_seconds=20.0)
+
+
+class MemoryOnByDefault(BaseModel):
+    memory: Memory = Memory()
+
+
+class RuledHistory(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "refusals": [
+                "history_keep_bytes: must be a multiple of 1024",
+                "history_keep_bytes: must not be above history_bytes",
+            ]
+        }
+    )
+
+    history_bytes: int = 49152
+    history_keep_bytes: int = 32768
+
+
+class RuledShorterHistory(RuledHistory):
+    history_bytes: int = 16384
+
+
 class DeclaresNoRules(BaseModel):
     model_config = ConfigDict(json_schema_extra={"refusals": []})
 
@@ -263,7 +360,8 @@ def notes_between(before: type[BaseModel], after: type[BaseModel]) -> str:
         pytest.param(
             Ownership,
             WithDatabase,
-            "- `[database]`: added, required.\n\n```toml\n[database]\nhost = <string>\nport = <integer>\n"
+            "- `[database]`: added, required.\n\nIt goes at the end of the file.\n\n"
+            "```toml\n[database]\nhost = <string>\nport = <integer>\n"
             'backend = <"litellm">\nwrite_seconds = 2.0\nlistens = true\nkeep_days = inf\nnames = ["first"]\n'
             "choice = <integer or string>\n"
             "\n[database.gateway]\norigin = <string>\n```\n",
@@ -274,7 +372,8 @@ def notes_between(before: type[BaseModel], after: type[BaseModel]) -> str:
             TopLevelAfter,
             "- `history_bytes`: added, optional.\n\nIt goes above the file's first table.\n\n"
             "```toml\nhistory_bytes = <integer>\n```\n\n"
-            "- `ready_file`: now required.\n\nIt goes above the file's first table.\n\n"
+            "- `ready_file`: now required.\n\nIt goes above the file's first table. Where the file already sets it,"
+            " nothing changes.\n\n"
             "```toml\nready_file = <string>\n```\n",
             id="top-level fields added and made required",
         ),
@@ -282,42 +381,118 @@ def notes_between(before: type[BaseModel], after: type[BaseModel]) -> str:
             WithIntPort,
             WithStrPort,
             "- `[database] port`: now takes `string`, was `integer`.\n\n"
-            "It goes under the file's `[database]` header.\n\n```toml\nport = <string>\n```\n",
+            "It goes under the file's `[database]` header. Where the file already sets it, it replaces that.\n\n"
+            "```toml\nport = <string>\n```\n",
             id="a field whose type changed",
+        ),
+        pytest.param(
+            WithLowPort,
+            WithHighPort,
+            "- `[database] port`: now takes `integer (at least 1024)`, was `integer (at least 1)`.\n\n"
+            "It goes under the file's `[database]` header. Where the file already sets it, it replaces that.\n\n"
+            "```toml\nport = <integer (at least 1024)>\n```\n",
+            id="a bound tightened on an unchanged type",
+        ),
+        pytest.param(
+            UnboundLookups,
+            BoundLookups,
+            "- `lookup_calls`: now takes `integer (above 0, at most 4)`, was `integer (above 0)`.\n\n"
+            "It goes above the file's first table. Where the file already sets it, it replaces that.\n\n"
+            "```toml\nlookup_calls = 2\n```\n",
+            id="a bound gained on an unchanged type",
+        ),
+        pytest.param(
+            WithTwoGestures,
+            WithOneGesture,
+            '- `[figure] gestures`: now takes `map of "wave" to { url = string, optional note = string }`,'
+            ' was `map of "wave" or "nod" to { url = string, optional note = string }`.\n\n'
+            "It goes under the file's `[figure]` header. Where the file already sets it, it replaces that.\n\n"
+            "```toml\ngestures = {}\n```\n",
+            id="a map whose key type changed",
         ),
         pytest.param(
             WithStringVoices,
             WithIntegerVoices,
             "- `[voice] names`: now takes `array of integer`, was `array of string`.\n\n"
-            "It goes under the file's `[voice]` header; a file without one adds the header first.\n\n"
-            "```toml\nnames = []\n```\n",
+            "It goes under the file's `[voice]` header; a file without one adds the header first."
+            " Where the file already sets it, it replaces that.\n\n```toml\nnames = []\n```\n",
             id="an array whose item type changed",
         ),
         pytest.param(
             HistoryBefore,
             HistoryAfter,
-            "- `history_bytes`: default now `1000`, was `49152`: set it to keep the old one.\n",
-            id="a field whose default changed",
+            "- `history_bytes`: default now `1000`, was `49152`: set it to keep the old one.\n\n"
+            "It goes above the file's first table. Where the file already sets it, nothing changes.\n\n"
+            "```toml\nhistory_bytes = 49152\n```\n",
+            id="a field whose default changed, with the line that keeps the old one",
+        ),
+        pytest.param(
+            RuledHistory,
+            RuledShorterHistory,
+            "- `history_bytes`: default now `16384`, was `49152`: set it to keep the old one.\n\n"
+            "It goes above the file's first table. Where the file already sets it, nothing changes. A file that leaves"
+            " it unset must still keep `history_keep_bytes: must not be above history_bytes`.\n\n"
+            "```toml\nhistory_bytes = 49152\n```\n",
+            id="a changed default with the rule a file that takes it must still keep",
+        ),
+        pytest.param(
+            OwnershipOnly,
+            TunedOwnershipOnly,
+            "- `[ownership]`: default now `{ grace_seconds = 20.0 }`, was its fields' defaults: set it to keep the"
+            " old one.\n\nIt goes at the end of the file. Where the file already sets it, nothing changes.\n\n"
+            "```toml\n[ownership]\n```\n",
+            id="a table's default changed from its fields' defaults",
+        ),
+        pytest.param(
+            TunedOwnershipOnly,
+            OwnershipOnly,
+            "- `[ownership]`: default now its fields' defaults, was `{ grace_seconds = 20.0 }`: set it to keep the"
+            " old one.\n\nIt goes at the end of the file. Where the file already sets it, nothing changes.\n\n"
+            "```toml\n[ownership]\ngrace_seconds = 20.0\n```\n",
+            id="a table's default changed to its fields' defaults",
+        ),
+        pytest.param(
+            WithMemory,
+            MemoryOnByDefault,
+            "- `[memory]`: default now its fields' defaults, was none.\n",
+            id="a table set by default that was unset, which no TOML can undo",
+        ),
+        pytest.param(
+            WithOneClip,
+            WithNoClips,
+            '- `[[clips]]`: default now `[]`, was `[{ url = "https://clip.test", note = "" }]`: set it to keep the old'
+            " one.\n\nIt goes at the end of the file. Where the file already sets it, nothing changes.\n\n"
+            '```toml\n[[clips]]\nurl = "https://clip.test"\nnote = ""\n```\n',
+            id="an array of tables whose default entries changed",
+        ),
+        pytest.param(
+            WithNoClips,
+            WithOneClip,
+            '- `[[clips]]`: default now `[{ url = "https://clip.test", note = "" }]`, was `[]`.\n',
+            id="an array of tables given default entries, which no TOML can undo",
         ),
         pytest.param(
             HistoryBefore,
             HistoryCountedInKibibytes,
             "- `history_bytes`: now takes `number`, was `integer`; default now `48.0`, was `49152`.\n\n"
-            "It goes above the file's first table.\n\n```toml\nhistory_bytes = 48.0\n```\n",
+            "It goes above the file's first table. Where the file already sets it, it replaces that.\n\n"
+            "```toml\nhistory_bytes = 48.0\n```\n",
             id="a field whose type and default changed",
         ),
         pytest.param(
             HistoryBefore,
             HistoryRequiredAsText,
             "- `history_bytes`: now takes `string`, was `integer`; now required.\n\n"
-            "It goes above the file's first table.\n\n```toml\nhistory_bytes = <string>\n```\n",
+            "It goes above the file's first table. Where the file already sets it, it replaces that.\n\n"
+            "```toml\nhistory_bytes = <string>\n```\n",
             id="a field whose type changed and that became required",
         ),
         pytest.param(
             HistoryRequiredAsText,
             HistoryBefore,
             "- `history_bytes`: now takes `integer`, was `string`; optional, default `49152`.\n\n"
-            "It goes above the file's first table.\n\n```toml\nhistory_bytes = 49152\n```\n",
+            "It goes above the file's first table. Where the file already sets it, it replaces that.\n\n"
+            "```toml\nhistory_bytes = 49152\n```\n",
             id="a required field whose type changed and that gained a default",
         ),
         pytest.param(
@@ -347,14 +522,15 @@ def notes_between(before: type[BaseModel], after: type[BaseModel]) -> str:
             WithAgentMemory,
             WithAgentLookup,
             "- `[agents.memory] lookup_bytes`: added, required.\n\n"
-            "It goes under `[agents.memory]` in each `[[agents]]` entry that sets it.\n\n"
+            "It goes into the `[agents.memory]` of each `[[agents]]` entry that has one.\n\n"
             "```toml\nlookup_bytes = <integer>\n```\n",
             id="a required field of an optional table inside an array of tables",
         ),
         pytest.param(
             WithIntPort,
             WithGateway,
-            "- `[database.gateway]`: added, required.\n\n```toml\n[database.gateway]\norigin = <string>\n```\n",
+            "- `[database.gateway]`: added, required.\n\nIt goes at the end of the file.\n\n"
+            "```toml\n[database.gateway]\norigin = <string>\n```\n",
             id="a required table inside a required table, placed by its own header",
         ),
         pytest.param(
@@ -363,6 +539,13 @@ def notes_between(before: type[BaseModel], after: type[BaseModel]) -> str:
             "- `[[agents]] scope`: added, required.\n\nIt goes into every existing `[[agents]]` entry.\n\n"
             "```toml\nscope = <string>\n```\n",
             id="a required field of an optional array of tables, needed only in the entries that exist",
+        ),
+        pytest.param(
+            WithAgentMemory,
+            WithAgentVoice,
+            "- `[agents.voice]`: added, optional.\n\nIt goes at the end of each `[[agents]]` entry that sets it.\n\n"
+            "```toml\n[agents.voice]\norigin = <string>\n```\n",
+            id="a table of an array of tables, at the end of an entry",
         ),
         pytest.param(
             DeclaresNoRules,
@@ -402,6 +585,161 @@ def test_the_notes_explain_the_placeholder_only_when_a_block_holds_one(before, a
     assert (PLACEHOLDER_SENTENCE in paragraphs) is explained
 
 
+type Paste = Callable[[str, list[str]], str]
+
+
+def above_the_first_table(text: str, block: list[str]) -> str:
+    return "\n".join([*block, text])
+
+
+def at_the_end(text: str, block: list[str]) -> str:
+    return "\n".join([text, *block, ""])
+
+
+def under(header: str) -> Paste:
+    def paste(text: str, block: list[str]) -> str:
+        lines: list[str] = []
+        for line in text.splitlines():
+            lines.append(line)
+            if line == header:
+                lines.extend(block)
+        return "\n".join([*lines, ""])
+
+    return paste
+
+
+def replacing(key: str, paste: Paste) -> Paste:
+    def replace(text: str, block: list[str]) -> str:
+        kept = [line for line in text.splitlines() if not line.startswith(f"{key} =")]
+        return paste("\n".join(kept), block)
+
+    return replace
+
+
+def at_the_end_of_each(entry: str) -> Paste:
+    """Pastes the block before the first header after each entry's start that belongs to no table of the entry."""
+    inside = f"[{entry.strip('[]')}."
+
+    def paste(text: str, block: list[str]) -> str:
+        lines: list[str] = []
+        in_entry = False
+        for line in text.splitlines():
+            starts_another_table = line.startswith("[") and not line.startswith(inside)
+            if in_entry and starts_another_table:
+                lines.extend(block)
+            if starts_another_table:
+                in_entry = line == entry
+            lines.append(line)
+        return "\n".join([*lines, *(block if in_entry else []), ""])
+
+    return paste
+
+
+TWO_AGENTS = '[[agents]]\nclient_id = "a"\n[agents.memory]\nkeep_days = 7.0\n\n[[agents]]\nclient_id = "b"\n'
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "sentence", "paste", "fill", "file", "parsed"),
+    [
+        pytest.param(
+            HistoryBefore,
+            HistoryAfter,
+            "It goes above the file's first table.",
+            above_the_first_table,
+            "",
+            "[ownership]\ngrace_seconds = 12.0\n",
+            {"history_bytes": 49152, "ownership": {"grace_seconds": 12.0}},
+            id="a top-level value above the first table",
+        ),
+        pytest.param(
+            Ownership,
+            WithStop,
+            "It goes under the file's `[ownership]` header",
+            under("[ownership]"),
+            "",
+            '[ownership]\ngrace_seconds = 12.0\n\n[[apps]]\nmcp_url = "https://a.test"\n',
+            {"ownership": {"grace_seconds": 12.0, "stop_seconds": 10.0}, "apps": [{"mcp_url": "https://a.test"}]},
+            id="a value of an existing table, under its header",
+        ),
+        pytest.param(
+            WithLowPort,
+            WithHighPort,
+            "Where the file already sets it, it replaces that.",
+            replacing("port", under("[database]")),
+            "6543",
+            "[database]\nport = 5432\n",
+            {"database": {"port": 6543}},
+            id="a changed value of an existing table, in place of its line",
+        ),
+        pytest.param(
+            Ownership,
+            WithScope,
+            "It goes into every existing `[[apps]]` entry.",
+            under("[[apps]]"),
+            '"mcp-a"',
+            '[[apps]]\nmcp_url = "https://a.test"\n\n[[apps]]\nmcp_url = "https://b.test"\n',
+            {"apps": [{"mcp_url": f"https://{name}.test", "scope": "mcp-a"} for name in "ab"]},
+            id="a value of every entry",
+        ),
+        pytest.param(
+            WithAgentMemory,
+            WithAgentLookup,
+            "It goes into the `[agents.memory]` of each `[[agents]]` entry that has one.",
+            under("[agents.memory]"),
+            "8192",
+            TWO_AGENTS,
+            {"agents": [{"client_id": "a", "memory": {"keep_days": 7.0, "lookup_bytes": 8192}}, {"client_id": "b"}]},
+            id="a value of an optional table inside the entries that have it",
+        ),
+        pytest.param(
+            WithIntPort,
+            WithGateway,
+            "It goes at the end of the file.",
+            at_the_end,
+            '"https://gateway.test"',
+            "[database]\nport = 5432\n",
+            {"database": {"port": 5432, "gateway": {"origin": "https://gateway.test"}}},
+            id="a table inside an existing table, at the end of the file",
+        ),
+        pytest.param(
+            WithAgentMemory,
+            WithAgentVoice,
+            "It goes at the end of each `[[agents]]` entry that sets it.",
+            at_the_end_of_each("[[agents]]"),
+            '"https://voice.test"',
+            TWO_AGENTS,
+            {
+                "agents": [
+                    {"client_id": "a", "memory": {"keep_days": 7.0}, "voice": {"origin": "https://voice.test"}},
+                    {"client_id": "b", "voice": {"origin": "https://voice.test"}},
+                ]
+            },
+            id="a table of the entries, at each entry's end",
+        ),
+        pytest.param(
+            TunedOwnershipOnly,
+            OwnershipOnly,
+            "It goes at the end of the file.",
+            at_the_end,
+            "",
+            "history_bytes = 1024\n",
+            {"history_bytes": 1024, "ownership": {"grace_seconds": 20.0}},
+            id="a table's old default, at the end of a file without it",
+        ),
+    ],
+)
+def test_each_block_pasted_where_its_sentence_says_parses_into_its_table(
+    before, after, sentence, paste, fill, file, parsed
+):
+    rendered = notes_between(before, after)
+    block = rendered.split("```toml\n")[1].split("\n```")[0]
+
+    pasted = paste(file, re.sub(r"<[^>]*>", fill, block).splitlines())
+
+    assert sentence in rendered
+    assert tomllib.loads(pasted) == parsed
+
+
 def test_the_notes_list_every_rule_when_the_previous_schema_names_none():
     rendered = notes_between(Ownership, DeclaresRules)
 
@@ -426,8 +764,8 @@ def test_the_notes_say_so_when_nothing_changed(before, after):
     assert rendered.splitlines() == [
         "## Configuration changes",
         "",
-        "No field of the runner's configuration file was added, removed, made required or changed in its type or"
-        f" default, and no rule across fields was added, since {PREVIOUS_TAG}.",
+        "No field of the runner's configuration file was added, removed, made required or changed in what it takes"
+        f" or its default, and no rule across fields was added, since {PREVIOUS_TAG}.",
     ]
 
 
@@ -470,7 +808,9 @@ CONFIG_AT_TAG = """from pydantic import BaseModel
 class _FileModel(BaseModel):
     ready_file: str
 """
-CONFIG_AT_CHECKOUT = """from pydantic import BaseModel, ConfigDict
+CONFIG_AT_CHECKOUT = """from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class _Model(BaseModel):

@@ -3,8 +3,9 @@
 ``schema`` writes the JSON schema of the runner's configuration file as the checked-out ``personas.config``
 validates it. ``notes <previous-tag> <version> < before.json`` compares the previous release's schema, read from
 standard input, with the checked-out one and writes each change a deployer must know of: a field added, removed,
-newly required or changed in its type or default, with the TOML it needs and where that goes, and each new rule
-across fields. The schema is the file's one owner, so the notes need no entry a change could forget;
+newly required, changed in what it takes (its type, its bounds, a map's key or value type) or in its default, a
+table's included, with the TOML it needs and where that goes, so that it pastes into the file as it is, and each new
+rule across fields. The schema is the file's one owner, so the notes need no entry a change could forget;
 ``scripts/configuration_release_notes.sh`` runs both.
 """
 
@@ -14,6 +15,7 @@ import argparse
 import importlib
 import json
 import math
+import re
 import sys
 from dataclasses import dataclass
 from enum import Enum
@@ -26,6 +28,23 @@ if TYPE_CHECKING:
 REFERENCE_URL = "https://github.com/overnightworks/personas/blob/v{version}/docs/configuration.md"
 
 type JsonObject = dict[str, object]
+
+BOUNDS: dict[str, tuple[str, tuple[str, str] | None]] = {
+    "minimum": ("at least", None),
+    "exclusiveMinimum": ("above", None),
+    "maximum": ("at most", None),
+    "exclusiveMaximum": ("below", None),
+    "multipleOf": ("a multiple of", None),
+    "minLength": ("at least", ("character", "characters")),
+    "maxLength": ("at most", ("character", "characters")),
+    "pattern": ("matching", None),
+    "minItems": ("at least", ("item", "items")),
+    "maxItems": ("at most", ("item", "items")),
+    "minProperties": ("at least", ("entry", "entries")),
+    "maxProperties": ("at most", ("entry", "entries")),
+}
+"""The JSON schema's keywords that bound a value, each with the words before the bound and, for a count, what it
+counts."""
 
 
 @dataclass(frozen=True)
@@ -103,6 +122,21 @@ def refusals_of(table: JsonObject) -> tuple[str, ...]:
     return tuple(cast("list[str]", sentences))
 
 
+def bound(words: str, value: object, unit: tuple[str, str] | None) -> str:
+    if unit is None:
+        return f"{words} {json.dumps(value)}"
+    return f"{words} {value} {unit[0] if value == 1 else unit[1]}"
+
+
+def overrides(table: JsonObject, default: object | None) -> JsonObject | None:
+    """What a table's default instance sets apart from its fields' own defaults, so that a field's changed default
+    is not counted again as its table's; none where the table is unset unless the file sets it."""
+    if default is None:
+        return None
+    own = {name: as_object(node).get("default") for name, node in as_object(table.get("properties", {})).items()}
+    return {name: value for name, value in as_object(default).items() if value != own.get(name)}
+
+
 @dataclass(frozen=True)
 class Schema:
     """A configuration file's JSON schema, its ``$ref`` links resolved against its ``$defs``."""
@@ -126,11 +160,35 @@ class Schema:
         return " or ".join(self.described(each) for each in self.choices(node))
 
     def described(self, choice: JsonObject) -> str:
+        """What one choice takes, with the bounds it sets, so that a bound tightened on an unchanged type reads as
+        a change of what the field takes."""
         if "enum" in choice:
             return " or ".join(json.dumps(each) for each in as_list(choice["enum"]))
+        if "const" in choice:
+            return json.dumps(choice["const"])
+        if "properties" in choice:
+            return self.bounded(self.inline_table(choice), choice)
         if choice.get("type") == "array" and "items" in choice:
-            return f"array of {self.kind(as_object(choice['items']))}"
-        return str(choice.get("format") or choice.get("type") or "value")
+            return self.bounded(f"array of {self.kind(as_object(choice['items']))}", choice)
+        values = choice.get("additionalProperties")
+        if isinstance(values, dict):
+            keys = self.kind(as_object(choice.get("propertyNames", {"type": "string"})))
+            return self.bounded(f"map of {keys} to {self.kind(cast('JsonObject', values))}", choice)
+        return self.bounded(str(choice.get("format") or choice.get("type") or "value"), choice)
+
+    def inline_table(self, choice: JsonObject) -> str:
+        """A table that is a value, such as a map's, written with each field and what it takes."""
+        required = set(as_list(choice.get("required", [])))
+        fields = (
+            f"{'' if name in required else 'optional '}{name} = {self.kind(as_object(node))}"
+            for name, node in as_object(choice["properties"]).items()
+        )
+        return f"{{ {', '.join(fields)} }}"
+
+    @staticmethod
+    def bounded(kind: str, choice: JsonObject) -> str:
+        bounds = [bound(words, choice[keyword], unit) for keyword, (words, unit) in BOUNDS.items() if keyword in choice]
+        return f"{kind} ({', '.join(bounds)})" if bounds else kind
 
     def table(self, choices: list[JsonObject]) -> tuple[JsonObject | None, bool]:
         """The table a field holds, if it holds one, and whether it is an array of tables."""
@@ -143,6 +201,11 @@ class Schema:
             return items, True
         return None, False
 
+    def table_kind(self, choice: JsonObject, *, repeated: bool) -> str:
+        """A table field takes a table, whose own fields are compared one by one; an array of tables keeps its
+        bounds."""
+        return self.bounded("array of tables", choice) if repeated else "table"
+
     def fields(self, table: JsonObject, prefix: FieldPath) -> Iterator[ConfigField]:
         required = set(as_list(table.get("required", [])))
         for name, value in as_object(table.get("properties", {})).items():
@@ -150,11 +213,12 @@ class Schema:
             choices = self.choices(node)
             table_schema, repeated = self.table(choices)
             path = (*prefix, Step(name, repeated=repeated))
+            default = node.get("default")
             yield ConfigField(
                 path,
                 required=name in required,
-                default=node.get("default"),
-                kind=self.kind(node),
+                default=default if table_schema is None or repeated else overrides(table_schema, default),
+                kind=self.kind(node) if table_schema is None else self.table_kind(choices[0], repeated=repeated),
                 table=table_schema is not None,
                 refusals=() if table_schema is None else refusals_of(table_schema),
             )
@@ -186,7 +250,7 @@ def kept_change(then: ConfigField, now: ConfigField) -> Change | None:
         return Change.TYPE_CHANGED
     if now.required and not then.required:
         return Change.NOW_REQUIRED
-    if not now.table and not now.required and not then.required and then.default != now.default:
+    if not now.required and not then.required and then.default != now.default:
         return Change.DEFAULT_CHANGED
     return None
 
@@ -217,6 +281,9 @@ def toml_value(value: object) -> str:
         return str(value)
     if isinstance(value, list):
         return f"[{', '.join(toml_value(each) for each in cast('list[object]', value))}]"
+    if isinstance(value, dict):
+        pairs = (f"{name} = {toml_value(each)}" for name, each in cast("JsonObject", value).items())
+        return f"{{ {', '.join(pairs)} }}" if value else "{}"
     return json.dumps(value)
 
 
@@ -255,6 +322,32 @@ def toml_entries(field: ConfigField, every: dict[FieldPath, ConfigField]) -> Ite
             yield from toml_entries(each, every)
 
 
+def old_default(then: ConfigField) -> Iterator[TomlEntry]:
+    """The TOML that keeps a changed default as it was: the field at its old default, the table's header with what
+    its old default instance set, or each old default entry; nothing where the old default left it unset or empty,
+    which no TOML of a table can write."""
+    if then.default is None:
+        return
+    if not then.table:
+        yield then
+        return
+    entries = as_list(then.default) if then.path[-1].repeated else [then.default]
+    for entry in entries:
+        yield table_header(then.path)
+        yield from (f"{name} = {toml_value(value)}" for name, value in as_object(entry).items() if value is not None)
+
+
+def toml_block(
+    change: Change, field: ConfigField, then: ConfigField | None, every: dict[FieldPath, ConfigField]
+) -> list[TomlEntry]:
+    """The TOML a deployer pastes for a change: none for a removal."""
+    if change is Change.REMOVED:
+        return []
+    if change is Change.DEFAULT_CHANGED and then is not None:
+        return list(old_default(then))
+    return list(toml_entries(field, every))
+
+
 def placement(field: ConfigField, every: dict[FieldPath, ConfigField]) -> Iterator[str]:
     """Where the field's TOML goes in a file that already holds the other tables and entries."""
     ancestors = [every[field.path[:length]] for length in range(len(field.path) - 1, 0, -1)]
@@ -273,11 +366,11 @@ def placement_outside_entries(
 
     A table whose default is null is a switch, so a file never adds its header for a field: the field goes where the
     table is already set. A table with a default instance may be added, since its header changes nothing."""
-    if not ancestors:
-        if not field.table:
-            yield "It goes above the file's first table."
-        return
-    if not field.table:
+    if field.table:
+        yield "It goes at the end of the file."
+    elif not ancestors:
+        yield "It goes above the file's first table."
+    else:
         header = f"It goes under the file's `{ancestors[0].label}` header"
         if optional is None or field.required:
             yield f"{header}."
@@ -285,29 +378,58 @@ def placement_outside_entries(
             yield f"{header}, only where `{optional.label}` is set."
         else:
             yield f"{header}; a file without one adds the header first."
-    if field.required and optional is not None:
+    if field.required and optional is not None and not field.table:
         yield f"It is required only where `{optional.label}` is set."
 
 
 def placement_inside_entry(
     field: ConfigField, parent: ConfigField, entry: ConfigField, optional: ConfigField | None
 ) -> Iterator[str]:
-    """Where a field inside an array of tables goes: into its entries, under its table there if it has one."""
+    """Where a field inside an array of tables goes: into its entries, under its table there if it has one; a
+    table at an entry's end, since its header takes every line below it."""
     if optional is not None and len(optional.path) > len(entry.path):
-        sets = "it" if optional == parent else f"`{optional.label}`"
-        yield f"It goes under `{parent.label}` in each `{entry.label}` entry that sets {sets}."
+        has = "one" if optional == parent else f"`{optional.label}`"
+        yield f"It goes into the `{parent.label}` of each `{entry.label}` entry that has {has}."
         return
     where = "every existing" if field.required else "each"
-    under = "" if field.table or parent == entry else f", under `{parent.label}`"
-    yield f"It goes into {where} `{entry.label}` entry{'' if field.required else ' that sets it'}{under}."
+    that = "" if field.required else " that sets it"
+    if field.table:
+        yield f"It goes at the end of {where} `{entry.label}` entry{that}."
+        return
+    under = "" if parent == entry else f", under `{parent.label}`"
+    yield f"It goes into {where} `{entry.label}` entry{that}{under}."
 
 
-def written(value: object | None) -> str:
-    return "none" if value is None else f"`{toml_value(value)}`"
+def already_set(change: Change) -> Iterator[str]:
+    """What the block does where the file already sets the field, so that no paste declares a key or table twice."""
+    if change is Change.TYPE_CHANGED:
+        yield "Where the file already sets it, it replaces that."
+    elif change in {Change.NOW_REQUIRED, Change.DEFAULT_CHANGED}:
+        yield "Where the file already sets it, nothing changes."
+
+
+def bound_by(change: Change, field: ConfigField, rules: list[Rule]) -> Iterator[str]:
+    """Each rule of the field's table that names a field whose default changed: a file that takes the new default
+    may break it."""
+    if change is not Change.DEFAULT_CHANGED or field.table:
+        return
+    named = re.compile(rf"\b{re.escape(field.path[-1].name)}\b")
+    for rule in rules:
+        if rule.table == field.path[:-1] and named.search(rule.sentence):
+            yield f"A file that leaves it unset must still keep `{rule.sentence}`."
+
+
+def written(field: ConfigField) -> str:
+    """A field's default as a deployer reads it; a table's names only what it sets apart from its fields'."""
+    if field.default is None:
+        return "none"
+    if field.table and field.default == {}:
+        return "its fields' defaults"
+    return f"`{toml_value(field.default)}`"
 
 
 def default_moved(field: ConfigField, then: ConfigField) -> str:
-    return f"default now {written(field.default)}, was {written(then.default)}"
+    return f"default now {written(field)}, was {written(then)}"
 
 
 def requirement_moved(field: ConfigField, then: ConfigField) -> str:
@@ -315,7 +437,7 @@ def requirement_moved(field: ConfigField, then: ConfigField) -> str:
     if field.required and not then.required:
         return "; now required"
     if then.required and not field.required:
-        return "; optional" if field.default is None else f"; optional, default {written(field.default)}"
+        return "; optional" if field.default is None else f"; optional, default {written(field)}"
     return "" if then.default == field.default else f"; {default_moved(field, then)}"
 
 
@@ -327,7 +449,8 @@ def summary(change: Change, field: ConfigField, then: ConfigField | None) -> str
     if change is Change.TYPE_CHANGED and then is not None:
         return f"now takes `{field.kind}`, was `{then.kind}`{requirement_moved(field, then)}"
     if change is Change.DEFAULT_CHANGED and then is not None:
-        return f"{default_moved(field, then)}: set it to keep the old one"
+        keep = ": set it to keep the old one" if next(old_default(then), None) is not None else ""
+        return f"{default_moved(field, then)}{keep}"
     if field.required:
         return "added, required"
     if field.table or field.placeholder:
@@ -360,38 +483,31 @@ def rule_lines(previous_tag: str, before: JsonObject, after: JsonObject) -> list
 
 def notes(previous_tag: str, version: str, before: JsonObject, after: JsonObject) -> str:
     fields_after = fields_of(after)
+    rules_after = rules_of(after)
     found = changes(fields_of(before), fields_after)
     rules = rule_lines(previous_tag, before, after)
     lines = ["## Configuration changes", ""]
     if not found and not rules:
         lines.append(
-            "No field of the runner's configuration file was added, removed, made required or changed in its type or"
-            f" default, and no rule across fields was added, since {previous_tag}."
+            "No field of the runner's configuration file was added, removed, made required or changed in what it takes"
+            f" or its default, and no rule across fields was added, since {previous_tag}."
         )
         return "\n".join(lines) + "\n"
     lines.append(
         f"Since {previous_tag}, the runner's configuration file changed as follows; what each field means is in the"
         f" [configuration reference]({REFERENCE_URL.format(version=version)})."
     )
-    blocks = [
-        (
-            change,
-            field,
-            then,
-            [] if change in {Change.REMOVED, Change.DEFAULT_CHANGED} else list(toml_entries(field, fields_after)),
-        )
-        for change, field, then in found
-    ]
+    blocks = [(change, field, then, toml_block(change, field, then, fields_after)) for change, field, then in found]
     if any(isinstance(entry, ConfigField) and entry.placeholder for *_, block in blocks for entry in block):
         lines.extend(["", PLACEHOLDER_SENTENCE])
     for change, field, then, block in blocks:
         lines.extend(["", f"- `{field.label}`: {summary(change, field, then)}."])
         if block:
-            sentences = " ".join(placement(field, fields_after))
-            if sentences:
-                lines.extend(["", sentences])
+            sentences = " ".join(
+                [*placement(field, fields_after), *already_set(change), *bound_by(change, field, rules_after)]
+            )
             toml = [entry if isinstance(entry, str) else assignment(entry) for entry in block]
-            lines.extend(["", "```toml", *toml, "```"])
+            lines.extend(["", sentences, "", "```toml", *toml, "```"])
     for line in rules:
         lines.extend(["", line])
     return "\n".join(lines) + "\n"
