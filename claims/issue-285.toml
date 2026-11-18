@@ -1,0 +1,8 @@
+claim_id = "bea4be7de9134f44a8b2e7aa04d308e8"
+agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
+role = "builder"
+base = "ba3375d9185078033c5613cae268b8bc743f03ca"
+branch = "claude/issue-285-personas-runs-on-logline-v0-7-0-and-no-l"
+scope = ["docs/log.md", "pyproject.toml", "src/personas", "tests", "uv.lock"]
+opened_commit = "e4bfbbf9a4adf65620a0e4cf80eafebd62e27ff7"
+whole_reason = "one dependency bump whose field renames span the modules that log"
