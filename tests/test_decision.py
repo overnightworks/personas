@@ -427,11 +427,7 @@ def test_a_place_that_serves_a_view_again_after_an_active_read_without_one_start
     ("place", "now", "before"),
     [
         (A_TABLE, (active("table-1", "table"),), (invited("table-1", "inv-3", kind="table"),)),
-        (
-            A_TABLE,
-            (active("table-1", "table", serves_view=True),),
-            (active("table-1", "table"),),
-        ),
+        (A_TABLE, (active("table-1", "table", serves_view=True),), (active("table-1", "table"),)),
         (
             PLACE,
             (active("room-7", serves_view=True),),
