@@ -17,6 +17,7 @@ from agents.turn_events import FinalEvent, ToolCallEvent
 from agents.voice.reply import REPLY_RULES
 
 from personas.decision import (
+    NETWORK_FAILURE_CODE,
     TURN_ROLE,
     AppPlace,
     Held,
@@ -531,10 +532,10 @@ class Turning:
         counting its own calls.
 
         Of each app every tool it lists now is held but the runner's reserved names and those an earlier app holds,
-        none when it lists none. Another app whose listing fails is left out and reported once, and the turn holds the
-        rest.
+        none when it lists none. Another app whose listing fails, and the place's own app when it does not answer within
+        its call time, is left out and reported, and the turn holds the rest.
         """
-        own = await self._list_tools(self._app, session)
+        own = await self._list_own_tools(session)
         inbox = HoldInbox() if admitted.aloud else None
         hold = HoldBack(admitted.history, inbox)
         tools: list[HandTool] = []
@@ -631,8 +632,25 @@ class Turning:
             self._report(Event.RESUMED, None, app, None)
         return declared
 
+    async def _list_own_tools(self, session: AppSession) -> tuple[ToolDeclaration, ...] | None:
+        """The tools the place's app lists, or ``None`` when it did not answer within its call time; the step then
+        ends failed with its reason and the turn goes on."""
+        bound = asyncio.timeout(self._app.call_seconds)
+        timer = step_timer("tool_list.ended", self._agent.client_id, self._app.mcp_url)
+        with stepping(timer):
+            try:
+                async with bound:
+                    return await session.declared_tools()
+            except TimeoutError:
+                if not bound.expired():
+                    raise
+                timer.handled()
+                timer.fail(NETWORK_FAILURE_CODE)
+                timer.end()
+                return None
+
     async def _list_tools(self, app: AppTarget, session: AppSession) -> tuple[ToolDeclaration, ...]:
-        with stepping(step_timer("tool_list.ended", self._agent.client_id, app.mcp_url), turn_goes_on=app != self._app):
+        with stepping(step_timer("tool_list.ended", self._agent.client_id, app.mcp_url), turn_goes_on=True):
             return await session.declared_tools()
 
     async def _decided_apart(  # NOSONAR(S7503) HandToolHandler is async

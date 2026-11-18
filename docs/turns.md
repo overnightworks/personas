@@ -157,4 +157,5 @@ left out of his turns and asked again every 30 seconds. (TURNS-42)
   states again what the last turn end at that seat stated since the runner started, that his turns answer
   when none did. At a seat he no longer holds nothing is stated, and a turn the runner's stop cuts states
   no end. One app's statements go out in order, so a turn's thinking never overtakes the end of the turn
-  before it; a refused or failed statement is logged as `turn_state.failed` and the turn goes on. (TURNS-43)
+  before it; a refused or failed statement, or one the app does not answer within its `call_seconds`, is logged as
+  `turn_state.failed` and the turn goes on. (TURNS-43)

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, NoReturn
 
 from agents.member import SetTurnStateArguments
 
-from personas.decision import failure_code, sync_seat_ends, turn_end_state
+from personas.decision import NETWORK_FAILURE_CODE, failure_code, sync_seat_ends, turn_end_state
 from personas.failures import CallFailure
 from personas.reporting import Event
 
@@ -41,14 +41,16 @@ class TurnStates:
     A turn waits until its thinking went out, so it reaches the app before the turn's first round. A turn's end is
     only queued, so no statement's wait or failure reaches how the turn ends. One worker sends them in the order
     queued, so a turn's thinking never overtakes the end of the turn before it. A refusal or a failure of a statement
-    is logged and the next one goes out.
+    is logged and the next one goes out; one the app does not answer within ``call_seconds`` fails as a refusal does.
     """
 
     def __init__(
         self,
         use_current_token: Callable[[AppSession], Awaitable[None]],
         report: Callable[[Event, str | None, AppTarget | None, CallFailure | None], None],
+        call_seconds: float,
     ) -> None:
+        self._call_seconds = call_seconds
         self._use_current_token = use_current_token
         self._report = report
         self._seat_ends: dict[PlaceRef, StopOutcome | None] = {}
@@ -85,9 +87,16 @@ class TurnStates:
                 queued.sent.set_result(None)
 
     async def _state(self, session: AppSession, statement: SetTurnStateArguments) -> None:
+        bound = asyncio.timeout(self._call_seconds)
         try:
-            await self._use_current_token(session)
-            refusal = await session.set_turn_state(statement)
+            async with bound:
+                await self._use_current_token(session)
+                refusal = await session.set_turn_state(statement)
+        except TimeoutError:
+            if not bound.expired():
+                raise
+            self._report(Event.TURN_STATE_FAILED, NETWORK_FAILURE_CODE, None, None)
+            return
         except CallFailure as failure:
             self._report(Event.TURN_STATE_FAILED, failure_code(failure), None, failure)
             return

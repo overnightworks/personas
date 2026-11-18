@@ -206,6 +206,13 @@ class Harness:
             self.config, agents=tuple(replace(each, persona=persona, voice=Voice(())) for each in self.config.agents)
         )
 
+    def bound_listening_calls_to(self, seconds: float) -> None:
+        """Gives every app the agents listen to this call time; the amounts of a scenario are its own."""
+        self.config = replace(
+            self.config,
+            apps=tuple(replace(each, call_seconds=seconds) if each.listens else each for each in self.config.apps),
+        )
+
     def bound_tools_only_calls_to(self, seconds: float) -> None:
         """Gives every tools-only app this call time; the amounts of a scenario are its own."""
         self.config = replace(

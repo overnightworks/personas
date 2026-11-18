@@ -26,7 +26,7 @@ At the default history, a skat game (40 to 50 states of about 1.5 KB) fills it a
 | `scope` | string | required | the token scope for this app (CONFIG-8) |
 | `max_tool_calls` | integer above 0 | none | binds every tool the app offers to its agents' turns, that many calls per turn (CONFIG-9) |
 | `listens` | boolean | true | `false` serves tools only: no loop runs, its tools join the turns of the other apps; needs `max_tool_calls` (CONFIG-10) |
-| `call_seconds` | number above 0 | 30 | bounds each request a turn of another app makes to it; keep it below the persona's `maxDurationSeconds` (CONFIG-11) |
+| `call_seconds` | number above 0 | 30 | bounds each request a turn of another app makes to it, and the tool list and turn state requests of a turn at its own places; keep it below the persona's `maxDurationSeconds` (CONFIG-11) |
 
 At least one app listens. Apps are declared to a turn in the file's order, so list the apps whose places
 come and go last. An app with `max_tool_calls` requires `[gateway]` and a `persona_file` for every agent. (CONFIG-12)
