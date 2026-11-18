@@ -100,10 +100,10 @@ grace outlasts the time a losing pod needs to stop him; the bound is in
 ## 4. Deployment View
 
 The image (`Dockerfile`) holds the runner and the persona files, runs as the non-root uid 1001 and starts
-`personas`, which handles SIGTERM as PID 1 and exits 0 on that clean stop. It holds no configuration and no secret. The deployment in
-overnightworks/platform supplies `PERSONAS_CONFIG`, the secret files and the Postgres database, runs
-`personas migrate`, probes readiness with `test -e <ready_file>`, and may run several pods against one
-database. The runner opens no port. The release path is in the [README](../README.md).
+`personas`, which handles SIGTERM as PID 1 and exits 0 on that clean stop. It holds no configuration and no
+secret. The deployment in overnightworks/platform supplies `PERSONAS_CONFIG`, the secret files and the
+Postgres database, runs `personas migrate`, probes readiness with `test -e <ready_file>`, and may run several
+pods against one database. The runner opens no port. The release path is in the [README](../README.md).
 
 ## 5. Crosscutting Concepts
 
@@ -185,5 +185,5 @@ once and retried.
 - Every line heard costs a model call; two agents in one call can keep each other talking, bounded only by
   the gateway's budget.
 - People are told apart by display name only.
-- Files, functions and near-identical pairs over quality's size and clone limits stand as debt in
+- Files over the size limit, functions over the complexity limit and near-identical pairs stand as debt in
   `quality/baseline.toml`, which quality holds from growing.

@@ -45,11 +45,12 @@ A `status` is the integer of an error status, absent for a JSON-RPC error sent w
 `reason` of a failed call is a standard JSON-RPC error or a known media type by name, else one fixed word,
 never the app's own value.
 
-A `turn_wait.ended` runs to the turn's start from the earliest arrival of a line the turn answers. A line
-that a turn without an answer left counts from the end of the pause that turn caused, and one that arrived
-during the pause keeps its arrival. A place a pod resumes at a takeover or a restart counts from that
-resume. Every moment is read on the monotonic scale of the clock boundary
-(`Clock.now` in `clock.py`), and `due.py` keeps the earliest through a join or a replacement.
+A `turn_wait.ended` runs to the turn's start from the earliest arrival of a line the turn answers, or at a
+place with a view from the moment the loop saw the revision that waits for the agent. A line that a turn
+without an answer left counts from the end of the pause that turn caused, and one that arrived during the
+pause keeps its arrival. A place a pod resumes at a takeover or a restart counts from that resume. Every
+moment is read on the monotonic scale of the clock boundary (`Clock.now` in `clock.py`), and `due.py` keeps
+the earliest through a join or a replacement.
 
 ## `turn.ended`
 
