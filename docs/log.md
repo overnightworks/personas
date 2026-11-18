@@ -8,11 +8,15 @@ events and their fields. A test cites each rule by its ID at the start of its do
 
 - Every line is one JSON object through [logline](https://github.com/overnightworks/logline), with
   `service` `personas`. `LOG_LEVEL` sets the level (default `info`), `SERVICE_VERSION` the `version`.
-  alembic, which checks the memory's schema at the start, writes only its warnings and errors. (LOG-1)
+  alembic, which checks the memory's schema at the start, writes only its warnings and errors. An uncaught
+  exception of the runner writes logline's `process.crashed` line at level critical, with `error_type` and
+  `exception`, Python's traceback with its frames and messages; a configuration it refuses before it starts is
+  one plain line on stderr. (LOG-1)
 - An event is `<noun>.<verb_past>`, written once per state change. Its ids are `agent_id` and `app_id`, the
   host of the app's URL; a `reason` is a closed code. (LOG-2)
 - A line holds ids, numbers named with their unit and closed codes: never text a person or an app wrote,
-  a table state, a token or a secret. (LOG-3)
+  a table state, a token or a secret. The one exception is the crash line's `exception`, whose messages may
+  quote such text; `secret.Secret` keeps every secret and token out of an error message. (LOG-3)
 - A turn writes every line it causes in one trace (`trace_id`): that of the newest line that made it due,
   or of the view revision, or its own when the app gives none or one that cannot be read. Every request to
   an app, the realm and the gateway carries that trace's `traceparent`. agents adds `model_request.ended`

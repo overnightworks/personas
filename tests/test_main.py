@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import signal
+import sys
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from typing import TYPE_CHECKING
@@ -69,6 +70,29 @@ def test_every_line_the_entry_point_configures_is_one_json_object_of_the_runner_
 
     line = json.loads(capsys.readouterr().out)
     assert (line["service"], line["event"], line["agent_id"]) == ("personas", "loop.started", "mozart")
+
+
+def test_an_uncaught_exception_after_the_entry_point_configures_is_one_json_crash_line_on_stdout(
+    restored_logging, capsys: pytest.CaptureFixture[str]
+):
+    """LOG-1."""
+    configure_logging()
+
+    try:
+        raise LookupError
+    except LookupError as crash:
+        sys.excepthook(type(crash), crash, crash.__traceback__)
+
+    written = capsys.readouterr()
+    line = json.loads(written.out)
+    assert (line["service"], line["level"], line["event"], line["error_type"]) == (
+        "personas",
+        "critical",
+        "process.crashed",
+        "LookupError",
+    )
+    assert "LookupError" in line["exception"]
+    assert written.err == ""
 
 
 class Stop(Exception):  # noqa: N818 - a test's way to end a runner whose loops never end
