@@ -88,6 +88,16 @@ class CheckedAfterInit(_Entry):
             raise ValueError("high: must be above low")
 
 
+class CheckedInInit(_Entry):
+    low: int = 1
+    high: int = 2
+
+    def __init__(self, **fields: int) -> None:
+        super().__init__(**fields)
+        if self.low >= self.high:
+            raise ValueError("high: must be above low")
+
+
 @pytest.mark.parametrize(
     ("entry", "check"),
     [
@@ -95,12 +105,14 @@ class CheckedAfterInit(_Entry):
         (CheckedByAField, "_high_is_above_low"),
         (CheckedByAnAnnotatedField, "high_is_above_low"),
         (CheckedAfterInit, "model_post_init"),
+        (CheckedInInit, "__init__"),
     ],
     ids=[
         "model validator",
         "field validator reading the fields before it",
         "annotated validator reading the fields before it",
         "model_post_init",
+        "an overridden __init__",
     ],
 )
 def test_a_check_across_fields_that_is_no_refusal_makes_the_schema_refuse_to_be_written(entry, check):
