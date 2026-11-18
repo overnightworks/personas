@@ -109,6 +109,10 @@ class HistoryRequired(BaseModel):
     history_bytes: int
 
 
+class HistoryRequiredAsText(BaseModel):
+    history_bytes: str
+
+
 class IntPort(Entry):
     port: int
 
@@ -269,6 +273,20 @@ def notes_between(before: type[BaseModel], after: type[BaseModel]) -> str:
             "- `history_bytes`: now takes `number`, was `integer`; default now `48.0`, was `49152`.\n\n"
             "It goes above the file's first table.\n\n```toml\nhistory_bytes = 48.0\n```\n",
             id="a field whose type and default changed",
+        ),
+        pytest.param(
+            HistoryBefore,
+            HistoryRequiredAsText,
+            "- `history_bytes`: now takes `string`, was `integer`; now required.\n\n"
+            "It goes above the file's first table.\n\n```toml\nhistory_bytes = <string>\n```\n",
+            id="a field whose type changed and that became required",
+        ),
+        pytest.param(
+            HistoryRequiredAsText,
+            HistoryBefore,
+            "- `history_bytes`: now takes `integer`, was `string`; optional, default `49152`.\n\n"
+            "It goes above the file's first table.\n\n```toml\nhistory_bytes = 49152\n```\n",
+            id="a required field whose type changed and that gained a default",
         ),
         pytest.param(
             Ownership,

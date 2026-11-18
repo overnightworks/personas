@@ -307,14 +307,22 @@ def default_moved(field: ConfigField, then: ConfigField) -> str:
     return f"default now {written(field.default)}, was {written(then.default)}"
 
 
+def requirement_moved(field: ConfigField, then: ConfigField) -> str:
+    """What a type change also did to whether the field is required and to its default."""
+    if field.required and not then.required:
+        return "; now required"
+    if then.required and not field.required:
+        return "; optional" if field.default is None else f"; optional, default {written(field.default)}"
+    return "" if then.default == field.default else f"; {default_moved(field, then)}"
+
+
 def summary(change: Change, field: ConfigField, then: ConfigField | None) -> str:
     if change is Change.REMOVED:
         return "removed: delete it"
     if change is Change.NOW_REQUIRED:
         return "now required"
     if change is Change.TYPE_CHANGED and then is not None:
-        moved = "" if then.default == field.default else f"; {default_moved(field, then)}"
-        return f"now takes `{field.kind}`, was `{then.kind}`{moved}"
+        return f"now takes `{field.kind}`, was `{then.kind}`{requirement_moved(field, then)}"
     if change is Change.DEFAULT_CHANGED and then is not None:
         return f"{default_moved(field, then)}: set it to keep the old one"
     if field.required:
