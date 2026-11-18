@@ -213,7 +213,8 @@ def notes_between(before: type[BaseModel], after: type[BaseModel]) -> str:
             Ownership,
             WithStop,
             "- `[ownership] stop_seconds`: added, optional, default `10.0`.\n\n"
-            "```toml\n[ownership]\nstop_seconds = 10.0\n```\n",
+            "It goes under the file's `[ownership]` header; a file without one adds the header first.\n\n"
+            "```toml\nstop_seconds = 10.0\n```\n",
             id="an optional field with its default",
         ),
         pytest.param(
@@ -240,14 +241,16 @@ def notes_between(before: type[BaseModel], after: type[BaseModel]) -> str:
         pytest.param(
             WithIntPort,
             WithStrPort,
-            "- `[database] port`: now takes `string`, was `integer`.\n\n```toml\n[database]\nport = <string>\n```\n",
+            "- `[database] port`: now takes `string`, was `integer`.\n\n"
+            "It goes under the file's `[database]` header.\n\n```toml\nport = <string>\n```\n",
             id="a field whose type changed",
         ),
         pytest.param(
             WithStringVoices,
             WithIntegerVoices,
             "- `[voice] names`: now takes `array of integer`, was `array of string`.\n\n"
-            "```toml\n[voice]\nnames = []\n```\n",
+            "It goes under the file's `[voice]` header; a file without one adds the header first.\n\n"
+            "```toml\nnames = []\n```\n",
             id="an array whose item type changed",
         ),
         pytest.param(
@@ -266,8 +269,9 @@ def notes_between(before: type[BaseModel], after: type[BaseModel]) -> str:
         pytest.param(
             WithMemory,
             WithLookup,
-            "- `[memory] lookup_bytes`: added, required.\n\nIt is required only where `[memory]` is set.\n\n"
-            "```toml\n[memory]\nlookup_bytes = <integer>\n```\n",
+            "- `[memory] lookup_bytes`: added, required.\n\n"
+            "It goes under the file's `[memory]` header. It is required only where `[memory]` is set.\n\n"
+            "```toml\nlookup_bytes = <integer>\n```\n",
             id="a required field of an optional table",
         ),
         pytest.param(
@@ -275,7 +279,7 @@ def notes_between(before: type[BaseModel], after: type[BaseModel]) -> str:
             WithAgentLookup,
             "- `[agents.memory] lookup_bytes`: added, required.\n\n"
             "It goes under `[agents.memory]` in each `[[agents]]` entry that sets it.\n\n"
-            "```toml\n[agents.memory]\nlookup_bytes = <integer>\n```\n",
+            "```toml\nlookup_bytes = <integer>\n```\n",
             id="a required field of an optional table inside an array of tables",
         ),
         pytest.param(

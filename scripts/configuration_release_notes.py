@@ -236,16 +236,14 @@ type TomlEntry = str | ConfigField
 
 
 def toml_entries(field: ConfigField, every: dict[FieldPath, ConfigField]) -> Iterator[TomlEntry]:
-    """The TOML that sets the field: a value under its table's header, or a table with each field it requires and
-    each default it sets, and the tables it requires. A value inside an array of tables comes without the
-    ``[[name]]`` header, which would start a new entry where it is pasted.
+    """The TOML that sets the field: a value alone, or a table with each field it requires and each default it sets,
+    and the tables it requires. A value comes without its table's header, which the file already holds or, for an
+    array of tables, would start a new entry where it is pasted; ``placement`` says where it goes.
 
     A value without a default is written as ``<kind>``, which no TOML parser accepts, so a pasted example fails
     at start until the deployer writes the real value.
     """
     if not field.table:
-        if len(field.path) > 1 and not field.path[-2].repeated:
-            yield table_header(field.path[:-1])
         yield field
         return
     yield table_header(field.path)
@@ -259,17 +257,44 @@ def toml_entries(field: ConfigField, every: dict[FieldPath, ConfigField]) -> Ite
 
 def placement(field: ConfigField, every: dict[FieldPath, ConfigField]) -> Iterator[str]:
     """Where the field's TOML goes in a file that already holds the other tables and entries."""
-    if len(field.path) == 1 and not field.table:
-        yield "It goes above the file's first table."
     ancestors = [every[field.path[:length]] for length in range(len(field.path) - 1, 0, -1)]
     entry = next((each for each in ancestors if each.path[-1].repeated), None)
     optional = next((each for each in ancestors if not each.required), None)
-    if entry is not None and optional is not None and len(optional.path) > len(entry.path):
-        yield f"It goes under `{optional.label}` in each `{entry.label}` entry that sets it."
+    if entry is None:
+        yield from placement_outside_entries(field, ancestors, optional)
+    else:
+        yield from placement_inside_entry(field, ancestors[0], entry, optional)
+
+
+def placement_outside_entries(
+    field: ConfigField, ancestors: list[ConfigField], optional: ConfigField | None
+) -> Iterator[str]:
+    """Where a field outside every array of tables goes: at the top level, or under its table's header."""
+    if not ancestors:
+        if not field.table:
+            yield "It goes above the file's first table."
         return
-    if entry is not None:
-        where = "every existing" if field.required else "each"
-        yield f"It goes into {where} `{entry.label}` entry{'' if field.required else ' that sets it'}."
+    if not field.table:
+        header = f"It goes under the file's `{ancestors[0].label}` header"
+        if optional is None or field.required:
+            yield f"{header}."
+        else:
+            yield f"{header}; a file without one adds the header first."
+    if field.required and optional is not None:
+        yield f"It is required only where `{optional.label}` is set."
+
+
+def placement_inside_entry(
+    field: ConfigField, parent: ConfigField, entry: ConfigField, optional: ConfigField | None
+) -> Iterator[str]:
+    """Where a field inside an array of tables goes: into its entries, under its table there if it has one."""
+    if optional is not None and len(optional.path) > len(entry.path):
+        sets = "it" if optional == parent else f"`{optional.label}`"
+        yield f"It goes under `{parent.label}` in each `{entry.label}` entry that sets {sets}."
+        return
+    where = "every existing" if field.required else "each"
+    under = "" if field.table or parent == entry else f", under `{parent.label}`"
+    yield f"It goes into {where} `{entry.label}` entry{'' if field.required else ' that sets it'}{under}."
     if field.required and optional is not None:
         yield f"It is required only where `{optional.label}` is set."
 
