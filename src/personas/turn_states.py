@@ -78,7 +78,8 @@ class TurnStates:
         then goes out on the next session."""
         while True:
             queued = await self._queue.get()
-            await asyncio.create_task(self._state(session, queued.statement), context=queued.context)
+            stating = asyncio.create_task(self._state(session, queued.statement), context=queued.context)
+            await stating
             # A turn cancelled while it waited has cancelled the future.
             if not queued.sent.done():
                 queued.sent.set_result(None)
