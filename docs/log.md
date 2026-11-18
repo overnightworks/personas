@@ -8,7 +8,9 @@ events and their fields. A test cites each rule by its ID at the start of its do
 
 - Every line is one JSON object through [logline](https://github.com/overnightworks/logline), with
   `service` `personas`. `LOG_LEVEL` sets the level (default `info`), `SERVICE_VERSION` the `version`.
-  alembic, which checks the memory's schema at the start, writes only its warnings and errors. (LOG-1)
+  alembic, which checks the memory's schema at the start, writes only its warnings and errors. An uncaught
+  exception of the runner writes logline's `process.crashed` line at level critical, with `error_type`; a
+  configuration it refuses before it starts is one plain line on stderr. (LOG-1)
 - An event is `<noun>.<verb_past>`, written once per state change. Its ids are `agent_id` and `app_id`, the
   host of the app's URL; a `reason` is a closed code. (LOG-2)
 - A line holds ids, numbers named with their unit and closed codes: never text a person or an app wrote,
