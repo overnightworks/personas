@@ -34,7 +34,8 @@
 
 ## Documents
 
-- `README.md`: read when starting or releasing the runner.
+- `README.md`: read when configuring or starting the runner.
+- `docs/runbooks/release.md`: read when releasing the runner.
 - `docs/configuration.md`: read when writing the TOML or changing a field of it.
 - `docs/turns.md`: read when changing when a turn is due, what it is told or what it may do.
 - `docs/log.md`: read when adding, changing or alerting on a log event.

@@ -105,7 +105,7 @@ ends at once, as [the configuration reference](configuration.md), `[ownership]`,
 configuration and no secret. The deployment in overnightworks/platform supplies `PERSONAS_CONFIG`, the
 secret files and the Postgres database, runs `personas migrate`, probes readiness with
 `test -e <ready_file>`, and may run several pods against one database. The runner opens no port. The
-release path is in the [README](../README.md).
+release path is in [the release runbook](runbooks/release.md).
 
 ## 5. Crosscutting Concepts
 
