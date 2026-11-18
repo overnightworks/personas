@@ -1,7 +1,0 @@
-claim_id = "3c72b0f54f83450a95b3644f4259c6e7"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "367eb8d68e0897477b194db5279f6a7147368624"
-branch = "claude/issue-291-the-lock-loss-takeover-test-waits-for-th"
-scope = ["tests/test_ownership_processes.py"]
-opened_commit = "6431f6a1e995194546b7a37e19d5f422e1392044"
