@@ -115,7 +115,7 @@ release path is in [the release runbook](runbooks/release.md).
 |---|---|---|
 | `history_entries` | lines, table states, calls, spoken sentences | the cut past `history_bytes`, or `memory erase` |
 | `answered_turns` | what each answered turn's message told | the entries it told left, or `memory erase` |
-| `agent_turns` | checkpoints, due places, unanswered turns, pauses | next write; on a takeover, as below |
+| `agent_turns` | checkpoints, due places, unanswered count, pause end | next write; on a takeover, as below |
 | `agent_owner` | the generation of the pod that owns him | every takeover and every erase renews it |
 | `lines`, with `[memory]` | every line of every window he read | a sweep past `lines_keep_days`, or `memory erase` |
 
