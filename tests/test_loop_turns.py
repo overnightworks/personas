@@ -10,10 +10,10 @@ import pytest
 from agents.backend.fake_gateway import Reply, completion
 from agents.turn import Principal, RejectionCode, person_fingerprint
 
-from personas.decision import NETWORK_FAILURE_CODE
+from personas.decision import BACKOFF_BASE_SECONDS, NETWORK_FAILURE_CODE
 from personas.reporting import Event
 from tests.support.call import ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
-from tests.support.fakes import CANCELLED_TURN, refused_turn
+from tests.support.fakes import CANCELLED_TURN, SweepClock, refused_turn
 from tests.support.gateway import BUDGET_SPENT, Gateway, says, says_after_a_hold
 from tests.support.history import (
     OTHER_CALL_ID,
@@ -47,6 +47,11 @@ SECOND_AGENT, SECOND_SUBJECT, SECOND_NAME = "agent-bach", "agent-subject-2", "Ba
 def wait_reasons(caplog) -> list[object]:
     """What each turn's wait names as having kept it waiting, in the order the turns started."""
     return [line["wait_reason"] for line in lines_of(caplog.get_records("call"), "turn_wait.ended")]
+
+
+def wait_durations(caplog) -> list[object]:
+    """How long each turn's wait lasted, in the order the turns started."""
+    return [line["duration_ms"] for line in lines_of(caplog.get_records("call"), "turn_wait.ended")]
 
 
 def turn_order(runner) -> list[tuple[int, str]]:
@@ -591,3 +596,43 @@ async def test_a_spoken_turn_due_while_his_table_turn_of_that_app_runs_names_tha
 
     assert turn_order(runner) == [(0, "view"), (0, "lines")]
     assert wait_reasons(caplog) == ["none", "turn_here"]
+
+
+async def test_a_line_said_during_his_pause_at_its_own_place_waits_out_the_pause_and_names_it(runner, caplog):
+    """LOG-27, LOG-32."""
+    runner.clock = SweepClock(BACKOFF_BASE_SECONDS)
+    runner.gateway = Gateway(BUDGET_SPENT, *says(PLACE_ID, ANSWER))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, REMARK)
+    await runner.clock.until_waiting(1)
+    await said_and_taken(runner.app, PLACE_ID, AGAIN)
+
+    runner.clock.open_gate()
+    await runner.reports.until_a_turn_completed()
+
+    assert wait_reasons(caplog) == ["none", "paused"]
+    assert wait_durations(caplog)[1] == pytest.approx(BACKOFF_BASE_SECONDS * 1000, abs=500)
+
+
+async def test_a_table_at_another_app_that_starts_waiting_during_his_pause_names_the_pause_as_its_wait(
+    runner, other, caplog
+):
+    """LOG-32."""
+    runner.clock = SweepClock(BACKOFF_BASE_SECONDS)
+    runner.gateway = Gateway(BUDGET_SPENT, completion("done"))
+    other.stand(SUBJECT, active(OTHER_CALL_ID), at_table())
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    runner.start()
+    await runner.app.until_window_read(PLACE_ID)
+    await other.until_window_read(OTHER_CALL_ID)
+    say_in_the_call(runner, REMARK)
+    await runner.clock.until_waiting(1)
+    runner.app.stand(SUBJECT)
+    waits(other, 1)
+    await settled(other)
+
+    runner.clock.open_gate()
+    await runner.reports.until_a_turn_ended(count=2)
+
+    assert turn_order(runner) == [(0, "lines"), (1, "view")]
+    assert wait_reasons(caplog) == ["none", "paused"]
