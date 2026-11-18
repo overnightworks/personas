@@ -351,7 +351,7 @@ def turn_end_state(ending: TurnEnding, last: StopOutcome | None) -> StopOutcome 
             return last
         case Outcome.REFUSED:
             return outcome_of_stop(RejectionCode(ending.reason))
-        case Outcome.FAILED:
+        case _:  # Outcome.FAILED, the last outcome
             return StopOutcome.UNAVAILABLE
 
 
