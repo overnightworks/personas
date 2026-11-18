@@ -103,8 +103,9 @@ The image (`Dockerfile`) holds the runner and the persona files, runs as the non
 `personas`, which handles SIGTERM as PID 1 and exits 0 on that clean stop; a stop that outlasts its deadline
 ends at once, as [the configuration reference](configuration.md), `[ownership]`, says. It holds no
 configuration and no secret. The deployment in overnightworks/platform supplies `PERSONAS_CONFIG`, the
-secret files and the Postgres database, runs `personas migrate`, probes readiness with `test -e <ready_file>`,
-and may run several pods against one database. The runner opens no port. The release path is in the [README](../README.md).
+secret files and the Postgres database, runs `personas migrate`, probes readiness with
+`test -e <ready_file>`, and may run several pods against one database. The runner opens no port. The
+release path is in the [README](../README.md).
 
 ## 5. Crosscutting Concepts
 
@@ -112,44 +113,42 @@ and may run several pods against one database. The runner opens no port. The rel
 
 | Table | Holds | Kept until |
 |---|---|---|
-| `history_entries` | lines, table states, relayed calls with arguments and answers, spoken sentences | newer entries push it past `history_bytes`, and the cut then drops the oldest messages down to `history_keep_bytes`; or `memory erase` |
+| `history_entries` | lines, table states, calls, spoken sentences | the cut past `history_bytes`, or `memory erase` |
 | `answered_turns` | what each answered turn's message told | the entries it told left, or `memory erase` |
-| `agent_turns` | reading checkpoints, due places, unanswered turns in a row, a pause's end | the next write; dropped by a takeover after a skipped generation; erase keeps it |
-| `agent_owner` | the generation of the pod that owns him | renewed by every takeover and every erase |
-| `lines`, with `[memory]` | every line of every window he read, verbatim, with speaker and first-read time | the first sweep past `lines_keep_days` from its first read, or `memory erase` |
+| `agent_turns` | reading checkpoints, due places, unanswered turns in a row, a pause's end | the next write |
+| `agent_owner` | the generation of the pod that owns him | every takeover and every erase renews it |
+| `lines`, with `[memory]` | every line of every window he read | a sweep past `lines_keep_days`, or `memory erase` |
 
-- No picture byte is kept anywhere.
-- A line a sweep removed from a window the app still holds is kept again with a new first-read time.
-- Without `[memory]` no sweep runs, so lines kept before stay until `memory erase`.
-- The mind writes through on every change, under his generation, so a write from a pod that lost him is
-  refused. A restart or a takeover loads his history and turns, and his next turn is told what the holder
-  before would have told, byte for byte.
-- What a pod took in after its last write is lost when it dies. Which turn a stop hands to the new holder
-  is in [the turns reference](turns.md), Pauses and retries.
-- A place read before resumes where reading stood, so a line said while no pod served him gets one turn;
-  how a place reads is in [the turns reference](turns.md), Joining and reading.
-- `personas memory list` and `personas memory erase` show and erase what an agent keeps; see
-  [the runbook](runbooks/erase-memory.md).
-- `personas migrate` is the only code that changes the schema, and a release only adds to it while two
-  releases run.
+The mind writes through on every change, under his generation, so a write from a pod that lost him is
+refused. A restart or a takeover loads his history and turns, and his next turn is told what the holder
+before would have told, byte for byte. A takeover keeps his turns of the generation just before the new one
+and drops older ones; an erase keeps them. What a pod took in after its last write is lost when it dies;
+which turn a stop hands to the new holder is in [the turns reference](turns.md), Pauses and retries. A place
+read before resumes where reading stood, so a line said while no pod served him gets one turn; how a place
+reads is in [the turns reference](turns.md), Joining and reading. A history entry keeps a call's arguments
+and answer; how the cut shrinks the history to `history_keep_bytes` is in
+[the turns reference](turns.md), What a turn is told. A kept line holds its text verbatim, its speaker and
+its first-read time, from which the sweep counts `lines_keep_days`. A line a sweep removed from a window the
+app still holds is kept again with a new first-read time. Without `[memory]` no sweep runs, so lines kept
+before stay until `memory erase`. No picture byte is kept anywhere. `personas memory list` and
+`personas memory erase` show and erase what an agent keeps; see [the runbook](runbooks/erase-memory.md).
+`personas migrate` is the only code that changes the schema, and a release only adds to it while two
+releases run.
 
-**Trust.** The model as the code and `AGENTS.md` state it today:
-
-- The operator and his configuration are trusted. Secrets enter only as files the configuration names,
-  are held in `secret.Secret`, and reach no log line, error or repr.
-- Each agent signs in as itself with its own client. The realm decides which apps it reaches; each app
-  decides what its tools let it do. The runner keeps no list of allowed tools, and each request to an app
-  carries a token of that app's scope only.
-- People in the apps are untrusted. Their lines, table states and tool answers reach the model as user
-  messages, none of them an instruction; nothing but the apps' tools and the gateway's budget bounds what
-  the model then does. A turn holds the tools of every app where the agent sits, so what is said in one app
-  can lead to a call in another, and so can a lookup's result.
-- Postgres holds content verbatim: names, lines, table states, tool arguments and answers. Whoever holds
-  the database password reads it. The runner sets no TLS mode, so the driver's defaults apply; encryption at
-  rest and network access to the database are the platform's and unknown here.
-- The model gateway sees the persona and everything a turn is told. The log carries ids, numbers and closed
-  codes, never content, a token or a secret.
-- Unknown here: how the realm and each app enforce their grants, which their own repositories own.
+**Trust.** The model as the code and `AGENTS.md` state it today. The operator and his configuration are
+trusted. Secrets enter only as files the configuration names, are held in `secret.Secret`, and reach no
+log line, error or repr. Each agent signs in as itself with its own client. The realm decides which apps it
+reaches; each app decides what its tools let it do. The runner keeps no list of allowed tools, and each
+request to an app carries a token of that app's scope only. People in the apps are untrusted. Their lines,
+table states and tool answers reach the model as user messages, none of them an instruction; nothing but
+the apps' tools and the gateway's budget bounds what the model then does. A turn holds the tools of every
+app where the agent sits, so what is said in one app can lead to a call in another, and so can a lookup's
+result. Postgres holds content verbatim: names, lines, table states, tool arguments and answers. Whoever
+holds the database password reads it. The runner sets no TLS mode, so the driver's defaults apply;
+encryption at rest and network access to the database are the platform's and unknown here. The model
+gateway sees the persona and everything a turn is told. The log carries ids, numbers and closed codes, never
+content, a token or a secret. Unknown here: how the realm and each app enforce their grants, which their
+own repositories own.
 
 **Proof strategy.** Pure decisions are unit tests with many cases. The loop, turns, voice and ownership run
 against scripted boundaries and in-process fakes of the realm, the gateway and an app (`tests/support`).

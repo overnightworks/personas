@@ -32,13 +32,13 @@ What the runner keeps in Postgres, for how long and what a restart or a takeover
 
 Each agent's character is its agent file `src/characters/<name>.md`, which the image holds at
 `/app/characters/<name>.md`, so a character changes with a release. Its figure `<name>.vrm` and its room
-`<name>.room.glb` are described in [the architecture](docs/ARCHITECTURE.md), Building Block View. An agent's `[agents.figure]` table names the released figure that
-every accept carries.
+`<name>.room.glb` are described in [the architecture](docs/ARCHITECTURE.md), Building Block View. An
+agent's `[agents.figure]` table names the released figure that every accept carries.
 
 ## Release it
 
-The image is the runner's release; [quality's release path](https://github.com/overnightworks/quality/blob/v0.21.1/docs/release.md)
-owns the rules.
+The image is the runner's release;
+[quality's release path](https://github.com/overnightworks/quality/blob/v0.21.1/docs/release.md) owns the rules.
 
 1. Once `main`'s CI is green, an agent dispatches the `Release` workflow (`.github/workflows/release.yml`)
    on `main` with the version as `YYYY.MM.DD.N`, for example `2026.11.08.1`.
