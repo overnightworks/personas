@@ -21,11 +21,12 @@ release changes the runner, its characters and its figures together. The rules i
    GHCR with an attestation, and the tag `v<version>` is created with the figures `src/characters/*.vrm`
    as assets.
 3. The release notes open with the configuration changes, written by
-   `scripts/configuration_release_notes.sh`: each field of the runner's file added, removed or newly
-   required since the newest tag the commit reaches, with the TOML it needs, or the sentence that none
-   changed. They are derived from `src/personas/config.py` at both tags, so no change needs a note of
-   its own, and they say what a `<kind>` placeholder asks for. The deployment's bump applies them all
-   to its runner configuration.
+   `scripts/configuration_release_notes.sh`: each field of the runner's file added, removed, newly
+   required or changed in its type or default since the newest tag the commit reaches, with the TOML it
+   needs and where that goes, and each new rule across fields, or the sentence that none changed. They
+   are derived from `src/personas/config.py` at both tags, so no change needs a note of its own, and
+   they say what a `<kind>` placeholder asks for. The deployment's bump applies them all to its runner
+   configuration.
 4. Then come one `figure` line per agent, written by `scripts/figure_release_notes.sh`: paste it,
    without the name and its colon, into that agent's `[[agents]]` entry. An app that shows
    figures fetches them only from the prefix its platform allows (hopin accepts
