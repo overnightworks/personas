@@ -296,9 +296,14 @@ async def _erase_memory(target: DatabaseTarget, request: argparse.Namespace) -> 
         erased = await (memory.erase_all() if request.every_agent else memory.erase_agent(request.agent))
     finally:
         await memory.close()
-    sys.stdout.write(
-        f"{erased.lines} lines, {erased.entries} history entries and {erased.answered_turns} answered turns erased\n"
-    )
+    lines = _counted(erased.lines, "line", "lines")
+    entries = _counted(erased.entries, "history entry", "history entries")
+    turns = _counted(erased.answered_turns, "answered turn", "answered turns")
+    sys.stdout.write(f"{lines}, {entries} and {turns} erased\n")
+
+
+def _counted(count: int, one: str, many: str) -> str:
+    return f"{count} {one if count == 1 else many}"
 
 
 async def _perform_memory(target: DatabaseTarget, request: argparse.Namespace) -> None:
