@@ -47,7 +47,8 @@ never the app's own value.
 
 A `turn_wait.ended` runs to the turn's start from the earliest arrival of a line the turn answers. A line
 that a turn without an answer left counts from the end of the pause that turn caused, and one that arrived
-during the pause keeps its arrival. Every moment is read on the monotonic scale of the clock boundary
+during the pause keeps its arrival. A place a pod resumes at a takeover or a restart counts from that
+resume. Every moment is read on the monotonic scale of the clock boundary
 (`Clock.now` in `clock.py`), and `due.py` keeps the earliest through a join or a replacement.
 
 ## `turn.ended`
