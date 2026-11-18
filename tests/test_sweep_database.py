@@ -114,6 +114,23 @@ async def test_a_line_that_ages_past_the_period_while_the_runner_runs_is_removed
     assert kept_lines(database, "text") == []
 
 
+async def test_a_line_a_sweep_removed_from_a_window_read_again_is_kept_again_with_the_new_first_read_time(
+    runner, store, database
+):
+    now = runner.clock.wall()
+    swept = read_of("Still held", days_ago=OLD_DAYS, now=now)
+    await store.keep(swept)
+    clock = sweeping(runner, store)
+    runner.start()
+    await clock.until_waiting(1)
+    swept_away = kept_lines(database, "text")
+
+    await store.keep(replace(swept, read_at=now))
+
+    assert swept_away == []
+    assert kept_lines(database, "text, first_read_at") == [("Still held", now)]
+
+
 async def test_a_store_that_cannot_be_reached_at_a_sweep_is_reported_once_costs_no_answer_and_is_swept_when_back(
     runner, database
 ):

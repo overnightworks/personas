@@ -18,7 +18,8 @@ id, history entries, answered turns, first and last entry). It never prints cont
 1. Wait until the agent has left the places concerned, or stop the runner: an erase removes what was kept
    up to that moment, and an agent still in a call keeps that call's window again at its next read.
 2. `personas memory erase --agent <client id>`, or `--all` for every agent. Exactly one is given, spelled in
-   full. It prints `<n> lines, <n> history entries and <n> answered turns erased`, 0 included.
+   full. It prints `<n> lines, <n> history entries and <n> answered turns erased`, 0 included, each
+   noun in the singular for 1.
 3. Expect the pod serving him to stop him at his next write and serve him again from the erased history; a
    turn in between may still be told what was erased. Where reading his places stands is kept.
 4. On `personas: memory: store_timeout` the erase deleted nothing, unless the bound ran out at the commit:

@@ -331,6 +331,21 @@ def test_erasing_an_agent_without_lines_prints_zero_also_when_the_configuration_
 
 
 @pytest.mark.postgres
+def test_erasing_one_line_one_history_entry_and_one_answered_turn_prints_each_count_in_the_singular(
+    files, database, monkeypatch, capsys
+):
+    spoken = Spoken()
+    kept_by_the_store(database, a_read(AGENT, FIRST_VISIT, spoken.lines(1, 1), 0))
+    one_turn = (a_turn_through(1, 0.5),)
+    histories_kept(database, (AGENT, HistoryDelta(0, spoken.history(1, 0), 0, one_turn, left_out=0)))
+    configured_for(files, database, monkeypatch)
+
+    main(arguments=list(ERASE_AGENT))
+
+    assert capsys.readouterr().out == "1 line, 1 history entry and 1 answered turn erased\n"
+
+
+@pytest.mark.postgres
 @pytest.mark.parametrize(
     "arguments",
     [

@@ -37,30 +37,15 @@ agent's `[agents.figure]` table names the released figure that every accept carr
 
 ## Release it
 
-The image is the runner's release;
-[quality's release path](https://github.com/overnightworks/quality/blob/v0.21.1/docs/release.md) owns the rules.
-
-1. Once `main`'s CI is green, an agent dispatches the `Release` workflow (`.github/workflows/release.yml`)
-   on `main` with the version as `YYYY.MM.DD.N`, for example `2026.11.08.1`.
-2. Quality's gate refuses a commit whose checks are not green. The image is pushed to GHCR with an
-   attestation, and the tag `v<version>` is created with the figures `src/characters/*.vrm` as assets.
-3. The release notes open with one `figure` line per agent, written by `scripts/figure_release_notes.sh`:
-   paste it, without the name and its colon, into that agent's `[[agents]]` entry. An app that shows
-   figures fetches them only from the prefix its platform allows (hopin accepts
-   `https://github.com/overnightworks/personas/releases/download/`).
-
-A release whose agents bump changes the member-tool wire waits until every app the runner serves pins that
-agents version or a newer one. Before the dispatch the agent reads the agents release notes from the
-version in `pyproject.toml` at the newest `v<version>` tag up to the one on `main`; when one changes the
-wire, it takes the served apps from the deployment's runner configuration (`apps/personas/personas.toml`
-in platform) and reads each app's `main` for its agents pin.
+The image is the runner's release; [the release runbook](docs/runbooks/release.md) says how to cut one.
 
 ## Documentation
 
 - [Vision](docs/VISION.md): what personas is for and what it deliberately is not.
 - [Architecture](docs/ARCHITECTURE.md): the parts, who talks to whom, what is kept, the trust.
 - [Configuration](docs/configuration.md), [turns](docs/turns.md) and [log](docs/log.md): the references.
-- [Runbooks](docs/runbooks/erase-memory.md): showing and erasing what an agent keeps.
+- Runbooks: [showing and erasing what an agent keeps](docs/runbooks/erase-memory.md) and
+  [releasing the runner](docs/runbooks/release.md).
 - [AGENTS.md](AGENTS.md): the commands and rules for working on the runner.
 
 ## License

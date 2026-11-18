@@ -105,7 +105,7 @@ ends at once, as [the configuration reference](configuration.md), `[ownership]`,
 configuration and no secret. The deployment in overnightworks/platform supplies `PERSONAS_CONFIG`, the
 secret files and the Postgres database, runs `personas migrate`, probes readiness with
 `test -e <ready_file>`, and may run several pods against one database. The runner opens no port. The
-release path is in the [README](../README.md).
+release path is in [the release runbook](runbooks/release.md).
 
 ## 5. Crosscutting Concepts
 
@@ -115,14 +115,15 @@ release path is in the [README](../README.md).
 |---|---|---|
 | `history_entries` | lines, table states, calls, spoken sentences | the cut past `history_bytes`, or `memory erase` |
 | `answered_turns` | what each answered turn's message told | the entries it told left, or `memory erase` |
-| `agent_turns` | reading checkpoints, due places, unanswered turns in a row, a pause's end | the next write |
+| `agent_turns` | checkpoints, due places, unanswered count, pause end | next write; on a takeover, as below |
 | `agent_owner` | the generation of the pod that owns him | every takeover and every erase renews it |
 | `lines`, with `[memory]` | every line of every window he read | a sweep past `lines_keep_days`, or `memory erase` |
 
 The mind writes through on every change, under his generation, so a write from a pod that lost him is
 refused. A restart or a takeover loads his history and turns, and his next turn is told what the holder
 before would have told, byte for byte. A takeover keeps his turns of the generation just before the new one
-and drops older ones; an erase keeps them. What a pod took in after its last write is lost when it dies;
+and drops older ones, so a takeover after one by a release that keeps no turns starts him without any; an
+erase keeps them. What a pod took in after its last write is lost when it dies;
 which turn a stop hands to the new holder is in [the turns reference](turns.md), Pauses and retries. A place
 read before resumes where reading stood, so a line said while no pod served him gets one turn; how a place
 reads is in [the turns reference](turns.md), Joining and reading. A history entry keeps a call's arguments
