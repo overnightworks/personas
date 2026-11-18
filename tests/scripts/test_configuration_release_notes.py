@@ -165,6 +165,24 @@ class WithLookup(BaseModel):
     memory: MemoryWithLookup | None = None
 
 
+class AgentWithMemory(Entry):
+    client_id: str
+    memory: Memory | None = None
+
+
+class AgentWithLookup(Entry):
+    client_id: str
+    memory: MemoryWithLookup | None = None
+
+
+class WithAgentMemory(BaseModel):
+    agents: list[AgentWithMemory]
+
+
+class WithAgentLookup(BaseModel):
+    agents: list[AgentWithLookup]
+
+
 class DeclaresNoRules(BaseModel):
     model_config = ConfigDict(json_schema_extra={"refusals": []})
 
@@ -251,6 +269,14 @@ def notes_between(before: type[BaseModel], after: type[BaseModel]) -> str:
             "- `[memory] lookup_bytes`: added, required.\n\nIt is required only where `[memory]` is set.\n\n"
             "```toml\n[memory]\nlookup_bytes = <integer>\n```\n",
             id="a required field of an optional table",
+        ),
+        pytest.param(
+            WithAgentMemory,
+            WithAgentLookup,
+            "- `[agents.memory] lookup_bytes`: added, required.\n\n"
+            "It goes under `[agents.memory]` in each `[[agents]]` entry that sets it.\n\n"
+            "```toml\n[agents.memory]\nlookup_bytes = <integer>\n```\n",
+            id="a required field of an optional table inside an array of tables",
         ),
         pytest.param(
             DeclaresNoRules,

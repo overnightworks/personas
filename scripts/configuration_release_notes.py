@@ -263,10 +263,13 @@ def placement(field: ConfigField, every: dict[FieldPath, ConfigField]) -> Iterat
         yield "It goes above the file's first table."
     ancestors = [every[field.path[:length]] for length in range(len(field.path) - 1, 0, -1)]
     entry = next((each for each in ancestors if each.path[-1].repeated), None)
+    optional = next((each for each in ancestors if not each.required), None)
+    if entry is not None and optional is not None and len(optional.path) > len(entry.path):
+        yield f"It goes under `{optional.label}` in each `{entry.label}` entry that sets it."
+        return
     if entry is not None:
         where = "every existing" if field.required else "each"
         yield f"It goes into {where} `{entry.label}` entry{'' if field.required else ' that sets it'}."
-    optional = next((each for each in ancestors if not each.required), None)
     if field.required and optional is not None:
         yield f"It is required only where `{optional.label}` is set."
 
