@@ -136,6 +136,7 @@ async def test_every_line_a_turn_writes_shares_its_trace_and_no_line_outside_it_
     in_the_turn = [line for line in lines if line["trace_id"] is not None]
     assert [line["event"] for line in in_the_turn] == [
         "turn_wait.ended",
+        "claim_write.ended",
         "token_hold.ended",
         "session_open.ended",
         "tool_list.ended",

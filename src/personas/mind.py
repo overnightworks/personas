@@ -20,6 +20,7 @@ from personas.due import (
     pause_left,
     paused_for,
     released,
+    waited,
     with_due,
     without_due,
 )
@@ -218,7 +219,9 @@ class Mind:
             self.wake()
 
     def claim(self, app: str, now: float) -> tuple[AppPlace, Due] | None:
-        """Takes the one turn for the place that has waited longest when it is at ``app`` and no pause holds it."""
+        """Takes the one turn for the place that has waited longest when it is at ``app`` and no pause holds it. Before,
+        each due place that nothing kept waiting yet names what stands in front of it at ``now``."""
+        self._turns = waited(self._turns, now)
         taken = claimed(self._turns, app, now)
         if taken is None:
             return None

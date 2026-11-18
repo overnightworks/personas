@@ -15,6 +15,7 @@ from personas.due import (
     Due,
     Turns,
     TurnState,
+    WaitReason,
     claimed,
     cut_by_stop,
     due_again,
@@ -25,6 +26,7 @@ from personas.due import (
     paused_for,
     released,
     resumed_turns,
+    waited,
     with_due,
     without_due,
 )
@@ -164,13 +166,38 @@ def test_the_turn_goes_to_the_place_that_waited_longest_and_only_in_its_app():
 
     assert claimed(turns, CALL_AT_A.app, NOW) is None
     after, at, due = claimed(turns, CALL_AT_B.app, NOW) or pytest.fail("the oldest place is at its app")
-    assert (after.running, at, due.occasion) == (True, CALL_AT_B, Waiting(1))
+    assert (after.running, at, due.occasion) == (CALL_AT_B, CALL_AT_B, Waiting(1))
     assert _occasions(after) == {CALL_AT_A: Waiting(2)}
 
 
 def test_no_turn_starts_while_one_runs_or_when_nothing_is_due():
-    assert claimed(replace(_due_in_order((CALL_AT_A, Waiting(1))), running=True), CALL_AT_A.app, NOW) is None
+    assert claimed(replace(_due_in_order((CALL_AT_A, Waiting(1))), running=TABLE_AT_A), CALL_AT_A.app, NOW) is None
     assert claimed(Turns(), CALL_AT_A.app, NOW) is None
+
+
+@pytest.mark.parametrize(
+    ("turns", "reason"),
+    [
+        (_due_in_order((CALL_AT_A, Waiting(1))), WaitReason.NONE),
+        (_due_in_order((CALL_AT_B, Waiting(1)), (CALL_AT_A, Waiting(2))), WaitReason.OLDER_DUE),
+        (replace(_due_in_order((CALL_AT_A, Waiting(1))), running=TABLE_AT_A), WaitReason.TURN_HERE),
+        (replace(_due_in_order((CALL_AT_A, Waiting(1))), running=CALL_AT_B), WaitReason.TURN_ELSEWHERE),
+        (paused_for(_due_in_order((CALL_AT_A, Waiting(1))), NOW, 4), WaitReason.PAUSED),
+    ],
+    ids=["nothing", "older-place", "turn-here", "turn-elsewhere", "pause"],
+)
+def test_a_due_place_names_what_stands_directly_in_front_of_it(turns, reason):
+    assert waited(turns, NOW).due[CALL_AT_A].waited_on is reason
+
+
+def test_a_due_place_keeps_the_first_reason_through_a_join_and_names_none_before_its_wait_began():
+    lines = Lines("g1", frozenset({1}), missed=False)
+    held = waited(replace(_due_in_order((CALL_AT_A, lines)), running=TABLE_AT_A), NOW)
+    joined = with_due(released(held), CALL_AT_A, Lines("g1", frozenset({2}), missed=False), NOW + 1)
+    after_the_pause = paused_for(with_due(Turns(), CALL_AT_A, Waiting(1), NOW + 4), NOW, 4)
+
+    assert waited(joined, NOW + 1).due[CALL_AT_A].waited_on is WaitReason.TURN_HERE
+    assert waited(after_the_pause, NOW + 1).due[CALL_AT_A].waited_on is WaitReason.NONE
 
 
 def test_a_pause_holds_the_turn_of_the_oldest_place_until_its_end_and_a_release_leaves_it():
@@ -187,16 +214,16 @@ def test_a_pause_is_left_only_to_the_app_of_the_oldest_place_and_only_while_a_tu
     waiting = paused_for(_due_in_order((CALL_AT_B, Waiting(1))), NOW, 4)
 
     assert pause_left(waiting, CALL_AT_A.app, NOW) == 0
-    assert pause_left(replace(waiting, running=True), CALL_AT_B.app, NOW) == 0
+    assert pause_left(replace(waiting, running=TABLE_AT_A), CALL_AT_B.app, NOW) == 0
     assert pause_left(paused_for(Turns(), NOW, 4), CALL_AT_B.app, NOW) == 0
 
 
 def test_a_released_turn_leaves_what_is_due_and_lets_the_next_one_start():
-    running = replace(_due_in_order((CALL_AT_A, Waiting(1))), running=True)
+    running = replace(_due_in_order((CALL_AT_A, Waiting(1))), running=TABLE_AT_A)
 
     after = released(running)
 
-    assert after.running is False
+    assert after.running is None
     assert after.due == running.due
     assert claimed(after, CALL_AT_A.app, NOW) is not None
 
@@ -213,7 +240,7 @@ def test_a_turn_his_stop_cut_before_it_spoke_is_due_first_joined_with_what_made_
     meanwhile, occasion
 ):
     claim = Claim(CALL_AT_A, Due(Lines("g1", frozenset({1, 2}), missed=False), NOW - 7), mark=0)
-    turns = replace(_due_in_order((CALL_AT_B, Waiting(1)), (CALL_AT_A, meanwhile)), running=True)
+    turns = replace(_due_in_order((CALL_AT_B, Waiting(1)), (CALL_AT_A, meanwhile)), running=TABLE_AT_A)
 
     after = cut_by_stop(turns, claim, History((), left_out=0, heard=0))
 
@@ -224,7 +251,7 @@ def test_a_turn_his_stop_cut_before_it_spoke_is_due_first_joined_with_what_made_
 def test_a_turn_his_stop_cut_after_the_bound_dropped_entries_since_its_claim_counts_as_spoken_and_is_not_due():
     claim = Claim(CALL_AT_A, Due(Waiting(1), NOW), mark=0)
 
-    after = cut_by_stop(Turns(running=True), claim, ONCE_DROPPED)
+    after = cut_by_stop(Turns(running=CALL_AT_A), claim, ONCE_DROPPED)
 
     assert after.due == {}
 
@@ -263,7 +290,7 @@ def test_turns_kept_and_resumed_keep_the_due_order_and_the_checkpoints_but_no_ru
     first, second, said_before = CALL_AT_A, CALL_AT_B, TABLE_AT_A
     lines = Lines("visit", frozenset({4}), missed=False)
     state = TurnState(
-        Turns(True, {second: Due(lines, 1.0), first: Due(Waiting(3), 2.0)}, not_before=50.0),
+        Turns(first, {second: Due(lines, 1.0), first: Due(Waiting(3), 2.0)}, not_before=50.0),
         {first: Joined(), second: Reading("visit", 4), said_before: Restarted()},
         unanswered=3,
     )
@@ -273,7 +300,7 @@ def test_turns_kept_and_resumed_keep_the_due_order_and_the_checkpoints_but_no_ru
     resumed = resumed_turns(kept, 100.0, wall + timedelta(seconds=10))
 
     assert resumed == TurnState(
-        Turns(False, {second: Due(lines, 100.0), first: Due(Waiting(3), 100.0)}, not_before=120.0),
+        Turns(None, {second: Due(lines, 100.0), first: Due(Waiting(3), 100.0)}, not_before=120.0),
         {first: Joined(), second: Reading("visit", 4)},
         unanswered=3,
     )

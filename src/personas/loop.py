@@ -57,7 +57,16 @@ from personas.mind import Mind
 from personas.present import history_delta, present_of
 from personas.recall import LookupBounds
 from personas.remembering import LineStore, Remembering
-from personas.reporting import Event, Reporter, StateChange, StoreOutage, TurnTally, start_turn_tally, step_timer
+from personas.reporting import (
+    Event,
+    Reporter,
+    StateChange,
+    StoreOutage,
+    TurnTally,
+    start_turn_tally,
+    step_timer,
+    stepping,
+)
 from personas.task_record import (
     TaskRecord,
     ending_loud_when_cancelled,
@@ -75,6 +84,7 @@ if TYPE_CHECKING:
     from personas.app_session import AppSession, SessionOpener
     from personas.clock import Clock
     from personas.config import AgentCredentials, AppTarget, Config
+    from personas.due import Due
     from personas.entries import KeptTurns
     from personas.ownership import Owned, Ownership
     from personas.readiness import ReadyMarker
@@ -398,7 +408,7 @@ class AgentLoop:
         aloud = speaks_aloud(self._voice_app, occasion, self._mind.checkpoint(at))
         apps = self._mind.held_apps(self._app.mcp_url)
         admitted = Admitted(facts, at.place, occasion, self._mind.present, self._boundaries.clock.wall(), aloud, apps)
-        self._start_turn(turns, setup, at.place, admitted, due.since, claimed)
+        self._start_turn(turns, setup, at.place, admitted, due, claimed)
 
     def _wake_when_pause_over(self, turns: asyncio.TaskGroup, now: float) -> None:
         """A pause holds the turn of the place at this app that has waited longest: one waiter of this loop wakes
@@ -432,20 +442,22 @@ class AgentLoop:
         setup: TurnSetup,
         place: PlaceRef,
         admitted: Admitted,
-        due_since: float,
+        due: Due,
         claimed: int,
     ) -> None:
         """Starts the turn in the trace of what made it due, or in a trace of its own when that carries none or one
         logline cannot read; its task, its done callback and its step lines share that trace and the loop's own lines
-        do not. The turn's wait, from ``due_since`` to now, ends here; a pause that ended later than ``due_since`` says
-        the place was due only from then."""
+        do not. The turn's wait, from ``due.since`` to now, ends here with what first kept it waiting; a pause that
+        ended later than ``due.since`` says the place was due only from then."""
         with unit_trace(admitted.occasion.traceparent):
-            step_timer(
+            wait = step_timer(
                 "turn_wait.ended",
                 self._agent.client_id,
                 self._app.mcp_url,
-                elapsed_seconds=max(0.0, self._boundaries.clock.now() - due_since),
-            ).end()
+                elapsed_seconds=max(0.0, self._boundaries.clock.now() - due.since),
+            )
+            wait.add(wait_reason=due.waited_on.value)
+            wait.end()
             tally = start_turn_tally(self._agent.client_id, self._app.mcp_url)
             task = turns.create_task(self._take_once_kept(claimed, setup, admitted, tally))
             self._turn = ActiveTurn(task, place, tally)
@@ -453,7 +465,8 @@ class AgentLoop:
 
     async def _take_once_kept(self, claimed: int, setup: TurnSetup, admitted: Admitted, tally: TurnTally) -> None:
         """Takes the turn once the ``claimed``-th change of his mind, its claim, is kept in the store."""
-        await self._mind.until_written(claimed)
+        with stepping(step_timer("claim_write.ended", self._agent.client_id, self._app.mcp_url)):
+            await self._mind.until_written(claimed)
         await self._turning.take(setup, admitted, TaskRecord(), tally)
 
     def _turn_over(self, task: asyncio.Task[None]) -> None:

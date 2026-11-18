@@ -31,6 +31,7 @@ from tests.support.history import (
 )
 from tests.support.hopin import CALL, LIMIT_SECONDS, READ
 from tests.support.hopin_places import ISSUER
+from tests.support.logs import lines_of
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, paused
 from tests.support.transport import ClosingHold
@@ -41,6 +42,11 @@ pytestmark = pytest.mark.anyio
 
 AGAIN = "And once more."
 SECOND_AGENT, SECOND_SUBJECT, SECOND_NAME = "agent-bach", "agent-subject-2", "Bach"
+
+
+def wait_reasons(caplog) -> list[object]:
+    """What each turn's wait names as having kept it waiting, in the order the turns started."""
+    return [line["wait_reason"] for line in lines_of(caplog.get_records("call"), "turn_wait.ended")]
 
 
 def turn_order(runner) -> list[tuple[int, str]]:
@@ -223,6 +229,22 @@ async def test_a_turn_made_due_while_the_one_before_runs_starts_as_it_ends_with_
     assert runner.clock.slept == []
 
 
+async def test_each_turn_names_what_first_stood_in_front_of_its_place_none_a_turn_elsewhere_or_an_older_place(
+    runner, other, caplog
+):
+    """LOG-32."""
+    running = await a_call_turn_that_waits_for_the_model(runner, other)
+    waits(other, 1)
+    await settled(other)
+    await said_and_taken(runner.app, PLACE_ID, AGAIN)
+
+    running.set()
+    await runner.gateway.until_turns(3)
+
+    assert turn_order(runner) == [(0, "lines"), (1, "view"), (0, "lines")]
+    assert wait_reasons(caplog) == ["none", "turn_elsewhere", "older_due"]
+
+
 async def test_the_place_that_waited_longest_goes_first_when_a_table_starts_waiting_before_a_line_is_said(runner):
     running = await a_call_turn_beside_a_table_that_waits_for_the_model(runner)
     waits(runner.app, 1)
@@ -257,7 +279,7 @@ async def test_a_table_that_moves_to_a_revision_that_does_not_wait_before_his_tu
     running = await a_call_turn_beside_a_table_that_waits_for_the_model(runner)
     waits(runner.app, 1)
     await settled(runner.app)
-    runner.app.show_view(TABLE.id, 2, {"hand": "none"}, awaits_you=False)
+    runner.app.show_view(TABLE.id, 2, {"hand": "empty"}, awaits_you=False)
     await settled(runner.app)
 
     running.set()
@@ -554,3 +576,18 @@ async def test_a_line_heard_at_a_voice_place_while_his_table_turn_of_that_app_ru
 
     assert turn_order(runner) == [(0, "view"), (0, "lines")]
     assert runner.app.spoken == [(SUBJECT, PLACE_ID, ANSWER)]
+
+
+async def test_a_spoken_turn_due_while_his_table_turn_of_that_app_runs_names_that_turn_as_its_wait(runner, caplog):
+    """LOG-32."""
+    await in_a_voice_call_and_at_a_table(runner, completion("table"), completion(ANSWER))
+    running = runner.gateway.hold_request(1)
+    waits(runner.app, 1)
+    await runner.gateway.until_requested(1)
+    await said_and_taken(runner.app, PLACE_ID, "Anyone there?")
+
+    running.set()
+    await runner.app.spoken_count(1)
+
+    assert turn_order(runner) == [(0, "view"), (0, "lines")]
+    assert wait_reasons(caplog) == ["none", "turn_here"]

@@ -35,7 +35,7 @@ events and their fields. A test cites each rule by its ID at the start of its do
 | `invitation.accepted`, `invitation.refused` | an accept answered | `reason` for a refusal (LOG-10) |
 | `invitation.left_out` | an invitation the agent cannot take turns at | `place_kind`, `reason` `no_turns` (LOG-11) |
 | `turn.ended` | every turn, however it ends | see below (LOG-12) |
-| `turn_wait.ended`, `token_hold.ended`, `session_open.ended`, `tool_list.ended`, `turn_setup.ended` | each step of a turn | `duration_ms`, `outcome`, `reason` of a failed step (LOG-13) |
+| `turn_wait.ended`, `claim_write.ended`, `token_hold.ended`, `session_open.ended`, `tool_list.ended`, `turn_setup.ended` | each step of a turn | `duration_ms`, `outcome`, `reason` of a failed step; `wait_reason` on `turn_wait.ended` (LOG-13) |
 | `token_request.ended` | each token request | `duration_ms`, `outcome` (LOG-14) |
 | `turns.paused` | a turn without an answer pauses his turns | `reason` (the turn's code, `budget_spent` among them), `pause_ms` (LOG-15) |
 | `speak.refused` | the app refused a sentence | `reason` (the app's code) (LOG-16) |
@@ -59,6 +59,16 @@ without an answer left counts from the end of the pause that turn caused, and on
 pause keeps its arrival. A place a pod resumes at a takeover or a restart counts from that resume. Every
 moment is read on the monotonic scale of the clock boundary (`Clock.now` in `clock.py`), and `due.py` keeps
 the earliest through a join or a replacement. (LOG-27)
+
+A `turn_wait.ended` names in `wait_reason` what first stood directly in front of the place once its wait
+began: `older_due` for an older due place of his, else `turn_here` for his running turn at the place's app or
+`turn_elsewhere` for one at another app, else `paused` for a pause of his turns; `none` when its turn could
+start at once. It is the first reason, not the longest: a loop reads it only when it tries to claim a turn,
+so what holds the place between two tries is not measured. A join keeps the reason; a place a pod resumes
+starts with none. (LOG-32)
+
+A `claim_write.ended` runs from the turn's start until the store keeps its claim; the turn's other steps
+follow it. (LOG-33)
 
 ## `turn.ended`
 
