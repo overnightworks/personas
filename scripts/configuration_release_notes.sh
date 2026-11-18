@@ -7,8 +7,8 @@
 # way CI installs, wheels only except the overnightworks libraries.
 set -euo pipefail
 
-if [[ "$#" -ne 1 || -z "$1" ]]; then
-    echo "usage: $0 <version>: the release's version is missing" >&2
+if [[ "$#" -ne 1 || ! "$1" =~ ^[0-9] ]]; then
+    echo "usage: $0 <version>: the release's version, without a v" >&2
     exit 2
 fi
 version="$1"
