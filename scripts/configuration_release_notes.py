@@ -104,6 +104,10 @@ def table_header(path: FieldPath) -> str:
     return f"[[{dotted}]]" if path[-1].repeated else f"[{dotted}]"
 
 
+def table_shape(*, repeated: bool) -> str:
+    return "array of tables" if repeated else "table"
+
+
 def as_object(value: object) -> JsonObject:
     if not isinstance(value, dict):
         raise ValueError(f"the schema holds {value!r} where an object belongs")
@@ -236,7 +240,7 @@ class Schema:
                 required=name in required,
                 default=default if table_schema is None or repeated else overrides(table_schema, default),
                 kind=self.kind(node) if table_schema is None else self.table_kind(choices[0], repeated=repeated),
-                shape=self.shape(node) if table_schema is None else ("array of tables" if repeated else "table"),
+                shape=self.shape(node) if table_schema is None else table_shape(repeated=repeated),
                 table=table_schema is not None,
                 refusals=() if table_schema is None else refusals_of(table_schema),
             )
