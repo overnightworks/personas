@@ -1,8 +1,0 @@
-claim_id = "b6c853f4f8ed4dfc84f696bacc124247"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "a89f13c0d11dbd3821e4a8f3fd47dbd94b5eabd7"
-branch = "claude/issue-272-personas-runs-on-agents-v0-59-0-and-its"
-scope = ["README.md", "docs/configuration.md", "pyproject.toml", "src/personas", "tests", "uv.lock"]
-opened_commit = "fbff957919a3a65ca42c9e9aa922431a6923a508"
-whole_reason = "one agents bump whose port change reaches the shared test fakes and whose removed AgentConfig.backend leaves the runner's [gateway] backend field"
