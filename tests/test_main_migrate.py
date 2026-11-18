@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -21,6 +20,7 @@ from personas.main import (
     command_line,
     main,
 )
+from tests.support.pods import ENTRY_POINT_CALL
 from tests.support.postgres import at_an_unknown_revision, kept_lines, migrated_to, revision_of, run_sql, tables_of
 
 if TYPE_CHECKING:
@@ -106,10 +106,15 @@ def test_migrating_a_database_at_a_revision_it_does_not_know_changes_nothing_and
 def test_the_console_script_prints_nothing_when_it_migrates_an_empty_or_a_migrated_database(files, unmigrated_database):
     files.use_database(unmigrated_database)
     environment = {**os.environ, CONFIG_ENVIRONMENT_VARIABLE: str(files.write()[CONFIG_ENVIRONMENT_VARIABLE])}
-    console_script = Path(sys.executable).with_name("personas")
 
     first, second = (
-        subprocess.run([console_script, MIGRATE_COMMAND], env=environment, capture_output=True, text=True, check=False)
+        subprocess.run(
+            [sys.executable, "-c", ENTRY_POINT_CALL, MIGRATE_COMMAND],
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         for _ in range(2)
     )
 
