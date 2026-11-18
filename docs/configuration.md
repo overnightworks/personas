@@ -83,7 +83,7 @@ both. The history is kept either way.
 
 | Name | Type | Default | Meaning |
 |---|---|---|---|
-| `lines_keep_days` | number above 0, or `inf` | 30 | a line is removed this long after its first read; `inf` keeps every line |
+| `lines_keep_days` | number above 0, or `inf` | 30 | how long after its first read a line becomes due for the next sweep; `inf` keeps every line |
 | `sweep_minutes` | number above 0, or `inf` | 60 | how often the sweep runs after its first at start; `inf` sweeps once |
 | `lookup_calls` | integer above 0 | 2 | lookups one turn may make; they join the turn's call total |
 | `lookup_bytes` | integer, at least an empty result's size | 8192 | the bytes of one result and the longest `text` a lookup takes |

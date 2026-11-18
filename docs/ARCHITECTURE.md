@@ -114,10 +114,11 @@ database. The runner opens no port. The release path is in the [README](../READM
 | `answered_turns` | what each answered turn's message told | the entries it told left, or `memory erase` |
 | `agent_turns` | reading checkpoints, due places, unanswered turns in a row, a pause's end | the next write; a takeover after a skipped generation drops it; `memory erase` keeps it |
 | `agent_owner` | the generation of the pod that owns him | renewed by every takeover and every erase |
-| `lines`, with `[memory]` | every line of every window he read, verbatim, with speaker, text and first-read time | `lines_keep_days` after its first read, or `memory erase` |
+| `lines`, with `[memory]` | every line of every window he read, verbatim, with speaker, text and first-read time | the first sweep after `lines_keep_days` from its first read, or `memory erase` |
 
 - The history has no period: it stays, also without `[memory]`, until newer entries push it past
   `history_bytes` or `memory erase` runs. No picture byte is kept anywhere.
+- A line a sweep removed from a window the app still holds is kept again with a new first-read time.
 - The mind writes through on every change, under his generation, so a write from a pod that lost him is
   refused. A restart or a takeover loads his history and turns, and his next turn is told what the holder
   before would have told, byte for byte.
