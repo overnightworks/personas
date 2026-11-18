@@ -1,8 +1,0 @@
-claim_id = "5fc2e431a8674d67a540a8d7a70c0877"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "a89f13c0d11dbd3821e4a8f3fd47dbd94b5eabd7"
-branch = "claude/issue-307-the-release-notes-name-changed-bounds-an"
-scope = ["docs/runbooks/release.md", "scripts/configuration_release_notes.py", "scripts/configuration_release_notes.sh", "src/personas/config.py", "tests/scripts", "tests/test_config_schema.py"]
-opened_commit = "85f84ba71cb766819c0c5687c53e24dc2c61d6d9"
-whole_reason = "one renderer, its schema owner and their tests: the remaining change kinds and the paste-safe placement"
