@@ -192,11 +192,13 @@ def _validators_given_the_fields(core_schema: object) -> Iterator[str]:
         return
     if not isinstance(core_schema, dict):
         return
-    node = cast("JsonDict", core_schema)
+    node = cast("dict[str, object]", core_schema)
     function = node.get("function")
-    if isinstance(function, dict) and function.get("type") == "with-info":
-        validator = function["function"]
-        yield getattr(validator, "__name__", repr(validator))
+    if isinstance(function, dict):
+        called = cast("dict[str, object]", function)
+        if called.get("type") == "with-info":
+            validator = called["function"]
+            yield getattr(validator, "__name__", repr(validator))
     for value in node.values():
         yield from _validators_given_the_fields(value)
 
@@ -206,13 +208,16 @@ def _with_refusals(schema: JsonDict, model: type[_Entry]) -> None:
 
     The JSON schema has no word for such a rule and the release notes read the schema alone, so a check across
     fields that is no ``_refusal`` would leave no trace there: writing the schema refuses it, whether a model
-    validator, a ``model_post_init`` or a validator that takes the ``ValidationInfo`` holding the fields validated
-    before its own.
+    validator, a ``model_post_init``, an ``__init__`` or a validator that takes the ``ValidationInfo`` holding the
+    fields validated before its own.
     """
     own = _Entry.holds_its_refusals.__name__
     checks = [name for name in model.__pydantic_decorators__.model_validators if name != own]
-    if model.model_post_init is not BaseModel.model_post_init:
-        checks.append("model_post_init")
+    checks.extend(
+        method.__name__
+        for method, base in ((model.model_post_init, BaseModel.model_post_init), (model.__init__, BaseModel.__init__))
+        if method is not base
+    )
     checks.extend(_validators_given_the_fields(model.__pydantic_core_schema__))
     if checks:
         raise TypeError(f"{model.__name__}.{checks[0]}: a check across fields is declared with _refusal")
