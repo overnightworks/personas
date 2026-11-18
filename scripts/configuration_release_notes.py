@@ -1,9 +1,10 @@
 """The release notes' configuration lines: python3 scripts/configuration_release_notes.py schema | notes ...
 
 ``schema`` writes the JSON schema of the runner's configuration file as the checked-out ``personas.config``
-validates it. ``notes <previous-tag> <version> <before.json> <after.json>`` compares two such schemas and writes each
-field a deployer must change: added, removed or newly required, with the TOML it needs. The schema is the file's one
-owner, so the notes need no entry a change could forget; ``scripts/configuration_release_notes.sh`` runs both.
+validates it. ``notes <previous-tag> <version> < before.json`` compares the previous release's schema, read from
+standard input, with the checked-out one and writes each field a deployer must change: added, removed or newly
+required, with the TOML it needs. The schema is the file's one owner, so the notes need no entry a change could
+forget; ``scripts/configuration_release_notes.sh`` runs both.
 """
 
 from __future__ import annotations
@@ -14,7 +15,6 @@ import math
 import sys
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 # The file's model is private to config.py, and every tag the notes compare names it _FileModel.
@@ -231,17 +231,17 @@ def main(arguments: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Write the release notes' configuration lines.")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("schema", help="write the JSON schema of the checked-out configuration file")
-    compare = commands.add_parser("notes", help="write the configuration changes between two schemas")
-    compare.add_argument("previous_tag", help="the release the schema before is from, as v<version>")
+    compare = commands.add_parser(
+        "notes", help="write the configuration changes from the schema on standard input to the checked-out one"
+    )
+    compare.add_argument("previous_tag", help="the release the schema on standard input is from, as v<version>")
     compare.add_argument("version", help="the release the notes are for, without a v")
-    compare.add_argument("before", type=Path, help="the schema at the previous release")
-    compare.add_argument("after", type=Path, help="the schema of this release")
     parsed = parser.parse_args(arguments)
     if parsed.command == "schema":
         sys.stdout.write(json.dumps(schema()) + "\n")
         return
-    before, after = (as_object(json.loads(path.read_text(encoding="utf-8"))) for path in (parsed.before, parsed.after))
-    sys.stdout.write(notes(parsed.previous_tag, parsed.version, before, after))
+    before = as_object(json.loads(sys.stdin.read()))
+    sys.stdout.write(notes(parsed.previous_tag, parsed.version, before, schema()))
 
 
 if __name__ == "__main__":

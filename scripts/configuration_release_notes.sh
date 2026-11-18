@@ -24,6 +24,4 @@ git archive "${previous}" | tar -x -C "${work}/before"
 env -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV \
     uv sync --quiet --project "${work}/before" --locked --no-install-project --no-build --no-dev
 PYTHONPATH="${work}/before/src" "${work}/before/.venv/bin/python" "${renderer}" schema > "${work}/before.json"
-PYTHONPATH="${PWD}/src" uv run --no-sync python "${renderer}" schema > "${work}/after.json"
-PYTHONPATH="${PWD}/src" uv run --no-sync python "${renderer}" notes "${previous}" "${version}" \
-    "${work}/before.json" "${work}/after.json"
+PYTHONPATH="${PWD}/src" uv run --no-sync python "${renderer}" notes "${previous}" "${version}" < "${work}/before.json"

@@ -1,3 +1,4 @@
+import io
 import json
 import math
 from enum import Enum
@@ -150,12 +151,12 @@ def test_a_malformed_schema_fails_loud(malformed):
         notes(PREVIOUS_TAG, VERSION, malformed, malformed)
 
 
-def test_the_shipped_configuration_compared_with_itself_has_no_change(tmp_path, capsys):
+def test_the_shipped_configuration_compared_with_itself_has_no_change(monkeypatch, capsys):
     main(["schema"])
-    written = tmp_path / "schema.json"
-    written.write_text(capsys.readouterr().out, encoding="utf-8")
+    written = capsys.readouterr().out
+    monkeypatch.setattr("sys.stdin", io.StringIO(written))
 
-    main(["notes", PREVIOUS_TAG, VERSION, str(written), str(written)])
+    main(["notes", PREVIOUS_TAG, VERSION])
 
-    assert json.loads(written.read_text(encoding="utf-8")) == schema()
+    assert json.loads(written) == schema()
     assert "No field" in capsys.readouterr().out
