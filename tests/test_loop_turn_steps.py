@@ -21,7 +21,7 @@ from tests.support.fakes import FakeClock
 from tests.support.gateway import Gateway, says
 from tests.support.hopin import LIST_TOOLS, LISTEN, a_traceparent, trace_id_of
 from tests.support.logs import lines_of, written_by_the_runner
-from tests.support.wire import hangs
+from tests.support.wire import cuts, hangs
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -177,6 +177,21 @@ async def test_a_tool_list_the_turns_own_app_does_not_answer_in_time_ends_failed
     assert (failed["outcome"], failed["reason"]) == ("failed", NETWORK_FAILURE_CODE)
     assert setup["outcome"] == "ok"
     assert runner.gateway.arrivals == 1
+
+
+async def test_a_tool_list_the_turns_own_app_loses_its_stream_in_fails_the_setup_of_the_turn(runner, caplog):
+    """LOG-13."""
+    runner.bound_listening_calls_to(SHORT_CALL_SECONDS)
+    runner.gateway = Gateway(*says(PLACE_ID, "Here."))
+    await restarted_in_the_call(runner)
+    # The first listing is the one the client makes before the turn's thinking statement; the second is the turn's own.
+    runner.app.script(LIST_TOOLS, hangs, cuts)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.reports.until_a_turn_ended()
+    await runner.app.log.until(LISTEN, 2)
+
+    (setup,) = lines_of(caplog.get_records("call"), "turn_setup.ended")
+    assert (setup["outcome"], setup["reason"]) == ("failed", NETWORK_FAILURE_CODE)
 
 
 async def test_every_request_of_a_turn_carries_its_trace_and_the_requests_of_the_loop_carry_none(runner, written):

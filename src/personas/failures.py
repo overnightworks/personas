@@ -57,9 +57,13 @@ class Unreachable(CallFailure):
     """The server was not reached or timed out."""
 
 
+class CallTimedOut(Unreachable):
+    """The app did not answer within its call time."""
+
+
 @asynccontextmanager
 async def within_call_time(call_seconds: float) -> AsyncGenerator[None]:
-    """Runs its body under an app's call time; an expired bound raises ``Unreachable``."""
+    """Runs its body under an app's call time; an expired bound raises ``CallTimedOut``."""
     bound = asyncio.timeout(call_seconds)
     try:
         async with bound:
@@ -67,7 +71,7 @@ async def within_call_time(call_seconds: float) -> AsyncGenerator[None]:
     except TimeoutError:
         if not bound.expired():
             raise
-        raise Unreachable("the app did not answer in time") from None
+        raise CallTimedOut("the app did not answer in time") from None
 
 
 class UnusableAnswer(CallFailure):

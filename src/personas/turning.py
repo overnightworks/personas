@@ -41,7 +41,7 @@ from personas.entries import (
 )
 from personas.failures import (
     CallFailure,
-    Unreachable,
+    CallTimedOut,
     leaves_of,
     raise_if_cancelled,
     task_is_being_cancelled,
@@ -646,7 +646,7 @@ class Turning:
             try:
                 async with within_call_time(self._app.call_seconds):
                     return await session.declared_tools()
-            except Unreachable as failure:
+            except CallTimedOut as failure:
                 timer.handled()
                 timer.fail(failure_code(failure))
                 timer.end()
