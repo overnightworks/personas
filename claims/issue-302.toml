@@ -1,0 +1,8 @@
+claim_id = "dd824b23f0b141aa832457ce7a986797"
+agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
+role = "builder"
+base = "86679e9128f3d53292ce5e8e21074f0a7fcfa2ec"
+branch = "claude/issue-302-migrate-s-output-matches-the-log-referen"
+scope = ["docs/log.md", "src/personas/main.py", "tests"]
+opened_commit = "b2716a6e701e29c7752f32f6865cabcfd8b95a01"
+whole_reason = "one settled migrate output and the logging restore in every test that drives main()"
