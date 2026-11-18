@@ -1,0 +1,8 @@
+claim_id = "f3d277698ab541608ba542c8a53bc16f"
+agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
+role = "builder"
+base = "d03540de451adf522a8d35658e249e211ec37933"
+branch = "claude/issue-317-turn-wait-ended-names-what-the-claim-wai"
+scope = ["docs/log.md", "src/personas/decision.py", "src/personas/due.py", "src/personas/loop.py", "src/personas/mind.py", "tests/test_due.py", "tests/test_loop_turns.py", "tests/test_mind.py"]
+opened_commit = "fdb80ecbed2ef7630aa9259ff4bb8cc4af42c111"
+whole_reason = "one closed wait reason decided where the claim is refused and logged where the turn starts, with the claim write's step line"
