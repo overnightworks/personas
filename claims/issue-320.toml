@@ -1,8 +1,0 @@
-claim_id = "4947e6393037441292c6d387476d5859"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "2cc2d540b8e880e63287ed082fbf18c00f351be7"
-branch = "claude/issue-320-a-wait-through-a-pause-at-its-own-place"
-scope = ["docs/log.md", "src/personas/due.py", "src/personas/loop.py", "tests/test_due.py", "tests/test_loop_turns.py"]
-opened_commit = "bc83a765b147dbbb52cf2c7045e15ee5b7eaad43"
-whole_reason = "one wait measurement across a same-place pause, decided in due.py and logged by the loop"
