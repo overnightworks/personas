@@ -52,8 +52,8 @@ An entry has its app and the time he took it (`at`), and is one of:
 - Every message before the turn's own is byte for byte as the turn before sent it, so the gateway's cache
   reads it back. A turn that ends without an answer adds no message; its entries go to the next turn's.
 - Past `history_bytes` the oldest whole messages leave in one step until what stays fits
-  `history_keep_bytes`; the newest message and its newest entry always stay. A larger value keeps more and
-  makes every request longer.
+  `history_keep_bytes`. When the newest message alone is past it, its oldest entries leave too until what
+  stays fits; its newest entry always stays. A larger value keeps more and makes every request longer.
 - What lies before his history's first entry reaches no turn unasked; with `[memory]` the turn can look it
   up (see Recall).
 
