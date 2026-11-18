@@ -91,6 +91,7 @@ def test_an_uncaught_exception_after_the_entry_point_configures_is_one_json_cras
         "process.crashed",
         "LookupError",
     )
+    assert "LookupError" in line["exception"]
     assert written.err == ""
 
 
