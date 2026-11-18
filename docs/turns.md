@@ -126,8 +126,8 @@ is an unusable answer; audio and resource blocks are ignored.
   budget and 30 seconds otherwise, logged once as `turns.paused`.
 - After the pause the place is due again with what the turn was for, joined with what arrived meanwhile. A
   place he left gets no turn, and a turn cancelled by his leaving or running at a kill is not retried. A
-  SIGTERM hands a turn it cut to the new holder only if the turn had relayed no call and sent no sentence,
-  since a line said twice is worse than one unanswered. The first turn with an answer ends the pausing.
+  stop (a SIGTERM or a lost lock) hands a turn it cut to the new holder only if the turn had relayed no call
+  and sent no sentence, since a line said twice is worse than one unanswered. The first turn with an answer ends the pausing.
 
 ## Recall
 
