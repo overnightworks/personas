@@ -3,6 +3,6 @@ agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
 role = "builder"
 base = "2cc2d540b8e880e63287ed082fbf18c00f351be7"
 branch = "claude/issue-318-the-log-and-configuration-references-say"
-scope = ["docs/configuration.md", "docs/log.md", "src/personas/main.py", "src/personas/reporting.py", "tests/test_main.py", "tests/test_reporting.py"]
+scope = ["docs/configuration.md", "docs/log.md", "src/personas/main.py", "src/personas/reporting.py", "tests/test_config_stores.py", "tests/test_loop_turn_steps.py", "tests/test_loop_view.py", "tests/test_main.py", "tests/test_reporting.py", "tests/test_sweep.py", "tests/test_tokens.py"]
 opened_commit = "72d607d9bb6c1966fa3db50119aae390072698e8"
 whole_reason = "one sweep of the drift between the log and configuration references and the runner, found by one explorative test"
