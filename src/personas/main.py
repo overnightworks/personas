@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv
+import logging
 import os
 import signal
 import sys
@@ -26,7 +27,7 @@ from personas.loop import Boundaries, run_all
 from personas.memory import PostgresHistoryStore, PostgresLineStore, PostgresMemory, migrate
 from personas.ownership import LockedOwnership
 from personas.readiness import FileReadyMarker, ReadinessError, ReadyMarker
-from personas.reporting import StateChange, StoreOutage, carry_trace, log_state_change
+from personas.reporting import Event, StateChange, StoreOutage, carry_trace, log_state_change
 from personas.sweep import sweep_lines
 from personas.tokens import HttpTokenSource
 
@@ -47,6 +48,9 @@ type Compose = Callable[[Config, ReadyMarker], AbstractAsyncContextManager[Sweep
 CONFIGURATION_ERROR_EXIT_CODE: Final = 2
 READINESS_ERROR_EXIT_CODE: Final = 3
 STORE_ERROR_EXIT_CODE: Final = 4
+STOP_CUT_EXIT_CODE: Final = 5
+"""A stop its deadline cut. Kubernetes neither restarts a pod it deleted nor holds a rollout by its exit code, so the
+code costs nothing there and leaves in the container's last state that the stop did not end cleanly."""
 MIGRATE_COMMAND: Final = "migrate"
 MEMORY_COMMAND: Final = "memory"
 LIST_COMMAND: Final = "list"
@@ -155,15 +159,34 @@ async def _compose_and_run(config: Config, ready: ReadyMarker, compose: Compose)
 
 
 async def _run(config: Config, ready: ReadyMarker, compose: Compose) -> None:
-    """Runs the runner as its own task, which a SIGTERM cancels; that cancellation is the clean stop.
+    """Runs the runner as its own task, which a SIGTERM cancels; that cancellation is the clean stop, which is cut if it
+    has not ended ``stop_seconds`` after the SIGTERM.
 
     Waiting on the task, not awaiting it, leaves the cancellation unraised, so any error the task ends with is a defect.
     """
     runner = asyncio.create_task(_compose_and_run(config, ready, compose))
-    asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, runner.cancel)
+    loop = asyncio.get_running_loop()
+
+    def stop() -> None:
+        runner.cancel()
+        loop.call_later(config.ownership.stop_seconds, _cut_the_stop)
+
+    loop.add_signal_handler(signal.SIGTERM, stop)
     await asyncio.wait({runner})
     if not runner.cancelled():
         runner.result()
+
+
+def _cut_the_stop() -> None:
+    """Ends the process at once: its stop outlasted the deadline, since the loop that runs this has not closed.
+
+    No timeout inside the loop could bound the stop: a close may await again after its cancellation, and the loop's own
+    shutdown waits for every task and thread. Each agent's write within his margin has ended by now, and the kernel
+    closes the lock connection, which frees his locks.
+    """
+    log_state_change(StateChange(Event.STOP_CUT, None, None))
+    logging.shutdown()
+    os._exit(STOP_CUT_EXIT_CODE)
 
 
 def configure_logging() -> None:

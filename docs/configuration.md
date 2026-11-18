@@ -71,10 +71,15 @@ a dark database hold that loop until the deadline and cancel the running turn, w
 | `heartbeat_timeout_seconds` | 3 | how long one such round may take |
 | `cancel_margin_seconds` | 2 | the time a pod that lost an agent has to stop him |
 | `grace_seconds` | 12 | how long a pod that took an agent waits before it starts him |
+| `stop_seconds` | 10 | how long after a SIGTERM a pod may take to stop before it ends at once |
 
-Each is a finite number above 0. A grace at or below the other three together is refused. A handover takes
-at most `contend_seconds + heartbeat_timeout_seconds + grace_seconds`, 20 seconds by default, inside
-agents' member lease of 120 seconds.
+Each is a finite number above 0. A grace at or below the first three together is refused, and so is a
+stop at or below `cancel_margin_seconds`, the time each agent's last write has. A handover takes at most
+`contend_seconds + heartbeat_timeout_seconds + grace_seconds`, 20 seconds by default, inside agents' member
+lease of 120 seconds.
+
+A stop that reaches `stop_seconds` is logged as `runner.stop_cut` and exits 5, whatever still hangs then;
+with `terminationGracePeriodSeconds` above it, Kubernetes sees that exit instead of killing the pod.
 
 ## `[memory]`
 

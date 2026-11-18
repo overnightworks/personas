@@ -100,10 +100,11 @@ grace outlasts the time a losing pod needs to stop him; the bound is in
 ## 4. Deployment View
 
 The image (`Dockerfile`) holds the runner and the persona files, runs as the non-root uid 1001 and starts
-`personas`, which handles SIGTERM as PID 1 and exits 0 on that clean stop. It holds no configuration and no
-secret. The deployment in overnightworks/platform supplies `PERSONAS_CONFIG`, the secret files and the
-Postgres database, runs `personas migrate`, probes readiness with `test -e <ready_file>`, and may run several
-pods against one database. The runner opens no port. The release path is in the [README](../README.md).
+`personas`, which handles SIGTERM as PID 1 and exits 0 on that clean stop; a stop that outlasts its deadline
+ends at once, as [the configuration reference](configuration.md), `[ownership]`, says. It holds no
+configuration and no secret. The deployment in overnightworks/platform supplies `PERSONAS_CONFIG`, the
+secret files and the Postgres database, runs `personas migrate`, probes readiness with `test -e <ready_file>`,
+and may run several pods against one database. The runner opens no port. The release path is in the [README](../README.md).
 
 ## 5. Crosscutting Concepts
 
