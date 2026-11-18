@@ -57,7 +57,16 @@ from personas.mind import Mind
 from personas.present import history_delta, present_of
 from personas.recall import LookupBounds
 from personas.remembering import LineStore, Remembering
-from personas.reporting import Event, Reporter, StateChange, StoreOutage, TurnTally, start_turn_tally, step_timer
+from personas.reporting import (
+    Event,
+    Reporter,
+    StateChange,
+    StoreOutage,
+    TurnTally,
+    start_turn_tally,
+    step_timer,
+    stepping,
+)
 from personas.task_record import (
     TaskRecord,
     ending_loud_when_cancelled,
@@ -456,7 +465,8 @@ class AgentLoop:
 
     async def _take_once_kept(self, claimed: int, setup: TurnSetup, admitted: Admitted, tally: TurnTally) -> None:
         """Takes the turn once the ``claimed``-th change of his mind, its claim, is kept in the store."""
-        await self._mind.until_written(claimed)
+        with stepping(step_timer("claim_write.ended", self._agent.client_id, self._app.mcp_url)):
+            await self._mind.until_written(claimed)
         await self._turning.take(setup, admitted, TaskRecord(), tally)
 
     def _turn_over(self, task: asyncio.Task[None]) -> None:

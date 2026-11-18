@@ -19,7 +19,14 @@ from tests.support.logs import lines_of, written_by_the_runner
 
 pytestmark = pytest.mark.anyio
 
-STEPS = ("turn_wait.ended", "token_hold.ended", "session_open.ended", "tool_list.ended", "turn_setup.ended")
+STEPS = (
+    "turn_wait.ended",
+    "claim_write.ended",
+    "token_hold.ended",
+    "session_open.ended",
+    "tool_list.ended",
+    "turn_setup.ended",
+)
 
 
 async def a_written_turn(runner, traceparent: str | None = None) -> None:
@@ -40,6 +47,15 @@ async def test_each_step_of_a_turn_writes_one_line_with_its_duration_and_outcome
         assert (line["outcome"], line["trace_id"]) == ("ok", ended["trace_id"])
         assert isinstance(line["duration_ms"], float)
     assert ended["trace_id"] is not None
+
+
+async def test_the_claims_write_ends_before_the_turns_other_steps(runner, written):
+    """LOG-33."""
+    await a_written_turn(runner)
+
+    events = [line["event"] for line in written_by_the_runner(written)]
+    in_the_turn = [event for event in events if event in STEPS]
+    assert in_the_turn[:2] == ["turn_wait.ended", "claim_write.ended"]
 
 
 async def test_every_step_names_the_agent_and_the_app_it_is_at(runner, written):
