@@ -17,7 +17,6 @@ from agents.turn_events import FinalEvent, ToolCallEvent
 from agents.voice.reply import REPLY_RULES
 
 from personas.decision import (
-    NETWORK_FAILURE_CODE,
     TURN_ROLE,
     AppPlace,
     Held,
@@ -40,7 +39,14 @@ from personas.entries import (
     told_stop,
     told_words,
 )
-from personas.failures import CallFailure, leaves_of, raise_if_cancelled, task_is_being_cancelled
+from personas.failures import (
+    CallFailure,
+    Unreachable,
+    leaves_of,
+    raise_if_cancelled,
+    task_is_being_cancelled,
+    within_call_time,
+)
 from personas.held_tools import Calls, HeldTools, HoldBack
 from personas.holds import DECISION_CALLS, DECISION_DECLARATIONS, HoldInbox, close_when_over
 from personas.present import held_told, turn_messages
@@ -635,17 +641,14 @@ class Turning:
     async def _list_own_tools(self, session: AppSession) -> tuple[ToolDeclaration, ...] | None:
         """The tools the place's app lists, or ``None`` when it did not answer within its call time; the step then
         ends failed with its reason and the turn goes on."""
-        bound = asyncio.timeout(self._app.call_seconds)
         timer = step_timer("tool_list.ended", self._agent.client_id, self._app.mcp_url)
         with stepping(timer):
             try:
-                async with bound:
+                async with within_call_time(self._app.call_seconds):
                     return await session.declared_tools()
-            except TimeoutError:
-                if not bound.expired():
-                    raise
+            except Unreachable as failure:
                 timer.handled()
-                timer.fail(NETWORK_FAILURE_CODE)
+                timer.fail(failure_code(failure))
                 timer.end()
                 return None
 

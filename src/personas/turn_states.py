@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING, NoReturn
 
 from agents.member import SetTurnStateArguments
 
-from personas.decision import NETWORK_FAILURE_CODE, failure_code, sync_seat_ends, turn_end_state
-from personas.failures import CallFailure
+from personas.decision import failure_code, sync_seat_ends, turn_end_state
+from personas.failures import CallFailure, within_call_time
 from personas.reporting import Event
 
 if TYPE_CHECKING:
@@ -87,16 +87,10 @@ class TurnStates:
                 queued.sent.set_result(None)
 
     async def _state(self, session: AppSession, statement: SetTurnStateArguments) -> None:
-        bound = asyncio.timeout(self._call_seconds)
         try:
-            async with bound:
+            async with within_call_time(self._call_seconds):
                 await self._use_current_token(session)
                 refusal = await session.set_turn_state(statement)
-        except TimeoutError:
-            if not bound.expired():
-                raise
-            self._report(Event.TURN_STATE_FAILED, NETWORK_FAILURE_CODE, None, None)
-            return
         except CallFailure as failure:
             self._report(Event.TURN_STATE_FAILED, failure_code(failure), None, failure)
             return
