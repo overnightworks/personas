@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import secrets
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NoReturn
+
+import pytest
 
 from personas.config import CONFIG_ENVIRONMENT_VARIABLE
+from personas.main import CONFIGURATION_ERROR_EXIT_CODE, main
 from tests.support.realm import API_GROUP
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from personas.config import DatabaseTarget
+    from personas.config import Config, DatabaseTarget
+    from personas.readiness import ReadyMarker
 
 PERSONA_NAME = "mozart"
 GATEWAY_ORIGIN = "http://gateway.test"
@@ -106,3 +110,17 @@ class Files:
     def write(self) -> dict[str, str]:
         self.config_path.write_text(self.text, encoding="utf-8")
         return {CONFIG_ENVIRONMENT_VARIABLE: str(self.config_path)}
+
+
+def never_composed(config: Config, marker: ReadyMarker) -> NoReturn:
+    raise AssertionError("a refused configuration started the runner")
+
+
+def fails_at_start(environment: dict[str, str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
+    monkeypatch.delenv(CONFIG_ENVIRONMENT_VARIABLE, raising=False)
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+    with pytest.raises(SystemExit) as stopped:
+        main(never_composed)
+    assert stopped.value.code == CONFIGURATION_ERROR_EXIT_CODE
+    return capsys.readouterr().err

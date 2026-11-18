@@ -90,6 +90,7 @@ async def an_invited_table_at_an_app_that_binds_no_tools_read_twice(runner) -> N
 
 
 async def test_an_invitation_to_a_view_place_at_an_app_that_binds_no_tools_is_not_accepted_and_nothing_is_read(runner):
+    """TURNS-1."""
     await an_invited_table_at_an_app_that_binds_no_tools_read_twice(runner)
 
     assert runner.app.accepted == []
