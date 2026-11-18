@@ -1,8 +1,0 @@
-claim_id = "9fc7685a4aba4a879bf2143a27c279dd"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "0ac75d9d0863098b797c6b3c6b5d8e6e0275f8e2"
-branch = "claude/issue-326-a-turn-states-at-its-place-that-the-agen"
-scope = ["docs/ARCHITECTURE.md", "docs/log.md", "docs/turns.md", "pyproject.toml", "quality/baseline.toml", "src/personas/app_session.py", "src/personas/decision.py", "src/personas/loop.py", "src/personas/reporting.py", "src/personas/turn_states.py", "src/personas/turning.py", "tests/support/fakes.py", "tests/support/hopin.py", "tests/test_app_session.py", "tests/test_decision.py", "tests/test_loop.py", "tests/test_loop_memory.py", "tests/test_loop_turn.py", "tests/test_loop_turn_state.py", "tests/test_loop_voice_end.py", "uv.lock"]
-opened_commit = "a330d54f6ca606808ce1da72e1711a3c59a88c66"
-whole_reason = "One owner decides each turn-state statement from the turn's ending and the seat's last turn end; the turn performs it at its start and end through the app session."
