@@ -37,6 +37,7 @@ Every value is validated at start and an error names the field or path, never a 
 
 from __future__ import annotations
 
+import inspect
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -54,7 +55,6 @@ from pydantic import (
     PositiveFloat,
     PositiveInt,
     ValidationError,
-    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -188,10 +188,15 @@ def _with_refusals(schema: JsonDict, model: type[_Entry]) -> None:
     """Writes the sentence of each rule across the entry's fields into its JSON schema, as ``refusals``.
 
     The JSON schema has no word for such a rule and the release notes read the schema alone, so a check across
-    fields that is no ``_refusal`` would leave no trace there: writing the schema refuses it.
+    fields that is no ``_refusal`` would leave no trace there: writing the schema refuses it, a field validator that
+    takes the ``ValidationInfo`` holding the fields validated before its own included.
     """
-    for name in model.__pydantic_decorators__.model_validators:
+    decorators = model.__pydantic_decorators__
+    for name in decorators.model_validators:
         if name != _Entry.holds_its_refusals.__name__:
+            raise TypeError(f"{model.__name__}.{name}: a check across fields is declared with _refusal")
+    for name, validator in decorators.field_validators.items():
+        if len(inspect.signature(validator.func).parameters) > (2 if validator.info.mode == "wrap" else 1):
             raise TypeError(f"{model.__name__}.{name}: a check across fields is declared with _refusal")
     schema["refusals"] = [refusal.sentence for refusal in model.refusals()]
 
@@ -238,12 +243,18 @@ class _AgentEntry(_Entry):
 
     @field_validator("model", "hold_model")
     @classmethod
-    def _model_is_a_text_model_of_an_agent_file(cls, model: str, info: ValidationInfo) -> str:
+    def _model_is_a_text_model(cls, model: str) -> str:
         if model_kind_of(model) is not ModelKind.TEXT:
             raise ValueError(f"must start with {ModelKind.TEXT}/")
-        if info.data.get("persona_file") is None:
-            raise ValueError("needs a persona_file, whose agent it names the model of")
         return model
+
+    @_refusal("model: needs a persona_file, whose agent it names the model of")
+    def _a_model_names_the_model_of_an_agent_file(self) -> bool:
+        return self.model is None or self.persona_file is not None
+
+    @_refusal("hold_model: needs a persona_file, whose agent it names the model of")
+    def _a_hold_model_names_the_model_of_an_agent_file(self) -> bool:
+        return self.hold_model is None or self.persona_file is not None
 
 
 class _DatabaseEntry(_Entry):
