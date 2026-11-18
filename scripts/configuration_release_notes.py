@@ -181,7 +181,7 @@ def kept_change(then: ConfigField, now: ConfigField) -> Change | None:
         return Change.TYPE_CHANGED
     if now.required and not then.required:
         return Change.NOW_REQUIRED
-    if not now.table and not now.required and then.default != now.default:
+    if not now.table and not now.required and not then.required and then.default != now.default:
         return Change.DEFAULT_CHANGED
     return None
 

@@ -1,5 +1,6 @@
 """The configuration file's JSON schema, the one source the release notes read: each rule across fields is named."""
 
+import re
 from typing import Self
 
 import pytest
@@ -27,8 +28,10 @@ def schema_refusals(node: object) -> set[str]:
         lambda text: text + "[ownership]\ncancel_margin_seconds = 1.0\nstop_seconds = 1.0\n",
         lambda text: text + "[ownership]\ngrace_seconds = 1.0\n",
         lambda text: f"history_bytes = 1024\nhistory_keep_bytes = 1025\n{text}",
+        lambda text: re.sub(r"\[gateway\].*?(?=\[\[apps\]\])", "", text, flags=re.DOTALL),
+        lambda text: re.sub(r"^persona_file = .*\n", "", text, flags=re.MULTILINE),
     ],
-    ids=["app", "stop", "grace", "top level"],
+    ids=["app", "stop", "grace", "top level", "gateway", "persona file"],
 )
 def test_a_rule_across_fields_that_refuses_a_file_is_named_in_the_configuration_schema(files, break_it):
     files.text = break_it(files.text)

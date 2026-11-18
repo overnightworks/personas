@@ -101,6 +101,10 @@ class HistoryAfter(BaseModel):
     history_bytes: int = 1000
 
 
+class HistoryRequired(BaseModel):
+    history_bytes: int
+
+
 class IntPort(Entry):
     port: int
 
@@ -274,10 +278,15 @@ def test_the_notes_list_every_rule_when_the_previous_schema_names_none():
 
 
 @pytest.mark.parametrize(
-    "unchanged", [pytest.param(Ownership, id="no rules named"), pytest.param(DeclaresRules, id="rules named")]
+    ("before", "after"),
+    [
+        pytest.param(Ownership, Ownership, id="no rules named"),
+        pytest.param(DeclaresRules, DeclaresRules, id="rules named"),
+        pytest.param(HistoryRequired, HistoryAfter, id="a required field given a default, which every file sets"),
+    ],
 )
-def test_the_notes_say_so_when_nothing_changed(unchanged):
-    rendered = notes_between(unchanged, unchanged)
+def test_the_notes_say_so_when_nothing_changed(before, after):
+    rendered = notes_between(before, after)
 
     assert rendered.splitlines() == [
         "## Configuration changes",
