@@ -8,6 +8,7 @@ from http import HTTPStatus
 import anyio
 import pytest
 from agents.backend.fake_gateway import completion
+from agents.member import SPEAK_TOOL
 from agents.tools import ToolOutcome
 from agents.turn import FailureCode
 
@@ -132,7 +133,9 @@ async def test_a_lifecycle_connection_lost_while_a_sentence_is_sent_cancels_the_
     [
         (
             lambda app: (
-                setattr(app, "refuse_with", HTTPStatus.SERVICE_UNAVAILABLE) or setattr(app, "refused_method", CALL)
+                setattr(app, "refuse_with", HTTPStatus.SERVICE_UNAVAILABLE)
+                or setattr(app, "refused_method", CALL)
+                or setattr(app, "refused_tool", SPEAK_TOOL)
             ),
             lambda app: setattr(app, "refuse_with", None),
             [(Event.STARTED, None), (Event.BACKOFF, status_code(503)), (Event.RESUMED, None)],

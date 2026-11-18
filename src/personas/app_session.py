@@ -15,6 +15,7 @@ from agents.member import (
     ACCEPT_INVITATION_TOOL,
     CONTINUE_SPEAKING_TOOL,
     LISTEN_BOUND_SECONDS,
+    SET_TURN_STATE_TOOL,
     SPEAK_TOOL,
     STANDING_URI,
     STOP_SPEAKING_TOOL,
@@ -26,6 +27,9 @@ from agents.member import (
     PlaceRef,
     PlaceView,
     PlaceWindow,
+    SetTurnStateArguments,
+    SetTurnStateRefusal,
+    SetTurnStateRefused,
     SpeakAnswer,
     SpeakRefusal,
     SpeakRefused,
@@ -132,6 +136,10 @@ class AppSession(Protocol):
 
     async def stop_speaking(self, place: PlaceRef, interrupted: str) -> StopSpeakingRefusal | None:
         """``None`` when the hold ended with nothing more said, else the refusal; raises as ``speak`` does."""
+        ...
+
+    async def set_turn_state(self, statement: SetTurnStateArguments) -> SetTurnStateRefusal | None:
+        """``None`` when the app took what his turns at the place do, else the refusal; raises as ``speak`` does."""
         ...
 
     async def declared_tools(self) -> tuple[ToolDeclaration, ...]:
@@ -312,6 +320,10 @@ class _McpAppSession:
     async def stop_speaking(self, place: PlaceRef, interrupted: str) -> StopSpeakingRefusal | None:
         result = await self._called(STOP_SPEAKING_TOOL, _naming_hold(place, interrupted))
         return _refusal_in(StopSpeakingRefused, result).refused if result.is_error else None
+
+    async def set_turn_state(self, statement: SetTurnStateArguments) -> SetTurnStateRefusal | None:
+        result = await self._called(SET_TURN_STATE_TOOL, statement.model_dump(mode="json"))
+        return _refusal_in(SetTurnStateRefused, result).refused if result.is_error else None
 
     async def invoke(self, name: str, arguments: JsonObject) -> ToolOutcome:
         result = await self._called(name, arguments)

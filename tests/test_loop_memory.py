@@ -285,7 +285,8 @@ async def test_a_turns_call_total_is_his_apps_bounds_plus_his_lookups_and_the_on
 ):
     """TURNS-22, CONFIG-36."""
     if not lists_tools:
-        runner.app.script(LIST_TOOLS, lists_nothing)
+        # The loop's session lists the tools first, to check the answer of the turn's thinking.
+        runner.app.script(LIST_TOOLS, lists_nothing, lists_nothing)
     stored_in(runner, ScriptedStore())
     lookups = runner.config.memory.lookup_calls
     own_calls = runner.config.apps[0].max_tool_calls if lists_tools else 0

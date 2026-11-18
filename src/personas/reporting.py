@@ -41,6 +41,7 @@ class Event(Enum):
     PAUSED = auto()
     SPEAK_REFUSED = auto()
     HOLD_DECIDED = auto()
+    TURN_STATE_FAILED = auto()
     TOOLS_ONLY_APP_FAILED = auto()
     HELD_APP_FAILED = auto()
     TOOLS_LEFT_OUT = auto()
@@ -91,6 +92,7 @@ _LINE_OF: Final = {
     Event.PAUSED: (logging.INFO, "turns.paused"),
     Event.SPEAK_REFUSED: (logging.INFO, "speak.refused"),
     Event.HOLD_DECIDED: (logging.INFO, "hold.decided"),
+    Event.TURN_STATE_FAILED: (logging.WARNING, "turn_state.failed"),
     Event.TOOLS_ONLY_APP_FAILED: (logging.WARNING, "tools_only_app.failed"),
     Event.HELD_APP_FAILED: (logging.WARNING, "held_app.failed"),
     Event.TOOLS_LEFT_OUT: (logging.INFO, "tools.left_out"),

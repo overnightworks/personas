@@ -389,12 +389,7 @@ class ScriptedSessions:
         tokens = FakeTokens(self.clock, [jwt_grant() for _ in range(5)])
         boundaries = Boundaries(tokens, self.open, self.clock, self.reports, FakeReadyMarker(), backend=backend)
         self.loop = AgentLoop(
-            self.config.agents[0],
-            self.config.apps[0],
-            boundaries,
-            unstored_mind(),
-            self.config.apps,
-            None,
+            self.config.agents[0], self.config.apps[0], boundaries, unstored_mind(), self.config.apps, None
         )
 
     def use_token(self, token) -> None:
@@ -406,6 +401,8 @@ class ScriptedSessions:
 
     async def accept(self, accept):
         return None
+
+    set_turn_state = accept
 
     def standing_of_a_joined_place(self, reads: int):
         return read_of(invited("room-7", "inv-3") if reads == 1 else active("room-7"))
