@@ -167,7 +167,7 @@ class World:
 
 
 @pytest.fixture
-def world(files: Files, monkeypatch: pytest.MonkeyPatch, restored_logging) -> World:
+def world(files: Files, monkeypatch: pytest.MonkeyPatch, restored_logging: None) -> World:
     files.write()
     monkeypatch.setenv(CONFIG_ENVIRONMENT_VARIABLE, str(files.config_path))
     return World(files)

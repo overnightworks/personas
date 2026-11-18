@@ -77,13 +77,15 @@ def test_a_valid_file_gives_every_agent_its_secret_and_every_app_its_scope(files
     ]
 
 
-def test_an_environment_without_the_variable_stops_the_start(monkeypatch, capsys):
+def test_an_environment_without_the_variable_stops_the_start(monkeypatch, capsys, restored_logging: None):
     error = fails_at_start({}, monkeypatch, capsys)
 
     assert CONFIG_ENVIRONMENT_VARIABLE in error
 
 
-def test_a_file_that_cannot_be_read_stops_the_start_and_names_its_path(files, monkeypatch, capsys):
+def test_a_file_that_cannot_be_read_stops_the_start_and_names_its_path(
+    files, monkeypatch, capsys, restored_logging: None
+):
     missing = files.config_path.parent / "nowhere.toml"
 
     error = fails_at_start({CONFIG_ENVIRONMENT_VARIABLE: str(missing)}, monkeypatch, capsys)
@@ -149,7 +151,9 @@ def test_a_file_that_cannot_be_read_stops_the_start_and_names_its_path(files, mo
         "ready file relative",
     ],
 )
-def test_a_missing_or_malformed_field_stops_the_start_and_names_it(files, monkeypatch, capsys, break_it, named):
+def test_a_missing_or_malformed_field_stops_the_start_and_names_it(
+    files, monkeypatch, capsys, restored_logging: None, break_it, named
+):
     files.text = break_it(files.text)
 
     error = fails_at_start(files.write(), monkeypatch, capsys)
@@ -168,7 +172,9 @@ def test_a_missing_or_malformed_field_stops_the_start_and_names_it(files, monkey
     ],
     ids=["missing", "empty", "not text", "relative path"],
 )
-def test_a_secret_file_that_is_unusable_stops_the_start_and_names_the_field(files, monkeypatch, capsys, arrange):
+def test_a_secret_file_that_is_unusable_stops_the_start_and_names_the_field(
+    files, monkeypatch, capsys, restored_logging: None, arrange
+):
     arrange(files)
 
     error = fails_at_start(files.write(), monkeypatch, capsys)
@@ -176,7 +182,9 @@ def test_a_secret_file_that_is_unusable_stops_the_start_and_names_the_field(file
     assert "agents.0.secret_file" in error
 
 
-def test_a_secret_written_into_the_file_is_refused_without_being_echoed(files, monkeypatch, capsys):
+def test_a_secret_written_into_the_file_is_refused_without_being_echoed(
+    files, monkeypatch, capsys, restored_logging: None
+):
     files.text += f'client_secret = "{files.secret}"\n'
 
     error = fails_at_start(files.write(), monkeypatch, capsys)
@@ -228,7 +236,9 @@ def test_an_agent_entry_may_name_the_figure_he_brings_and_none_otherwise(files):
     ],
     ids=["not https", "query", "not absolute", "digest short", "digest uppercase", "unknown key", "digest missing"],
 )
-def test_a_malformed_figure_stops_the_start_and_names_the_field(files, monkeypatch, capsys, table, named):
+def test_a_malformed_figure_stops_the_start_and_names_the_field(
+    files, monkeypatch, capsys, restored_logging: None, table, named
+):
     files.text += table
 
     error = fails_at_start(files.write(), monkeypatch, capsys)
@@ -312,7 +322,7 @@ def test_a_malformed_entry_of_a_list_is_refused_naming_only_its_own_field(files,
 
 @pytest.mark.parametrize("table", ["", "[agents.voice]\n"], ids=["without the table", "with the table"])
 def test_a_persona_file_with_a_voice_section_stops_the_start_and_names_the_field_but_not_its_content(
-    files, monkeypatch, capsys, table
+    files, monkeypatch, capsys, restored_logging: None, table
 ):
     files.persona_path.write_text(files.persona_text(voice_window_bytes=8192), encoding="utf-8")
     files.text += table
@@ -362,7 +372,7 @@ def test_a_configuration_without_tools_in_any_app_needs_no_gateway_and_no_person
     ],
 )
 def test_a_tools_key_is_refused_and_a_call_bound_needs_the_gateway_and_a_persona_to_run_with(
-    files, monkeypatch, capsys, break_it, named
+    files, monkeypatch, capsys, restored_logging: None, break_it, named
 ):
     files.text = break_it(files.text)
 
@@ -410,7 +420,9 @@ def test_a_tools_key_is_refused_and_a_call_bound_needs_the_gateway_and_a_persona
         "relative path",
     ],
 )
-def test_a_persona_file_that_is_unusable_stops_the_start_and_names_the_field(files, monkeypatch, capsys, arrange):
+def test_a_persona_file_that_is_unusable_stops_the_start_and_names_the_field(
+    files, monkeypatch, capsys, restored_logging: None, arrange
+):
     arrange(files)
 
     error = fails_at_start(files.write(), monkeypatch, capsys)
@@ -452,7 +464,7 @@ def test_a_tools_only_app_has_its_call_bound_and_the_default_call_bound_unless_s
     ],
 )
 def test_a_tools_only_app_without_a_call_bound_and_a_file_without_a_listening_app_are_refused(
-    files, monkeypatch, capsys, break_it, named, reason
+    files, monkeypatch, capsys, restored_logging: None, break_it, named, reason
 ):
     files.text = break_it(files.text)
 
@@ -485,7 +497,9 @@ def test_a_database_table_may_set_the_write_bound_or_leave_a_write_unbounded(fil
     assert load_config(files.write()).database.write_seconds == bound
 
 
-def test_a_file_without_a_database_table_stops_the_start_and_names_it(files, monkeypatch, capsys):
+def test_a_file_without_a_database_table_stops_the_start_and_names_it(
+    files, monkeypatch, capsys, restored_logging: None
+):
     files.text = files.text.replace(files.database_table(), "")
 
     assert "database" in fails_at_start(files.write(), monkeypatch, capsys)
@@ -522,7 +536,7 @@ def test_an_ownership_table_sets_each_of_its_times(files):
     ("over", "starts"), [(-0.5, False), (0.0, False), (0.1, True)], ids=["below", "equal", "above"]
 )
 def test_a_grace_or_a_stop_at_or_below_the_times_it_must_outlast_is_refused(
-    files, monkeypatch, capsys, outlasted, field, bound, over, starts
+    files, monkeypatch, capsys, restored_logging: None, outlasted, field, bound, over, starts
 ):
     files.text += f"[ownership]\n{outlasted}{field} = {bound + over}\n"
 
@@ -537,7 +551,7 @@ def test_a_grace_or_a_stop_at_or_below_the_times_it_must_outlast_is_refused(
 )
 @pytest.mark.parametrize("written", ["0", "-1", '"5"', "inf", "nan"])
 def test_an_ownership_time_that_is_no_positive_finite_number_stops_the_start_and_names_the_field(
-    files, monkeypatch, capsys, field, written
+    files, monkeypatch, capsys, restored_logging: None, field, written
 ):
     files.text += f"[ownership]\n{field} = {written}\n"
 
@@ -587,7 +601,7 @@ def test_a_memory_table_lets_a_turn_look_up_twice_within_8192_bytes_unless_it_se
 @pytest.mark.parametrize("field", ["lookup_calls", "lookup_bytes"])
 @pytest.mark.parametrize("written", ["0", "-1", "1.5", "2.0", '"2"', "true", "inf", "nan"])
 def test_a_lookup_bound_that_is_no_positive_integer_stops_the_start_and_names_the_field(
-    files, monkeypatch, capsys, field, written
+    files, monkeypatch, capsys, restored_logging: None, field, written
 ):
     files.text += files.memory_table(**{field: written})
 
@@ -595,7 +609,7 @@ def test_a_lookup_bound_that_is_no_positive_integer_stops_the_start_and_names_th
 
 
 def test_a_result_bound_too_small_for_a_result_without_a_line_stops_the_start_and_names_the_field(
-    files, monkeypatch, capsys
+    files, monkeypatch, capsys, restored_logging: None
 ):
     files.text += files.memory_table(lookup_bytes=str(SMALLEST_RESULT_BYTES - 1))
 
@@ -620,7 +634,7 @@ def test_the_file_sets_the_history_bound_and_what_a_step_keeps(files, bound, kep
 
 
 def test_a_step_that_keeps_more_than_the_history_may_hold_stops_the_start_and_names_the_field(
-    files, monkeypatch, capsys
+    files, monkeypatch, capsys, restored_logging: None
 ):
     files.text = f"history_bytes = 1024\nhistory_keep_bytes = 1025\n{files.text}"
 
@@ -630,7 +644,7 @@ def test_a_step_that_keeps_more_than_the_history_may_hold_stops_the_start_and_na
 @pytest.mark.parametrize("field", ["history_bytes", "history_keep_bytes"])
 @pytest.mark.parametrize("written", ["0", "-1", "1.5", '"1024"', "true"])
 def test_a_history_bound_that_is_no_positive_integer_stops_the_start_and_names_the_field(
-    files, monkeypatch, capsys, field, written
+    files, monkeypatch, capsys, restored_logging: None, field, written
 ):
     files.text = f"{field} = {written}\n{files.text}"
 
@@ -651,7 +665,7 @@ def test_the_pause_for_a_spent_budget_is_capped_by_the_default_unless_the_file_s
 
 @pytest.mark.parametrize("written", ["0", "0.5", "-1", '"60"', "true", "inf", "nan"])
 def test_a_pause_cap_below_the_backoff_base_or_no_number_stops_the_start_and_names_the_field(
-    files, monkeypatch, capsys, written
+    files, monkeypatch, capsys, restored_logging: None, written
 ):
     files.text = f"budget_pause_cap_seconds = {written}\n{files.text}"
 
@@ -694,7 +708,7 @@ def test_a_file_without_a_memory_table_opens_no_store(files):
     ],
 )
 def test_a_missing_or_malformed_database_field_stops_the_start_and_names_it(
-    files, monkeypatch, capsys, overrides, named
+    files, monkeypatch, capsys, restored_logging: None, overrides, named
 ):
     files.set_database(**overrides)
 
@@ -705,7 +719,9 @@ def test_a_missing_or_malformed_database_field_stops_the_start_and_names_it(
 
 
 @pytest.mark.parametrize("field", ["host", "port", "dbname", "user", "password_file", "write_seconds"])
-def test_a_connection_field_in_the_memory_table_stops_the_start_and_names_it(files, monkeypatch, capsys, field):
+def test_a_connection_field_in_the_memory_table_stops_the_start_and_names_it(
+    files, monkeypatch, capsys, restored_logging: None, field
+):
     files.text += f"[memory]\n{field} = 1\n"
 
     assert f"memory.{field}" in fails_at_start(files.write(), monkeypatch, capsys)
@@ -734,7 +750,9 @@ def test_a_connection_field_in_the_memory_table_stops_the_start_and_names_it(fil
         "sweep period no number",
     ],
 )
-def test_a_malformed_memory_field_stops_the_start_and_names_it(files, monkeypatch, capsys, overrides, named):
+def test_a_malformed_memory_field_stops_the_start_and_names_it(
+    files, monkeypatch, capsys, restored_logging: None, overrides, named
+):
     files.text += files.memory_table(**overrides)
 
     assert named in fails_at_start(files.write(), monkeypatch, capsys)
@@ -749,7 +767,9 @@ def test_a_malformed_memory_field_stops_the_start_and_names_it(files, monkeypatc
     ],
     ids=["missing", "empty", "relative path"],
 )
-def test_a_password_file_that_is_unusable_stops_the_start_and_names_the_field(files, monkeypatch, capsys, arrange):
+def test_a_password_file_that_is_unusable_stops_the_start_and_names_the_field(
+    files, monkeypatch, capsys, restored_logging: None, arrange
+):
     arrange(files)
 
     error = fails_at_start(files.write(), monkeypatch, capsys)
@@ -776,14 +796,18 @@ def test_an_agent_entry_with_a_hold_model_gives_it_to_the_agent_and_one_without_
 @pytest.mark.parametrize(
     "name", ["image/painter", "sonnet", "text/", 7], ids=["image", "no kind", "no model", "number"]
 )
-def test_a_model_that_is_no_text_model_stops_the_start_and_names_the_field(files, monkeypatch, capsys, field, name):
+def test_a_model_that_is_no_text_model_stops_the_start_and_names_the_field(
+    files, monkeypatch, capsys, restored_logging: None, field, name
+):
     files.text += f"{field} = {name!r}\n".replace("'", '"')
 
     assert f"agents.0.{field}" in fails_at_start(files.write(), monkeypatch, capsys)
 
 
 @pytest.mark.parametrize("field", ["model", "hold_model"])
-def test_a_model_without_a_persona_file_stops_the_start_and_names_the_field(files, monkeypatch, capsys, field):
+def test_a_model_without_a_persona_file_stops_the_start_and_names_the_field(
+    files, monkeypatch, capsys, restored_logging: None, field
+):
     files.text = files.valid_text(binds_tools=False) + f'{field} = "text/sonnet-low"\n'
 
     assert f"agents.0.{field}" in fails_at_start(files.write(), monkeypatch, capsys)
