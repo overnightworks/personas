@@ -373,7 +373,7 @@ def toml_block(
     return list(toml_entries(field, every))
 
 
-def placement(field: ConfigField, every: dict[FieldPath, ConfigField]) -> Iterator[str]:
+def placement(change: Change, field: ConfigField, every: dict[FieldPath, ConfigField]) -> Iterator[str]:
     """Where the field's TOML goes in a file that already holds the other tables and entries."""
     ancestors = [every[field.path[:length]] for length in range(len(field.path) - 1, 0, -1)]
     entry = next((each for each in ancestors if each.path[-1].repeated), None)
@@ -381,7 +381,7 @@ def placement(field: ConfigField, every: dict[FieldPath, ConfigField]) -> Iterat
     if entry is None:
         yield from placement_outside_entries(field, ancestors, optional)
     else:
-        yield from placement_inside_entry(field, ancestors[0], entry, optional)
+        yield from placement_inside_entry(change, field, ancestors[0], entry, optional)
 
 
 def placement_outside_entries(
@@ -408,17 +408,22 @@ def placement_outside_entries(
 
 
 def placement_inside_entry(
-    field: ConfigField, parent: ConfigField, entry: ConfigField, optional: ConfigField | None
+    change: Change, field: ConfigField, parent: ConfigField, entry: ConfigField, optional: ConfigField | None
 ) -> Iterator[str]:
     """Where a field inside an array of tables goes: into its entries, under its table there if it has one; a
-    table at the end of its entry, or of its table there, since its header takes every line below it."""
+    table at the end of its entry, or of its table there, since its header takes every line below it. An old
+    default is kept only in the entries that leave the field unset, since an entry that sets it keeps its own."""
     if optional is not None and len(optional.path) > len(entry.path):
         has = "one" if optional == parent else f"`{optional.label}`"
         into = "at the end of" if field.table else "into"
         yield f"It goes {into} the `{parent.label}` of each `{entry.label}` entry that has {has}."
         return
     where = "every existing" if field.required else "each"
-    that = "" if field.required else " that sets it"
+    that = " that sets it"
+    if field.required:
+        that = ""
+    elif change is Change.DEFAULT_CHANGED:
+        that = " that leaves it unset"
     if field.table:
         yield f"It goes at the end of {where} `{entry.label}` entry{that}."
         return
@@ -537,7 +542,7 @@ def notes(previous_tag: str, version: str, before: JsonObject, after: JsonObject
         if block:
             sentences = " ".join(
                 [
-                    *placement(field, fields_after),
+                    *placement(change, field, fields_after),
                     *already_set(change, field, then),
                     *bound_by(change, field, rules_after),
                 ]

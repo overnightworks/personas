@@ -190,6 +190,24 @@ class WithIntegerVoices(BaseModel):
     voice: IntegerVoices = IntegerVoices()
 
 
+class ListeningApp(Entry):
+    mcp_url: str
+    listens: bool = True
+
+
+class SilentApp(Entry):
+    mcp_url: str
+    listens: bool = False
+
+
+class ListeningApps(BaseModel):
+    apps: list[ListeningApp]
+
+
+class SilentApps(BaseModel):
+    apps: list[SilentApp]
+
+
 class AppWithScope(Entry):
     mcp_url: str
     tools: list[str] = []

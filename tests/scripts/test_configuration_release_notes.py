@@ -24,12 +24,14 @@ from tests.scripts.support.configuration_schemas import (
     HistoryCountedInKibibytes,
     HistoryRequired,
     HistoryRequiredAsText,
+    ListeningApps,
     MemoryOnByDefault,
     Ownership,
     OwnershipBefore,
     OwnershipOnly,
     RuledHistory,
     RuledShorterHistory,
+    SilentApps,
     TopLevelAfter,
     TopLevelBefore,
     TunedOwnershipOnly,
@@ -400,6 +402,17 @@ def at_the_end_of_each(entry: str) -> Paste:
     return paste
 
 
+def into_each_without(entry: str, key: str) -> Paste:
+    """Pastes the block under each entry's start whose own lines do not set the key."""
+
+    def paste(text: str, block: list[str]) -> str:
+        entries = text.split(f"{entry}\n")
+        kept = [entries[0], *(each if f"{key} =" in each else "\n".join([*block, each]) for each in entries[1:])]
+        return f"{entry}\n".join(kept)
+
+    return paste
+
+
 TWO_AGENTS = '[[agents]]\nclient_id = "a"\n[agents.memory]\nkeep_days = 7.0\n\n[[agents]]\nclient_id = "b"\n'
 
 
@@ -456,6 +469,16 @@ TWO_AGENTS = '[[agents]]\nclient_id = "a"\n[agents.memory]\nkeep_days = 7.0\n\n[
             '[[apps]]\nmcp_url = "https://a.test"\n\n[[apps]]\nmcp_url = "https://b.test"\n',
             {"apps": [{"mcp_url": f"https://{name}.test", "scope": "mcp-a"} for name in "ab"]},
             id="a value of every entry",
+        ),
+        pytest.param(
+            ListeningApps,
+            SilentApps,
+            "It goes into each `[[apps]]` entry that leaves it unset.",
+            into_each_without("[[apps]]", "listens"),
+            "",
+            '[[apps]]\nmcp_url = "https://a.test"\n\n[[apps]]\nmcp_url = "https://b.test"\nlistens = false\n',
+            {"apps": [{"mcp_url": "https://a.test", "listens": True}, {"mcp_url": "https://b.test", "listens": False}]},
+            id="an entry field's old default, into each entry that leaves it unset",
         ),
         pytest.param(
             WithAgentMemory,
