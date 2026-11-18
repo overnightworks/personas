@@ -191,6 +191,29 @@ class WithAgentLookup(BaseModel):
     agents: list[AgentWithLookup]
 
 
+class IntPortBehindGateway(Entry):
+    port: int
+    gateway: Gateway
+
+
+class WithGateway(BaseModel):
+    database: IntPortBehindGateway
+
+
+class AgentWithScope(Entry):
+    client_id: str
+    memory: Memory | None = None
+    scope: str
+
+
+class WithOptionalAgents(BaseModel):
+    agents: list[AgentWithMemory] = []
+
+
+class WithOptionalScopedAgents(BaseModel):
+    agents: list[AgentWithScope] = []
+
+
 class DeclaresNoRules(BaseModel):
     model_config = ConfigDict(json_schema_extra={"refusals": []})
 
@@ -310,6 +333,19 @@ def notes_between(before: type[BaseModel], after: type[BaseModel]) -> str:
             "It goes under `[agents.memory]` in each `[[agents]]` entry that sets it.\n\n"
             "```toml\nlookup_bytes = <integer>\n```\n",
             id="a required field of an optional table inside an array of tables",
+        ),
+        pytest.param(
+            WithIntPort,
+            WithGateway,
+            "- `[database.gateway]`: added, required.\n\n```toml\n[database.gateway]\norigin = <string>\n```\n",
+            id="a required table inside a required table, placed by its own header",
+        ),
+        pytest.param(
+            WithOptionalAgents,
+            WithOptionalScopedAgents,
+            "- `[[agents]] scope`: added, required.\n\nIt goes into every existing `[[agents]]` entry.\n\n"
+            "```toml\nscope = <string>\n```\n",
+            id="a required field of an optional array of tables, needed only in the entries that exist",
         ),
         pytest.param(
             DeclaresNoRules,

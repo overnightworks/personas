@@ -295,8 +295,6 @@ def placement_inside_entry(
     where = "every existing" if field.required else "each"
     under = "" if field.table or parent == entry else f", under `{parent.label}`"
     yield f"It goes into {where} `{entry.label}` entry{'' if field.required else ' that sets it'}{under}."
-    if field.required and optional is not None:
-        yield f"It is required only where `{optional.label}` is set."
 
 
 def written(value: object | None) -> str:
