@@ -29,18 +29,20 @@ REFERENCE_URL = "https://github.com/overnightworks/personas/blob/v{version}/docs
 
 type JsonObject = dict[str, object]
 
+AT_LEAST = "at least"
+
 BOUNDS: dict[str, tuple[str, tuple[str, str] | None]] = {
-    "minimum": ("at least", None),
+    "minimum": (AT_LEAST, None),
     "exclusiveMinimum": ("above", None),
     "maximum": ("at most", None),
     "exclusiveMaximum": ("below", None),
     "multipleOf": ("a multiple of", None),
-    "minLength": ("at least", ("character", "characters")),
+    "minLength": (AT_LEAST, ("character", "characters")),
     "maxLength": ("at most", ("character", "characters")),
     "pattern": ("matching", None),
-    "minItems": ("at least", ("item", "items")),
+    "minItems": (AT_LEAST, ("item", "items")),
     "maxItems": ("at most", ("item", "items")),
-    "minProperties": ("at least", ("entry", "entries")),
+    "minProperties": (AT_LEAST, ("entry", "entries")),
     "maxProperties": ("at most", ("entry", "entries")),
 }
 """The JSON schema's keywords that bound a value, each with the words before the bound and, for a count, what it
