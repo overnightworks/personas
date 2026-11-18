@@ -110,9 +110,9 @@ database. The runner opens no port. The release path is in the [README](../READM
 
 | Table | Holds | Kept until |
 |---|---|---|
-| `history_entries` | each agent's history: every line he took in, every table state he read, every call relayed for him with its arguments and the app's answer, every sentence he spoke | newer entries push it past `history_bytes`, or `memory erase` |
+| `history_entries` | lines, table states, relayed calls with arguments and answers, spoken sentences | newer entries push it past `history_bytes`, or `memory erase` |
 | `answered_turns` | what each answered turn's message told | the entries it told left, or `memory erase` |
-| `agent_turns` | where reading each place stands, his due places, his unanswered turns in a row, a pause's end | replaced by every write; `memory erase` keeps it |
+| `agent_turns` | reading checkpoints, due places, unanswered turns in a row, a pause's end | the next write; a takeover after a skipped generation drops it; `memory erase` keeps it |
 | `agent_owner` | the generation of the pod that owns him | renewed by every takeover and every erase |
 | `lines`, with `[memory]` | every line of every window he read, verbatim, with speaker, text and first-read time | `lines_keep_days` after its first read, or `memory erase` |
 
