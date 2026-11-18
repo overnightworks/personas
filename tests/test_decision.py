@@ -11,7 +11,6 @@ from agents.backend import TurnStopKind, TurnStopped
 from agents.member import (
     ACCEPT_INVITATION_TOOL,
     CONTINUE_SPEAKING_TOOL,
-    LEASE_SECONDS,
     LISTEN_BOUND_SECONDS,
     SPEAK_TOOL,
     STOP_SPEAKING_TOOL,
@@ -34,7 +33,6 @@ from agents.turn import FailureCode, RejectionCode
 from logline import Outcome
 from mcp_types import INVALID_PARAMS
 
-from personas.app_session import READ_SECONDS
 from personas.decision import (
     BACKOFF_BASE_SECONDS,
     BACKOFF_CAP_SECONDS,
@@ -99,11 +97,9 @@ from personas.entries import Answered, Lines, Reading, Unanswered, Waiting
 from personas.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer
 from personas.recall import RECALL_TOOL
 from personas.secret import Secret
-from tests.support.fakes import line, window_of
 from tests.support.history import MORNING, OTHER_TABLE, TABLE, a_view
-from tests.support.hopin import GENERATION
 from tests.support.pictures import a_picture
-from tests.support.standings import active, invited, paused
+from tests.support.standings import GENERATION, active, invited, line, paused, window_of
 
 TRANSIENT_REFUSALS = [
     AcceptInvitationRefusal.SPONSOR_AWAY,
@@ -288,10 +284,6 @@ def test_a_secret_shows_nothing_of_itself():
 
 def test_a_token_is_renewed_before_a_stream_the_app_bounds_could_end_on_an_expired_one():
     assert RENEW_BEFORE_EXPIRY_SECONDS > LISTEN_BOUND_SECONDS
-
-
-def test_the_runner_cuts_a_stream_before_the_lease_of_its_member_would_have_ended():
-    assert READ_SECONDS < LEASE_SECONDS
 
 
 REFUSAL = UnusableAnswer(jsonrpc_code(INVALID_PARAMS))

@@ -24,10 +24,10 @@ from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_cal
 from tests.support.fakes import CANCELLED_TURN
 from tests.support.gateway import Gateway
 from tests.support.history import said_and_taken, settled
-from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, DISCOVER, LIMIT_SECONDS, LIST_TOOLS, LISTEN, SAY_TOOL
 from tests.support.logs import formatted, lines_of
 from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG, SCOPE, ToolsOnlyApp
+from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.transport import (
     ClosingHold,
     opener_whose_request_raises,

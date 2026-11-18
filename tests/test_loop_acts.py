@@ -48,12 +48,12 @@ from tests.support.history import (
     waits,
     written_turns,
 )
-from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, LISTEN, PLAY_TOOL, READ, SAY_TOOL
 from tests.support.hopin_places import ISSUER
 from tests.support.pictures import a_picture, a_real_picture, base64_of
 from tests.support.realm import AGENT_NAME
 from tests.support.songmaker import CALLS, CREATE_SONG
+from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active
 from tests.support.wire import cuts, hangs, hangs_once_entered, refuses_with_a_server_error
 

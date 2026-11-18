@@ -39,15 +39,13 @@ from tests.support.fakes import (
     TurnEnded,
     grant,
     jwt_grant,
-    line,
     read_of,
     refused_turn,
     unstored_mind,
-    window_of,
 )
 from tests.support.gateway import Gateway, says
 from tests.support.hopin import LIMIT_SECONDS
-from tests.support.standings import active, invited
+from tests.support.standings import active, invited, line, window_of
 
 pytestmark = pytest.mark.anyio
 

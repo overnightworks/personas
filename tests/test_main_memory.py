@@ -17,8 +17,9 @@ from personas.entries import NO_TURNS_KEPT, HistoryDelta, KeptHistory, KeptLine,
 from personas.failures import STORE_DEFECT_CODE, STORE_UNREACHABLE_CODE, StaleGenerationError
 from personas.main import CONFIGURATION_ERROR_EXIT_CODE, STORE_ERROR_EXIT_CODE, main
 from personas.memory import PostgresHistoryStore, PostgresLineStore
-from tests.support.fakes import WALL_START, window_of
+from tests.support.fakes import WALL_START
 from tests.support.postgres import kept_lines, run_sql
+from tests.support.standings import window_of
 
 if TYPE_CHECKING:
     from personas.config import DatabaseTarget

@@ -25,7 +25,7 @@ from personas.memory import PostgresLineStore, SchemaNotAtHeadError
 from personas.recall import RECALL_TOOL, LineSearch
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
-from tests.support.fakes import WALL_START, line, window_of
+from tests.support.fakes import WALL_START
 from tests.support.gateway import Gateway, says
 from tests.support.history import (
     act_entry,
@@ -35,7 +35,6 @@ from tests.support.history import (
     history_of,
     url_of,
 )
-from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import LIMIT_SECONDS
 from tests.support.logs import formatted
 from tests.support.postgres import (
@@ -48,7 +47,8 @@ from tests.support.postgres import (
     waiting_statements,
 )
 from tests.support.realm import AGENT_NAME
-from tests.support.standings import active, invited, paused
+from tests.support.standings import AGENT_SUBJECT as SUBJECT
+from tests.support.standings import active, invited, line, paused, window_of
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

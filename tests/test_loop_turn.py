@@ -32,9 +32,9 @@ from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PERSON, PLACE_ID, 
 from tests.support.fakes import SweepClock, failed_turn, refused_turn
 from tests.support.gateway import BUDGET_SPENT, Gateway, says, says_after_a_hold
 from tests.support.history import act_entry, after_start, unanswered, url_of, woke_at_lines
-from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, DISCOVER, LIMIT_SECONDS, LIST_TOOLS, LISTEN, READ, SAY_TOOL
 from tests.support.logs import lines_of
+from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, invited
 from tests.support.transport import transport_closing_with_late_answers
 from tests.support.wire import cuts, hangs

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Literal, NamedTuple, overload
 
-from agents.member import MemberStanding, PlaceEntry, PlaceWindow, Standing
+from agents.member import MemberStanding, Standing
 
 from personas.config import (
     DEFAULT_BUDGET_PAUSE_CAP_SECONDS,
@@ -27,7 +27,6 @@ from personas.mind import Mind
 from personas.reporting import Event
 from personas.secret import Secret
 from personas.tokens import GrantedToken
-from tests.support.hopin import GENERATION
 from tests.support.hopin_places import ISSUER
 from tests.support.realm import AGENT_NAME, API_GROUP, jwt_of
 
@@ -107,16 +106,6 @@ def app_target() -> AppTarget:
 
 def read_of(*standings: Standing) -> MemberStanding:
     return MemberStanding(standings=standings)
-
-
-def line(
-    seq: int, text: str, *, own: bool = False, spoken: bool = False, act: bool = False, name: str = "Ada"
-) -> PlaceEntry:
-    return PlaceEntry(seq=seq, kind="message", name=name, text=text, own=own, spoken=spoken, cut=False, act=act)
-
-
-def window_of(*lines: PlaceEntry, generation: str = GENERATION) -> PlaceWindow:
-    return PlaceWindow(generation=generation, starts_at=lines[0].seq if lines else 1, entries=lines)
 
 
 def grant(lifetime: float = 300.0) -> GrantedToken:

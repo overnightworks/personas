@@ -38,13 +38,14 @@ from tests.support.fakes import (
     unstored_mind,
 )
 from tests.support.gateway import Gateway, RoundBackend
-from tests.support.hopin import AGENT_SUBJECT, PLAY_TOOL, FakeApp
+from tests.support.hopin import PLAY_TOOL, FakeApp
 from tests.support.hopin_places import ISSUER
 from tests.support.logs import configure_logging_into, formatted
 from tests.support.ownership import AllAgentsOwned, KeptHistories
 from tests.support.realm import TOKEN_ENDPOINT, FakeRealm
 from tests.support.songmaker import CALLS, ToolsOnlyApp
 from tests.support.songmaker import SCOPE as TOOLS_ONLY_SCOPE
+from tests.support.standings import AGENT_SUBJECT
 from tests.support.voice import HeldSleeps
 
 if TYPE_CHECKING:

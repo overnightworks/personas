@@ -5,15 +5,18 @@ from __future__ import annotations
 import secrets
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 from agents.member import STANDING_URI, PlaceRef, PlaceView, Spoken
 
 from personas.entries import ActDone, Answered, History, KeptLine, SaidAloud, ViewSeen, Visit
 from personas.present import EMPTY_PRESENT, Present, taken_into
 from tests.support.call import PERSON
-from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import FakeApp
+from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active
+
+if TYPE_CHECKING:
+    from tests.support.hopin import FakeApp
 
 TABLE = PlaceRef(kind="table", id="table-1")
 OTHER_TABLE = PlaceRef(kind="table", id="table-2")

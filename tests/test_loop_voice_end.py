@@ -22,8 +22,8 @@ from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PLACE_ID, say_in_t
 from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
 from tests.support.fakes import CANCELLED_TURN, failed_turn
 from tests.support.gateway import Gateway, speaks_and_says
-from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, LIMIT_SECONDS, LISTEN, READ, SAY_TOOL
+from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, paused
 from tests.support.transport import ClosingHold, opener_whose_request_raises, transport_whose_session_loses_a_child
 from tests.support.voice import TWO_SENTENCES, a_voice_call, ended_by, gated, holding_sentence_ends, sentences_spoken

@@ -43,13 +43,13 @@ from tests.support.hopin_places import ACCEPTED_NAME, ISSUER
 from tests.support.hopin_voice import CONTINUE_DECLARATION, SPEAK_DECLARATION, STOP_DECLARATION, AppVoice
 from tests.support.loopback import serving
 from tests.support.pictures import base64_of
+from tests.support.standings import GENERATION
 from tests.support.wire import ConnectionCut, Handler, Reply, Rpc
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator
 
 
-AGENT_SUBJECT = "agent-subject"
 LIMIT_SECONDS = 10
 _SUBJECT_KEY = "test.subject"
 
@@ -65,7 +65,6 @@ ACKNOWLEDGED = "acknowledged"
 
 SAY_TOOL = "say"
 PLAY_TOOL = "play"
-GENERATION = "generation-1"
 
 _SAY_DECLARATION = ToolDeclaration(
     name=SAY_TOOL,
