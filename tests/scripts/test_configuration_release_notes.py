@@ -405,7 +405,9 @@ def notes_between(before: type[BaseModel], after: type[BaseModel]) -> str:
             WithLowPort,
             WithHighPort,
             "- `[database] port`: now takes `integer (at least 1024)`, was `integer (at least 1)`.\n\n"
-            "It goes under the file's `[database]` header. Where the file already sets it, it replaces that.\n\n"
+            "It goes under the file's `[database]` header. "
+            "Where the file already sets it, a value that still fits what it now takes stays as it is; one that"
+            " does not is changed to fit, or replaced by this.\n\n"
             "```toml\nport = <integer (at least 1024)>\n```\n",
             id="a bound tightened on an unchanged type",
         ),
@@ -413,7 +415,9 @@ def notes_between(before: type[BaseModel], after: type[BaseModel]) -> str:
             UnboundLookups,
             BoundLookups,
             "- `lookup_calls`: now takes `integer (above 0, at most 4)`, was `integer (above 0)`.\n\n"
-            "It goes above the file's first table. Where the file already sets it, it replaces that.\n\n"
+            "It goes above the file's first table. "
+            "Where the file already sets it, a value that still fits what it now takes stays as it is; one that"
+            " does not is changed to fit, or replaced by this.\n\n"
             "```toml\nlookup_calls = 2\n```\n",
             id="a bound gained on an unchanged type",
         ),
@@ -422,7 +426,9 @@ def notes_between(before: type[BaseModel], after: type[BaseModel]) -> str:
             WithOneGesture,
             '- `[figure] gestures`: now takes `map of "wave" to { url = string, optional note = string }`,'
             ' was `map of "wave" or "nod" to { url = string, optional note = string }`.\n\n'
-            "It goes under the file's `[figure]` header. Where the file already sets it, it replaces that.\n\n"
+            "It goes under the file's `[figure]` header. "
+            "Where the file already sets it, a value that still fits what it now takes stays as it is; one that"
+            " does not is changed to fit, or replaced by this.\n\n"
             "```toml\ngestures = {}\n```\n",
             id="a map whose key type changed",
         ),
@@ -695,13 +701,13 @@ TWO_AGENTS = '[[agents]]\nclient_id = "a"\n[agents.memory]\nkeep_days = 7.0\n\n[
             id="a value of an existing table, under its header",
         ),
         pytest.param(
-            WithLowPort,
-            WithHighPort,
+            WithIntPort,
+            WithStrPort,
             "Where the file already sets it, it replaces that.",
             replacing("port", under("[database]")),
-            "6543",
+            '"6543"',
             "[database]\nport = 5432\n",
-            {"database": {"port": 6543}},
+            {"database": {"port": "6543"}},
             id="a changed value of an existing table, in place of its line",
         ),
         pytest.param(

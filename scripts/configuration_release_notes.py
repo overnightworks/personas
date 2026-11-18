@@ -64,6 +64,7 @@ class ConfigField:
     required: bool
     default: object | None
     kind: str
+    shape: str
     table: bool
     refusals: tuple[str, ...] = ()
 
@@ -185,6 +186,22 @@ class Schema:
         )
         return f"{{ {', '.join(fields)} }}"
 
+    def shape(self, node: JsonObject) -> str:
+        """What a field takes without its bounds, a map as any map and an inline table as any table: a change that
+        keeps the shape may leave the value a file sets fitting."""
+        return " or ".join(self.unbounded(each) for each in self.choices(node))
+
+    def unbounded(self, choice: JsonObject) -> str:
+        if "enum" in choice or "const" in choice:
+            return self.described(choice)
+        if "properties" in choice:
+            return "table"
+        if choice.get("type") == "array" and "items" in choice:
+            return f"array of {self.shape(as_object(choice['items']))}"
+        if isinstance(choice.get("additionalProperties"), dict):
+            return "map"
+        return str(choice.get("format") or choice.get("type") or "value")
+
     @staticmethod
     def bounded(kind: str, choice: JsonObject) -> str:
         bounds = [bound(words, choice[keyword], unit) for keyword, (words, unit) in BOUNDS.items() if keyword in choice]
@@ -219,6 +236,7 @@ class Schema:
                 required=name in required,
                 default=default if table_schema is None or repeated else overrides(table_schema, default),
                 kind=self.kind(node) if table_schema is None else self.table_kind(choices[0], repeated=repeated),
+                shape=self.shape(node) if table_schema is None else ("array of tables" if repeated else "table"),
                 table=table_schema is not None,
                 refusals=() if table_schema is None else refusals_of(table_schema),
             )
@@ -401,9 +419,15 @@ def placement_inside_entry(
     yield f"It goes into {where} `{entry.label}` entry{that}{under}."
 
 
-def already_set(change: Change) -> Iterator[str]:
-    """What the block does where the file already sets the field, so that no paste declares a key or table twice."""
-    if change is Change.TYPE_CHANGED:
+def already_set(change: Change, field: ConfigField, then: ConfigField | None) -> Iterator[str]:
+    """What the block does where the file already sets the field, so that no paste declares a key or table twice;
+    where only bounds or a map's keys or values changed, a value the file sets may still fit and stays."""
+    if change is Change.TYPE_CHANGED and then is not None and then.shape == field.shape:
+        yield (
+            "Where the file already sets it, a value that still fits what it now takes stays as it is; one that does"
+            " not is changed to fit, or replaced by this."
+        )
+    elif change is Change.TYPE_CHANGED:
         yield "Where the file already sets it, it replaces that."
     elif change in {Change.NOW_REQUIRED, Change.DEFAULT_CHANGED}:
         yield "Where the file already sets it, nothing changes."
@@ -505,7 +529,11 @@ def notes(previous_tag: str, version: str, before: JsonObject, after: JsonObject
         lines.extend(["", f"- `{field.label}`: {summary(change, field, then)}."])
         if block:
             sentences = " ".join(
-                [*placement(field, fields_after), *already_set(change), *bound_by(change, field, rules_after)]
+                [
+                    *placement(field, fields_after),
+                    *already_set(change, field, then),
+                    *bound_by(change, field, rules_after),
+                ]
             )
             toml = [entry if isinstance(entry, str) else assignment(entry) for entry in block]
             lines.extend(["", sentences, "", "```toml", *toml, "```"])
