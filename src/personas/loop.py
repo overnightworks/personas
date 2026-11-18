@@ -723,11 +723,15 @@ async def run_all(config: Config, boundaries: Boundaries, ownership: Ownership) 
                     write_through.stopping(config.ownership.cancel_margin_seconds)
         finally:
             if agent_task.cancelling():
-                # The statements share his stop's margin with the write, beside it, so neither waits on the other.
-                async with asyncio.TaskGroup() as stop:
-                    stop.create_task(write_through.flush_on_stop())
-                    for loop in loops:
-                        stop.create_task(loop.state_on_stop(write_through.seconds_left_to_stop()))
+                # The statements share his stop's margin with the write, beside it, so neither waits on the other; the
+                # write runs outside their group, so a statement's defect does not cancel his last write.
+                flush = asyncio.create_task(write_through.flush_on_stop())
+                try:
+                    async with asyncio.TaskGroup() as stop:
+                        for loop in loops:
+                            stop.create_task(loop.state_on_stop(write_through.seconds_left_to_stop()))
+                finally:
+                    await flush
         raise AssertionError("a loop ended")  # pragma: no cover
 
     await ownership.serve(list(agents), serve_agent, boundaries.ready.announce)
