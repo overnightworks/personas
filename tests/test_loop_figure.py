@@ -11,7 +11,7 @@ from agents.member import FigureRef
 from personas.config import load_config
 from personas.reporting import Event
 from tests.support.history import TABLE
-from tests.support.hopin import AGENT_SUBJECT as SUBJECT
+from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import invited
 
 pytestmark = pytest.mark.anyio

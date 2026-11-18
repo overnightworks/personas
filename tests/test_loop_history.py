@@ -50,11 +50,11 @@ from tests.support.history import (
     woke_at_table,
     written_turns,
 )
-from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import LIMIT_SECONDS, PLAY_TOOL
 from tests.support.hopin_places import ACCEPTED_NAME, ISSUER
 from tests.support.ownership import KeptHistories
 from tests.support.realm import AGENT_NAME
+from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, paused
 from tests.support.voice import a_voice_call
 

@@ -19,11 +19,12 @@ from personas.task_record import UnrequestedCancellationError
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import CANCELLED_TURN, COMPLETED_TURN
 from tests.support.gateway import Gateway, says
-from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import DISCOVER, LIMIT_SECONDS, READ
+from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, paused
 from tests.support.transport import (
     ClosingHold,
+    opener_whose_request_raises,
     transport_closing_with_late_answers,
     transport_whose_close_loses_a_child,
     transport_whose_session_loses_a_child,
@@ -233,14 +234,10 @@ async def a_turn_removed_while_its_session_closes(runner, monkeypatch, *, seam=N
 
     The place is then removed.
     """
-
-    async def raise_it(self, *arguments):
-        raise error
-
     closing = ClosingHold()
     monkeypatch.setattr(app_session, "streamable_http_client", closing.transport())
     if seam is not None:
-        monkeypatch.setattr(f"personas.app_session._McpAppSession.{seam}", raise_it)
+        runner.open_session = opener_whose_request_raises(seam, error)
     runner.gateway = gateway or Gateway(*says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
@@ -397,11 +394,7 @@ async def test_a_turn_whose_session_anyio_cancelled_with_late_answers_alone_whil
 
 async def test_a_defect_in_a_turns_session_body_whose_close_loses_a_child_ends_the_runner_loud(runner, monkeypatch):
     defect = ValueError("a defect")
-
-    async def raise_it(self, *arguments):
-        raise defect
-
-    monkeypatch.setattr("personas.app_session._McpAppSession.invoke", raise_it)
+    runner.open_session = opener_whose_request_raises("invoke", defect)
     lost = transport_whose_close_loses_a_child(OSError, nth=2, of_url=runner.app_url)
     monkeypatch.setattr(app_session, "streamable_http_client", lost)
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))

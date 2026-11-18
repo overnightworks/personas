@@ -32,13 +32,16 @@ from personas.failures import (
     Unreachable,
     leaves_of,
 )
-from personas.loop import AgentLoop
 from personas.reporting import Event
 from tests.support.call import CALL_PLACE
 from tests.support.hopin import ACKNOWLEDGED, CALL, DISCOVER, INITIALIZE, LIMIT_SECONDS, LISTEN, READ
-from tests.support.hopin import AGENT_SUBJECT as SUBJECT
+from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, invited
-from tests.support.transport import transport_closing_with_late_answers, transport_whose_close_loses_a_child
+from tests.support.transport import (
+    opener_whose_request_raises,
+    transport_closing_with_late_answers,
+    transport_whose_close_loses_a_child,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -464,18 +467,7 @@ async def test_a_defect_in_the_lifecycle_sessions_body_whose_close_loses_a_child
     runner, monkeypatch
 ):
     defect = ValueError("a defect")
-
-    real_reconcile = AgentLoop._reconcile  # noqa: SLF001 - the lifecycle's body is where the defect arises
-    raised = False
-
-    async def raise_once(self, session, turns):
-        nonlocal raised
-        if raised:
-            return await real_reconcile(self, session, turns)
-        raised = True
-        raise defect
-
-    monkeypatch.setattr(AgentLoop, "_reconcile", raise_once)
+    runner.open_session = opener_whose_request_raises("read_standing", defect, once=True)
     monkeypatch.setattr(app_session, "streamable_http_client", transport_whose_close_loses_a_child(OSError))
     runner.start()
 

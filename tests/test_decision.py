@@ -11,7 +11,7 @@ from agents.backend import TurnStopKind, TurnStopped
 from agents.member import (
     ACCEPT_INVITATION_TOOL,
     CONTINUE_SPEAKING_TOOL,
-    LEASE_SECONDS,
+    DECLINE_INVITATION_TOOL,
     LISTEN_BOUND_SECONDS,
     SPEAK_TOOL,
     STOP_SPEAKING_TOOL,
@@ -34,7 +34,6 @@ from agents.turn import FailureCode, RejectionCode
 from logline import Outcome
 from mcp_types import INVALID_PARAMS
 
-from personas.app_session import READ_SECONDS
 from personas.decision import (
     BACKOFF_BASE_SECONDS,
     BACKOFF_CAP_SECONDS,
@@ -99,11 +98,9 @@ from personas.entries import Answered, Lines, Reading, Unanswered, Waiting
 from personas.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer
 from personas.recall import RECALL_TOOL
 from personas.secret import Secret
-from tests.support.fakes import line, window_of
 from tests.support.history import MORNING, OTHER_TABLE, TABLE, a_view
-from tests.support.hopin import GENERATION
 from tests.support.pictures import a_picture
-from tests.support.standings import active, invited, paused
+from tests.support.standings import GENERATION, active, invited, line, paused, window_of
 
 TRANSIENT_REFUSALS = [
     AcceptInvitationRefusal.SPONSOR_AWAY,
@@ -290,10 +287,6 @@ def test_a_token_is_renewed_before_a_stream_the_app_bounds_could_end_on_an_expir
     assert RENEW_BEFORE_EXPIRY_SECONDS > LISTEN_BOUND_SECONDS
 
 
-def test_the_runner_cuts_a_stream_before_the_lease_of_its_member_would_have_ended():
-    assert READ_SECONDS < LEASE_SECONDS
-
-
 REFUSAL = UnusableAnswer(jsonrpc_code(INVALID_PARAMS))
 RENEWABLE = StatusFailure(401)
 SERVER_ERROR = StatusFailure(503)
@@ -434,11 +427,7 @@ def test_a_place_that_serves_a_view_again_after_an_active_read_without_one_start
     ("place", "now", "before"),
     [
         (A_TABLE, (active("table-1", "table"),), (invited("table-1", "inv-3", kind="table"),)),
-        (
-            A_TABLE,
-            (active("table-1", "table", serves_view=True),),
-            (active("table-1", "table"),),
-        ),
+        (A_TABLE, (active("table-1", "table", serves_view=True),), (active("table-1", "table"),)),
         (
             PLACE,
             (active("room-7", serves_view=True),),
@@ -633,6 +622,7 @@ def _declaration(name: str) -> ToolDeclaration:
             0,
         ),
         (["a", SPEAK_TOOL], [SPEAK_TOOL], ["a"], 0),
+        (["a", DECLINE_INVITATION_TOOL], [], ["a"], 0),
     ],
     ids=[
         "all",
@@ -642,6 +632,7 @@ def _declaration(name: str) -> ToolDeclaration:
         "none listed",
         "reserved names",
         "reserved and held",
+        "decline of an invitation",
     ],
 )
 def test_a_turn_declares_what_an_app_lists_but_the_reserved_names_and_those_an_earlier_app_holds(

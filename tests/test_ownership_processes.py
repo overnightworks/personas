@@ -12,10 +12,9 @@ from agents.backend.fake_gateway import tool_round
 from personas.config import OwnershipTimings
 from tests.support.call import ADDRESSED, PERSON, PLACE_ID
 from tests.support.gateway import BUDGET_SPENT, say, says
-from tests.support.hopin import AGENT_SUBJECT
 from tests.support.pods import SECOND_AGENT, Pods, Runner, serving_pods, until
 from tests.support.postgres import answered_turns_kept, lock_holders, terminate_backend
-from tests.support.standings import active
+from tests.support.standings import AGENT_SUBJECT, active
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

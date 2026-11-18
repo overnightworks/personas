@@ -107,6 +107,14 @@ def test_a_line_another_places_turn_told_first_is_named_by_the_woke_seqs_of_the_
     assert (own["entries"], own["woke"]["seqs"]) == ([], [1])
 
 
+def test_a_turns_woke_seqs_leave_out_a_line_of_its_place_the_history_dropped_though_another_place_holds_its_seq():
+    present = taken_into(EMPTY_PRESENT, (said(4, "elsewhere", visit=NOON),), ROOMY_BYTES, ROOMY_BYTES)
+
+    *_, own = (json.loads(each) for each in turn_messages("Mozart", present, a_lines_turn(4, through=1)))
+
+    assert own["woke"]["seqs"] == []
+
+
 def test_a_view_another_places_turn_told_first_is_named_by_the_woke_revision_of_the_turn_it_is_for():
     view = ViewSeen(APP, TABLE, PlaceView(revision=2, awaits_you=True, state={"hand": []}), LATER)
     present = answered_into(taken_into(EMPTY_PRESENT, (view,), ROOMY_BYTES, ROOMY_BYTES), a_lines_turn(through=1))

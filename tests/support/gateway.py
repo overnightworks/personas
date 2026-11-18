@@ -27,10 +27,14 @@ if TYPE_CHECKING:
 
 
 class RoundBackend:
-    """A gateway backend that notes when its host closes it."""
+    """A gateway backend that notes when its host closes it.
 
-    def __init__(self, inner: GatewayBackend) -> None:
+    With ``defect`` its close raises that defect in place of the error that ended its turn.
+    """
+
+    def __init__(self, inner: GatewayBackend, *, defect: Exception | None = None) -> None:
         self._inner = inner
+        self._defect = defect
         self.closed = asyncio.Event()
 
     def run(self, request: TurnRequest, person: TurnPerson) -> AsyncIterator[TurnEvent]:
@@ -44,6 +48,8 @@ class RoundBackend:
     ) -> None:
         await self._inner.aclose()
         self.closed.set()
+        if isinstance(error, Exception) and self._defect is not None:
+            raise self._defect from None
 
 
 MESSAGES_OF_A_FIRST_ROUND = 2

@@ -15,12 +15,12 @@ from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, says, speaks_and_says
 from tests.support.history import REMARK, SPEAKER, bounded_history, said_and_taken, settled, waits
-from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import PLAY_TOOL, SAY_TOOL, QuietApp
 from tests.support.hopin_places import ISSUER, Line
 from tests.support.logs import lines_of
 from tests.support.realm import LIFETIME_SECONDS
 from tests.support.songmaker import CREATE_SONG, GENERATE_SONG
+from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active
 from tests.support.voice import (
     TWO_SENTENCES,

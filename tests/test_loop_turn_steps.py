@@ -4,7 +4,6 @@ carry that trace to the app."""
 from __future__ import annotations
 
 import json
-import time
 from http import HTTPStatus
 from urllib.parse import urlsplit
 
@@ -213,20 +212,15 @@ async def test_a_failed_step_of_another_app_is_written_as_a_handled_failure(runn
     assert levels == ["WARNING"]
 
 
-async def test_a_turn_due_again_after_a_pause_waits_from_the_pause_end(runner, caplog, monkeypatch):
+async def test_a_turn_due_again_after_a_pause_waits_from_the_pause_end(runner, caplog):
     passed_after_pause = 5.0
-    real_perf_counter = time.perf_counter
 
     class PausingClock(FakeClock):
-        skew = 0.0
-
         async def sleep(self, seconds: float) -> None:
-            self.skew += seconds + passed_after_pause
             await super().sleep(seconds)
+            self.time += passed_after_pause
 
-    clock = PausingClock()
-    runner.clock = clock
-    monkeypatch.setattr(time, "perf_counter", lambda: real_perf_counter() + clock.skew)
+    runner.clock = PausingClock()
     runner.gateway = Gateway(Reply(status=HTTPStatus.TOO_MANY_REQUESTS), *says(PLACE_ID, "Here."))
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)

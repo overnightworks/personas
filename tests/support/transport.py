@@ -1,10 +1,11 @@
-"""Stand-ins for the SDK's transport: late answers, chosen leaves, a waiting close, a failing child, a stray cancel."""
+"""Stand-ins for the SDK's transport: late answers, chosen leaves, a waiting close, a failing child, a stray cancel, and
+sessions whose requests raise a defect."""
 
 from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import anyio
 
@@ -133,6 +134,55 @@ class ClosingHold:
                         await self._held()
 
         return waiting
+
+
+class _RaisingSession:
+    """The real session at one app, whose ``request`` raises ``defect`` while ``raises`` allows it."""
+
+    def __init__(self, session: AppSession, request: str, defect: Exception, raises: Callable[[], bool]) -> None:
+        self._session = session
+        self._request = request
+        self._defect = defect
+        self._raises = raises
+
+    def __getattr__(self, name: str) -> object:
+        real = getattr(self._session, name)
+        if name != self._request:
+            return real
+
+        async def raising(*arguments: object) -> object:
+            if self._raises():
+                raise self._defect
+            return await real(*arguments)
+
+        return raising
+
+
+def opener_whose_request_raises(
+    request: str, defect: Exception, *, of_url: str | None = None, once: bool = False
+) -> SessionOpener:
+    """A session opener of real sessions whose ``request``, an ``AppSession`` method, raises ``defect``.
+
+    With ``of_url`` only the sessions at that URL raise, and with ``once`` only the first such request does.
+    """
+    raised = False
+
+    def raises() -> bool:
+        nonlocal raised
+        if once and raised:
+            return False
+        raised = True
+        return True
+
+    @asynccontextmanager
+    async def opened(app: AppTarget, token: Secret) -> AsyncGenerator[AppSession]:
+        async with open_mcp_session(app, token) as session:
+            if of_url in (None, str(app.mcp_url)):
+                yield cast("AppSession", _RaisingSession(session, request, defect, raises))
+            else:
+                yield session
+
+    return opened
 
 
 def transport_whose_session_loses_a_child(

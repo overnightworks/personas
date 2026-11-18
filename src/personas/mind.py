@@ -196,7 +196,7 @@ class Mind:
         return event
 
     def due(self, at: AppPlace, occasion: Occasion, since: float) -> None:
-        """The place is due for ``occasion`` from ``since``, a ``time.perf_counter`` value."""
+        """The place is due for ``occasion`` from ``since``, on the clock's monotonic scale."""
         self._turns = with_due(self._turns, at, occasion, since)
         self._change()
 

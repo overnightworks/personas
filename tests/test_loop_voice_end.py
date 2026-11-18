@@ -22,10 +22,10 @@ from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PLACE_ID, say_in_t
 from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
 from tests.support.fakes import CANCELLED_TURN, failed_turn
 from tests.support.gateway import Gateway, speaks_and_says
-from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, LIMIT_SECONDS, LISTEN, READ, SAY_TOOL
+from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, paused
-from tests.support.transport import ClosingHold, transport_whose_session_loses_a_child
+from tests.support.transport import ClosingHold, opener_whose_request_raises, transport_whose_session_loses_a_child
 from tests.support.voice import TWO_SENTENCES, a_voice_call, ended_by, gated, holding_sentence_ends, sentences_spoken
 from tests.support.wire import hangs
 
@@ -343,14 +343,10 @@ async def test_a_line_or_answer_that_never_arrives_ends_the_turn_limit_exceeded_
 
 
 @pytest.fixture
-def speak_defect(monkeypatch):
+def speak_defect(runner):
     """A defect that ``speak`` raises, whatever the sentence."""
     defect = ValueError("a defect")
-
-    async def raise_it(self, *arguments):
-        raise defect
-
-    monkeypatch.setattr("personas.app_session._McpAppSession.speak", raise_it)
+    runner.open_session = opener_whose_request_raises("speak", defect)
     return defect
 
 
@@ -418,7 +414,8 @@ async def test_a_speak_that_never_answers_is_given_up_at_the_sessions_read_bound
     runner.gateway = Gateway(completion(TWO_SENTENCES))
     runner.app.script(CALL, hangs)
     runner.app.stand(SUBJECT, active(PLACE_ID))
-    runner.start(open_session=short_after_the_lifecycle)
+    runner.open_session = short_after_the_lifecycle
+    runner.start()
     await runner.app.until_window_read(PLACE_ID)
     say_in_the_call(runner, ADDRESSED, spoken=True)
     await runner.reports.until(Event.BACKOFF)

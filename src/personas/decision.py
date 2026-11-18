@@ -21,6 +21,7 @@ from agents.backend import TurnStopped
 from agents.member import (
     ACCEPT_INVITATION_TOOL,
     CONTINUE_SPEAKING_TOOL,
+    DECLINE_INVITATION_TOOL,
     SPEAK_TOOL,
     STOP_SPEAKING_TOOL,
     AcceptInvitationRefusal,
@@ -61,10 +62,17 @@ if TYPE_CHECKING:
 
 CALL_PLACE_KIND: Final = "call"
 RESERVED_TOOLS: Final = frozenset(
-    {ACCEPT_INVITATION_TOOL, SPEAK_TOOL, RECALL_TOOL, CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL}
+    {
+        ACCEPT_INVITATION_TOOL,
+        DECLINE_INVITATION_TOOL,
+        SPEAK_TOOL,
+        RECALL_TOOL,
+        CONTINUE_SPEAKING_TOOL,
+        STOP_SPEAKING_TOOL,
+    }
 )
-"""The names the runner calls or answers itself in every turn: the accept of an invitation, the voice's ``speak``, the
-lookup's ``recall`` and the two tools that decide a hold."""
+"""The names the runner calls or answers itself in every turn: the accept and the decline of an invitation, the voice's
+``speak``, the lookup's ``recall`` and the two tools that decide a hold."""
 RENEW_BEFORE_EXPIRY_SECONDS: Final = 60.0
 """A token is renewed once this little of its lifetime remains, so no call carries an expired one."""
 NETWORK_FAILURE_CODE: Final = "network"

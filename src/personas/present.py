@@ -25,6 +25,7 @@ from personas.entries import (
     SaidAloud,
     TurnTold,
     ViewSeen,
+    Visit,
     entry_size,
     newest_that_fit,
     told_bytes,
@@ -234,12 +235,13 @@ def told_turn(turn: TurnTold, entries: Iterable[Entry]) -> str:
 
 
 def _naming_told_lines(turn: TurnTold, history: History) -> TurnTold:
-    """``turn`` with the lines its occasion names cut down to those the history still holds, since a message partly cut
-    in a step no longer tells the rest."""
+    """``turn`` with the lines its occasion names cut down to those of its visit the history still holds, since a
+    message partly cut in a step no longer tells the rest; a line of another place with the same seq is no such line."""
     occasion = turn.occasion
     if not isinstance(occasion, Lines):
         return turn
-    held = {entry.seq for entry in history.entries if isinstance(entry, KeptLine)}
+    visit = Visit(turn.app, turn.place, occasion.generation)
+    held = {entry.seq for entry in history.entries if isinstance(entry, KeptLine) and entry.visit == visit}
     still_told = Lines(occasion.generation, occasion.seqs & held, occasion.missed)
     return TurnTold(turn.at, turn.app, turn.place, still_told, turn.aloud, turn.through)
 

@@ -14,7 +14,7 @@ from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, say_in_the_call
 from tests.support.gateway import Gateway
 from tests.support.history import TABLE
-from tests.support.hopin import AGENT_SUBJECT as SUBJECT
+from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, invited
 
 pytestmark = pytest.mark.anyio
