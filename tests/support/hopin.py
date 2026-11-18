@@ -189,8 +189,8 @@ class FakeApp(AppVoice):
         default_factory=list[tuple[str, SetTurnStateArguments]]
     )
     """Each statement the app took, with its member, in order; a refused one is not among them. A statement is
-    no call: it is neither counted among ``calls`` nor answered by a script."""
-    turn_state_added: asyncio.Event = field(default_factory=asyncio.Event)
+    no call: it is not counted among ``calls``, and is logged and scripted under its tool's name."""
+    turn_state_taken: asyncio.Condition = field(default_factory=asyncio.Condition)
     turn_state_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
     """The answer to each next statement as it arrives, in order, before the app judges it."""
 
@@ -393,10 +393,8 @@ class FakeApp(AppVoice):
 
     async def until_turn_states(self, count: int) -> None:
         """Returns once the app took this many statements; fails after the limit."""
-        async with asyncio.timeout(LIMIT_SECONDS):
-            while len(self.turn_states) < count:
-                self.turn_state_added.clear()
-                await self.turn_state_added.wait()
+        async with asyncio.timeout(LIMIT_SECONDS), self.turn_state_taken:
+            await self.turn_state_taken.wait_for(lambda: len(self.turn_states) >= count)
 
     async def _set_turn_state(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
         """Takes the statement of a member who holds a seat, active or paused, at its place."""
@@ -411,8 +409,9 @@ class FakeApp(AppVoice):
             return ToolOutcome(
                 SetTurnStateRefused(refused=SetTurnStateRefusal.NOT_HELD).model_dump_json(), is_error=True
             )
-        self.turn_states.append((subject, statement))
-        self.turn_state_added.set()
+        async with self.turn_state_taken:
+            self.turn_states.append((subject, statement))
+            self.turn_state_taken.notify_all()
         return ToolOutcome("{}", is_error=False)
 
     async def _accept(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
@@ -466,7 +465,8 @@ class FakeApp(AppVoice):
         document: dict[str, Any],
     ) -> None:
         method = document.get("method", NO_METHOD)
-        self.log.add(SET_TURN_STATE_TOOL if _is_statement(document) else method)
+        key = _key_of(document)
+        self.log.add(key)
         if method == CALL:
             self._take_in(document.get("params") or {})
         headers = {name.decode(): value.decode() for name, value in scope["headers"]}
@@ -489,9 +489,9 @@ class FakeApp(AppVoice):
             await reply.status(self.refuse_with)
         elif method == READ and self._fails_the_window_read(document):
             await reply.status(HTTPStatus.SERVICE_UNAVAILABLE)
-        elif self.scripted[method] and not _is_statement(document):
+        elif self.scripted[key]:
             try:
-                await self.scripted[method].pop(0)(reply)
+                await self.scripted[key].pop(0)(reply)
             except ConnectionCut:
                 self.log.add(f"{method} cut")
                 raise
@@ -530,6 +530,11 @@ class QuietApp(FakeApp):
 
 def _is_statement(document: dict[str, Any]) -> bool:
     return document.get("method") == CALL and (document.get("params") or {}).get("name") == SET_TURN_STATE_TOOL
+
+
+def _key_of(document: dict[str, Any]) -> str:
+    """What a request is logged and scripted under: its method, and a statement its tool's name."""
+    return SET_TURN_STATE_TOOL if _is_statement(document) else document.get("method", NO_METHOD)
 
 
 async def _body_of(receive: Callable[..., Any]) -> bytes:

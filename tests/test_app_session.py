@@ -572,10 +572,7 @@ async def test_every_leaf_of_nested_groups_the_body_raises_reaches_the_caller(ap
 
 @pytest.mark.parametrize("status", [HTTPStatus.FORBIDDEN, HTTPStatus.SERVICE_UNAVAILABLE])
 async def test_an_error_answer_whose_body_does_not_decode_is_told_by_its_status(app, bearer, status, place):
-    async def answers_undecodably(reply):
-        await reply.undecodable(status)
-
-    app.script(CALL, answers_undecodably)
+    app.script(CALL, lambda reply: reply.undecodable(status))
 
     with pytest.raises(StatusFailure) as failure:
         await accepts_a_place(app, bearer, place)
@@ -584,10 +581,7 @@ async def test_an_error_answer_whose_body_does_not_decode_is_told_by_its_status(
 
 
 async def test_an_ok_answer_whose_body_does_not_decode_is_unreachable(app, bearer, place):
-    async def answers_undecodably(reply):
-        await reply.undecodable(HTTPStatus.OK)
-
-    app.script(CALL, answers_undecodably)
+    app.script(CALL, lambda reply: reply.undecodable(HTTPStatus.OK))
 
     with pytest.raises(Unreachable):
         await accepts_a_place(app, bearer, place)
