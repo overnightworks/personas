@@ -115,7 +115,7 @@ database. The runner opens no port. The release path is in the [README](../READM
 | `answered_turns` | what each answered turn's message told | the entries it told left, or `memory erase` |
 | `agent_turns` | reading checkpoints, due places, unanswered turns in a row, a pause's end | the next write; dropped by a takeover after a skipped generation; erase keeps it |
 | `agent_owner` | the generation of the pod that owns him | renewed by every takeover and every erase |
-| `lines`, with `[memory]` | every line of every window he read, verbatim, with speaker and first-read time | the first sweep past `lines_keep_days` from its first read, or `memory erase` |
+| `lines`, with `[memory]` | every line of every window he read, verbatim, with speaker and first-read time | the first sweep past `lines_keep_days` from its first read, or `memory erase`; without `[memory]` no sweep runs, so lines kept before stay until `memory erase` |
 
 - No picture byte is kept anywhere.
 - A line a sweep removed from a window the app still holds is kept again with a new first-read time.

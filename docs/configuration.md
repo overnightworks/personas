@@ -78,8 +78,8 @@ agents' member lease of 120 seconds.
 
 ## `[memory]`
 
-Its presence keeps every line the agents read and gives every turn the lookup `recall`; removing it stops
-both.
+Its presence keeps every line the agents read, sweeps them and gives every turn the lookup `recall`; removing it
+stops all three. What then happens to lines kept before is in [the architecture](ARCHITECTURE.md), Persistence.
 
 | Name | Type | Default | Meaning |
 |---|---|---|---|
