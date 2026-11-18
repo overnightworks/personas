@@ -1,7 +1,0 @@
-claim_id = "c0d855a0f4924ac58430273d4256c8e1"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "2faaa2e03e53449631daaefd2fcbf7c050eccc11"
-branch = "claude/issue-306-the-notes-renderer-reads-old-tags-only-t"
-scope = ["scripts/configuration_release_notes.py", "tests/scripts/test_configuration_release_notes.py"]
-opened_commit = "2e0857525bbc6aea63fcde589b412727fb3a1889"
