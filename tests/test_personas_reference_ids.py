@@ -6,10 +6,6 @@ REPOSITORY = Path(__file__).resolve().parents[1]
 DOCUMENTED_ID = re.compile(r"\(([A-Z]+-\d+)\)")
 CITATION = re.compile(r"[A-Z]+-\d+(?:, [A-Z]+-\d+)*(?=[:.])")
 
-# Rules the reference documents state that no test proves yet; each leaves this set when a test cites it
-# or its rule leaves the document.
-UNPROVEN = frozenset({"LOG-32"})
-
 
 def documented_ids() -> set[str]:
     return {
@@ -40,7 +36,7 @@ def test_every_id_a_test_cites_names_a_rule_of_a_reference_document():
     assert unknown == {}
 
 
-def test_every_rule_of_a_reference_document_is_cited_by_a_test_unless_it_is_named_unproven():
+def test_every_rule_of_a_reference_document_is_cited_by_a_test():
     uncited = documented_ids() - set(cited_ids())
 
-    assert uncited == UNPROVEN
+    assert uncited == set()

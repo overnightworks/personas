@@ -69,4 +69,5 @@ the earliest through a join or a replacement. (LOG-27)
   `input_tokens` (cached included; a picture counts once per round), `cached_input_tokens`,
   `cache_write_tokens` and `output_tokens`, and `model_request_count`; otherwise all five are absent, never
   zero. (LOG-31)
-- The counts change nothing the runner does. (LOG-32)
+
+The counts change nothing the runner does.
