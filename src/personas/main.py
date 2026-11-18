@@ -193,13 +193,24 @@ def configure_logging() -> None:
     configure("personas")
 
 
-class _MemoryArgumentParser(argparse.ArgumentParser):
+class _RefusingArgumentParser(argparse.ArgumentParser):
     """Refuses a wrong use with its usage and the exit code of every refused command, before anything is read."""
 
     def error(self, message: str) -> NoReturn:
         self.print_usage(sys.stderr)
         sys.stderr.write(f"{self.prog}: {message}\n")
         raise SystemExit(CONFIGURATION_ERROR_EXIT_CODE)
+
+    # Restating the base's three overloads, generic in the namespace, serves no caller: none here passes a namespace.
+    def parse_known_args(  # pyright: ignore[reportIncompatibleMethodOverride]
+        self, args: Iterable[str] | None = None, namespace: None = None
+    ) -> tuple[argparse.Namespace, list[str]]:
+        """Refuses an argument it does not know itself, so the usage shown is that of the command it was given to;
+        argparse would hand it up and refuse it with the outermost usage."""
+        parsed, unknown = super().parse_known_args(args, namespace)
+        if unknown:
+            self.error(f"unrecognized arguments: {' '.join(unknown)}")
+        return parsed, unknown
 
 
 class _StoreOnce(argparse.Action):
@@ -217,10 +228,23 @@ class _StoreOnce(argparse.Action):
         setattr(namespace, self.dest, values)
 
 
-def _memory_request(arguments: Sequence[str]) -> argparse.Namespace:
+def _request(arguments: Sequence[str]) -> argparse.Namespace:
+    """The command asked for; none runs the runner."""
     # Prefix matching is off, or a mistyped option such as ``--al`` would select every agent's lines.
-    parser = _MemoryArgumentParser(prog=f"personas {MEMORY_COMMAND}", allow_abbrev=False)
-    commands = parser.add_subparsers(dest="command", required=True)
+    parser = _RefusingArgumentParser(
+        prog="personas", description="Without a command, runs the runner.", allow_abbrev=False
+    )
+    commands = parser.add_subparsers(dest="command", metavar="COMMAND")
+    commands.add_parser(MIGRATE_COMMAND, help="bring the memory's schema to its head", allow_abbrev=False)
+    memory = commands.add_parser(
+        MEMORY_COMMAND, help="list or erase what the agents keep, without any content", allow_abbrev=False
+    )
+    _add_memory_commands(memory)
+    return parser.parse_args(arguments)
+
+
+def _add_memory_commands(parser: argparse.ArgumentParser) -> None:
+    commands = parser.add_subparsers(dest="memory_command", metavar="COMMAND", required=True)
     listing = commands.add_parser(
         LIST_COMMAND, help="one row per visit and per agent's history, without any content", allow_abbrev=False
     )
@@ -240,7 +264,6 @@ def _memory_request(arguments: Sequence[str]) -> argparse.Namespace:
     selector.add_argument(
         "--all", action="store_true", dest="every_agent", help="every agent's lines, history entries and answered turns"
     )
-    return parser.parse_args(arguments)
 
 
 @contextmanager
@@ -307,7 +330,7 @@ def _counted(count: int, one: str, many: str) -> str:
 
 
 async def _perform_memory(target: DatabaseTarget, request: argparse.Namespace) -> None:
-    if request.command == LIST_COMMAND:
+    if request.memory_command == LIST_COMMAND:
         await _list_memory(target, request.agent)
     else:
         await _erase_memory(target, request)
@@ -334,19 +357,15 @@ def _run_runner(config: Config, compose: Compose) -> None:
 
 def main(compose: Compose = real_boundaries, arguments: Sequence[str] = ()) -> None:
     """Runs the runner; ``migrate`` brings the memory's schema to its head, ``memory`` lists or erases what it keeps."""
-    command = list(arguments)
-    memory_request = _memory_request(command[1:]) if command[:1] == [MEMORY_COMMAND] else None
-    if memory_request is None and command not in ([], [MIGRATE_COMMAND]):
-        sys.stderr.write(f"personas: unknown command; the commands are {MIGRATE_COMMAND} and {MEMORY_COMMAND}\n")
-        raise SystemExit(CONFIGURATION_ERROR_EXIT_CODE)
+    request = _request(arguments)
     try:
         config = load_config(os.environ)
     except ConfigError as error:
         sys.stderr.write(f"personas: {error}\n")
         raise SystemExit(CONFIGURATION_ERROR_EXIT_CODE) from None
-    if memory_request is not None:
-        _memory(config, memory_request)
-    elif command:
+    if request.command == MEMORY_COMMAND:
+        _memory(config, request)
+    elif request.command == MIGRATE_COMMAND:
         _migrate(config)
     else:
         configure_logging()

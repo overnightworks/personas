@@ -10,7 +10,14 @@ from sqlalchemy.exc import IntegrityError
 
 from personas.config import CONFIG_ENVIRONMENT_VARIABLE
 from personas.failures import STORE_UNREACHABLE_CODE
-from personas.main import CONFIGURATION_ERROR_EXIT_CODE, MIGRATE_COMMAND, STORE_ERROR_EXIT_CODE, command_line, main
+from personas.main import (
+    CONFIGURATION_ERROR_EXIT_CODE,
+    MEMORY_COMMAND,
+    MIGRATE_COMMAND,
+    STORE_ERROR_EXIT_CODE,
+    command_line,
+    main,
+)
 from tests.support.postgres import at_an_unknown_revision, kept_lines, migrated_to, revision_of, run_sql, tables_of
 
 if TYPE_CHECKING:
@@ -115,4 +122,19 @@ def test_an_unknown_command_of_the_console_script_stops_before_the_configuration
         command_line()
 
     assert stopped.value.code == CONFIGURATION_ERROR_EXIT_CODE
-    assert "unknown command" in capsys.readouterr().err
+    assert "invalid choice: 'serve'" in capsys.readouterr().err
+
+
+def test_the_help_of_the_console_script_names_each_command_on_one_line_and_exits_zero(monkeypatch, capsys):
+    monkeypatch.delenv(CONFIG_ENVIRONMENT_VARIABLE, raising=False)
+    monkeypatch.setattr(sys, "argv", ["personas", "--help"])
+
+    with pytest.raises(SystemExit) as stopped:
+        command_line()
+
+    assert stopped.value.code == 0
+    lines = [each.split() for each in capsys.readouterr().out.splitlines()]
+    for command in (MIGRATE_COMMAND, MEMORY_COMMAND):
+        described = [words for words in lines if words[:1] == [command]]
+        assert len(described) == 1
+        assert len(described[0]) > 1
