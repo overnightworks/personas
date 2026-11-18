@@ -1,8 +1,0 @@
-claim_id = "9466966896e647f09dcf6b7a4c2b888e"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "04da5aa17ee285cd7b0c2514da3d06e894b3624e"
-branch = "claude/issue-279-the-documents-state-truly-what-personas"
-scope = ["AGENTS.md", "README.md", "docs", "src/personas/main.py"]
-opened_commit = "266f73d76bef0a862a4acd5dff8b9a2cb25a465f"
-whole_reason = "one rewrite of the two overviews to one true statement of storage and the fleet's document set"
