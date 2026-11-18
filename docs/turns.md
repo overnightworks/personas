@@ -125,8 +125,9 @@ is an unusable answer; audio and resource blocks are ignored.
   turns: 1 second, doubling with each such turn in a row, up to `budget_pause_cap_seconds` for a spent
   budget and 30 seconds otherwise, logged once as `turns.paused`.
 - After the pause the place is due again with what the turn was for, joined with what arrived meanwhile. A
-  place he left gets no turn, and a turn cancelled by leaving or a shutdown is not retried. The first turn
-  with an answer ends the pausing.
+  place he left gets no turn, and a turn cancelled by his leaving or running at a kill is not retried; which
+  turn a SIGTERM hands over is in [the architecture](ARCHITECTURE.md), Persistence. The first turn with an
+  answer ends the pausing.
 
 ## Recall
 
