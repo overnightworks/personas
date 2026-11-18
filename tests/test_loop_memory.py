@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
-from agents.mcp_server import listen
+from agents.member import STANDING_URI, place_window_uri
 from agents.tools import ToolEffect
 from agents.turn import FailureCode
 from mcp_types import ListToolsResult
@@ -51,7 +51,7 @@ from tests.support.history import (
     url_of,
     waits,
 )
-from tests.support.hopin import LIMIT_SECONDS, LIST_TOOLS, PLAY_TOOL, SAY_TOOL
+from tests.support.hopin import LIMIT_SECONDS, LIST_TOOLS, LISTEN, PLAY_TOOL, SAY_TOOL
 from tests.support.logs import formatted, lines_of
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active
@@ -67,9 +67,8 @@ pytestmark = pytest.mark.anyio
 
 OUTAGE_EVENTS = {Event.BACKOFF, Event.SUSPENDED}
 SHORT_STREAM_SECONDS = 0.5
-APP_LISTEN_BOUND_SECONDS = 0.1
-"""The app ends an idle listen before the runner's deadline, as it does at its own bound, so only a held write
-reaches that deadline."""
+"""The runner's deadline on a listen; the scripted app ends each listen once it has pulsed, so only a held write
+reaches it."""
 
 
 class ScriptedStore:
@@ -177,11 +176,23 @@ async def test_a_write_that_ends_in_a_timeout_is_reported_by_its_code_and_the_tu
     assert not OUTAGE_EVENTS & {event for event, _ in runner.reports.reported()}
 
 
-async def test_a_write_held_past_the_listens_deadline_cancels_the_running_turn_with_no_store_failed(
-    runner, monkeypatch
-):
+def pulses_the_window_once(line_said: asyncio.Event):
+    """A listen that the app ends once it has pulsed the call's window for the line said, so no idle stream waits."""
+
+    async def answered(reply) -> None:
+        await reply.open_stream()
+        await reply.acknowledge([STANDING_URI])
+        await line_said.wait()
+        await reply.pulse(place_window_uri(CALL_PLACE))
+        await reply.complete()
+
+    return answered
+
+
+async def test_a_write_held_past_the_listens_deadline_cancels_the_running_turn_with_no_store_failed(runner):
     """CONFIG-25."""
-    monkeypatch.setattr(listen, "LISTEN_BOUND_SECONDS", APP_LISTEN_BOUND_SECONDS)
+    addressed_said, held_line_said = asyncio.Event(), asyncio.Event()
+    runner.app.script(LISTEN, pulses_the_window_once(addressed_said), pulses_the_window_once(held_line_said))
     store = ScriptedStore()
     runner.lines = store
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
@@ -190,9 +201,11 @@ async def test_a_write_held_past_the_listens_deadline_cancels_the_running_turn_w
     runner.start(stream_seconds=SHORT_STREAM_SECONDS)
     await runner.app.until_window_read(PLACE_ID)
     say_in_the_call(runner, ADDRESSED)
+    addressed_said.set()
     await runner.gateway.until_requested(1)
     store.release = asyncio.Event()
     say_in_the_call(runner, "A line the dark store holds")
+    held_line_said.set()
     await store.until_waiting()
     await runner.reports.until_a_turn_ended()
     await runner.reports.until(Event.BACKOFF)
