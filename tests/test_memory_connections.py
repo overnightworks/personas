@@ -80,11 +80,12 @@ async def test_a_write_whose_connection_goes_dark_is_given_up_only_after_the_dri
         store = PostgresLineStore(through_the_forwarder)
         try:
             await store.keep(a_read(1))
+            in_the_dark = a_read(2)
             forwarder.go_dark()
             started = time.monotonic()
             async with asyncio.timeout(DARK_LIMIT_SECONDS):
                 with pytest.raises(StoreUnavailable) as given_up:
-                    await store.keep(a_read(2))
+                    await store.keep(in_the_dark)
             elapsed = time.monotonic() - started
         finally:
             await store.close()
