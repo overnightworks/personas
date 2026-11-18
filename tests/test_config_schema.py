@@ -35,9 +35,10 @@ def schema_refusals(node: object) -> set[str]:
 )
 def test_a_rule_across_fields_that_refuses_a_file_is_named_in_the_configuration_schema(files, break_it):
     files.text = break_it(files.text)
+    path = files.write()
 
     with pytest.raises(ConfigError) as refused:
-        load_config(files.write())
+        load_config(path)
 
     assert [sentence for sentence in schema_refusals(configuration_schema()) if sentence in str(refused.value)]
 
