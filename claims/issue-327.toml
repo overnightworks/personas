@@ -1,0 +1,8 @@
+claim_id = "5bb42e56264342348bc4bc1398653fa1"
+agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
+role = "builder"
+base = "96a3493cefe2c70b38be47d4ab66e294e12abb0a"
+branch = "claude/issue-327-an-agent-who-stops-taking-turns-in-an-ap"
+scope = ["docs/log.md", "docs/turns.md", "src/personas/decision.py", "src/personas/loop.py", "src/personas/main.py", "src/personas/turn_states.py", "tests/support/hopin.py", "tests/test_decision.py", "tests/test_loop_turn_state.py"]
+opened_commit = "19ee46573a5fcdd3ac8abccc59c5159b24e9a9b4"
+whole_reason = "the turn state statements outside a turn: unavailable at suspend, backoff and stop, the restatement after recovery, and the noise an app without the tool makes"
