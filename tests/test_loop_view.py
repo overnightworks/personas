@@ -16,7 +16,17 @@ from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, say_in_the_call
 from tests.support.fakes import CANCELLED_TURN, SweepClock
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
-from tests.support.history import after_start, entry, history_of, said_and_taken, settled, view_entry, woke_at_table
+from tests.support.history import (
+    OTHER_TABLE,
+    TABLE,
+    after_start,
+    entry,
+    history_of,
+    said_and_taken,
+    settled,
+    view_entry,
+    woke_at_table,
+)
 from tests.support.hopin import CALL, READ, SAY_TOOL, a_traceparent, trace_id_of
 from tests.support.logs import lines_of, written_by_the_runner
 from tests.support.realm import AGENT_NAME
@@ -26,9 +36,6 @@ from tests.support.standings import active, invited, paused
 from tests.support.wire import cuts
 
 pytestmark = pytest.mark.anyio
-
-TABLE = PlaceRef(kind="table", id="table-1")
-OTHER_TABLE = PlaceRef(kind="table", id="table-2")
 
 
 def at_table(place: PlaceRef = TABLE):
