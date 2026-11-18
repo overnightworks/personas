@@ -122,7 +122,7 @@ database. The runner opens no port. The release path is in the [README](../READM
 - The mind writes through on every change, under his generation, so a write from a pod that lost him is
   refused. A restart or a takeover loads his history and turns, and his next turn is told what the holder
   before would have told, byte for byte.
-- What a pod took in after its last write is lost when it dies. Which turn a SIGTERM hands to the new holder
+- What a pod took in after its last write is lost when it dies. Which turn a stop hands to the new holder
   is in [the turns reference](turns.md), Pauses and retries.
 - A place read before resumes where reading stood, so a line said while no pod served him gets one turn;
   how a place reads is in [the turns reference](turns.md), Joining and reading.
