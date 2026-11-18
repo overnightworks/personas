@@ -40,7 +40,7 @@ from __future__ import annotations
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, Self
+from typing import TYPE_CHECKING, Final, Self, cast
 
 from agents.agent_file import AgentDefinition, AgentFileError, load_agent
 from agents.config import AgentConfig  # noqa: TC002 - pydantic resolves the field's type at run time
@@ -65,8 +65,9 @@ from personas.recall import SMALLEST_RESULT_BYTES
 from personas.secret import Secret
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
+    from pydantic.config import JsonDict
     from pydantic_core import ErrorDetails
 
 CONFIG_ENVIRONMENT_VARIABLE: Final = "PERSONAS_CONFIG"
@@ -165,8 +166,49 @@ class Config:
     budget_pause_cap_seconds: float = DEFAULT_BUDGET_PAUSE_CAP_SECONDS
 
 
+@dataclass(frozen=True)
+class _Refusal[EntryT: BaseModel]:
+    """A rule across an entry's fields, checked once each field holds: an entry it does not hold for is refused with
+    the sentence, which names the field it blames."""
+
+    sentence: str
+    holds: Callable[[EntryT], bool]
+
+
+def _refusal[EntryT: BaseModel](sentence: str) -> Callable[[Callable[[EntryT], bool]], _Refusal[EntryT]]:
+    """Declares the method below as a rule across its entry's fields, refused with ``sentence``."""
+
+    def declare(holds: Callable[[EntryT], bool]) -> _Refusal[EntryT]:
+        return _Refusal(sentence, holds)
+
+    return declare
+
+
+def _with_refusals(schema: JsonDict, model: type[_Entry]) -> None:
+    """Writes the sentence of each rule across the entry's fields into its JSON schema, as ``refusals``.
+
+    The JSON schema has no word for such a rule and the release notes read the schema alone, so a check across
+    fields that is no ``_refusal`` would leave no trace there: writing the schema refuses it.
+    """
+    for name in model.__pydantic_decorators__.model_validators:
+        if name != _Entry.holds_its_refusals.__name__:
+            raise TypeError(f"{model.__name__}.{name}: a check across fields is declared with _refusal")
+    schema["refusals"] = [refusal.sentence for refusal in model.refusals()]
+
+
 class _Entry(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, ignored_types=(_Refusal,), json_schema_extra=_with_refusals)
+
+    @classmethod
+    def refusals(cls) -> tuple[_Refusal[Self], ...]:
+        return tuple(cast("_Refusal[Self]", each) for each in vars(cls).values() if isinstance(each, _Refusal))
+
+    @model_validator(mode="after")
+    def holds_its_refusals(self) -> Self:
+        for refusal in self.refusals():
+            if not refusal.holds(self):
+                raise ValueError(refusal.sentence)
+        return self
 
 
 class _AppEntry(_Entry):
@@ -176,11 +218,9 @@ class _AppEntry(_Entry):
     listens: bool = True
     call_seconds: PositiveFloat | None = None
 
-    @model_validator(mode="after")
-    def _a_tools_only_app_has_a_call_bound(self) -> Self:
-        if not self.listens and self.max_tool_calls is None:
-            raise ValueError("listens = false needs max_tool_calls")
-        return self
+    @_refusal("listens = false needs max_tool_calls")
+    def _a_tools_only_app_has_a_call_bound(self) -> bool:
+        return self.listens or self.max_tool_calls is not None
 
 
 class _VoiceEntry(_Entry):
@@ -226,24 +266,18 @@ class _OwnershipEntry(_Entry):
     grace_seconds: PositiveFloat = Field(default=DEFAULT_GRACE_SECONDS, strict=True, allow_inf_nan=False)
     stop_seconds: PositiveFloat = Field(default=DEFAULT_STOP_SECONDS, strict=True, allow_inf_nan=False)
 
-    @model_validator(mode="after")
-    def _the_stop_outlasts_the_flush_its_margin_allows(self) -> Self:
+    @_refusal("stop_seconds: must be above cancel_margin_seconds")
+    def _the_stop_outlasts_the_flush_its_margin_allows(self) -> bool:
         """A stopping agent writes what his stop cut off within his cancel margin, and that write is cut by the margin
         itself, so a stop deadline above the margin never cuts a write the margin allows; one at or below it would."""
-        if self.stop_seconds <= self.cancel_margin_seconds:
-            raise ValueError("stop_seconds: must be above cancel_margin_seconds")
-        return self
+        return self.stop_seconds > self.cancel_margin_seconds
 
-    @model_validator(mode="after")
-    def _the_grace_outlasts_the_hold_it_takes_over_from(self) -> Self:
+    @_refusal("grace_seconds: must be above contend_seconds + heartbeat_timeout_seconds + cancel_margin_seconds")
+    def _the_grace_outlasts_the_hold_it_takes_over_from(self) -> bool:
         """A pod that lost its lock notices within a contend interval and a heartbeat timeout and then needs its margin
         to stop; a taker that starts sooner than that could speak beside it."""
         stopped_by = self.contend_seconds + self.heartbeat_timeout_seconds + self.cancel_margin_seconds
-        if self.grace_seconds <= stopped_by:
-            raise ValueError(
-                "grace_seconds: must be above contend_seconds + heartbeat_timeout_seconds + cancel_margin_seconds"
-            )
-        return self
+        return self.grace_seconds > stopped_by
 
 
 class _MemoryEntry(_Entry):
@@ -268,20 +302,21 @@ class _FileModel(_Entry):
         default=DEFAULT_BUDGET_PAUSE_CAP_SECONDS, strict=True, ge=BACKOFF_BASE_SECONDS, allow_inf_nan=False
     )
 
-    @model_validator(mode="after")
-    def _tools_need_a_gateway_and_personas(self) -> Self:
-        if any(app.max_tool_calls for app in self.apps):
-            if self.gateway is None:
-                raise ValueError("gateway: required when an app binds tools")
-            if any(agent.persona_file is None for agent in self.agents):
-                raise ValueError("persona_file: required for every agent when an app binds tools")
-        return self
+    @property
+    def binds_tools(self) -> bool:
+        return any(app.max_tool_calls for app in self.apps)
 
-    @model_validator(mode="after")
-    def _a_step_keeps_no_more_than_the_history_may_hold(self) -> Self:
-        if self.history_keep_bytes > self.history_bytes:
-            raise ValueError("history_keep_bytes: must not be above history_bytes")
-        return self
+    @_refusal("gateway: required when an app binds tools")
+    def _tools_need_a_gateway(self) -> bool:
+        return not self.binds_tools or self.gateway is not None
+
+    @_refusal("persona_file: required for every agent when an app binds tools")
+    def _tools_need_personas(self) -> bool:
+        return not self.binds_tools or all(agent.persona_file is not None for agent in self.agents)
+
+    @_refusal("history_keep_bytes: must not be above history_bytes")
+    def _a_step_keeps_no_more_than_the_history_may_hold(self) -> bool:
+        return self.history_keep_bytes <= self.history_bytes
 
     @field_validator("ready_file")
     @classmethod
@@ -326,6 +361,11 @@ class _FileModel(_Entry):
                 for each in _without_the_length_of_entries_that_failed(error.errors())
             )
             raise ConfigError("; ".join(problems)) from None
+
+
+def configuration_schema() -> JsonDict:
+    """The JSON schema of the configuration file, each entry's rules across its fields under ``refusals``."""
+    return _FileModel.model_json_schema()
 
 
 def _without_the_length_of_entries_that_failed(problems: list[ErrorDetails]) -> list[ErrorDetails]:
