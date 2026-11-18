@@ -167,7 +167,7 @@ class World:
 
 
 @pytest.fixture
-def world(files: Files, monkeypatch: pytest.MonkeyPatch) -> World:
+def world(files: Files, monkeypatch: pytest.MonkeyPatch, restored_logging: None) -> World:
     files.write()
     monkeypatch.setenv(CONFIG_ENVIRONMENT_VARIABLE, str(files.config_path))
     return World(files)
@@ -449,7 +449,7 @@ class MarkerThatMustStayAbsent:
 @pytest.mark.postgres
 @pytest.mark.parametrize("has_memory", [True, False], ids=["memory table", "no memory table"])
 def test_a_runner_whose_database_is_behind_its_head_stops_before_it_writes_its_ready_marker(
-    files, database, monkeypatch, capsys, has_memory
+    files, database, monkeypatch, capsys, has_memory, restored_logging
 ):
     from tests.support.postgres import run_sql
 

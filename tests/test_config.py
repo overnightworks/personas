@@ -37,6 +37,8 @@ if TYPE_CHECKING:
     from personas.config import Config
     from personas.readiness import ReadyMarker
 
+pytestmark = pytest.mark.usefixtures("restored_logging")
+
 MORE_VOICES_THAN_ANY_LIST_HOLDS = [f"voice-{index}" for index in range(100)]
 APP_TABLE = f'[[apps]]\nmcp_url = "https://hopin.test/mcp"\nscope = "mcp-hopin"\nmax_tool_calls = {MAX_TOOL_CALLS}\n'
 
