@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from http import HTTPStatus
+from typing import TYPE_CHECKING
 
 import pytest
 from agents.backend.fake_gateway import Reply
@@ -19,9 +21,12 @@ from personas.decision import status_code
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
-from tests.support.hopin import CALL, SAY_TOOL
+from tests.support.hopin import CALL, LIMIT_SECONDS, SAY_TOOL
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, paused
+
+if TYPE_CHECKING:
+    from tests.support.wire import Reply as AppReply
 
 pytestmark = pytest.mark.anyio
 
@@ -124,6 +129,31 @@ async def test_a_turn_cancelled_because_his_seat_ended_states_no_end(runner):
 
     assert statements(runner) == [THINKING, THINKING]
     assert runner.reports.reported(started=False) == []
+
+
+async def test_a_turn_cancelled_while_its_thinking_waits_still_ends_its_thinking(runner):
+    """TURNS-43."""
+    entered, released = asyncio.Event(), asyncio.Event()
+
+    async def fails_once_released(reply: AppReply) -> None:
+        entered.set()
+        await released.wait()
+        await reply.status(HTTPStatus.SERVICE_UNAVAILABLE)
+
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    runner.app.script(SET_TURN_STATE_TOOL, fails_once_released)
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED)
+    async with asyncio.timeout(LIMIT_SECONDS):
+        await entered.wait()
+
+    runner.app.stand(SUBJECT, paused(PLACE_ID))
+    await runner.reports.until_a_turn_ended()
+    released.set()
+    await runner.app.until_turn_states(1)
+
+    assert statements(runner) == [ended(None)]
+    assert runner.gateway.arrivals == 0
 
 
 def refuses_the_thinking(runner) -> None:
