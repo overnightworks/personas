@@ -1,8 +1,0 @@
-claim_id = "a40cdefdf76541d2b4d77f99f030da10"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "184c392275108293ac3e2e77ee9bab108ab012a1"
-branch = "claude/issue-304-the-release-notes-name-type-changes-chan"
-scope = ["docs/runbooks/release.md", "scripts/configuration_release_notes.py", "scripts/configuration_release_notes.sh", "src/personas/config.py", "tests/scripts", "tests/support/scripts.py", "tests/test_config.py", "tests/test_config_schema.py"]
-opened_commit = "762ac303875c8b090162381d4e977a1f2449827a"
-whole_reason = "one renderer and its one schema source: the reported change kinds, the accessor they read and the tests that pin them"
