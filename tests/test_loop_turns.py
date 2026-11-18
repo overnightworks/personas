@@ -212,6 +212,17 @@ async def test_a_line_in_his_own_call_while_his_call_turn_runs_enters_the_histor
     assert second.woke_seqs == [2]
 
 
+async def test_a_turn_made_due_while_the_one_before_runs_starts_as_it_ends_with_no_wait_of_the_runner(runner, other):
+    """TURNS-8."""
+    running = await a_call_turn_that_waits_for_the_model(runner, other)
+    await said_and_taken(runner.app, PLACE_ID, AGAIN)
+
+    running.set()
+    await runner.gateway.until_requested(2)
+
+    assert runner.clock.slept == []
+
+
 async def test_the_place_that_waited_longest_goes_first_when_a_table_starts_waiting_before_a_line_is_said(runner):
     running = await a_call_turn_beside_a_table_that_waits_for_the_model(runner)
     waits(runner.app, 1)

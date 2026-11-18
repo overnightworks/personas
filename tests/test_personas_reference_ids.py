@@ -8,7 +8,7 @@ CITATION = re.compile(r"[A-Z]+-\d+(?:, [A-Z]+-\d+)*(?=[:.])")
 
 # Rules the reference documents state that no test proves yet; each leaves this set when a test cites it
 # or its rule leaves the document.
-UNPROVEN = frozenset({"TURNS-2", "TURNS-8", "CONFIG-25", "CONFIG-38", "LOG-32"})
+UNPROVEN = frozenset({"TURNS-2", "LOG-32"})
 
 
 def documented_ids() -> set[str]:
