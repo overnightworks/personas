@@ -121,6 +121,22 @@ class WithStrPort(BaseModel):
     database: StrPort
 
 
+class StringVoices(Entry):
+    names: tuple[str, ...] = ()
+
+
+class IntegerVoices(Entry):
+    names: tuple[int, ...] = ()
+
+
+class WithStringVoices(BaseModel):
+    voice: StringVoices = StringVoices()
+
+
+class WithIntegerVoices(BaseModel):
+    voice: IntegerVoices = IntegerVoices()
+
+
 class AppWithScope(Entry):
     mcp_url: str
     tools: list[str] = []
@@ -208,6 +224,13 @@ def notes_between(before: type[BaseModel], after: type[BaseModel]) -> str:
             WithStrPort,
             "- `[database] port`: now takes `string`, was `integer`.\n\n```toml\n[database]\nport = <string>\n```\n",
             id="a field whose type changed",
+        ),
+        pytest.param(
+            WithStringVoices,
+            WithIntegerVoices,
+            "- `[voice] names`: now takes `array of integer`, was `array of string`.\n\n"
+            "```toml\n[voice]\nnames = []\n```\n",
+            id="an array whose item type changed",
         ),
         pytest.param(
             HistoryBefore,

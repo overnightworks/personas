@@ -103,12 +103,6 @@ def refusals_of(table: JsonObject) -> tuple[str, ...]:
     return tuple(cast("list[str]", sentences))
 
 
-def described(node: JsonObject) -> str:
-    if "enum" in node:
-        return " or ".join(json.dumps(choice) for choice in as_list(node["enum"]))
-    return str(node.get("format") or node.get("type") or "value")
-
-
 @dataclass(frozen=True)
 class Schema:
     """A configuration file's JSON schema, its ``$ref`` links resolved against its ``$defs``."""
@@ -126,6 +120,17 @@ class Schema:
         return [
             self.resolved(as_object(each)) for each in as_list(node.get("anyOf", [node])) if each != {"type": "null"}
         ]
+
+    def kind(self, node: JsonObject) -> str:
+        """What a field takes, as a deployer reads it; an array names what each of its items takes."""
+        return " or ".join(self.described(each) for each in self.choices(node))
+
+    def described(self, choice: JsonObject) -> str:
+        if "enum" in choice:
+            return " or ".join(json.dumps(each) for each in as_list(choice["enum"]))
+        if choice.get("type") == "array" and "items" in choice:
+            return f"array of {self.kind(as_object(choice['items']))}"
+        return str(choice.get("format") or choice.get("type") or "value")
 
     def table(self, choices: list[JsonObject]) -> tuple[JsonObject | None, bool]:
         """The table a field holds, if it holds one, and whether it is an array of tables."""
@@ -149,7 +154,7 @@ class Schema:
                 path,
                 required=name in required,
                 default=node.get("default"),
-                kind=" or ".join(described(each) for each in choices),
+                kind=self.kind(node),
                 table=table_schema is not None,
                 refusals=() if table_schema is None else refusals_of(table_schema),
             )
