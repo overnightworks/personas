@@ -544,10 +544,12 @@ class AgentLoop:
     async def _wait_parked(self, seconds: float, *, stopped_taking_turns: bool) -> None:
         """Waits before the next retry. Once the loop has stopped taking turns in the app, it states ``unavailable`` at
         his seats meanwhile, the first time until the next full pass, and retries once that has gone out too."""
-        async with asyncio.TaskGroup() as stating:
-            if stopped_taking_turns and self._turn_states.stopped_taking_turns():
-                stating.create_task(self._state_on_own_session(self._turn_states.state_unavailable))
+        if not (stopped_taking_turns and self._turn_states.stopped_taking_turns()):
             await self._boundaries.clock.sleep(seconds)
+            return
+        async with asyncio.TaskGroup() as waiting:
+            waiting.create_task(self._state_on_own_session(self._turn_states.state_unavailable))
+            waiting.create_task(self._boundaries.clock.sleep(seconds))
 
     async def state_on_stop(self, seconds: float) -> None:
         """At his stop, sends within ``seconds`` what the stop left queued, the end of a turn it cut among it, and each
