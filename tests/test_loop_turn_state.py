@@ -21,7 +21,7 @@ from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PLACE_ID, restarte
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
 from tests.support.hopin import CALL, SAY_TOOL
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
-from tests.support.standings import paused
+from tests.support.standings import active, paused
 
 pytestmark = pytest.mark.anyio
 
@@ -114,8 +114,15 @@ async def test_a_turn_cancelled_because_his_seat_ended_states_no_end(runner):
 
     runner.app.stand(SUBJECT)
     await runner.reports.until_a_turn_ended()
+    # Statements go out in the order queued, so a next turn's thinking arrives after any end the first one queued.
+    seated_again_read = runner.app.hold_next_window_read()
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    await runner.app.until_window_read_held()
+    say_in_the_call(runner, ADDRESSED)
+    seated_again_read.set()
+    await runner.app.until_turn_states(2)
 
-    assert statements(runner) == [THINKING]
+    assert statements(runner) == [THINKING, THINKING]
     assert runner.reports.reported(started=False) == []
 
 
