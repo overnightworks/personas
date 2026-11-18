@@ -306,7 +306,8 @@ async def a_call_waiting_for_its_app_while_its_place_leaves(runner, songmaker, *
         runner.gateway = Gateway(say_round(ANSWER), completion("done"))
         act = a_say(runner, ANSWER, unanswered(TURN_CANCELLED_CODE))
     runner.app.stand(SUBJECT, active(PLACE_ID), active(OTHER_CALL_ID))
-    runner.start(open_session=open_session)
+    runner.open_session = open_session
+    runner.start()
     await runner.app.until_window_read(PLACE_ID)
     await runner.app.until_window_read(OTHER_CALL_ID)
     say_in_the_call(runner, ADDRESSED)

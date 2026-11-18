@@ -159,6 +159,10 @@ class Harness:
         """The backend of each turn, in the order opened."""
         self.sleeps: HeldSleeps | None = None
         """The held sleeps of the clock, from the first spoken scenario that needs the wait for his own line gated."""
+        self.open_session: SessionOpener | None = None
+        """How the runner opens its app sessions, when a scenario chooses; else the real session at the app."""
+        self.backend_defect: Exception | None = None
+        """The defect each turn's backend raises in place of the error that ended its turn, when a scenario chooses."""
 
     def remember_in(self, store: LineStore, memory: MemoryTarget | None = None) -> None:
         """Gives the runner a memory: the store its loops keep and read lines through, and the table that names it.
@@ -226,10 +230,10 @@ class Harness:
         log_state_change(change)
         self.on_report(change)
 
-    def start(self, *, stream_seconds: float = READ_SECONDS, open_session: SessionOpener | None = None) -> None:
+    def start(self, *, stream_seconds: float = READ_SECONDS) -> None:
         boundaries = SweepingBoundaries(
             tokens=HttpTokenSource(TOKEN_ENDPOINT, self.token_client),
-            open_session=open_session or partial(open_mcp_session, stream_seconds=stream_seconds),
+            open_session=self.open_session or partial(open_mcp_session, stream_seconds=stream_seconds),
             clock=self.clock,
             report=self._report,
             ready=FileReadyMarker(self.ready_file),
@@ -244,7 +248,9 @@ class Harness:
         assert self.config.gateway is not None
         handed = tuple(tools)
         self.handed.append(handed)
-        backend = RoundBackend(GatewayBackend(self.config.gateway, tools=handed, transport=self.gateway))
+        backend = RoundBackend(
+            GatewayBackend(self.config.gateway, tools=handed, transport=self.gateway), defect=self.backend_defect
+        )
         self.backends.append(backend)
         return backend
 
