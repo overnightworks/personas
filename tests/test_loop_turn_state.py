@@ -17,19 +17,21 @@ from agents.member import (
 from agents.tools import ToolOutcome
 from agents.turn import StopOutcome
 
-from personas.decision import status_code
+from personas.decision import NETWORK_FAILURE_CODE, status_code
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
 from tests.support.hopin import CALL, LIMIT_SECONDS, SAY_TOOL
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, paused
+from tests.support.wire import hangs
 
 if TYPE_CHECKING:
     from tests.support.wire import Reply as AppReply
 
 pytestmark = pytest.mark.anyio
 
+SHORT_CALL_SECONDS = 0.3
 THINKING = SetTurnStateArguments(place=CALL_PLACE, thinking=True)
 
 
@@ -186,3 +188,17 @@ async def test_a_statement_the_app_refuses_or_fails_is_logged_and_the_turn_goes_
     await runner.reports.until(Event.TURN_STATE_FAILED, count=len(reported))
 
     assert runner.reports.reported(started=False) == reported
+
+
+async def test_a_statement_the_app_does_not_answer_in_time_is_logged_as_failed_and_the_turns_round_starts(runner):
+    """TURNS-43, LOG-34."""
+    runner.bound_listening_calls_to(SHORT_CALL_SECONDS)
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    await restarted_in_the_call(runner)
+    runner.app.script(SET_TURN_STATE_TOOL, hangs)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.app.said_count(1)
+    await runner.reports.until(Event.TURN_STATE_FAILED)
+
+    assert runner.reports.reported(started=False)[0] == (Event.TURN_STATE_FAILED, NETWORK_FAILURE_CODE)
+    assert runner.gateway.arrivals == 1

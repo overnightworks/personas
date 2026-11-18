@@ -3,12 +3,11 @@ for that app's scope and within its call time."""
 
 from __future__ import annotations
 
-import asyncio
 from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING
 
 from personas.decision import decisive_failure
-from personas.failures import Unreachable, leaves_of, raise_if_cancelled
+from personas.failures import leaves_of, raise_if_cancelled, within_call_time
 from personas.reporting import step_timer, stepping
 from personas.task_record import ending_loud_when_cancelled, unreachable_unless_cancelling
 
@@ -76,18 +75,12 @@ class TurnSessions:
         self, app: AppTarget, ask: Callable[[AppSession], Awaitable[Answer]], record: TaskRecord, *, opening: bool
     ) -> Answer:
         """The token, the session and the request, all under the call time of the app."""
-        bound = asyncio.timeout(app.call_seconds)
-        try:
-            async with bound:
-                granted = await self._tokens.fetch(self._agent, app.scope)
-                async with AsyncExitStack() as opened:
-                    session = await self.opened(opened, app, granted.value, measured=opening)
-                    try:
-                        return await ask(session)
-                    except Exception as error:
-                        record.note(error)
-                        raise
-        except TimeoutError:
-            if not bound.expired():
-                raise
-            raise Unreachable("the app did not answer in time") from None
+        async with within_call_time(app.call_seconds):
+            granted = await self._tokens.fetch(self._agent, app.scope)
+            async with AsyncExitStack() as opened:
+                session = await self.opened(opened, app, granted.value, measured=opening)
+                try:
+                    return await ask(session)
+                except Exception as error:
+                    record.note(error)
+                    raise
