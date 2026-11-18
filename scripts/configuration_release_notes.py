@@ -265,11 +265,6 @@ def rules_of(schema: JsonObject) -> list[Rule]:
     ]
 
 
-def declares_rules(schema: JsonObject) -> bool:
-    """Whether the schema names its rules across fields; a tag older than configuration_schema names none."""
-    return "refusals" in schema
-
-
 def kept_change(then: ConfigField, now: ConfigField) -> Change | None:
     """How a field both schemas hold changed, if it changed in a way a deployer must know of."""
     if (then.kind, then.table) != (now.kind, now.table):
@@ -496,34 +491,22 @@ def summary(change: Change, field: ConfigField, then: ConfigField | None) -> str
     return f"added, optional, default `{toml_value(field.default)}`"
 
 
-def rule_line(rule: Rule, *, new: bool) -> str:
+def rule_line(rule: Rule) -> str:
     where = "the top level" if not rule.table else f"`{table_header(rule.table)}`"
-    if not new:
-        return f"- A rule across the fields of {where}: `{rule.sentence}`."
     return f"- A new rule across the fields of {where}: `{rule.sentence}`. A file that breaks it no longer starts."
 
 
-def rule_lines(previous_tag: str, before: JsonObject, after: JsonObject) -> list[str]:
-    """The rules across fields that the checked-out file adds, or every rule it holds when the previous release's
-    schema names none, with a sentence that says so."""
-    if declares_rules(before):
-        known = set(rules_of(before))
-        return [rule_line(rule, new=True) for rule in rules_of(after) if rule not in known]
-    rules = rules_of(after)
-    if not rules:
-        return []
-    return [
-        f"{previous_tag} names no rule across fields in its schema, so here is each rule this release holds; a file"
-        " that breaks one does not start, and some may be older than this release.",
-        *(rule_line(rule, new=False) for rule in rules),
-    ]
+def rule_lines(before: JsonObject, after: JsonObject) -> list[str]:
+    """The rules across fields that the checked-out file adds."""
+    known = set(rules_of(before))
+    return [rule_line(rule) for rule in rules_of(after) if rule not in known]
 
 
 def notes(previous_tag: str, version: str, before: JsonObject, after: JsonObject) -> str:
     fields_after = fields_of(after)
     rules_after = rules_of(after)
     found = changes(fields_of(before), fields_after)
-    rules = rule_lines(previous_tag, before, after)
+    rules = rule_lines(before, after)
     lines = ["## Configuration changes", ""]
     if not found and not rules:
         lines.append(
@@ -557,9 +540,6 @@ def notes(previous_tag: str, version: str, before: JsonObject, after: JsonObject
 
 def schema(configuration: ModuleType) -> JsonObject:
     """The JSON schema of the configuration file that ``configuration``, a tree's ``personas.config``, reads."""
-    # A tag older than configuration_schema can be the previous release, and it names the file's model _FileModel.
-    if not hasattr(configuration, "configuration_schema"):
-        return as_object(configuration._FileModel.model_json_schema())  # noqa: SLF001
     accessor = cast("Callable[[], JsonObject]", configuration.configuration_schema)
     return accessor()
 

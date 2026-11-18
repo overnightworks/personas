@@ -8,12 +8,11 @@ import sys
 import tomllib
 from collections.abc import Callable
 from pathlib import Path
-from types import ModuleType
 from typing import TYPE_CHECKING
 
 import pytest
 
-from configuration_release_notes import PLACEHOLDER_SENTENCE, main, notes, schema
+from configuration_release_notes import PLACEHOLDER_SENTENCE, main, notes
 from personas.config import configuration_schema
 from tests.scripts.support.configuration_schemas import (
     BoundLookups,
@@ -27,7 +26,6 @@ from tests.scripts.support.configuration_schemas import (
     ListeningApps,
     MemoryOnByDefault,
     Ownership,
-    OwnershipBefore,
     OwnershipOnly,
     RuledHistory,
     RuledShorterHistory,
@@ -558,16 +556,6 @@ def test_each_block_pasted_where_its_sentence_says_parses_into_its_table(
     assert tomllib.loads(pasted) == parsed
 
 
-def test_the_notes_list_every_rule_when_the_previous_schema_names_none():
-    rendered = notes_between(Ownership, DeclaresRules)
-
-    assert f"{PREVIOUS_TAG} names no rule across fields in its schema" in rendered
-    assert rendered.endswith(
-        "- A rule across the fields of the top level: `history_keep_bytes: must not be above history_bytes`.\n\n"
-        "- A rule across the fields of `[ownership]`: `stop_seconds: must be above grace_seconds`.\n"
-    )
-
-
 @pytest.mark.parametrize(
     ("before", "after"),
     [
@@ -611,13 +599,6 @@ def test_the_shipped_configuration_compared_with_itself_has_no_change(monkeypatc
     assert "No field" in capsys.readouterr().out
 
 
-def test_the_schema_of_a_tag_older_than_configuration_schema_is_its_file_models():
-    older = ModuleType("personas.config")
-    older._FileModel = OwnershipBefore  # noqa: SLF001 - the name an older tag gives its file's model
-
-    assert schema(older) == OwnershipBefore.model_json_schema()
-
-
 SCRIPT = Path(__file__).parents[2] / "scripts" / "configuration_release_notes.sh"
 UNTAGGED = "nightly"
 CONFIG_AT_TAG = """from pydantic import BaseModel
@@ -625,6 +606,10 @@ CONFIG_AT_TAG = """from pydantic import BaseModel
 
 class _FileModel(BaseModel):
     ready_file: str
+
+
+def configuration_schema():
+    return _FileModel.model_json_schema()
 """
 CONFIG_AT_CHECKOUT = """from typing import Literal
 
