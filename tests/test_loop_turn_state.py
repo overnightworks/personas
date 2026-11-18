@@ -4,6 +4,7 @@ his seats are told once the loop stops taking turns in the app, recovers or stop
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
@@ -19,7 +20,7 @@ from agents.tools import ToolOutcome
 from agents.turn import StopOutcome
 from mcp_types import INVALID_PARAMS
 
-from personas.decision import INVALID_PARAMS_REASON, NO_ANSWER_REASON
+from personas.decision import INVALID_PARAMS_REASON, NETWORK_FAILURE_CODE, NO_ANSWER_REASON
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
@@ -316,6 +317,30 @@ async def test_the_runners_stop_ends_the_thinking_of_the_turn_it_cuts_with_his_l
     await ended_by(runner.task)
 
     assert statements(runner) == [*earlier, THINKING, ended(last)]
+
+
+async def test_a_stops_statement_that_does_not_go_out_within_its_margin_is_logged_and_the_agent_still_ends(runner):
+    """TURNS-43, LOG-34."""
+    entered, released = asyncio.Event(), asyncio.Event()
+
+    async def held_until_released(reply: AppReply) -> None:
+        entered.set()
+        await released.wait()
+
+    runner.config = replace(runner.config, ownership=replace(runner.config.ownership, cancel_margin_seconds=0.05))
+    await a_turn_in_its_first_round(runner, *says(PLACE_ID, ANSWER))
+    await runner.app.until_turn_states(1)
+    runner.app.script(SET_TURN_STATE_TOOL, held_until_released)
+
+    runner.task.cancel()
+    try:
+        ended_as = await ended_by(runner.task)
+    finally:
+        released.set()
+
+    assert entered.is_set()
+    assert isinstance(ended_as, asyncio.CancelledError)
+    assert runner.reports.reported(started=False).count((Event.TURN_STATE_FAILED, NETWORK_FAILURE_CODE)) == 1
 
 
 @pytest.mark.parametrize("status", [HTTPStatus.BAD_REQUEST, HTTPStatus.OK], ids=["error status", "success status"])
