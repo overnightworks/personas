@@ -43,6 +43,14 @@ def test_a_database_table_may_set_the_write_bound_or_leave_a_write_unbounded(fil
     assert load_config(files.write()).database.write_seconds == bound
 
 
+@pytest.mark.parametrize("port", ['"5432"', "0", "65536"], ids=["a string", "below the range", "above the range"])
+def test_a_port_that_is_no_integer_from_1_to_65535_stops_the_start_and_names_it(files, monkeypatch, capsys, port):
+    """CONFIG-22."""
+    files.set_database(port=port)
+
+    assert "port" in fails_at_start(files.write(), monkeypatch, capsys)
+
+
 def test_a_file_without_a_database_table_stops_the_start_and_names_it(files, monkeypatch, capsys):
     """CONFIG-22."""
     files.text = files.text.replace(files.database_table(), "")

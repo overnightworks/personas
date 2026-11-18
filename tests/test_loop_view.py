@@ -110,6 +110,15 @@ async def test_an_invitation_the_loop_leaves_out_is_reported_once_with_its_place
     assert not [value for value in (TABLE.id, "inv-3") if value in str(logged)]
 
 
+async def test_the_started_line_of_an_agent_that_cannot_take_turns_names_no_model(runner, caplog):
+    """LOG-6."""
+    await an_invited_table_at_an_app_that_binds_no_tools_read_twice(runner)
+
+    started = lines_of(caplog.get_records("call"), "loop.started")
+    assert started
+    assert all("model" not in line for line in started)
+
+
 async def test_a_table_that_serves_no_view_yet_is_accepted_with_figure_and_voice_and_his_turn_runs_once_it_is_active(
     runner,
 ):

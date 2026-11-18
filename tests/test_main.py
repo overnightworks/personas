@@ -22,6 +22,7 @@ from personas.app_session import open_mcp_session
 from personas.config import CONFIG_ENVIRONMENT_VARIABLE, load_config
 from personas.failures import STORE_UNREACHABLE_CODE, SchemaNotAtHeadError, StoreUnavailable, leaves_of
 from personas.main import (
+    CONFIGURATION_ERROR_EXIT_CODE,
     READINESS_ERROR_EXIT_CODE,
     STORE_ERROR_EXIT_CODE,
     SchemaChecked,
@@ -70,6 +71,21 @@ def test_every_line_the_entry_point_configures_is_one_json_object_of_the_runner_
 
     line = json.loads(capsys.readouterr().out)
     assert (line["service"], line["event"], line["agent_id"]) == ("personas", "loop.started", "mozart")
+
+
+def test_a_log_level_logline_refuses_is_one_plain_line_on_stderr_and_the_configuration_exit_code(
+    world, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    """LOG-1."""
+    monkeypatch.setenv("LOG_LEVEL", "loud")
+
+    with pytest.raises(SystemExit) as refused:
+        world.start()
+
+    assert refused.value.code == CONFIGURATION_ERROR_EXIT_CODE
+    error = capsys.readouterr().err
+    assert error.startswith("personas: LOG_LEVEL is 'loud'")
+    assert error.count("\n") == 1
 
 
 def test_an_uncaught_exception_after_the_entry_point_configures_is_one_json_crash_line_on_stdout(

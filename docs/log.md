@@ -28,22 +28,22 @@ events and their fields. A test cites each rule by its ID at the start of its do
 
 | Event | Written when | Fields beyond the ids |
 |---|---|---|
-| `loop.started` | a loop starts | `model` when the agent has a persona (LOG-6) |
+| `loop.started` | a loop starts | `model` when the agent can take turns (LOG-6) |
 | `loop.suspended` | the realm or an app refuses the agent | `reason`; `status` and `mcp_method` when a call failed (LOG-7) |
 | `loop.resumed` | the refusal ended | none (LOG-8) |
 | `loop.backed_off` | a network failure, a lost stream or a 5xx | `reason`; `status` and `mcp_method` when a call failed (LOG-9) |
 | `invitation.accepted`, `invitation.refused` | an accept answered | `reason` for a refusal (LOG-10) |
 | `invitation.left_out` | an invitation the agent cannot take turns at | `place_kind`, `reason` `no_turns` (LOG-11) |
 | `turn.ended` | every turn, however it ends | see below (LOG-12) |
-| `turn_wait.ended`, `claim_write.ended`, `token_hold.ended`, `session_open.ended`, `tool_list.ended`, `turn_setup.ended` | each step of a turn | `duration_ms`, `outcome`, `reason` of a failed step; `wait_reason` on `turn_wait.ended` (LOG-13) |
-| `token_request.ended` | each token request | `duration_ms`, `outcome` (LOG-14) |
+| `turn_wait.ended`, `claim_write.ended`, `token_hold.ended`, `session_open.ended`, `tool_list.ended`, `turn_setup.ended` | each step of a turn | `duration_ms`, `outcome`, `reason` and `error_type` of a failed step; `wait_reason` on `turn_wait.ended` (LOG-13) |
+| `token_request.ended` | each token request | `duration_ms`, `outcome`; `reason` and `error_type` of a failed request (LOG-14) |
 | `turns.paused` | a turn without an answer pauses his turns | `reason` (the turn's code, `budget_spent` among them), `pause_ms` (LOG-15) |
 | `speak.refused` | the app refused a sentence | `reason` (the app's code) (LOG-16) |
 | `hold.decided` | once per hold id | `reason`: `continued`, `stopped`, `undecided`, `no_turn` (LOG-17) |
 | `tools.left_out` | an app lost tool names to an earlier app, once per session | `tool_count`, never a name (LOG-18) |
 | `held_app.failed`, `tools_only_app.failed` | a call to another app failed | `status`, `mcp_method`, `reason` (LOG-19) |
 | `store.failed`, `store.resumed` | once per store outage, and when it answers again | `reason` `store_unreachable` or `store_timeout` (LOG-20) |
-| `lines.swept` | each sweep | `line_count`; no agent or app (LOG-21) |
+| `lines.swept` | a sweep that erased lines | `line_count`; no agent or app (LOG-21) |
 | `agent.taken` | a pod holds an agent's lock | the agent only (LOG-22) |
 | `agent.lost` | a pod stops an agent it served | `reason`: `hold_lost`, `generation_stale` or the store's code (LOG-23) |
 | `agent.stop_overran` | an agent took longer than `cancel_margin_seconds` to stop | the agent only (LOG-24) |
