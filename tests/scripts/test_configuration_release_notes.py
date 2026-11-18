@@ -6,7 +6,7 @@ from enum import Enum
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-from configuration_release_notes import main, notes, schema
+from configuration_release_notes import PLACEHOLDER_SENTENCE, main, notes, schema
 
 PREVIOUS_TAG = "v2026.11.17.2"
 VERSION = "2026.11.18.1"
@@ -127,6 +127,21 @@ def test_the_notes_name_each_change_a_deployer_must_make_with_its_toml(before, a
     assert f"Since {PREVIOUS_TAG}," in rendered
     assert f"/v{VERSION}/docs/configuration.md" in rendered
     assert rendered.endswith(expected)
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "explained"),
+    [
+        pytest.param(Ownership, WithStop, False, id="only defaults"),
+        pytest.param(Ownership, WithoutTools, False, id="only a removal"),
+        pytest.param(Ownership, WithDatabase, True, id="a required table's placeholders"),
+        pytest.param(TopLevelBefore, TopLevelAfter, True, id="an optional and a required field's placeholders"),
+    ],
+)
+def test_the_notes_explain_the_placeholder_only_when_a_block_holds_one(before, after, explained):
+    paragraphs = notes_between(before, after).split("\n\n")
+
+    assert (PLACEHOLDER_SENTENCE in paragraphs) is explained
 
 
 def test_the_notes_say_so_when_no_field_changed():

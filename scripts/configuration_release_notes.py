@@ -165,6 +165,13 @@ def toml_value(value: object) -> str:
     return json.dumps(value)
 
 
+PLACEHOLDER_MARK = " = <"
+PLACEHOLDER_SENTENCE = (
+    "A value written as `<kind>` has no default: a required field's must be filled in, an optional field's may be"
+    " left out."
+)
+
+
 def assignment(field: ConfigField) -> str:
     value = f"<{field.kind}>" if field.default is None else toml_value(field.default)
     return f"{field.path[-1].name} = {value}"
@@ -216,10 +223,16 @@ def notes(previous_tag: str, version: str, before: JsonObject, after: JsonObject
         f"Since {previous_tag}, the runner's configuration file changed as follows; what each field means is in the"
         f" [configuration reference]({REFERENCE_URL.format(version=version)})."
     )
-    for change, field in found:
+    blocks = [
+        (change, field, [] if change is Change.REMOVED else list(toml_lines(field, fields_after)))
+        for change, field in found
+    ]
+    if any(PLACEHOLDER_MARK in line for _, _, block in blocks for line in block):
+        lines.extend(["", PLACEHOLDER_SENTENCE])
+    for change, field, block in blocks:
         lines.extend(["", f"- `{field.label}`: {summary(change, field)}."])
-        if change is not Change.REMOVED:
-            lines.extend(["", "```toml", *toml_lines(field, fields_after), "```"])
+        if block:
+            lines.extend(["", "```toml", *block, "```"])
     return "\n".join(lines) + "\n"
 
 
