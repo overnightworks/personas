@@ -199,13 +199,24 @@ def _memory_request(arguments: Sequence[str]) -> argparse.Namespace:
     parser = _MemoryArgumentParser(prog=f"personas {MEMORY_COMMAND}", allow_abbrev=False)
     commands = parser.add_subparsers(dest="command", required=True)
     listing = commands.add_parser(
-        LIST_COMMAND, help="one row per visit, without any line's content", allow_abbrev=False
+        LIST_COMMAND, help="one row per visit and per agent's history, without any content", allow_abbrev=False
     )
-    listing.add_argument("--agent", action=_StoreOnce, metavar="CLIENT_ID", help="only this agent's visits")
-    erasing = commands.add_parser(ERASE_COMMAND, help="delete kept lines and print how many", allow_abbrev=False)
+    listing.add_argument("--agent", action=_StoreOnce, metavar="CLIENT_ID", help="only this agent's visits and history")
+    erasing = commands.add_parser(
+        ERASE_COMMAND,
+        help="delete kept lines, history entries and answered turns and print how many",
+        allow_abbrev=False,
+    )
     selector = erasing.add_mutually_exclusive_group(required=True)
-    selector.add_argument("--agent", action=_StoreOnce, metavar="CLIENT_ID", help="every line this agent keeps")
-    selector.add_argument("--all", action="store_true", dest="every_agent", help="every line of every agent")
+    selector.add_argument(
+        "--agent",
+        action=_StoreOnce,
+        metavar="CLIENT_ID",
+        help="every line, history entry and answered turn this agent keeps",
+    )
+    selector.add_argument(
+        "--all", action="store_true", dest="every_agent", help="every agent's lines, history entries and answered turns"
+    )
     return parser.parse_args(arguments)
 
 
