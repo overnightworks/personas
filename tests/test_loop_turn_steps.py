@@ -4,20 +4,34 @@ carry that trace to the app."""
 from __future__ import annotations
 
 import json
+from contextlib import asynccontextmanager
 from http import HTTPStatus
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 import pytest
 from agents.backend.fake_gateway import Reply
+from logline import current_traceparent
 
+from personas.app_session import open_mcp_session
 from personas.decision import NO_ANSWER_REASON
+from personas.failures import StatusFailure
 from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import FakeClock
 from tests.support.gateway import Gateway, says
 from tests.support.hopin import LIST_TOOLS, LISTEN, a_traceparent, trace_id_of
 from tests.support.logs import lines_of, written_by_the_runner
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
+    from personas.app_session import AppSession
+    from personas.config import AppTarget
+    from personas.secret import Secret
+
 pytestmark = pytest.mark.anyio
+
+TOKEN_RAN_OUT_SECONDS = 10_000.0
 
 STEPS = (
     "turn_wait.ended",
@@ -77,23 +91,70 @@ async def test_the_setup_of_a_turn_contains_the_steps_it_waits_for(runner, caplo
     )
 
 
-async def test_a_failed_step_ends_failed_with_a_closed_reason(runner, caplog):
-    """LOG-13."""
+class TokenRunsOutInTurn(FakeClock):
+    """A clock that has the token run out for whoever asks inside a turn's trace, so the loop's own token holds."""
+
+    def now(self) -> float:
+        return super().now() + (0.0 if current_traceparent() is None else TOKEN_RAN_OUT_SECONDS)
+
+
+class Sessions:
+    """Opens the real sessions until it is broken, then fails to open any."""
+
+    def __init__(self) -> None:
+        self.broken = False
+
+    @asynccontextmanager
+    async def open(self, app: AppTarget, token: Secret) -> AsyncGenerator[AppSession]:
+        if self.broken:
+            raise StatusFailure(HTTPStatus.SERVICE_UNAVAILABLE)
+        async with open_mcp_session(app, token) as session:
+            yield session
+
+
+def the_app_refusing_the_tool_list(runner, sessions):
     runner.app.refuse_with = HTTPStatus.SERVICE_UNAVAILABLE
     runner.app.refused_method = LIST_TOOLS
+
+
+def the_realm_refusing_a_token_that_ran_out(runner, sessions):
+    runner.realm.refusing = True
+
+
+def the_session_failing_to_open(runner, sessions):
+    sessions.broken = True
+
+
+@pytest.mark.parametrize(
+    ("failure", "step", "reason"),
+    [
+        (the_app_refusing_the_tool_list, "tool_list.ended", NO_ANSWER_REASON),
+        (the_realm_refusing_a_token_that_ran_out, "token_hold.ended", NO_ANSWER_REASON),
+        (the_session_failing_to_open, "session_open.ended", NO_ANSWER_REASON),
+    ],
+    ids=["tool_list", "token_hold", "session_open"],
+)
+async def test_a_failed_step_ends_failed_with_a_closed_reason(runner, caplog, failure, step, reason):
+    """LOG-13."""
+    sessions = Sessions()
+    runner.clock = TokenRunsOutInTurn()
+    runner.open_session = sessions.open
     runner.gateway = Gateway(Reply(status=HTTPStatus.OK))
     await restarted_in_the_call(runner)
+    failure(runner, sessions)
     say_in_the_call(runner, ADDRESSED)
     await runner.reports.until_a_turn_ended()
+    sessions.broken = False
+    runner.realm.refusing = False
     await runner.app.log.until(LISTEN, 2)
 
-    (listed,) = lines_of(caplog.get_records("call"), "tool_list.ended")
-    (listed_record,) = [each for each in caplog.get_records("call") if each.getMessage() == "tool_list.ended"]
-    assert listed_record.levelname == "ERROR"
+    (failed,) = lines_of(caplog.get_records("call"), step)
+    (failed_record,) = [each for each in caplog.get_records("call") if each.getMessage() == step]
+    assert failed_record.levelname == "ERROR"
     (setup,) = lines_of(caplog.get_records("call"), "turn_setup.ended")
-    assert (listed["outcome"], listed["reason"]) == ("failed", NO_ANSWER_REASON)
-    assert (setup["outcome"], setup["reason"]) == ("failed", NO_ANSWER_REASON)
-    assert listed["error_type"]
+    assert (failed["outcome"], failed["reason"]) == ("failed", reason)
+    assert (setup["outcome"], setup["reason"]) == ("failed", reason)
+    assert failed["error_type"]
     assert setup["error_type"]
 
 

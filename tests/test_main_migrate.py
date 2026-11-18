@@ -154,6 +154,22 @@ def test_an_unknown_command_of_the_console_script_stops_before_the_configuration
     assert "invalid choice: 'serve'" in capsys.readouterr().err
 
 
+def test_migrating_refuses_a_log_level_logline_refuses_with_one_plain_line_and_the_configuration_exit_code(
+    files, monkeypatch, capsys, restored_logging
+):
+    """LOG-1."""
+    monkeypatch.setenv(CONFIG_ENVIRONMENT_VARIABLE, str(files.write()[CONFIG_ENVIRONMENT_VARIABLE]))
+    monkeypatch.setenv("LOG_LEVEL", "loud")
+
+    with pytest.raises(SystemExit) as refused:
+        main(arguments=[MIGRATE_COMMAND])
+
+    assert refused.value.code == CONFIGURATION_ERROR_EXIT_CODE
+    error = capsys.readouterr().err
+    assert error.startswith("personas: LOG_LEVEL is 'loud'")
+    assert error.count("\n") == 1
+
+
 def test_the_help_of_the_console_script_names_each_command_on_one_line_and_exits_zero(monkeypatch, capsys):
     monkeypatch.delenv(CONFIG_ENVIRONMENT_VARIABLE, raising=False)
     monkeypatch.setattr(sys, "argv", ["personas", "--help"])

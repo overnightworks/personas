@@ -386,6 +386,22 @@ def test_a_memory_command_used_wrongly_is_refused_with_its_usage_and_every_line_
     assert len(agents_kept(database)) == 6
 
 
+def test_a_memory_command_refuses_a_log_level_logline_refuses_with_one_plain_line_and_the_configuration_exit_code(
+    files, monkeypatch, capsys, restored_logging
+):
+    """LOG-1."""
+    monkeypatch.setenv(CONFIG_ENVIRONMENT_VARIABLE, str(files.write()[CONFIG_ENVIRONMENT_VARIABLE]))
+    monkeypatch.setenv("LOG_LEVEL", "loud")
+
+    with pytest.raises(SystemExit) as refused:
+        main(arguments=["memory", "list"])
+
+    assert refused.value.code == CONFIGURATION_ERROR_EXIT_CODE
+    error = capsys.readouterr().err
+    assert error.startswith("personas: LOG_LEVEL is 'loud'")
+    assert error.count("\n") == 1
+
+
 @pytest.mark.postgres
 def test_a_memory_command_needs_the_database_table_alone_since_every_agent_keeps_a_history(
     files, database, monkeypatch, capsys
