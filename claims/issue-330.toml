@@ -3,6 +3,6 @@ agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
 role = "builder"
 base = "96a3493cefe2c70b38be47d4ab66e294e12abb0a"
 branch = "claude/issue-330-a-turn-s-setup-in-an-app-that-does-not-a"
-scope = ["docs/log.md", "src/personas/app_session.py", "src/personas/turn_states.py", "src/personas/turning.py", "tests/test_loop_turn_state.py", "tests/test_loop_turn_steps.py"]
+scope = ["docs/configuration.md", "docs/log.md", "docs/turns.md", "src/personas/app_session.py", "src/personas/loop.py", "src/personas/turn_states.py", "src/personas/turning.py", "tests/conftest.py", "tests/test_loop_turn_state.py", "tests/test_loop_turn_steps.py"]
 opened_commit = "ec7a1b786d39960ab159e8fa13f2de27a80d1b2c"
 whole_reason = "one time bound on the turn's own-app setup requests, logged as the failed step it is"
