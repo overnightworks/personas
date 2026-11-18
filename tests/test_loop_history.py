@@ -87,7 +87,7 @@ async def test_a_line_said_in_a_call_of_one_app_is_told_to_his_view_turn_of_anot
 
 async def test_a_line_read_in_the_same_wake_as_the_view_of_its_own_app_is_told_with_that_app(runner):
     runner.app.stand(SUBJECT, active(PLACE_ID), at_table())
-    runner.app.show_view(TABLE.id, 1, {"hand": "none"}, awaits_you=False)
+    runner.app.show_view(TABLE.id, 1, {"hand": "empty"}, awaits_you=False)
     runner.start()
     await runner.app.until_window_read(PLACE_ID)
     await runner.app.until_view_read(TABLE)
@@ -99,7 +99,7 @@ async def test_a_line_read_in_the_same_wake_as_the_view_of_its_own_app_is_told_w
     assert opening.room["woke"]["app"] == url_of(runner, 0)
     assert opening.room["history"] == history_of(
         [
-            view_entry(url_of(runner, 0), {"hand": "none"}, revision=1, awaits_you=False),
+            view_entry(url_of(runner, 0), {"hand": "empty"}, revision=1, awaits_you=False),
             entry(url_of(runner, 0), PLACE_ID, REMARK),
             view_entry(url_of(runner, 0), state, revision=2),
         ]

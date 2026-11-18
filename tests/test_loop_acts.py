@@ -417,8 +417,8 @@ async def test_each_agent_is_told_only_his_own_acts(runner):
     runner.add_agent(SECOND_AGENT, SECOND_SUBJECT, SECOND_NAME)
     first, second = (person_fingerprint(Principal(iss=ISSUER, sub=subject)) for subject in (SUBJECT, SECOND_SUBJECT))
     runner.gateway = Gateway(completion("done"))
-    runner.gateway.script_for(first, say_round("one"), completion("done"))
-    runner.gateway.script_for(second, completion("done"), say_round("two"), completion("done"))
+    runner.gateway.script_for(first, say_round("Hello."), completion("done"))
+    runner.gateway.script_for(second, completion("done"), say_round("Goodbye."), completion("done"))
     runner.app.stand(SUBJECT, active(PLACE_ID))
     runner.app.stand(SECOND_SUBJECT, active(PLACE_ID))
     runner.start()
@@ -439,8 +439,8 @@ async def test_each_agent_is_told_only_his_own_acts(runner):
         for user in (first, second)
     }
     assert told == {
-        first: [a_say(runner, "one", answered("said"))],
-        second: [a_say(runner, "two", answered("said"))],
+        first: [a_say(runner, "Hello.", answered("said"))],
+        second: [a_say(runner, "Goodbye.", answered("said"))],
     }
 
 
