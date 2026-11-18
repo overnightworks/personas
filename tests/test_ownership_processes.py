@@ -124,7 +124,10 @@ async def test_a_holder_whose_lock_connection_is_ended_during_a_turn_makes_no_to
     terminate_backend(database, lock_connection)
     await until(lambda: holder.lines("agent.lost", AGENT), "the holder stopped the agent")
     release.set()
+    reads_by_the_holder = pods.app.window_reads(PLACE_ID)
     await until(lambda: is_listening(other, AGENT), "the other pod listens for the agent")
+    await until(lambda: pods.app.window_reads(PLACE_ID) > reads_by_the_holder, "the other pod read the place")
+    pods.app.speak(PLACE_ID, PERSON, "Ada", LATER_LINE)
     await pods.app.said_count(1)
 
     ((lost_at, _),) = holder.lines("agent.lost", AGENT)
