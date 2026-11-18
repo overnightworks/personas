@@ -79,32 +79,48 @@ def as_list(value: object) -> list[object]:
     return cast("list[object]", value)
 
 
-def fields_of(schema: JsonObject) -> dict[FieldPath, ConfigField]:
-    """Every table and field the schema allows, keyed by its path, in the schema's order."""
-    definitions = as_object(schema.get("$defs", {}))
+def described(node: JsonObject) -> str:
+    if "enum" in node:
+        return " or ".join(json.dumps(choice) for choice in as_list(node["enum"]))
+    return str(node.get("format") or node.get("type") or "value")
 
-    def resolved(node: JsonObject) -> JsonObject:
+
+@dataclass(frozen=True)
+class Schema:
+    """A configuration file's JSON schema, its ``$ref`` links resolved against its ``$defs``."""
+
+    root: JsonObject
+
+    def resolved(self, node: JsonObject) -> JsonObject:
         reference = node.get("$ref")
         if not isinstance(reference, str):
             return node
-        return as_object(definitions[reference.removeprefix("#/$defs/")])
+        return as_object(as_object(self.root.get("$defs", {}))[reference.removeprefix("#/$defs/")])
 
-    def described(node: JsonObject) -> str:
-        if "enum" in node:
-            return " or ".join(json.dumps(choice) for choice in as_list(node["enum"]))
-        return str(node.get("format") or node.get("type") or "value")
+    def choices(self, node: JsonObject) -> list[JsonObject]:
+        """The values a field allows, its optional ``null`` left out."""
+        return [
+            self.resolved(as_object(each)) for each in as_list(node.get("anyOf", [node])) if each != {"type": "null"}
+        ]
 
-    def visit(table: JsonObject, prefix: FieldPath) -> Iterator[ConfigField]:
+    def table(self, choices: list[JsonObject]) -> tuple[JsonObject | None, bool]:
+        """The table a field holds, if it holds one, and whether it is an array of tables."""
+        if len(choices) != 1:
+            return None, False
+        if "properties" in choices[0]:
+            return choices[0], False
+        items = self.resolved(as_object(choices[0].get("items", {})))
+        if "properties" in items:
+            return items, True
+        return None, False
+
+    def fields(self, table: JsonObject, prefix: FieldPath) -> Iterator[ConfigField]:
         required = set(as_list(table.get("required", [])))
         for name, value in as_object(table.get("properties", {})).items():
             node = as_object(value)
-            choices = [
-                resolved(as_object(each)) for each in as_list(node.get("anyOf", [node])) if each != {"type": "null"}
-            ]
-            only = choices[0] if len(choices) == 1 else {}
-            items = resolved(as_object(only.get("items", {})))
-            table_schema = only if "properties" in only else items if "properties" in items else None
-            path = (*prefix, Step(name, repeated=table_schema is items))
+            choices = self.choices(node)
+            table_schema, repeated = self.table(choices)
+            path = (*prefix, Step(name, repeated=repeated))
             yield ConfigField(
                 path,
                 required=name in required,
@@ -113,9 +129,12 @@ def fields_of(schema: JsonObject) -> dict[FieldPath, ConfigField]:
                 table=table_schema is not None,
             )
             if table_schema is not None:
-                yield from visit(table_schema, path)
+                yield from self.fields(table_schema, path)
 
-    return {each.path: each for each in visit(schema, ())}
+
+def fields_of(schema: JsonObject) -> dict[FieldPath, ConfigField]:
+    """Every table and field the schema allows, keyed by its path, in the schema's order."""
+    return {each.path: each for each in Schema(schema).fields(schema, ())}
 
 
 def changes(
