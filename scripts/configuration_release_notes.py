@@ -386,10 +386,11 @@ def placement_inside_entry(
     field: ConfigField, parent: ConfigField, entry: ConfigField, optional: ConfigField | None
 ) -> Iterator[str]:
     """Where a field inside an array of tables goes: into its entries, under its table there if it has one; a
-    table at an entry's end, since its header takes every line below it."""
+    table at the end of its entry, or of its table there, since its header takes every line below it."""
     if optional is not None and len(optional.path) > len(entry.path):
         has = "one" if optional == parent else f"`{optional.label}`"
-        yield f"It goes into the `{parent.label}` of each `{entry.label}` entry that has {has}."
+        into = "at the end of" if field.table else "into"
+        yield f"It goes {into} the `{parent.label}` of each `{entry.label}` entry that has {has}."
         return
     where = "every existing" if field.required else "each"
     that = "" if field.required else " that sets it"

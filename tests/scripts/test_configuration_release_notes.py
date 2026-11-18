@@ -282,6 +282,22 @@ class WithAgentVoice(BaseModel):
     agents: list[AgentWithVoice]
 
 
+class VoiceBehindGateway(Entry):
+    origin: str
+    ca_file: str | None = None
+    gateway: Gateway
+
+
+class AgentWithVoiceBehindGateway(Entry):
+    client_id: str
+    memory: Memory | None = None
+    voice: VoiceBehindGateway | None = None
+
+
+class WithAgentVoiceBehindGateway(BaseModel):
+    agents: list[AgentWithVoiceBehindGateway]
+
+
 class WithNoClips(BaseModel):
     clips: list[Clip] = []
 
@@ -616,6 +632,23 @@ def replacing(key: str, paste: Paste) -> Paste:
     return replace
 
 
+def at_the_end_of(header: str) -> Paste:
+    """Pastes the block before the first header after each line that is the header."""
+
+    def paste(text: str, block: list[str]) -> str:
+        lines: list[str] = []
+        inside = False
+        for line in text.splitlines():
+            if inside and line.startswith("["):
+                lines.extend(block)
+                inside = False
+            inside = inside or line == header
+            lines.append(line)
+        return "\n".join([*lines, *(block if inside else []), ""])
+
+    return paste
+
+
 def at_the_end_of_each(entry: str) -> Paste:
     """Pastes the block before the first header after each entry's start that belongs to no table of the entry."""
     inside = f"[{entry.strip('[]')}."
@@ -715,6 +748,25 @@ TWO_AGENTS = '[[agents]]\nclient_id = "a"\n[agents.memory]\nkeep_days = 7.0\n\n[
                 ]
             },
             id="a table of the entries, at each entry's end",
+        ),
+        pytest.param(
+            WithAgentVoice,
+            WithAgentVoiceBehindGateway,
+            "It goes at the end of the `[agents.voice]` of each `[[agents]]` entry that has one.",
+            at_the_end_of("[agents.voice]"),
+            '"https://gateway.test"',
+            '[[agents]]\nclient_id = "a"\n[agents.voice]\norigin = "https://voice.test"\n\n'
+            '[[agents]]\nclient_id = "b"\n',
+            {
+                "agents": [
+                    {
+                        "client_id": "a",
+                        "voice": {"origin": "https://voice.test", "gateway": {"origin": "https://gateway.test"}},
+                    },
+                    {"client_id": "b"},
+                ]
+            },
+            id="a table of an optional table inside the entries that have it, at that table's end",
         ),
         pytest.param(
             TunedOwnershipOnly,
