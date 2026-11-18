@@ -7,6 +7,7 @@ events and their fields.
 
 - Every line is one JSON object through [logline](https://github.com/overnightworks/logline), with
   `service` `personas`. `LOG_LEVEL` sets the level (default `info`), `SERVICE_VERSION` the `version`.
+  alembic, which checks the memory's schema at the start, writes only its warnings and errors.
 - An event is `<noun>.<verb_past>`, written once per state change. Its ids are `agent_id` and `app_id`, the
   host of the app's URL; a `reason` is a closed code.
 - A line holds ids, numbers named with their unit and closed codes: never text a person or an app wrote,

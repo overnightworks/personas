@@ -472,6 +472,41 @@ def test_a_runner_whose_database_is_behind_its_head_stops_before_it_writes_its_r
     assert not files.ready_path.exists()
 
 
+class WarnsAfterTheSchemaCheck:
+    """The real schema check, after which alembic warns and the runner stops."""
+
+    def __init__(self, inner: SchemaChecked) -> None:
+        self._inner = inner
+
+    async def require_head(self) -> None:
+        await self._inner.require_head()
+        logging.getLogger("alembic.runtime.migration").warning("migration.warned")
+        raise Stop
+
+
+@pytest.mark.postgres
+def test_a_runner_with_a_memory_writes_no_info_line_of_alembic_and_its_warning_still_reaches_stdout(
+    files, database, monkeypatch, restored_logging, capsys
+):
+    files.text += files.memory_table()
+    files.use_database(database)
+    monkeypatch.setenv(CONFIG_ENVIRONMENT_VARIABLE, files.write()[CONFIG_ENVIRONMENT_VARIABLE])
+
+    @asynccontextmanager
+    async def real_with_a_warning(config: Config, ready: ReadyMarker) -> AsyncGenerator[SweepingBoundaries]:
+        async with real_boundaries(config, ready) as boundaries:
+            assert boundaries.schema is not None
+            yield replace(boundaries, schema=WarnsAfterTheSchemaCheck(boundaries.schema))
+
+    with pytest.raises(Stop):
+        main(real_with_a_warning)
+
+    alembic_lines = [
+        line for line in map(json.loads, capsys.readouterr().out.splitlines()) if line["logger"].startswith("alembic")
+    ]
+    assert [(line["level"], line["event"]) for line in alembic_lines] == [("warning", "migration.warned")]
+
+
 @pytest.mark.parametrize("has_memory", [True, False], ids=["memory table", "no memory table"])
 def test_the_real_boundaries_hold_a_store_exactly_when_the_configuration_has_a_memory_table(files, has_memory):
     if has_memory:
