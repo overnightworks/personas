@@ -38,6 +38,7 @@ from tests.support.configuration_schemas import (
     WithAgentMemory,
     WithAgentVoice,
     WithAgentVoiceBehindGateway,
+    WithClipOrName,
     WithDatabase,
     WithGateway,
     WithHighPort,
@@ -48,6 +49,7 @@ from tests.support.configuration_schemas import (
     WithMemory,
     WithModedMemory,
     WithNoClips,
+    WithNotedClipOrName,
     WithOneClip,
     WithOneGesture,
     WithOptionalAgents,
@@ -144,6 +146,17 @@ def notes_between(before: type[BaseModel], after: type[BaseModel]) -> str:
             " does not is changed to fit, or replaced by this.\n\n"
             "```toml\ngestures = {}\n```\n",
             id="a map whose key type changed",
+        ),
+        pytest.param(
+            WithClipOrName,
+            WithNotedClipOrName,
+            "- `intro`: now takes `{ url = string, note = string } or string`,"
+            " was `{ url = string, optional note = string } or string`.\n\n"
+            "It goes above the file's first table. "
+            "Where the file already sets it, a value that still fits what it now takes stays as it is; one that"
+            " does not is changed to fit, or replaced by this.\n\n"
+            '```toml\nintro = ""\n```\n',
+            id="an inline table, beside another type, whose fields changed",
         ),
         pytest.param(
             WithStringVoices,

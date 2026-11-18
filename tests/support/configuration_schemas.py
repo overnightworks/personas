@@ -161,6 +161,19 @@ class WithOneGesture(BaseModel):
     figure: OneGesture
 
 
+class NotedClip(Entry):
+    url: str
+    note: str
+
+
+class WithClipOrName(BaseModel):
+    intro: Clip | str = ""
+
+
+class WithNotedClipOrName(BaseModel):
+    intro: NotedClip | str = ""
+
+
 class StringVoices(Entry):
     names: tuple[str, ...] = ()
 
