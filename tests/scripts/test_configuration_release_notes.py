@@ -437,6 +437,17 @@ TWO_AGENTS = '[[agents]]\nclient_id = "a"\n[agents.memory]\nkeep_days = 7.0\n\n[
             id="a changed value of an existing table, in place of its line",
         ),
         pytest.param(
+            WithLowPort,
+            WithHighPort,
+            "a value that still fits what it now takes stays as it is; one that does not is changed to fit,"
+            " or replaced by this.",
+            replacing("port", under("[database]")),
+            "8080",
+            "[database]\nport = 80\n",
+            {"database": {"port": 8080}},
+            id="a value outside a changed bound, replaced in place of its line",
+        ),
+        pytest.param(
             Ownership,
             WithScope,
             "It goes into every existing `[[apps]]` entry.",
