@@ -1,8 +1,11 @@
 """The configuration file's JSON schema, the one source the release notes read: each rule across fields is named."""
 
-import pytest
+from typing import Self
 
-from personas.config import ConfigError, configuration_schema, load_config
+import pytest
+from pydantic import model_validator
+
+from personas.config import ConfigError, _Entry, configuration_schema, load_config
 
 TOOLS_ONLY_APP = '[[apps]]\nmcp_url = "https://songmaker.test/mcp"\nscope = "mcp-songmaker"\nlistens = false\n'
 
@@ -34,3 +37,16 @@ def test_a_rule_across_fields_that_refuses_a_file_is_named_in_the_configuration_
         load_config(files.write())
 
     assert [sentence for sentence in schema_refusals(configuration_schema()) if sentence in str(refused.value)]
+
+
+def test_a_check_across_fields_that_is_no_refusal_makes_the_schema_refuse_to_be_written():
+    class CheckedOutsideTheSchema(_Entry):
+        low: int = 1
+        high: int = 2
+
+        @model_validator(mode="after")
+        def _low_is_below_high(self) -> Self:
+            return self
+
+    with pytest.raises(TypeError, match="_low_is_below_high"):
+        CheckedOutsideTheSchema.model_json_schema()

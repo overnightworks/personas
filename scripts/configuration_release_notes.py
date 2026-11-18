@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
+    from types import ModuleType
 
 REFERENCE_URL = "https://github.com/overnightworks/personas/blob/v{version}/docs/configuration.md"
 
@@ -347,8 +348,8 @@ def notes(previous_tag: str, version: str, before: JsonObject, after: JsonObject
     return "\n".join(lines) + "\n"
 
 
-def schema() -> JsonObject:
-    configuration = importlib.import_module("personas.config")
+def schema(configuration: ModuleType) -> JsonObject:
+    """The JSON schema of the configuration file that ``configuration``, a tree's ``personas.config``, reads."""
     # A tag older than configuration_schema can be the previous release, and it names the file's model _FileModel.
     if not hasattr(configuration, "configuration_schema"):
         return as_object(configuration._FileModel.model_json_schema())  # noqa: SLF001
@@ -366,11 +367,12 @@ def main(arguments: Sequence[str] | None = None) -> None:
     compare.add_argument("previous_tag", help="the release the schema on standard input is from, as v<version>")
     compare.add_argument("version", help="the release the notes are for, without a v")
     parsed = parser.parse_args(arguments)
+    checked_out = schema(importlib.import_module("personas.config"))
     if parsed.command == "schema":
-        sys.stdout.write(json.dumps(schema()) + "\n")
+        sys.stdout.write(json.dumps(checked_out) + "\n")
         return
     before = as_object(json.loads(sys.stdin.read()))
-    sys.stdout.write(notes(parsed.previous_tag, parsed.version, before, schema()))
+    sys.stdout.write(notes(parsed.previous_tag, parsed.version, before, checked_out))
 
 
 if __name__ == "__main__":

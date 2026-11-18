@@ -7,11 +7,13 @@ import subprocess
 import sys
 from enum import Enum
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 from pydantic import BaseModel, ConfigDict
 
 from configuration_release_notes import PLACEHOLDER_SENTENCE, main, notes, schema
+from personas.config import configuration_schema
 from tests.support.scripts import run_from
 
 PREVIOUS_TAG = "v2026.11.17.2"
@@ -290,6 +292,7 @@ def test_the_notes_say_so_when_nothing_changed(unchanged):
     [
         pytest.param({"properties": ["ready_file"]}, id="properties as a list"),
         pytest.param({"properties": {}, "required": "ready_file"}, id="required as a string"),
+        pytest.param({"properties": {}, "refusals": [1]}, id="refusals not sentences"),
     ],
 )
 def test_a_malformed_schema_fails_loud(malformed):
@@ -304,8 +307,15 @@ def test_the_shipped_configuration_compared_with_itself_has_no_change(monkeypatc
 
     main(["notes", PREVIOUS_TAG, VERSION])
 
-    assert json.loads(written) == schema()
+    assert json.loads(written) == configuration_schema()
     assert "No field" in capsys.readouterr().out
+
+
+def test_the_schema_of_a_tag_older_than_configuration_schema_is_its_file_models():
+    older = ModuleType("personas.config")
+    older._FileModel = OwnershipBefore  # noqa: SLF001 - the name an older tag gives its file's model
+
+    assert schema(older) == OwnershipBefore.model_json_schema()
 
 
 SCRIPT = Path(__file__).parents[2] / "scripts" / "configuration_release_notes.sh"
