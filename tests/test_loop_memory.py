@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
-from agents.member import STANDING_URI, place_window_uri
 from agents.tools import ToolEffect
 from agents.turn import FailureCode
 from mcp_types import ListToolsResult
@@ -36,7 +35,15 @@ from personas.recall import (
     text_refused_text,
 )
 from personas.reporting import Event
-from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PLACE_ID, restarted_in_the_call, say_in_the_call
+from tests.support.call import (
+    ADDRESSED,
+    ANSWER,
+    CALL_PLACE,
+    PLACE_ID,
+    pulses_the_window_once,
+    restarted_in_the_call,
+    say_in_the_call,
+)
 from tests.support.fakes import CANCELLED_TURN, failed_turn, memory_target
 from tests.support.gateway import Gateway, play, say, says
 from tests.support.history import (
@@ -174,19 +181,6 @@ async def test_a_write_that_ends_in_a_timeout_is_reported_by_its_code_and_the_tu
 
     assert (Event.STORE_FAILED, STORE_TIMEOUT_CODE) in runner.reports.reported()
     assert not OUTAGE_EVENTS & {event for event, _ in runner.reports.reported()}
-
-
-def pulses_the_window_once(line_said: asyncio.Event):
-    """A listen that the app ends once it has pulsed the call's window for the line said, so no idle stream waits."""
-
-    async def answered(reply) -> None:
-        await reply.open_stream()
-        await reply.acknowledge([STANDING_URI])
-        await line_said.wait()
-        await reply.pulse(place_window_uri(CALL_PLACE))
-        await reply.complete()
-
-    return answered
 
 
 async def test_a_write_held_past_the_listens_deadline_cancels_the_running_turn_with_no_store_failed(runner):

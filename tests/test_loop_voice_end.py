@@ -8,7 +8,6 @@ from http import HTTPStatus
 import anyio
 import pytest
 from agents.backend.fake_gateway import completion
-from agents.member import STANDING_URI, place_window_uri
 from agents.tools import ToolOutcome
 from agents.turn import FailureCode
 
@@ -18,7 +17,7 @@ from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE, status_
 from personas.failures import INVALID_ANSWER_CODE, leaves_of
 from personas.reporting import Event
 from personas.task_record import UnrequestedCancellationError
-from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PLACE_ID, say_in_the_call
+from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, pulses_the_window_once, say_in_the_call
 from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
 from tests.support.fakes import CANCELLED_TURN, failed_turn
 from tests.support.gateway import Gateway, speaks_and_says
@@ -87,17 +86,8 @@ async def test_a_resume_in_a_call_answers_nothing_that_was_said_during_the_pause
 
 async def test_a_stream_the_app_ends_at_its_bound_while_he_speaks_lets_the_turn_speak_on(runner):
     pulse_window, end_stream = asyncio.Event(), asyncio.Event()
-
-    async def pulses_the_window_then_ends(reply):
-        await reply.open_stream()
-        await reply.acknowledge([STANDING_URI])
-        await pulse_window.wait()
-        await reply.pulse(place_window_uri(CALL_PLACE))
-        await end_stream.wait()
-        await reply.complete()
-
     sleeps = holding_sentence_ends(runner)
-    runner.app.script(LISTEN, pulses_the_window_then_ends)
+    runner.app.script(LISTEN, pulses_the_window_once(pulse_window, ended=end_stream))
     await a_voice_call(runner, completion(TWO_SENTENCES))
     say_in_the_call(runner, ADDRESSED, spoken=True)
     pulse_window.set()
