@@ -4,7 +4,7 @@ import pytest
 
 CHARACTERS = Path(__file__).resolve().parents[1] / "src" / "characters"
 TABLE_PARAGRAPH_START = "Am Spieltisch:"
-CONCEDING_RULE = ("nicht mehr gewinnen kannst, gibst du auf", "ein verlorenes Spiel aufzugeben, stimmst du zu")
+CONCEDING_RULE = ("nicht mehr gewinnen kannst, gibst du auf, wenn die App das anbietet", "ein verlorenes Spiel aufzugeben, stimmst du zu")
 
 
 @pytest.mark.parametrize("persona", sorted(CHARACTERS.glob("*.md")), ids=lambda path: path.stem)
