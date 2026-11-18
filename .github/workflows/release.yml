@@ -62,6 +62,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The configuration lines compare with the newest tag the commit reaches.
+          fetch-depth: 0
 
       - name: Refuse unless the checkout is the commit the gate judged
         run: |
@@ -71,15 +73,29 @@ jobs:
             exit 1
           fi
 
-      - name: Write the notes' figure lines from the files the release carries
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.14"
+
+      # As in CI: only what the lockfile resolved, wheels only except the
+      # overnightworks libraries, and no development tools.
+      - name: Install dependencies
+        run: uv sync --locked --no-install-project --no-build --no-dev
+
+      - name: Write the notes' configuration and figure lines from the files the release carries
         id: notes
         run: |
-          scripts/figure_release_notes.sh "$VERSION" > figure-notes.md
+          {
+            scripts/configuration_release_notes.sh "$VERSION"
+            echo
+            scripts/figure_release_notes.sh "$VERSION"
+          } > release-notes.md
           # A random delimiter cannot occur in the notes.
           delimiter="notes_$(openssl rand -hex 16)"
           {
             echo "notes<<${delimiter}"
-            cat figure-notes.md
+            cat release-notes.md
             echo "${delimiter}"
           } >> "$GITHUB_OUTPUT"
 

@@ -20,8 +20,14 @@ release changes the runner, its characters and its figures together. The rules i
 2. Expect quality's gate to refuse a commit whose checks are not green. Otherwise the image is pushed to
    GHCR with an attestation, and the tag `v<version>` is created with the figures `src/characters/*.vrm`
    as assets.
-3. The release notes open with one `figure` line per agent, written by `scripts/figure_release_notes.sh`:
-   paste it, without the name and its colon, into that agent's `[[agents]]` entry. An app that shows
+3. The release notes open with the configuration changes, written by
+   `scripts/configuration_release_notes.sh`: each field of the runner's file added, removed or newly
+   required since the newest tag the commit reaches, with the TOML it needs, or the sentence that none
+   changed. They are derived from `src/personas/config.py` at both tags, so no change needs a note of
+   its own, and they say what a `<kind>` placeholder asks for. The deployment's bump applies them all
+   to its runner configuration.
+4. Then come one `figure` line per agent, written by `scripts/figure_release_notes.sh`: paste it,
+   without the name and its colon, into that agent's `[[agents]]` entry. An app that shows
    figures fetches them only from the prefix its platform allows (hopin accepts
    `https://github.com/overnightworks/personas/releases/download/`).
 
