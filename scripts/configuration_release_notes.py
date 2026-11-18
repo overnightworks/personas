@@ -228,7 +228,8 @@ class Schema:
     def table_kind(self, choice: JsonObject, *, repeated: bool) -> str:
         """A table field takes a table, whose own fields are compared one by one; an array of tables keeps its
         bounds."""
-        return self.bounded("array of tables", choice) if repeated else "table"
+        shape = table_shape(repeated=repeated)
+        return self.bounded(shape, choice) if repeated else shape
 
     def fields(self, table: JsonObject, prefix: FieldPath) -> Iterator[ConfigField]:
         required = set(as_list(table.get("required", [])))
