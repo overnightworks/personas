@@ -24,8 +24,8 @@ release changes the runner, its characters and its figures together. The rules i
    `scripts/configuration_release_notes.sh`: each field of the runner's file added, removed or newly
    required since the newest tag the commit reaches, with the TOML it needs, or the sentence that none
    changed. They are derived from `src/personas/config.py` at both tags, so no change needs a note of
-   its own. A value written `<kind>` has no default and must be filled in; the deployment's bump applies
-   them all to its runner configuration.
+   its own. A required field's `<kind>` has no default and must be filled in; an optional field's may be
+   left out. The deployment's bump applies them all to its runner configuration.
 4. Then come one `figure` line per agent, written by `scripts/figure_release_notes.sh`: paste it,
    without the name and its colon, into that agent's `[[agents]]` entry. An app that shows
    figures fetches them only from the prefix its platform allows (hopin accepts
