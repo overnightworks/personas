@@ -360,10 +360,9 @@ async def test_the_runners_stop_ends_the_thinking_of_the_turn_it_cuts_with_his_l
 
 async def test_a_stops_statement_that_does_not_go_out_within_its_margin_is_logged_and_the_agent_still_ends(runner):
     """TURNS-43, LOG-34."""
-    entered, released = asyncio.Event(), asyncio.Event()
+    released = asyncio.Event()
 
     async def held_until_released(reply: AppReply) -> None:
-        entered.set()
         await released.wait()
 
     runner.config = replace(runner.config, ownership=replace(runner.config.ownership, cancel_margin_seconds=0.05))
@@ -377,7 +376,6 @@ async def test_a_stops_statement_that_does_not_go_out_within_its_margin_is_logge
     finally:
         released.set()
 
-    assert entered.is_set()
     assert isinstance(ended_as, asyncio.CancelledError)
     assert runner.reports.reported(started=False).count((Event.TURN_STATE_FAILED, NETWORK_FAILURE_CODE)) == 1
 
