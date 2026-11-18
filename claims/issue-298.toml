@@ -1,0 +1,8 @@
+claim_id = "28de6a1f6c4948bfb41b574538416173"
+agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
+role = "builder"
+base = "0b784979a31bf40c4a86d9939a41963022986346"
+branch = "claude/issue-298-the-release-runbook-the-memory-counts-an"
+scope = ["README.md", "docs", "src/personas/main.py", "tests"]
+opened_commit = "3f857591d021fa24ab13eb5932582e48448fcfdc"
+whole_reason = "the last small gaps of the storage documents and the memory command"
