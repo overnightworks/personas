@@ -15,7 +15,7 @@ import pytest
 
 from configuration_release_notes import PLACEHOLDER_SENTENCE, main, notes, schema
 from personas.config import configuration_schema
-from tests.support.configuration_schemas import (
+from tests.scripts.configuration_schemas import (
     BoundLookups,
     DeclaresNoRules,
     DeclaresRules,
