@@ -23,6 +23,7 @@ from personas.config import (
     DEFAULT_SWEEP_MINUTES,
     DEFAULT_WRITE_SECONDS,
     ConfigError,
+    OwnershipTimings,
     Voice,
     load_config,
 )
@@ -491,15 +492,7 @@ def test_a_file_without_a_database_table_stops_the_start_and_names_it(files, mon
 
 
 def test_a_file_without_an_ownership_table_shares_the_agents_by_the_defaults(files):
-    ownership = load_config(files.write()).ownership
-
-    assert (
-        ownership.contend_seconds,
-        ownership.heartbeat_timeout_seconds,
-        ownership.cancel_margin_seconds,
-        ownership.grace_seconds,
-        ownership.stop_seconds,
-    ) == (
+    assert load_config(files.write()).ownership == OwnershipTimings(
         DEFAULT_CONTEND_SECONDS,
         DEFAULT_HEARTBEAT_TIMEOUT_SECONDS,
         DEFAULT_CANCEL_MARGIN_SECONDS,
@@ -514,44 +507,29 @@ def test_an_ownership_table_sets_each_of_its_times(files):
         "cancel_margin_seconds = 0.5\ngrace_seconds = 9\nstop_seconds = 0.75\n"
     )
 
-    ownership = load_config(files.write()).ownership
-
-    assert (
-        ownership.contend_seconds,
-        ownership.heartbeat_timeout_seconds,
-        ownership.cancel_margin_seconds,
-        ownership.grace_seconds,
-        ownership.stop_seconds,
-    ) == (1.5, 2.5, 0.5, 9, 0.75)
+    assert load_config(files.write()).ownership == OwnershipTimings(1.5, 2.5, 0.5, 9, 0.75)
 
 
 @pytest.mark.parametrize(
-    ("grace", "starts"), [("4.0", False), ("4.5", False), ("4.6", True)], ids=["below", "equal", "above"]
+    ("outlasted", "field", "bound"),
+    [
+        ("contend_seconds = 2.0\nheartbeat_timeout_seconds = 1.5\ncancel_margin_seconds = 1.0\n", "grace_seconds", 4.5),
+        ("cancel_margin_seconds = 1.0\n", "stop_seconds", 1.0),
+    ],
+    ids=["grace", "stop"],
 )
-def test_a_grace_at_or_below_the_contend_interval_plus_the_heartbeat_timeout_plus_the_cancel_margin_is_refused(
-    files, monkeypatch, capsys, grace, starts
+@pytest.mark.parametrize(
+    ("over", "starts"), [(-0.5, False), (0.0, False), (0.1, True)], ids=["below", "equal", "above"]
+)
+def test_a_grace_or_a_stop_at_or_below_the_times_it_must_outlast_is_refused(
+    files, monkeypatch, capsys, outlasted, field, bound, over, starts
 ):
-    files.text += (
-        "[ownership]\ncontend_seconds = 2.0\nheartbeat_timeout_seconds = 1.5\ncancel_margin_seconds = 1.0\n"
-        f"grace_seconds = {grace}\n"
-    )
+    files.text += f"[ownership]\n{outlasted}{field} = {bound + over}\n"
 
     if starts:
-        assert load_config(files.write()).ownership.grace_seconds == float(grace)
+        assert getattr(load_config(files.write()).ownership, field) == bound + over
     else:
-        assert "grace_seconds" in fails_at_start(files.write(), monkeypatch, capsys)
-
-
-@pytest.mark.parametrize(
-    ("stop", "starts"), [("0.5", False), ("1.0", False), ("1.1", True)], ids=["below", "equal", "above"]
-)
-def test_a_stop_deadline_at_or_below_the_cancel_margin_is_refused(files, monkeypatch, capsys, stop, starts):
-    files.text += f"[ownership]\ncancel_margin_seconds = 1.0\nstop_seconds = {stop}\n"
-
-    if starts:
-        assert load_config(files.write()).ownership.stop_seconds == float(stop)
-    else:
-        assert "stop_seconds" in fails_at_start(files.write(), monkeypatch, capsys)
+        assert field in fails_at_start(files.write(), monkeypatch, capsys)
 
 
 @pytest.mark.parametrize(
