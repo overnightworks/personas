@@ -305,9 +305,10 @@ async def test_a_defect_while_stating_unavailable_ends_the_runner_loud(runner):
     assert [leaf for leaf in leaves_of(ended_as) if leaf is defect] == [defect]
 
 
-async def test_a_blip_that_recovers_on_its_first_retry_states_nothing(runner):
+@EARLIER_ENDS
+async def test_a_blip_that_recovers_on_its_first_retry_states_nothing(runner, replies, earlier, last):
     """TURNS-44."""
-    await in_the_call_after(runner, [])
+    await in_the_call_after(runner, replies)
     reads = runner.app.window_reads(PLACE_ID)
 
     fails_the_next_read(runner)
@@ -315,9 +316,28 @@ async def test_a_blip_that_recovers_on_its_first_retry_states_nothing(runner):
     await runner.reports.until(Event.RESUMED)
     await runner.app.until_window_read(PLACE_ID, reads + 1)
     await a_turn_after_it(runner)
+    await runner.app.until_turn_states(len(earlier) + 2)
+
+    assert statements(runner) == [*earlier, THINKING, ended(None)]
+
+
+async def test_a_blip_while_a_turns_end_is_answered_backs_off_and_states_no_unavailable(runner):
+    """TURNS-44, LOG-9: the answer to the statement beside the failed read does not tell how the read failed."""
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.reports.until_a_turn_completed()
     await runner.app.until_turn_states(2)
 
-    assert statements(runner) == [THINKING, ended(None)]
+    fails_the_next_read(runner)
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    await runner.reports.until(Event.RESUMED)
+    await a_turn_after_it(runner)
+    await runner.app.until_turn_states(4)
+
+    reported = {event for event, _ in runner.reports.reported(started=False)}
+    assert (Event.BACKOFF in reported, Event.SUSPENDED in reported) == (True, False)
+    assert UNAVAILABLE not in statements(runner)
 
 
 async def test_a_statement_lost_with_its_session_is_stated_again_after_the_next_full_pass(runner):

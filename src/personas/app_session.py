@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import re
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
@@ -163,8 +164,20 @@ class _HttpAnswer:
     answer: str | None = None
 
 
+@dataclass
+class _CallAnswer:
+    """The last HTTP answer to one call, which only its own requests write, so no call beside it on the session can."""
+
+    answer: _HttpAnswer | None = None
+
+
+_CALL_ANSWER: Final = contextvars.ContextVar[_CallAnswer | None]("call_answer", default=None)
+"""The answer of the call whose request this is; the SDK sends each request in the context of the call that made it."""
+
+
 class _BearerAuth(httpx2.Auth):
-    """Adds the current bearer to each request and keeps the last HTTP answer the app gave.
+    """Adds the current bearer to each request and keeps the last HTTP answer the app gave, to the session and to the
+    call the request belongs to.
 
     The SDK turns an HTTP error into a bare protocol error, so this is where the status is seen.
     """
@@ -181,6 +194,8 @@ class _BearerAuth(httpx2.Auth):
             self.last_answer = _HttpAnswer(response.status_code)
         else:
             self.last_answer = _HttpAnswer(response.status_code, _method_of(request), await _answer_code_of(response))
+        if (call := _CALL_ANSWER.get()) is not None:
+            call.answer = self.last_answer
 
 
 def _method_of(request: httpx2.Request) -> str | None:
@@ -270,7 +285,7 @@ class _McpAppSession:
                 raise
             if isinstance(error, TimeoutError) and deadline.expired():
                 raise Unreachable("the stream outlasted its deadline") from None
-            raise _failure_of(error, self.auth) from None
+            raise _failure_of(error, self.auth.last_answer) from None
 
     async def read_standing(self) -> MemberStanding:
         return _record_of(MemberStanding, await self._asked(self._read(STANDING_URI)))
@@ -348,11 +363,16 @@ class _McpAppSession:
         return result
 
     async def _asked[Answer](self, request: Awaitable[Answer]) -> Answer:
+        """The call's answer; a failure is told by the call's own last HTTP answer, never by one to a call beside it."""
         self.auth.last_answer = None
+        call = _CallAnswer()
+        reset = _CALL_ANSWER.set(call)
         try:
             return await request
         except _CALL_ERRORS as error:
-            raise _failure_of(error, self.auth) from None
+            raise _failure_of(error, call.answer) from None
+        finally:
+            _CALL_ANSWER.reset(reset)
 
 
 async def _wakes_of(subscription: Subscription, auth: _BearerAuth) -> AsyncIterator[object]:
@@ -360,7 +380,7 @@ async def _wakes_of(subscription: Subscription, auth: _BearerAuth) -> AsyncItera
         async for wake in subscription:
             yield wake
     except SubscriptionLost as lost:
-        raise _failure_of(lost, auth) from None
+        raise _failure_of(lost, auth.last_answer) from None
 
 
 def _record_of[Record: BaseModel](record: type[Record], result: ReadResourceResult) -> Record:
@@ -437,14 +457,13 @@ def _refusal_in[Refused: BaseModel](refused: type[Refused], result: CallToolResu
         raise UnusableAnswer(INVALID_ANSWER_CODE) from None
 
 
-def _failure_of(error: BaseException, auth: _BearerAuth) -> CallFailure:
-    """A call that gave no usable answer: told by the last HTTP answer the app sent, else by the error.
+def _failure_of(error: BaseException, answered: _HttpAnswer | None) -> CallFailure:
+    """A call that gave no usable answer: told by the last HTTP answer it was given, else by the error.
 
     A protocol error or a result the SDK cannot validate is an unusable answer; only a broken or
     silent connection is unreachable. The error is one of ``_CALL_ERRORS``: the status is read only for
     those, never for a late answer's error, which no call raised.
     """
-    answered = auth.last_answer
     if (
         isinstance(error, MCPError)
         and error.code == UNSUPPORTED_PROTOCOL_VERSION
@@ -479,7 +498,7 @@ def _settled(leaf: BaseException, from_body: set[int], auth: _BearerAuth, *, bes
     if isinstance(leaf, CallFailure) or id(leaf) in from_body:
         return leaf
     if isinstance(leaf, _CALL_ERRORS):
-        return _failure_of(leaf, auth)
+        return _failure_of(leaf, auth.last_answer)
     if beside_no_echo and isinstance(leaf, LATE_ANSWER_ERRORS):
         return Unreachable("an answer landed after the session closed")
     return leaf
@@ -546,4 +565,4 @@ async def _discover(session: ClientSession, auth: _BearerAuth) -> None:
     except RuntimeError:
         raise UnusableAnswer(UNSUPPORTED_VERSION_CODE) from None
     except _CALL_ERRORS as error:
-        raise _failure_of(error, auth) from None
+        raise _failure_of(error, auth.last_answer) from None
