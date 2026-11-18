@@ -93,6 +93,7 @@ async def test_a_failed_step_ends_failed_with_a_closed_reason(runner, caplog):
     (setup,) = lines_of(caplog.get_records("call"), "turn_setup.ended")
     assert (listed["outcome"], listed["reason"]) == ("failed", NO_ANSWER_REASON)
     assert (setup["outcome"], setup["reason"]) == ("failed", NO_ANSWER_REASON)
+    assert listed["error_type"] and setup["error_type"]
 
 
 async def test_every_request_of_a_turn_carries_its_trace_and_the_requests_of_the_loop_carry_none(runner, written):
