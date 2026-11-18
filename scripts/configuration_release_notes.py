@@ -269,7 +269,10 @@ def placement(field: ConfigField, every: dict[FieldPath, ConfigField]) -> Iterat
 def placement_outside_entries(
     field: ConfigField, ancestors: list[ConfigField], optional: ConfigField | None
 ) -> Iterator[str]:
-    """Where a field outside every array of tables goes: at the top level, or under its table's header."""
+    """Where a field outside every array of tables goes: at the top level, or under its table's header.
+
+    A table whose default is null is a switch, so a file never adds its header for a field: the field goes where the
+    table is already set. A table with a default instance may be added, since its header changes nothing."""
     if not ancestors:
         if not field.table:
             yield "It goes above the file's first table."
@@ -278,6 +281,8 @@ def placement_outside_entries(
         header = f"It goes under the file's `{ancestors[0].label}` header"
         if optional is None or field.required:
             yield f"{header}."
+        elif optional.default is None:
+            yield f"{header}, only where `{optional.label}` is set."
         else:
             yield f"{header}; a file without one adds the header first."
     if field.required and optional is not None:

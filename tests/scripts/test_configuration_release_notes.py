@@ -183,6 +183,15 @@ class AgentWithLookup(Entry):
     memory: MemoryWithLookup | None = None
 
 
+class MemoryWithMode(Entry):
+    keep_days: float = 30.0
+    mode: str = "x"
+
+
+class WithModedMemory(BaseModel):
+    memory: MemoryWithMode | None = None
+
+
 class WithAgentMemory(BaseModel):
     agents: list[AgentWithMemory]
 
@@ -325,6 +334,14 @@ def notes_between(before: type[BaseModel], after: type[BaseModel]) -> str:
             "It goes under the file's `[memory]` header. It is required only where `[memory]` is set.\n\n"
             "```toml\nlookup_bytes = <integer>\n```\n",
             id="a required field of an optional table",
+        ),
+        pytest.param(
+            WithMemory,
+            WithModedMemory,
+            "- `[memory] mode`: added, optional, default `\"x\"`.\n\n"
+            "It goes under the file's `[memory]` header, only where `[memory]` is set.\n\n"
+            "```toml\nmode = \"x\"\n```\n",
+            id="an optional field of a nullable table, placed only where the table is set",
         ),
         pytest.param(
             WithAgentMemory,
