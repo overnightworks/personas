@@ -3,8 +3,9 @@
 Task: someone asks what an agent keeps of them, or that it be erased. Impact: the agent forgets every line,
 table state, call and sentence of his history, and every kept line, of the agent or agents named.
 
-Both commands need only the `[database]` table of the runner's configuration, so `PERSONAS_CONFIG` names
-it; they run under `write_seconds`.
+Both commands load the runner's whole configuration, so `PERSONAS_CONFIG` names a valid one whose secret
+files are all readable; a configuration it refuses ends them with exit 2. They use only its `[database]`
+table and run under `write_seconds`.
 
 ## Check
 
