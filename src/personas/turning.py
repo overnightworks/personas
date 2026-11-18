@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from contextlib import AsyncExitStack, aclosing
 from dataclasses import dataclass, field
 from functools import partial
@@ -284,20 +283,18 @@ class Turning:
     def _leave_unanswered(self, code: RejectionCode | FailureCode, admitted: Admitted) -> None:
         """A turn that ended without an answer leaves his mind a pause that holds every turn of his, so the lines that
         arrive meanwhile are taken into his history and make one turn after it, with the turn's own place, due again
-        from the pause's end on the ``time.perf_counter`` scale of the step timers. The pause is the mind's, so it
-        outlives this task."""
-        seconds = self._mind.unanswered(budget_spent=code is RejectionCode.BUDGET_SPENT, now=self._clock.now())
+        from the pause's end. The pause is the mind's, so it outlives this task."""
+        now = self._clock.now()
+        seconds = self._mind.unanswered(budget_spent=code is RejectionCode.BUDGET_SPENT, now=now)
         self._report_pause(seconds, code.value)
-        self._mind.due_again(
-            AppPlace(self._app.mcp_url, admitted.place), admitted.occasion, time.perf_counter() + seconds
-        )
+        self._mind.due_again(AppPlace(self._app.mcp_url, admitted.place), admitted.occasion, now + seconds)
 
     async def _run_turn(
         self, setup: TurnSetup, admitted: Admitted, record: TaskRecord, sizing: _Sizing, tally: TurnTally
     ) -> None:
         agent = self._agent.client_id
-        begun = time.perf_counter()
-        with stepping(step_timer("turn_setup.ended", agent, self._app.mcp_url, started_at=begun)) as hand_off:
+        begun = self._clock.now()
+        with stepping(step_timer("turn_setup.ended", agent, self._app.mcp_url)) as hand_off:
             turn = TurnTold(
                 admitted.at,
                 self._app.mcp_url,
@@ -307,7 +304,8 @@ class Turning:
                 through=admitted.history.taken,
             )
             told = turn_messages(admitted.facts.name, admitted.present, turn)
-            with stepping(step_timer("token_hold.ended", agent, self._app.mcp_url, started_at=begun)):
+            held_since = self._clock.now() - begun
+            with stepping(step_timer("token_hold.ended", agent, self._app.mcp_url, elapsed_seconds=held_since)):
                 token = await self._current_token()
             async with AsyncExitStack() as opened:
                 session = await self._sessions.opened(opened, self._app, token.value, measured=True)

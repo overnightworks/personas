@@ -153,7 +153,8 @@ database. The runner opens no port. The release path is in the [README](../READM
 against scripted boundaries and in-process fakes of the realm, the gateway and an app (`tests/support`).
 Tests marked `postgres` drive the stores and several pods against a throwaway Postgres. Branch coverage is
 100 % over all of them (`fail_under` in `pyproject.toml`). CI adds the image build with its start and stop,
-the figures' regeneration check, the offline link check, and quality's shared gate (`quality / verdict`).
+the figures' regeneration check, the offline link check, and quality's shared gate (`quality / verdict`),
+which holds the import direction to the layers contract under `[tool.importlinter]` in `pyproject.toml`.
 
 **Errors.** A failure that could corrupt the history, the store or ownership ends the runner loud. A refusal
 by the realm or an app suspends that loop, a network failure backs it off, and a store outage is logged
@@ -183,4 +184,5 @@ once and retried.
 - Every line heard costs a model call; two agents in one call can keep each other talking, bounded only by
   the gateway's budget.
 - People are told apart by display name only.
-- quality reports size and clone debt that no baseline records yet.
+- Files, functions and near-identical pairs over quality's size and clone limits stand as debt in
+  `quality/baseline.toml`, which quality holds from growing.

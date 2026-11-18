@@ -9,8 +9,8 @@ from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, says, says_after_a_hold
 from tests.support.history import settled
-from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin_places import WINDOW_LINES
+from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, invited, paused
 
 pytestmark = pytest.mark.anyio

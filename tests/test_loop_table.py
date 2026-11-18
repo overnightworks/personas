@@ -34,10 +34,10 @@ from tests.support.history import (
     woke_at_table,
     written_turns,
 )
-from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import READ
 from tests.support.hopin_places import ISSUER
 from tests.support.realm import AGENT_NAME
+from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, invited, paused
 from tests.support.wire import cuts
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -215,10 +216,15 @@ async def carry_trace(request: httpx2.Request) -> None:
         request.headers["traceparent"] = traceparent
 
 
-def step_timer(event: str, /, agent_id: str, app: str | None = None, *, started_at: float | None = None) -> StepTimer:
+def step_timer(event: str, /, agent_id: str, app: str | None = None, *, elapsed_seconds: float = 0.0) -> StepTimer:
     """The timer of one step of an agent, optionally at one app, written as ``event``, a literal ``<noun>.ended`` at the
-    call: its line carries the agent, the app's host and the timer's duration and outcome, never a name or content."""
+    call: its line carries the agent, the app's host and the timer's duration and outcome, never a name or content.
+
+    A step that began ``elapsed_seconds`` ago, as the caller's clock measured it, counts its duration from then.
+    """
     fields = {"agent_id": agent_id} | ({} if app is None else {"app_id": urlsplit(app).hostname or ""})
+    # logline counts a step's duration on the time.perf_counter scale, so an elapsed time enters it only here.
+    started_at = time.perf_counter() - elapsed_seconds if elapsed_seconds else None
     return StepTimer(event, _LOG, started_at=started_at, **fields)
 
 

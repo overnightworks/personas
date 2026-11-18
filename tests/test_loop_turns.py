@@ -29,9 +29,9 @@ from tests.support.history import (
     waits,
     written_turns,
 )
-from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, LIMIT_SECONDS, READ
 from tests.support.hopin_places import ISSUER
+from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, paused
 from tests.support.transport import ClosingHold
 from tests.support.voice import HeldSleeps, in_a_voice_call_and_at_a_table
@@ -361,7 +361,8 @@ async def test_while_a_cancelled_turn_still_unwinds_no_turn_of_his_starts_at_ano
     runner.gateway.hold_request(1)
     runner.app.stand(SUBJECT, active(PLACE_ID))
     other.stand(SUBJECT, active(OTHER_CALL_ID))
-    runner.start(open_session=unwinding.opener(of_url=runner.app_url))
+    runner.open_session = unwinding.opener(of_url=runner.app_url)
+    runner.start()
     await runner.app.until_window_read(PLACE_ID)
     await other.until_window_read(OTHER_CALL_ID)
     say_in_the_call(runner, REMARK)

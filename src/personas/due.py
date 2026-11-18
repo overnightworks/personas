@@ -26,8 +26,8 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class Due:
-    """What a due place's turn is for, and ``since``, the ``time.perf_counter`` value of the earliest moment the place
-    was due that the turn answers; a turn due again after one with no answer is due from the end of its pause."""
+    """What a due place's turn is for, and ``since``, the earliest moment the place was due that the turn answers, on
+    the clock's monotonic scale; a turn due again after one with no answer is due from the end of its pause."""
 
     occasion: Occasion
     since: float
@@ -177,11 +177,11 @@ def kept_turns(state: TurnState, paused_until: datetime | None) -> KeptTurns:
     return KeptTurns(checkpoints, due, state.unanswered, paused_until)
 
 
-def resumed_turns(kept: KeptTurns, now: float, wall: datetime, since: float) -> TurnState:
-    """The turns a pod resumes him with at ``now`` and ``wall``: each kept due place due from ``since``, a
-    ``time.perf_counter`` value, in the kept order, and the kept pause holding his turns for what is left of it."""
+def resumed_turns(kept: KeptTurns, now: float, wall: datetime) -> TurnState:
+    """The turns a pod resumes him with at ``now`` and ``wall``: each kept due place due from ``now``, in the kept
+    order, and the kept pause holding his turns for what is left of it."""
     left = 0.0 if kept.paused_until is None else max(0.0, (kept.paused_until - wall).total_seconds())
-    due = {AppPlace(held.app, held.place): Due(held.occasion, since) for held in kept.due}
+    due = {AppPlace(held.app, held.place): Due(held.occasion, now) for held in kept.due}
     checkpoints: dict[AppPlace, Checkpoint] = {
         AppPlace(held.app, held.place): Joined() if held.reading is None else held.reading for held in kept.checkpoints
     }

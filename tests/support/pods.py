@@ -22,9 +22,10 @@ import personas
 from personas.config import CONFIG_ENVIRONMENT_VARIABLE, load_config
 from tests.support.configfiles import GATEWAY_ORIGIN, Files
 from tests.support.gateway import Gateway
-from tests.support.hopin import AGENT_SUBJECT, CALL, FakeApp
+from tests.support.hopin import CALL, FakeApp
 from tests.support.loopback import serving
 from tests.support.realm import TOKEN_ENDPOINT, FakeRealm
+from tests.support.standings import AGENT_SUBJECT
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator

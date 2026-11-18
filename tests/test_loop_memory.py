@@ -49,9 +49,9 @@ from tests.support.history import (
     url_of,
     waits,
 )
-from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import LIMIT_SECONDS, LIST_TOOLS, PLAY_TOOL, SAY_TOOL
 from tests.support.logs import formatted, lines_of
+from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active
 
 if TYPE_CHECKING:

@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from agents.member import PlaceRef
 
-from tests.support.hopin import AGENT_SUBJECT
-from tests.support.standings import active
+from tests.support.standings import AGENT_SUBJECT, active
 
 PLACE_ID = "room-7"
 CALL_PLACE = PlaceRef(kind="call", id=PLACE_ID)

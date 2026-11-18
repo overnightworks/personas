@@ -18,11 +18,12 @@ from personas.failures import STORE_TIMEOUT_CODE, STORE_UNREACHABLE_CODE, StoreD
 from personas.memory import PostgresLineStore
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
-from tests.support.fakes import SweepClock, line, window_of
+from tests.support.fakes import SweepClock
 from tests.support.gateway import Gateway, says
 from tests.support.hopin import LIMIT_SECONDS
 from tests.support.logs import formatted, lines_of
 from tests.support.postgres import kept_lines, lines_table_locked, run_sql
+from tests.support.standings import line, window_of
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

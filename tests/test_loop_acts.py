@@ -48,12 +48,12 @@ from tests.support.history import (
     waits,
     written_turns,
 )
-from tests.support.hopin import AGENT_SUBJECT as SUBJECT
 from tests.support.hopin import CALL, LISTEN, PLAY_TOOL, READ, SAY_TOOL
 from tests.support.hopin_places import ISSUER
 from tests.support.pictures import a_picture, a_real_picture, base64_of
 from tests.support.realm import AGENT_NAME
 from tests.support.songmaker import CALLS, CREATE_SONG
+from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active
 from tests.support.wire import cuts, hangs, hangs_once_entered, refuses_with_a_server_error
 
@@ -306,7 +306,8 @@ async def a_call_waiting_for_its_app_while_its_place_leaves(runner, songmaker, *
         runner.gateway = Gateway(say_round(ANSWER), completion("done"))
         act = a_say(runner, ANSWER, unanswered(TURN_CANCELLED_CODE))
     runner.app.stand(SUBJECT, active(PLACE_ID), active(OTHER_CALL_ID))
-    runner.start(open_session=open_session)
+    runner.open_session = open_session
+    runner.start()
     await runner.app.until_window_read(PLACE_ID)
     await runner.app.until_window_read(OTHER_CALL_ID)
     say_in_the_call(runner, ADDRESSED)
