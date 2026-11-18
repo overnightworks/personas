@@ -111,7 +111,7 @@ pods against one database. The runner opens no port. The release path is in the 
 
 | Table | Holds | Kept until |
 |---|---|---|
-| `history_entries` | lines, table states, relayed calls with arguments and answers, spoken sentences | newer entries push it past `history_bytes`, or `memory erase` |
+| `history_entries` | lines, table states, relayed calls with arguments and answers, spoken sentences | newer entries push it past `history_bytes`, and the cut then drops the oldest messages down to `history_keep_bytes`; or `memory erase` |
 | `answered_turns` | what each answered turn's message told | the entries it told left, or `memory erase` |
 | `agent_turns` | reading checkpoints, due places, unanswered turns in a row, a pause's end | the next write; dropped by a takeover after a skipped generation; erase keeps it |
 | `agent_owner` | the generation of the pod that owns him | renewed by every takeover and every erase |
