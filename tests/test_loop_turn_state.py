@@ -227,17 +227,39 @@ async def a_turn_after_it(runner) -> None:
     await runner.reports.until_a_turn_completed()
 
 
+def fails_the_window_reads(runner) -> None:
+    runner.app.failing_windows.add(PLACE_ID)
+
+
+def answers_the_window_reads(runner) -> None:
+    runner.app.failing_windows.clear()
+
+
+def forbids_every_read(runner) -> None:
+    runner.app.refuse_with = HTTPStatus.FORBIDDEN
+    runner.app.refused_method = READ
+
+
+def answers_every_read(runner) -> None:
+    runner.app.refuse_with = None
+
+
 @EARLIER_ENDS
-async def test_a_backoff_past_its_first_retry_states_unavailable_and_the_next_full_pass_his_last_end(
-    runner, replies, earlier, last
+@pytest.mark.parametrize(
+    ("breaks", "recovers"),
+    [(fails_the_window_reads, answers_the_window_reads), (forbids_every_read, answers_every_read)],
+    ids=["a backoff", "a suspension"],
+)
+async def test_a_loop_that_stops_taking_turns_states_unavailable_and_the_next_full_pass_his_last_end(
+    runner, replies, earlier, last, breaks, recovers
 ):
     """TURNS-44."""
     await in_the_call_after(runner, replies)
 
-    runner.app.failing_windows.add(PLACE_ID)
+    breaks(runner)
     runner.app.stand(SUBJECT, active(PLACE_ID))
     await runner.app.until_turn_states(len(earlier) + 1)
-    runner.app.failing_windows.clear()
+    recovers(runner)
     await runner.app.until_turn_states(len(earlier) + 2)
 
     assert statements(runner) == [*earlier, UNAVAILABLE, ended(last)]
