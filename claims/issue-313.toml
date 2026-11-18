@@ -1,8 +1,0 @@
-claim_id = "ad23ad04f91143478a3423dbc5a75e83"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "2faaa2e03e53449631daaefd2fcbf7c050eccc11"
-branch = "claude/issue-313-an-agent-gives-up-a-game-he-can-no-longe"
-scope = ["src/characters/curie.md", "src/characters/hildegard.md", "src/characters/humboldt.md", "src/characters/leonardo.md", "src/characters/lovelace.md", "src/characters/mozart.md", "tests"]
-opened_commit = "96f6f43e4819fa4879c72736822d34a460b9ed04"
-whole_reason = "one sentence in the shared table paragraph of every character, with its test"
