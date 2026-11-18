@@ -1,0 +1,8 @@
+claim_id = "b4bc8d88e16d41a0a9cf32617f5b0772"
+agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
+role = "builder"
+base = "ec023464e7facf33b9c2c3f2fa70bfc0a78de62d"
+branch = "claude/issue-255-alembic-s-info-lines-stay-out-of-the-run"
+scope = ["src/personas", "tests"]
+opened_commit = "10fc3e7065d941a22c1ea12fd838363e4cedbe23"
+whole_reason = "one logging setting and its proof"
