@@ -1,0 +1,8 @@
+claim_id = "232c5b2545c24b8dbb3ec92952f67655"
+agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
+role = "builder"
+base = "a89f13c0d11dbd3821e4a8f3fd47dbd94b5eabd7"
+branch = "claude/issue-288-each-reference-rule-in-personas-carries"
+scope = ["docs", "tests"]
+opened_commit = "82dd5d4ff825c816984da8cbe2eba1a49b24108a"
+whole_reason = "one pass that pairs each reference rule with the test that proves it"
