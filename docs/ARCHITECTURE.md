@@ -93,8 +93,8 @@ sequenceDiagram
 
 A takeover: a pod that newly holds an agent's lock waits `grace_seconds`, renews his generation, loads his
 history and kept turns, and starts his loops. The pod it took him from has stopped by then, because the
-configuration refuses a grace at or below `contend_seconds + heartbeat_timeout_seconds +
-cancel_margin_seconds`.
+grace outlasts the time a losing pod needs to stop him; the bound is in
+[the configuration reference](configuration.md), `[ownership]`.
 
 ## 4. Deployment View
 
@@ -124,9 +124,8 @@ database. The runner opens no port. The release path is in the [README](../READM
 - What a pod took in after its last write is lost when it dies, and a turn running at a kill is not
   retried. A SIGTERM hands a turn it cut to the new holder only if the turn had relayed no call and sent no
   sentence, since a line said twice is worse than one unanswered.
-- A place read before resumes where reading stood, so a line said while no pod served him gets one turn; a
-  line said while the place was paused is never taken, and a place with no kept checkpoint takes what its
-  window holds as read.
+- A place read before resumes where reading stood, so a line said while no pod served him gets one turn;
+  how a place reads is in [the turns reference](turns.md), Joining and reading.
 - `personas memory list` shows counts and times only. `personas memory erase` deletes an agent's lines,
   history entries and answered turns; see [the runbook](runbooks/erase-memory.md).
 - `personas migrate` is the only code that changes the schema, and a release only adds to it while two
