@@ -3,7 +3,8 @@
 The runner reads one TOML file named by `PERSONAS_CONFIG`. `src/personas/config.py` owns every field and
 refusal; every value is checked at start, an unknown key is refused, and an error names the field or path,
 never a secret (CONFIG-1). What the stores keep is in [the architecture](ARCHITECTURE.md), Persistence. A test
-cites each rule by its ID at the start of its docstring, such as `CONFIG-1`.
+cites each rule by its ID at the start of its docstring, such as `CONFIG-1`. Every bullet and table row is a
+rule; prose without an ID is context.
 
 ## Top level
 

@@ -2,7 +2,7 @@
 
 What the runner writes to stdout, for whoever reads or alerts on it. `src/personas/reporting.py` owns the
 events and their fields. A test cites each rule by its ID at the start of its docstring, such as
-`LOG-1`.
+`LOG-1`. Every bullet and table row is a rule; prose without an ID is context.
 
 ## Shape
 

@@ -2,20 +2,22 @@
 
 What the runner promises about an agent's turns: when one is due, what it is told, what it may do and how it
 ends. What is stored, and for how long, is in [the architecture](ARCHITECTURE.md), Persistence. A test cites
-each rule by its ID at the start of its docstring, such as `TURNS-1`.
+each rule by its ID at the start of its docstring, such as `TURNS-1`. Every bullet and table row is a rule;
+prose without an ID is context.
 
 ## Joining and reading
 
 - An agent accepts every invitation to a call. To a place of another kind it accepts only in an app where it
   can take turns (a persona, the gateway and bound tools); one left out for that is logged once as
   `invitation.left_out` with the reason `no_turns`. Only apps configured to listen can invite it. (TURNS-1)
-- It appears under the name the realm gives it and with the AI mark the app shows; it is removed with its
-  seat, its lease or its client.
 - After its own accept it reads the window from `seq` 1. A place whose reading is kept resumes where it
   stood; lines said while the place was paused are never taken; a place with no kept reading takes what its
   window holds as read and answers only what is said after. (TURNS-3)
 - A window that dropped lines past where reading stood is told as `missed`. A window the app lost makes its
   place start as with no kept reading. (TURNS-4)
+
+An agent appears under the name the realm gives it and with the AI mark the app shows; it is removed with its
+seat, its lease or its client.
 
 ## When a turn is due
 
