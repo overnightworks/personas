@@ -47,8 +47,8 @@ model needs a restart; the runner fetches and checks nothing about a figure's ad
 
 ## `[gateway]`
 
-The table holds the fields of the agents library's `AgentConfig` that reach the model gateway: `backend`,
-`api_group` and `[gateway.gateway]` with `origin`, `key_file` and, for HTTPS, `ca_file`. It is required
+The table holds the fields of the agents library's `AgentConfig` that reach the model gateway: `api_group`
+and `[gateway.gateway]` with `origin`, `key_file` and, for HTTPS, `ca_file`. It is required
 when an app sets `max_tool_calls`. What an agent may spend is bounded at the gateway's budget; the runner
 sets no limit of its own.
 

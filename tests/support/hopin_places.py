@@ -8,11 +8,9 @@ import secrets
 from dataclasses import dataclass, field
 from typing import Any
 
-from agents.mcp_server import ResourceChanges
+from agents.mcp_server import InMemoryPlaceStore, ResourceChanges
 from agents.member import STANDING_URI, PlaceView, Standing, place_view_uri, place_window_uri
 from agents.turn import Principal
-
-from tests.support.placestore import MemoryPlaceStore
 
 ISSUER = "https://realm.test/realms/test"
 WINDOW_LINES = 100
@@ -42,7 +40,7 @@ class AppPlaces:
     lines: dict[str, list[Line]] = field(default_factory=dict[str, list[Line]])
     generations: dict[str, str] = field(default_factory=dict[str, str])
     vanished: set[str] = field(default_factory=set[str])
-    changes: ResourceChanges = field(default_factory=lambda: ResourceChanges(MemoryPlaceStore()))
+    changes: ResourceChanges = field(default_factory=lambda: ResourceChanges(InMemoryPlaceStore()))
     views: dict[str, PlaceView] = field(default_factory=dict[str, PlaceView])
     content: set[str] = field(default_factory=lambda: {ACCEPTED_NAME})
 

@@ -56,7 +56,7 @@ class Files:
         gateway = tools = persona = ""
         if binds_tools:
             gateway = (
-                f'[gateway]\nbackend = "litellm"\napi_group = "{API_GROUP}"\n'
+                f'[gateway]\napi_group = "{API_GROUP}"\n'
                 f'[gateway.gateway]\norigin = "{GATEWAY_ORIGIN}"\nkey_file = "{self.key_path}"\n'
             )
             tools = f"max_tool_calls = {MAX_TOOL_CALLS}\n"
