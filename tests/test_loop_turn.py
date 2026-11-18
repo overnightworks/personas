@@ -391,6 +391,10 @@ async def answers_wrongly(reply):
     await reply.error(INVALID_PARAMS, status=HTTPStatus.OK)
 
 
+async def lists_nothing(reply):
+    await reply.result(ListToolsResult(tools=[]))
+
+
 @pytest.mark.parametrize(
     ("method", "fails", "events"),
     [
@@ -406,7 +410,8 @@ async def test_a_turn_whose_session_fails_before_the_model_is_asked_leads_to_one
 ):
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
-    runner.app.script(method, fails)
+    # The loop's session lists the tools first, to check the answer of the turn's thinking.
+    runner.app.script(method, *((lists_nothing,) if method == LIST_TOOLS else ()), fails)
     say_in_the_call(runner, ADDRESSED)
     await runner.app.log.until(LISTEN, 2)
     await runner.app.log.until(READ, 3)

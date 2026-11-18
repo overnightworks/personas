@@ -73,6 +73,7 @@ from personas.task_record import (
     unrequested_unless_cancelling,
 )
 from personas.tokens import facts_of
+from personas.turn_states import TurnStates
 from personas.turning import Admitted, Turning, TurnSetup
 
 if TYPE_CHECKING:
@@ -174,6 +175,7 @@ class AgentLoop:
             self._report_tools_left_out,
             self._remembering,
         )
+        self._turn_states = TurnStates(self._use_current_token, self._report)
         self._token: Token | None = None
         self._memory = Memory()
         self._failures = 0
@@ -209,6 +211,7 @@ class AgentLoop:
             asyncio.TaskGroup() as turns,
             self._boundaries.open_session(self._app, token.value) as session,
         ):
+            turns.create_task(self._turn_states.state_each(session))
             self._turning.new_session()
             self._voice_app = await self._is_voice_app(session)
             while True:
@@ -273,6 +276,7 @@ class AgentLoop:
         self._mind.sync_checkpoints(self._app.mcp_url, standing.standings, self._standings)
         self._standings = standing.standings
         self._turned_revisions = sync_turned_revisions(self._turned_revisions, standing.standings)
+        self._turn_states.sync_seats(standing.standings)
         self._mind.undue(left_standing(self._app.mcp_url, standing.standings))
         self._mind.stand_at(
             self._app.mcp_url, holds=lends_tools(self._app.max_tool_calls is not None, standing.standings)
@@ -467,6 +471,7 @@ class AgentLoop:
         """Takes the turn once the ``claimed``-th change of his mind, its claim, is kept in the store."""
         with stepping(step_timer("claim_write.ended", self._agent.client_id, self._app.mcp_url)):
             await self._mind.until_written(claimed)
+        await self._turn_states.turn_started(admitted.place)
         await self._turning.take(setup, admitted, TaskRecord(), tally)
 
     def _turn_over(self, task: asyncio.Task[None]) -> None:
@@ -482,6 +487,7 @@ class AgentLoop:
             answered=tally.answered,
         )
         tally.end(ending)
+        self._turn_states.turn_ended(turn.place, ending)
         if cancelled and not tally.answered and not turn.cancel_requested:
             self._mind.cut()
         self._mind.release()

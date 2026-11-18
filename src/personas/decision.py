@@ -22,6 +22,7 @@ from agents.member import (
     ACCEPT_INVITATION_TOOL,
     CONTINUE_SPEAKING_TOOL,
     DECLINE_INVITATION_TOOL,
+    SET_TURN_STATE_TOOL,
     SPEAK_TOOL,
     STOP_SPEAKING_TOOL,
     AcceptInvitationRefusal,
@@ -36,7 +37,7 @@ from agents.member import (
     StandingState,
     VoiceState,
 )
-from agents.turn import FailureCode, RejectionCode
+from agents.turn import FailureCode, RejectionCode, StopOutcome, outcome_of_stop
 from logline import Outcome
 
 from personas.entries import (
@@ -69,10 +70,11 @@ RESERVED_TOOLS: Final = frozenset(
         RECALL_TOOL,
         CONTINUE_SPEAKING_TOOL,
         STOP_SPEAKING_TOOL,
+        SET_TURN_STATE_TOOL,
     }
 )
 """The names the runner calls or answers itself in every turn: the accept and the decline of an invitation, the voice's
-``speak``, the lookup's ``recall`` and the two tools that decide a hold."""
+``speak``, the lookup's ``recall``, the two tools that decide a hold and the statement of his turns at a place."""
 RENEW_BEFORE_EXPIRY_SECONDS: Final = 60.0
 """A token is renewed once this little of its lifetime remains, so no call carries an expired one."""
 NETWORK_FAILURE_CODE: Final = "network"
@@ -338,6 +340,21 @@ def turn_ending(*, cancelled: bool, error: BaseException | None, stop_code: str 
     return TurnEnding(Outcome.FAILED, NO_FINAL_EVENT_REASON)
 
 
+def turn_end_state(ending: TurnEnding, last: StopOutcome | None) -> StopOutcome | None:
+    """What a seat states once a turn there ended: ``None``, his turns answer, after an answer; the outcome of the
+    gateway's refusal after one; ``unavailable`` after any failure, a stop or not. A cancelled turn ends its thinking
+    with ``last``, what the last turn end at that seat in this run stated, ``None`` when there was none."""
+    match ending.outcome:
+        case Outcome.OK:
+            return None
+        case Outcome.CANCELLED:
+            return last
+        case Outcome.REFUSED:
+            return outcome_of_stop(RejectionCode(ending.reason))
+        case Outcome.FAILED:
+            return StopOutcome.UNAVAILABLE
+
+
 def reaction_to(failure: CallFailure, *, already_renewed: bool) -> Reaction | Suspend:
     """What the loop does after a failure: a refusal suspends with its code, the rest backs off.
 
@@ -490,6 +507,18 @@ def sync_turned_revisions(turned: Mapping[PlaceRef, int], standings: tuple[Stand
     """The revisions after a standing read: a place that is no active view place any more is forgotten."""
     active = set(active_view_places(standings))
     return {place: revision for place, revision in turned.items() if place in active}
+
+
+def sync_seat_ends(
+    ends: Mapping[PlaceRef, StopOutcome | None], standings: tuple[Standing, ...]
+) -> dict[PlaceRef, StopOutcome | None]:
+    """Each seat he holds, active or paused, after a standing read, with what the last turn end there stated in this
+    run: ``None`` when none did. A place where he holds no seat any more is forgotten."""
+    return {
+        standing.place: ends.get(standing.place)
+        for standing in standings
+        if standing.state is not StandingState.INVITED
+    }
 
 
 def view_turn_due(turned_revision: int | None, view: PlaceView) -> bool:

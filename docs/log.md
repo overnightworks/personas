@@ -48,6 +48,7 @@ events and their fields. A test cites each rule by its ID at the start of its do
 | `agent.lost` | a pod stops an agent it served | `reason`: `hold_lost`, `generation_stale` or the store's code (LOG-23) |
 | `agent.stop_overran` | an agent took longer than `cancel_margin_seconds` to stop | the agent only (LOG-24) |
 | `runner.stop_cut` | the runner had not stopped `stop_seconds` after a SIGTERM and ends at once | none; no agent or app (LOG-25) |
+| `turn_state.failed` | the app refused or failed a statement of his turns at a place | `reason` (the app's refusal code or the failed call's reason); `status` and `mcp_method` when a call failed (LOG-34) |
 
 A `status` is the integer of an error status, absent for a JSON-RPC error sent with a success status. A
 `reason` of a failed call is a standard JSON-RPC error or a known media type by name, else one fixed word,

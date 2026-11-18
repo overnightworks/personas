@@ -407,6 +407,9 @@ class ScriptedSessions:
     async def accept(self, accept):
         return None
 
+    async def set_turn_state(self, statement):
+        return None
+
     def standing_of_a_joined_place(self, reads: int):
         return read_of(invited("room-7", "inv-3") if reads == 1 else active("room-7"))
 

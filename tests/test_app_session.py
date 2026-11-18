@@ -14,6 +14,7 @@ import pytest
 from agents.member import (
     ACCEPT_INVITATION_TOOL,
     CONTINUE_SPEAKING_TOOL,
+    SET_TURN_STATE_TOOL,
     SPEAK_TOOL,
     STANDING_URI,
     STOP_SPEAKING_TOOL,
@@ -974,6 +975,7 @@ async def test_the_declared_tools_are_the_ones_the_app_lists(app, bearer):
         SPEAK_TOOL,
         CONTINUE_SPEAKING_TOOL,
         STOP_SPEAKING_TOOL,
+        SET_TURN_STATE_TOOL,
     }
 
 

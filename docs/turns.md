@@ -64,8 +64,8 @@ An entry has its app and the time he took it (`at`), and is one of:
 
 - A turn holds every tool its own app lists when it starts, the tools of every other app where he holds an
   active place, and those of the tools-only apps, declared in the configuration's order. A name two apps
-  offer goes to the first; `accept_invitation`, `speak`, `recall`, `continue_speaking` and `stop_speaking`
-  are the runner's own and never taken from an app. (TURNS-18)
+  offer goes to the first; `accept_invitation`, `speak`, `recall`, `continue_speaking`, `stop_speaking` and
+  `set_turn_state` are the runner's own and never taken from an app. (TURNS-18)
 - A call goes to its app in a session of its own under a token for that app's scope. A call to another app
   that fails gives the model an error result and that app takes no more calls in the turn; a failed call to
   the turn's own app ends the turn. A tool's error result reaches the model inside the same turn. (TURNS-19)
@@ -148,3 +148,13 @@ is an unusable answer; audio and resource blocks are ignored. (TURNS-33)
 Which apps an agent reaches is the realm's group membership. When the realm or an app refuses him, that loop
 is suspended and resumes when the refusal ends, without a restart; a tools-only app that refuses him is
 left out of his turns and asked again every 30 seconds. (TURNS-42)
+
+## Turn state
+
+- Through the app's `set_turn_state` a turn states at its place that it is thinking before its first round,
+  and once it ends what its end calls for: that his turns answer after an answer, the gateway's refusal
+  (`budget_spent`, `busy`, `not_enabled`) after one, `unavailable` after any failure. A cancelled turn
+  states again what the last turn end at that seat stated since the runner started, that his turns answer
+  when none did. At a seat he no longer holds nothing is stated, and a turn the runner's stop cuts states
+  no end. One app's statements go out in order, so a turn's thinking never overtakes the end of the turn
+  before it; a refused or failed statement is logged as `turn_state.failed` and the turn goes on. (TURNS-43)
