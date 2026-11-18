@@ -126,15 +126,15 @@ def the_session_failing_to_open(runner, sessions):
 
 
 @pytest.mark.parametrize(
-    ("failure", "step", "reason"),
+    ("failure", "step"),
     [
-        (the_app_refusing_the_tool_list, "tool_list.ended", NO_ANSWER_REASON),
-        (the_realm_refusing_a_token_that_ran_out, "token_hold.ended", NO_ANSWER_REASON),
-        (the_session_failing_to_open, "session_open.ended", NO_ANSWER_REASON),
+        (the_app_refusing_the_tool_list, "tool_list.ended"),
+        (the_realm_refusing_a_token_that_ran_out, "token_hold.ended"),
+        (the_session_failing_to_open, "session_open.ended"),
     ],
     ids=["tool_list", "token_hold", "session_open"],
 )
-async def test_a_failed_step_ends_failed_with_a_closed_reason(runner, caplog, failure, step, reason):
+async def test_a_failed_step_ends_failed_with_a_closed_reason(runner, caplog, failure, step):
     """LOG-13."""
     sessions = Sessions()
     runner.clock = TokenRunsOutInTurn()
@@ -152,8 +152,8 @@ async def test_a_failed_step_ends_failed_with_a_closed_reason(runner, caplog, fa
     (failed_record,) = [each for each in caplog.get_records("call") if each.getMessage() == step]
     assert failed_record.levelname == "ERROR"
     (setup,) = lines_of(caplog.get_records("call"), "turn_setup.ended")
-    assert (failed["outcome"], failed["reason"]) == ("failed", reason)
-    assert (setup["outcome"], setup["reason"]) == ("failed", reason)
+    assert (failed["outcome"], failed["reason"]) == ("failed", NO_ANSWER_REASON)
+    assert (setup["outcome"], setup["reason"]) == ("failed", NO_ANSWER_REASON)
     assert failed["error_type"]
     assert setup["error_type"]
 

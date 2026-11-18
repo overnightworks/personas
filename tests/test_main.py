@@ -73,14 +73,16 @@ def test_every_line_the_entry_point_configures_is_one_json_object_of_the_runner_
     assert (line["service"], line["event"], line["agent_id"]) == ("personas", "loop.started", "mozart")
 
 
-def test_a_log_level_logline_refuses_is_one_plain_line_on_stderr_and_the_configuration_exit_code(
-    world, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize("arguments", [[], ["migrate"], ["memory", "list"]], ids=["runner", "migrate", "memory"])
+def test_a_log_level_logline_refuses_is_one_plain_line_on_stderr_and_the_configuration_exit_code_of_every_command(
+    files, restored_logging, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], arguments
 ):
     """LOG-1."""
+    monkeypatch.setenv(CONFIG_ENVIRONMENT_VARIABLE, str(files.write()[CONFIG_ENVIRONMENT_VARIABLE]))
     monkeypatch.setenv("LOG_LEVEL", "loud")
 
     with pytest.raises(SystemExit) as refused:
-        world.start()
+        main(arguments=arguments)
 
     assert refused.value.code == CONFIGURATION_ERROR_EXIT_CODE
     error = capsys.readouterr().err
