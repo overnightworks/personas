@@ -12,6 +12,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 
 from configuration_release_notes import PLACEHOLDER_SENTENCE, main, notes, schema
+from tests.support.scripts import run_from
 
 PREVIOUS_TAG = "v2026.11.17.2"
 VERSION = "2026.11.18.1"
@@ -395,15 +396,9 @@ def fake_uv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PATH", f"{bin_directory}{os.pathsep}{os.environ['PATH']}")
 
 
-def run_script(tree: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # noqa: S603 - the shipped script under test, at a path this module computes
-        [str(tree / "scripts" / SCRIPT.name), *arguments], capture_output=True, text=True, check=False
-    )
-
-
 @pytest.mark.usefixtures("fake_uv")
 def test_the_script_compares_the_newest_release_tag_before_with_the_checkout_after(released_tree):
-    result = run_script(released_tree, VERSION)
+    result = run_from(released_tree, SCRIPT, VERSION)
 
     assert result.returncode == 0, result.stderr
     assert f"Since {PREVIOUS_TAG}," in result.stdout
@@ -412,7 +407,7 @@ def test_the_script_compares_the_newest_release_tag_before_with_the_checkout_aft
 
 @pytest.mark.parametrize("arguments", [pytest.param((), id="none"), pytest.param(("",), id="empty")])
 def test_the_script_refuses_a_missing_version_with_its_usage(released_tree, arguments):
-    result = run_script(released_tree, *arguments)
+    result = run_from(released_tree, SCRIPT, *arguments)
 
     assert result.returncode == 2
     assert "usage" in result.stderr

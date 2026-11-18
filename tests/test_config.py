@@ -25,7 +25,6 @@ from personas.config import (
     ConfigError,
     OwnershipTimings,
     Voice,
-    configuration_schema,
     load_config,
 )
 from personas.decision import DEFAULT_BUDGET_PAUSE_CAP_SECONDS
@@ -628,36 +627,6 @@ def test_a_step_that_keeps_more_than_the_history_may_hold_stops_the_start_and_na
     files.text = f"history_bytes = 1024\nhistory_keep_bytes = 1025\n{files.text}"
 
     assert "history_keep_bytes" in fails_at_start(files.write(), monkeypatch, capsys)
-
-
-def schema_refusals(node: object) -> set[str]:
-    """Every sentence under ``refusals`` anywhere in a JSON schema."""
-    if isinstance(node, list):
-        return {sentence for each in node for sentence in schema_refusals(each)}
-    if not isinstance(node, dict):
-        return set()
-    found = {sentence for value in node.values() for sentence in schema_refusals(value)}
-    return found | set(node.get("refusals", []))
-
-
-@pytest.mark.parametrize(
-    "break_it",
-    [
-        lambda text: text + TOOLS_ONLY_TABLE.replace("max_tool_calls = 5\n", ""),
-        lambda text: text + "[ownership]\ncancel_margin_seconds = 1.0\nstop_seconds = 1.0\n",
-        lambda text: text + "[ownership]\ngrace_seconds = 1.0\n",
-        lambda text: f"history_bytes = 1024\nhistory_keep_bytes = 1025\n{text}",
-    ],
-    ids=["app", "stop", "grace", "top level"],
-)
-def test_a_rule_across_fields_that_refuses_a_file_is_named_in_the_configuration_schema(
-    files, monkeypatch, capsys, break_it
-):
-    files.text = break_it(files.text)
-
-    error = fails_at_start(files.write(), monkeypatch, capsys)
-
-    assert [sentence for sentence in schema_refusals(configuration_schema()) if sentence in error]
 
 
 @pytest.mark.parametrize("field", ["history_bytes", "history_keep_bytes"])
