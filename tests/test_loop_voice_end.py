@@ -8,7 +8,6 @@ from http import HTTPStatus
 import anyio
 import pytest
 from agents.backend.fake_gateway import completion
-from agents.member import STANDING_URI, place_window_uri
 from agents.tools import ToolOutcome
 from agents.turn import FailureCode
 
@@ -18,7 +17,7 @@ from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE, status_
 from personas.failures import INVALID_ANSWER_CODE, leaves_of
 from personas.reporting import Event
 from personas.task_record import UnrequestedCancellationError
-from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PLACE_ID, say_in_the_call
+from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, pulses_the_window_once, say_in_the_call
 from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
 from tests.support.fakes import CANCELLED_TURN, failed_turn
 from tests.support.gateway import Gateway, speaks_and_says
@@ -59,6 +58,7 @@ async def test_a_place_removed_or_paused_while_a_sentence_waits_cancels_the_turn
 
 
 async def test_a_restart_in_a_call_answers_nothing_that_was_said_before_it(runner):
+    """TURNS-3."""
     before = f"{ADDRESSED} Before the start."
     say_in_the_call(runner, before, spoken=True)
     await a_voice_call(runner, completion(ANSWER))
@@ -86,17 +86,8 @@ async def test_a_resume_in_a_call_answers_nothing_that_was_said_during_the_pause
 
 async def test_a_stream_the_app_ends_at_its_bound_while_he_speaks_lets_the_turn_speak_on(runner):
     pulse_window, end_stream = asyncio.Event(), asyncio.Event()
-
-    async def pulses_the_window_then_ends(reply):
-        await reply.open_stream()
-        await reply.acknowledge([STANDING_URI])
-        await pulse_window.wait()
-        await reply.pulse(place_window_uri(CALL_PLACE))
-        await end_stream.wait()
-        await reply.complete()
-
     sleeps = holding_sentence_ends(runner)
-    runner.app.script(LISTEN, pulses_the_window_then_ends)
+    runner.app.script(LISTEN, pulses_the_window_once(pulse_window, ended=end_stream))
     await a_voice_call(runner, completion(TWO_SENTENCES))
     say_in_the_call(runner, ADDRESSED, spoken=True)
     pulse_window.set()
@@ -157,6 +148,7 @@ async def test_a_lifecycle_connection_lost_while_a_sentence_is_sent_cancels_the_
 async def test_a_speak_that_fails_as_a_call_or_answers_no_spoken_ends_the_turn_into_the_reaction_and_a_new_turn_speaks(
     runner, break_speak, mend_speak, events
 ):
+    """TURNS-27."""
     await a_voice_call(runner, *speaks_and_says(PLACE_ID, TWO_SENTENCES, "Written.", after="Later."))
     sleeps = gated(runner)
     break_speak(runner.app)
@@ -286,6 +278,7 @@ async def sentences_playing_with_the_next_open(runner, sent):
 async def test_a_turn_past_its_deadline_when_his_line_entered_sends_no_call_or_sentence_and_ends_limit_exceeded_once(
     runner, replies, sent
 ):
+    """TURNS-28."""
     sleeps = holding_sentence_ends(runner)
     await a_voice_call(runner, *replies, completion("Later."))
     say_in_the_call(runner, ADDRESSED)

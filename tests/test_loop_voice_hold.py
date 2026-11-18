@@ -53,6 +53,7 @@ async def window_read_after_the_hold(runner, reads: int = 1) -> None:
 
 
 async def test_a_hold_is_told_once_with_what_was_said_over_him_and_what_he_had_not_said(runner):
+    """TURNS-29, TURNS-30."""
     await held_in_the_first_sentence(runner, completion(TWO_SENTENCES), deciding(CONTINUE_SPEAKING_TOOL), completion())
 
     await decided(runner)
@@ -67,6 +68,7 @@ async def test_a_hold_is_told_once_with_what_was_said_over_him_and_what_he_had_n
 
 
 async def test_the_round_is_asked_over_his_history_and_the_turns_tools_with_one_call_per_reply(runner):
+    """TURNS-30."""
     await held_in_the_first_sentence(runner, completion(TWO_SENTENCES), deciding(CONTINUE_SPEAKING_TOOL), completion())
 
     await decided(runner)
@@ -78,6 +80,7 @@ async def test_the_round_is_asked_over_his_history_and_the_turns_tools_with_one_
 
 
 async def test_a_continue_lets_the_rest_play_and_his_unsent_sentences_follow(runner):
+    """TURNS-31."""
     await held_in_the_first_sentence(runner, completion(TWO_SENTENCES), deciding(CONTINUE_SPEAKING_TOOL), completion())
 
     assert await decided(runner) == ["continued"]
@@ -90,6 +93,7 @@ async def test_a_continue_lets_the_rest_play_and_his_unsent_sentences_follow(run
 
 
 async def test_a_stop_drops_the_unsent_sentences_and_tells_him_what_was_left_unsaid(runner):
+    """TURNS-31."""
     await held_in_the_first_sentence(runner, completion(TWO_SENTENCES), deciding(STOP_SPEAKING_TOOL), completion())
 
     assert await decided(runner) == ["stopped"]
@@ -109,6 +113,7 @@ async def test_a_stop_drops_the_unsent_sentences_and_tells_him_what_was_left_uns
     ids=["silent", "text only", "failed round"],
 )
 async def test_a_round_that_makes_no_decision_stops_him_with_the_id_and_says_nothing(runner, reply):
+    """TURNS-31."""
     await held_in_the_first_sentence(runner, completion(TWO_SENTENCES), reply)
 
     assert await decided(runner) == ["undecided"]
@@ -160,6 +165,7 @@ async def test_a_hold_without_words_starts_no_round_until_it_has_words_or_its_re
 
 
 async def test_a_hold_with_no_spoken_turn_of_his_is_stopped_with_its_id_once_and_no_round_runs(runner):
+    """TURNS-31, LOG-17."""
     await a_voice_call(runner, completion(ANSWER))
 
     runner.app.hold(PLACE_ID, HOLD_ID, SAID)
@@ -203,6 +209,7 @@ async def test_a_call_waiting_on_his_speech_is_sent_after_a_continue(runner):
 async def test_words_said_over_him_after_a_continue_are_told_once_at_his_next_call_and_the_call_after_it_goes_out(
     runner,
 ):
+    """TURNS-32."""
     more = ("Ada", "wait a moment, please")
     replies = [tool_round(say("first try", PLACE_ID), content=TWO_SENTENCES), deciding(CONTINUE_SPEAKING_TOOL)]
     await held_in_the_first_sentence(
@@ -224,6 +231,7 @@ async def test_words_said_over_him_after_a_continue_are_told_once_at_his_next_ca
 
 
 async def test_a_call_waiting_on_his_speech_is_never_sent_after_a_stop_and_he_is_told_so(runner):
+    """TURNS-31."""
     replies = [tool_round(say("written", PLACE_ID), content=TWO_SENTENCES), deciding(STOP_SPEAKING_TOOL)]
     await held_in_the_first_sentence(runner, *replies, completion(), completion())
 
@@ -285,6 +293,7 @@ async def test_every_spoken_request_asks_for_one_call_per_reply_and_a_written_on
 
 @pytest.mark.parametrize("hold_model", ["text/hold-low", None], ids=["set", "unset"])
 async def test_the_round_runs_on_the_hold_model_when_one_is_set_and_on_his_own_model_otherwise(runner, hold_model):
+    """TURNS-30, CONFIG-17."""
     runner.config = replace(
         runner.config, agents=tuple(replace(each, hold_model=hold_model) for each in runner.config.agents)
     )
@@ -348,6 +357,7 @@ async def test_a_decision_whose_call_fails_beside_a_defect_ends_the_runner_loud_
 
 
 async def test_a_hold_with_no_words_when_his_speech_is_over_is_stopped_undecided_and_no_round_runs(runner):
+    """TURNS-31, LOG-17."""
     await held_in_the_first_sentence(runner, completion(TWO_SENTENCES), said=(("Ada", ""),))
     await window_read_after_the_hold(runner)
 

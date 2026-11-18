@@ -116,6 +116,7 @@ def _claimed(mind: Mind, app: str, now: float) -> tuple[AppPlace, Occasion] | No
 
 
 def test_one_turn_runs_at_a_time_and_the_next_goes_to_the_place_that_waited_longest_once_it_ended():
+    """TURNS-6."""
     mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
     mind.due(CALL_AT_B, Waiting(1), NOW)
     mind.due(TABLE_AT_A, Waiting(2), NOW)
@@ -148,6 +149,7 @@ TABLE_WAITING = (TABLE_AT_A, Waiting(2))
 def test_a_turn_his_stop_cuts_before_it_spoke_leaves_its_place_due_first_and_any_other_cut_turn_leaves_none(
     stopping: bool, taken: tuple[Entry, ...], due_after: list[tuple[AppPlace, Occasion]]
 ):
+    """TURNS-38."""
     mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
     mind.due(CALL_AT_B, Waiting(1), NOW)
     mind.due(TABLE_AT_A, Waiting(2), NOW)
@@ -203,6 +205,7 @@ def test_the_end_of_a_wait_wakes_every_loop_of_his():
 
 
 def test_the_wait_after_turns_without_an_answer_doubles_per_turn_in_a_row_and_starts_over_after_an_answer():
+    """TURNS-37, TURNS-38."""
     mind = Mind(1_000, 1_000, BACKOFF_CAP_SECONDS * 4)
 
     waits = [mind.unanswered(budget_spent=False, now=NOW) for _ in range(2)]
@@ -213,6 +216,7 @@ def test_the_wait_after_turns_without_an_answer_doubles_per_turn_in_a_row_and_st
 
 
 def test_the_wait_after_a_spent_budget_reaches_its_cap_and_after_any_other_stop_the_backoff_cap():
+    """TURNS-37."""
     cap = BACKOFF_CAP_SECONDS * 4
     mind = Mind(1_000, 1_000, budget_pause_cap_seconds=cap)
 
@@ -313,6 +317,7 @@ def seqs_told(message: str) -> list[int]:
 
 
 def test_passing_the_history_bound_changes_the_earlier_messages_once_and_later_turns_append_again():
+    """TURNS-16."""
     mind = Mind(3 * LINE_BYTES, 2 * LINE_BYTES, BUDGET_PAUSE_CAP_SECONDS)
     for seq in (1, 2, 3):
         sent = answer_turn_for(mind, seq)
@@ -328,6 +333,7 @@ def test_passing_the_history_bound_changes_the_earlier_messages_once_and_later_t
 
 
 def test_a_turn_in_flight_whose_message_left_in_a_step_is_not_told_and_every_entry_is_told_once():
+    """TURNS-10."""
     mind = Mind(6 * LINE_BYTES, 3 * LINE_BYTES, BUDGET_PAUSE_CAP_SECONDS)
     mind.take((said(CALL, 1, "x"), said(CALL, 2, "x")))
     in_flight = a_lines_turn(mind, 2)
@@ -355,6 +361,7 @@ def test_a_turn_whose_message_a_step_cut_names_only_the_lines_it_still_tells():
 
 
 def test_a_newest_message_past_the_kept_bytes_loses_its_oldest_entries_and_keeps_its_newest():
+    """TURNS-16."""
     mind = Mind(4 * LINE_BYTES, 2 * LINE_BYTES, BUDGET_PAUSE_CAP_SECONDS)
     answer_turn_for(mind, 1)
     mind.take(tuple(said(CALL, seq, "x") for seq in range(2, 7)))
@@ -366,6 +373,7 @@ def test_a_newest_message_past_the_kept_bytes_loses_its_oldest_entries_and_keeps
 
 
 def test_the_newest_entry_stays_when_it_alone_is_past_the_kept_bytes():
+    """TURNS-16."""
     mind = Mind(4 * LINE_BYTES, 1, BUDGET_PAUSE_CAP_SECONDS)
     mind.take(tuple(said(CALL, seq, "x") for seq in range(1, 6)))
 

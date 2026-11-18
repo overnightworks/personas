@@ -30,6 +30,7 @@ async def a_written_turn(runner, traceparent: str | None = None) -> None:
 
 
 async def test_each_step_of_a_turn_writes_one_line_with_its_duration_and_outcome_in_the_turns_trace(runner, written):
+    """LOG-13."""
     await a_written_turn(runner)
 
     lines = written_by_the_runner(written)
@@ -61,6 +62,7 @@ async def test_the_setup_of_a_turn_contains_the_steps_it_waits_for(runner, caplo
 
 
 async def test_a_failed_step_ends_failed_with_a_closed_reason(runner, caplog):
+    """LOG-13."""
     runner.app.refuse_with = HTTPStatus.SERVICE_UNAVAILABLE
     runner.app.refused_method = LIST_TOOLS
     runner.gateway = Gateway(Reply(status=HTTPStatus.OK))
@@ -78,6 +80,7 @@ async def test_a_failed_step_ends_failed_with_a_closed_reason(runner, caplog):
 
 
 async def test_every_request_of_a_turn_carries_its_trace_and_the_requests_of_the_loop_carry_none(runner, written):
+    """LOG-4."""
     await a_written_turn(runner)
 
     (ended,) = [line for line in written_by_the_runner(written) if line["event"] == "turn.ended"]
@@ -93,6 +96,7 @@ async def test_every_request_of_a_turn_carries_its_trace_and_the_requests_of_the
 async def test_a_turn_woken_by_a_line_writes_its_wait_its_steps_and_its_end_in_the_trace_the_line_entered_in(
     runner, written
 ):
+    """LOG-4, LOG-27."""
     traceparent = a_traceparent()
     await a_written_turn(runner, traceparent)
 
@@ -124,6 +128,7 @@ async def test_the_requests_of_a_turn_woken_by_a_line_pass_the_trace_the_line_en
 async def test_a_turn_woken_by_a_line_without_a_trace_it_can_continue_opens_a_trace_of_its_own(
     runner, written, traceparent
 ):
+    """LOG-4."""
     await a_written_turn(runner, traceparent)
 
     lines = written_by_the_runner(written)
@@ -151,6 +156,7 @@ async def test_the_gateway_request_of_a_turn_and_its_tool_call_carry_the_trace_o
 
 
 async def test_the_gateway_request_line_agents_writes_for_a_turn_carries_the_trace_of_the_turn(runner, written):
+    """LOG-4."""
     await a_written_turn(runner)
 
     lines = all_written_lines(written)
@@ -213,6 +219,7 @@ async def test_a_failed_step_of_another_app_is_written_as_a_handled_failure(runn
 
 
 async def test_a_turn_due_again_after_a_pause_waits_from_the_pause_end(runner, caplog):
+    """LOG-27."""
     passed_after_pause = 5.0
 
     class PausingClock(FakeClock):

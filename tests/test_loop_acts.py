@@ -140,6 +140,7 @@ async def test_an_error_result_the_app_answers_is_told_as_an_answer_that_is_an_e
 
 
 async def test_a_picture_the_app_answered_reaches_the_models_next_request_and_his_next_turn_is_told_a_mark_only(runner):
+    """TURNS-33."""
     picture = a_picture()
     runner.app.say_outcomes.append(ToolOutcome("", is_error=False, image=picture))
     runner.gateway = Gateway(say_round(ANSWER), completion("done"), completion("again"))
@@ -204,6 +205,7 @@ async def test_a_picture_that_breaks_the_wire_is_the_failure_of_the_tools_only_a
 async def test_a_relayed_say_that_fails_is_told_as_not_answered_with_the_failures_code_and_the_turn_ends_as_before(
     runner, fails, code, waited
 ):
+    """TURNS-21."""
     runner.gateway = Gateway(say_round(ANSWER), say_round(ANSWER), completion("done"))
     await restarted_in_the_call(runner)
     runner.app.script(CALL, fails)
@@ -226,6 +228,7 @@ async def test_a_relayed_say_that_fails_is_told_as_not_answered_with_the_failure
 
 
 async def test_calls_past_the_places_own_bound_enter_no_act(runner, songmaker):
+    """TURNS-21."""
     own_bound = runner.config.apps[0].max_tool_calls
     runner.gateway = Gateway(say_round(*[ANSWER] * (own_bound + 1)), completion("done"), completion("again"))
     await restarted_in_the_call(runner)
@@ -324,6 +327,7 @@ async def a_call_waiting_for_its_app_while_its_place_leaves(runner, songmaker, *
 async def test_a_call_cut_in_flight_because_its_place_left_is_told_cancelled_to_a_turn_at_another_place(
     runner, songmaker, tools_only
 ):
+    """TURNS-21."""
     act, second = await a_call_waiting_for_its_app_while_its_place_leaves(runner, songmaker, tools_only=tools_only)
 
     assert second.room["history"] == history_of(

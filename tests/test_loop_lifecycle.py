@@ -242,6 +242,7 @@ async def test_a_4xx_suspends_the_loop_with_its_status_and_it_resumes_when_the_a
     ],
 )
 async def test_a_4xx_suspends_the_loop_with_the_method_and_the_answer_that_failed(runner, answers, answer):
+    """LOG-26."""
     runner.app.stand(SUBJECT, invited("room-7", "inv-3"))
     runner.app.script(READ, answers)
     runner.start()
@@ -272,6 +273,8 @@ async def test_a_5xx_backs_off_and_is_logged_once_until_a_read_answers(runner):
 
 
 async def test_a_5xx_backs_off_with_the_method_and_the_answer_that_failed(runner):
+    """LOG-26."""
+
     async def fails_once(reply):
         await reply.body(HTTPStatus.SERVICE_UNAVAILABLE, "text/html", b"<html>the front</html>")
 
@@ -378,6 +381,7 @@ async def test_a_pulse_for_a_place_window_is_a_wake_and_a_read_and_no_failure(ru
 
 
 async def test_a_disabled_client_suspends_the_loop_before_any_app_call_and_a_granted_token_resumes_it(runner):
+    """TURNS-42."""
     runner.realm.refusing = True
     runner.start()
     await drain(runner.realm.refusals, REFUSALS_BEFORE_THE_FIX)

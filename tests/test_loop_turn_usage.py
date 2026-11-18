@@ -62,6 +62,7 @@ def the_turn_ended_line(caplog) -> dict[str, object]:
 async def test_a_turn_that_ends_with_its_final_event_logs_the_tokens_it_used_or_none(
     runner, caplog, rounds, counts, aloud
 ):
+    """LOG-31."""
     if aloud:
         await a_voice_call(runner, *rounds)
     else:
@@ -84,6 +85,7 @@ async def the_sizes_of_a_turn(runner, caplog, *rounds) -> tuple[int, int, int, i
 
 
 async def test_a_turn_with_no_call_results_logs_its_sizes_and_zero_results(runner, caplog):
+    """LOG-30."""
     tools, told, results, images = await the_sizes_of_a_turn(runner, caplog, completion("done"))
 
     assert tools > 0
@@ -94,6 +96,7 @@ async def test_a_turn_with_no_call_results_logs_its_sizes_and_zero_results(runne
 
 @pytest.mark.parametrize("calls", [1, 2, 3])
 async def test_a_turn_logs_the_sum_of_its_call_results(runner, caplog, calls):
+    """LOG-30."""
     answer = "x" * 100
     runner.app.say_outcomes.extend(ToolOutcome(answer, is_error=False) for _ in range(calls))
     runner.app.content.add(answer)
@@ -111,6 +114,7 @@ async def test_a_turn_logs_the_sum_of_its_call_results(runner, caplog, calls):
 
 @pytest.mark.parametrize("pictures", [1, 2], ids=["one picture", "two pictures"])
 async def test_a_turn_logs_the_decoded_bytes_of_its_pictures_apart_from_its_results(runner, caplog, pictures):
+    """LOG-30."""
     answer = "x" * 100
     shown = [a_picture(size) for size in (5000, 7000)[:pictures]]
     runner.app.say_outcomes.extend(ToolOutcome(answer, is_error=False, image=each) for each in shown)
@@ -152,6 +156,7 @@ async def test_a_turn_counts_the_result_of_a_held_call_among_its_results(runner,
 
 
 async def test_a_turn_that_fails_after_its_request_logs_its_sizes_and_no_usage(runner, caplog):
+    """LOG-30, LOG-31."""
     runner.gateway = Gateway(Reply(status=HTTPStatus.SERVICE_UNAVAILABLE))
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)

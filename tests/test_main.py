@@ -62,6 +62,7 @@ if TYPE_CHECKING:
 def test_every_line_the_entry_point_configures_is_one_json_object_of_the_runner_on_stdout(
     restored_logging, capsys: pytest.CaptureFixture[str]
 ):
+    """LOG-1."""
     configure_logging()
 
     logging.getLogger("personas").info("loop.started", extra={"agent_id": "mozart"})
@@ -488,6 +489,7 @@ class WarnsAfterTheSchemaCheck:
 def test_a_runner_with_a_memory_writes_no_info_line_of_alembic_and_its_warning_still_reaches_stdout(
     files, database, monkeypatch, restored_logging, capsys
 ):
+    """LOG-1."""
     files.text += files.memory_table()
     files.use_database(database)
     monkeypatch.setenv(CONFIG_ENVIRONMENT_VARIABLE, files.write()[CONFIG_ENVIRONMENT_VARIABLE])
@@ -509,6 +511,7 @@ def test_a_runner_with_a_memory_writes_no_info_line_of_alembic_and_its_warning_s
 
 @pytest.mark.parametrize("has_memory", [True, False], ids=["memory table", "no memory table"])
 def test_the_real_boundaries_hold_a_store_exactly_when_the_configuration_has_a_memory_table(files, has_memory):
+    """CONFIG-33."""
     if has_memory:
         files.text += files.memory_table()
     config = load_config(files.write())

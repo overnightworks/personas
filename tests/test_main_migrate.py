@@ -106,6 +106,7 @@ def test_migrating_a_database_at_a_revision_it_does_not_know_changes_nothing_and
 
 @pytest.mark.postgres
 def test_the_console_script_prints_nothing_when_it_migrates_an_empty_or_a_migrated_database(files, unmigrated_database):
+    """LOG-5."""
     files.use_database(unmigrated_database)
     environment = {
         **os.environ,

@@ -58,6 +58,7 @@ async def test_a_written_turn_that_called_a_tool_and_answered_says_its_call_and_
 
 
 async def test_a_spoken_turn_counts_the_sentences_it_sent_and_marks_when_the_first_one_went_out(runner, caplog):
+    """LOG-29."""
     await a_spoken_turn(runner, completion(TWO_SENTENCES))
 
     line = the_turn_ended_line(caplog)
@@ -67,6 +68,7 @@ async def test_a_spoken_turn_counts_the_sentences_it_sent_and_marks_when_the_fir
 
 
 async def test_a_silent_turn_counts_its_silent_round_and_has_no_sentence_or_first_output(runner, caplog):
+    """LOG-29."""
     await a_spoken_turn(runner, completion(SILENT))
 
     line = the_turn_ended_line(caplog)
@@ -75,6 +77,7 @@ async def test_a_silent_turn_counts_its_silent_round_and_has_no_sentence_or_firs
 
 
 async def test_a_turn_the_gateway_refused_ends_refused_with_the_code_as_its_reason(runner, caplog):
+    """LOG-28."""
     await a_written_turn(runner, Reply(status=HTTPStatus.TOO_MANY_REQUESTS))
 
     assert runner.reports.turn_endings == [refused_turn(RejectionCode.BUSY)]
@@ -82,6 +85,7 @@ async def test_a_turn_the_gateway_refused_ends_refused_with_the_code_as_its_reas
 
 
 async def test_a_turn_whose_relayed_call_failed_ends_failed_with_a_closed_reason_at_error_level(runner, caplog):
+    """LOG-28."""
     runner.gateway = Gateway(*says(PLACE_ID, "Here.")[:1], *says(PLACE_ID, "Here."))
     await restarted_in_the_call(runner)
     runner.app.script(CALL, cuts)
@@ -95,6 +99,7 @@ async def test_a_turn_whose_relayed_call_failed_ends_failed_with_a_closed_reason
 
 
 async def test_a_turn_whose_place_left_ends_cancelled_without_a_reason(runner, caplog):
+    """LOG-28."""
     sleeps = holding_sentence_ends(runner)
     await a_voice_call(runner, completion(TWO_SENTENCES))
     say_in_the_call(runner, ADDRESSED, spoken=True)
@@ -121,6 +126,7 @@ async def test_a_turn_the_runner_cancelled_ends_cancelled_though_the_loop_did_no
 
 
 async def test_every_line_a_turn_writes_shares_its_trace_and_no_line_outside_it_carries_one(written, runner):
+    """LOG-4."""
     runner.gateway = Gateway(Reply(status=HTTPStatus.TOO_MANY_REQUESTS))
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)

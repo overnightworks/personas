@@ -15,6 +15,7 @@ from agents.tools import ToolEffect
 from agents.turn import FailureCode
 from mcp_types import ListToolsResult
 
+from personas.decision import NETWORK_FAILURE_CODE
 from personas.failures import (
     STORE_DEFECT_CODE,
     STORE_TIMEOUT_CODE,
@@ -34,8 +35,16 @@ from personas.recall import (
     text_refused_text,
 )
 from personas.reporting import Event
-from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PLACE_ID, restarted_in_the_call, say_in_the_call
-from tests.support.fakes import failed_turn, memory_target
+from tests.support.call import (
+    ADDRESSED,
+    ANSWER,
+    CALL_PLACE,
+    PLACE_ID,
+    pulses_the_window_once,
+    restarted_in_the_call,
+    say_in_the_call,
+)
+from tests.support.fakes import CANCELLED_TURN, failed_turn, memory_target
 from tests.support.gateway import Gateway, play, say, says
 from tests.support.history import (
     MORNING,
@@ -49,7 +58,7 @@ from tests.support.history import (
     url_of,
     waits,
 )
-from tests.support.hopin import LIMIT_SECONDS, LIST_TOOLS, PLAY_TOOL, SAY_TOOL
+from tests.support.hopin import LIMIT_SECONDS, LIST_TOOLS, LISTEN, PLAY_TOOL, SAY_TOOL
 from tests.support.logs import formatted, lines_of
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active
@@ -64,6 +73,9 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.anyio
 
 OUTAGE_EVENTS = {Event.BACKOFF, Event.SUSPENDED}
+SHORT_STREAM_SECONDS = 0.5
+"""The runner's deadline on a listen; the scripted app ends each listen once it has pulsed, so only a held write
+reaches it."""
 
 
 class ScriptedStore:
@@ -171,6 +183,32 @@ async def test_a_write_that_ends_in_a_timeout_is_reported_by_its_code_and_the_tu
     assert not OUTAGE_EVENTS & {event for event, _ in runner.reports.reported()}
 
 
+async def test_a_write_held_past_the_listens_deadline_cancels_the_running_turn_with_no_store_failed(runner):
+    """CONFIG-25."""
+    addressed_said, held_line_said = asyncio.Event(), asyncio.Event()
+    runner.app.script(LISTEN, pulses_the_window_once(addressed_said), pulses_the_window_once(held_line_said))
+    store = ScriptedStore()
+    runner.lines = store
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    runner.gateway.hold_request(1)
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    runner.start(stream_seconds=SHORT_STREAM_SECONDS)
+    await runner.app.until_window_read(PLACE_ID)
+    say_in_the_call(runner, ADDRESSED)
+    addressed_said.set()
+    await runner.gateway.until_requested(1)
+    store.release = asyncio.Event()
+    say_in_the_call(runner, "A line the dark store holds")
+    held_line_said.set()
+    await store.until_waiting()
+    await runner.reports.until_a_turn_ended()
+    await runner.reports.until(Event.BACKOFF)
+
+    assert runner.reports.turn_endings == [CANCELLED_TURN]
+    assert runner.reports.reported()[:2] == [(Event.STARTED, None), (Event.BACKOFF, NETWORK_FAILURE_CODE)]
+    assert Event.STORE_FAILED not in {event for event, _ in runner.reports.reported()}
+
+
 LATER_TOLD = "2026-11-10T18:00:00Z"
 
 
@@ -222,6 +260,7 @@ async def ended_by(task):
 
 
 async def test_a_written_turn_with_a_memory_is_handed_the_lookup_first_declared_read_only_before_the_apps_tools(runner):
+    """TURNS-39."""
     await looking_in_the_call(runner, ScriptedStore(), completion("done"))
     await runner.gateway.until_requested(1)
 
@@ -244,6 +283,7 @@ async def test_a_turn_at_a_view_with_a_memory_is_handed_the_lookup_first_declare
 async def test_a_turns_call_total_is_his_apps_bounds_plus_his_lookups_and_the_one_a_held_call_counts(
     runner, lists_tools
 ):
+    """TURNS-22, CONFIG-36."""
     if not lists_tools:
         runner.app.script(LIST_TOOLS, lists_nothing)
     stored_in(runner, ScriptedStore())
@@ -268,6 +308,7 @@ async def test_a_turns_call_total_is_his_apps_bounds_plus_his_lookups_and_the_on
 
 @pytest.mark.parametrize("at_a_view", [False, True], ids=["written turn", "turn at a view"])
 async def test_a_lookup_asks_for_the_turns_own_room_whatever_arguments_the_model_gave(runner, at_a_view):
+    """TURNS-39."""
     elsewhere = {"place": "elsewhere", "app": "https://elsewhere.test", "client_id": "another", "kind": "call"}
     replies = (tool_round(recalling("some words", **elsewhere)), completion("done"))
     store = ScriptedStore()
@@ -315,6 +356,7 @@ async def test_a_result_holds_the_newest_lines_within_lookup_bytes_and_says_when
 
 
 async def test_a_lookup_past_lookup_calls_is_refused_with_a_text_of_its_own_and_reads_nothing(runner):
+    """CONFIG-36."""
     store = ScriptedStore()
     await looking_in_the_call(
         runner, store, tool_round(recalling(), recalling(), recalling()), completion("done"), lookup_calls=2
@@ -328,6 +370,7 @@ async def test_a_lookup_past_lookup_calls_is_refused_with_a_text_of_its_own_and_
 
 
 async def test_a_lookup_is_not_held_back_by_what_arrived_and_does_not_use_up_the_hold(runner):
+    """TURNS-41."""
     store = ScriptedStore()
     stored_in(runner, store)
     runner.gateway = Gateway(tool_round(recalling()), tool_round(say(ANSWER)), completion("done"))
@@ -367,6 +410,7 @@ async def test_a_text_that_is_missing_no_string_or_too_long_is_an_error_result_a
 
 
 async def test_a_store_that_cannot_answer_gives_an_error_result_and_store_failed_once_and_his_answer_goes_out(runner):
+    """TURNS-41, LOG-20."""
     store = ScriptedStore()
     store.search_failure = StoreUnavailable(STORE_UNREACHABLE_CODE)
     await looking_in_the_call(
@@ -404,6 +448,7 @@ async def test_a_defect_or_a_schema_behind_its_head_met_in_a_lookup_ends_the_run
 async def test_a_turn_that_looked_leaves_nothing_of_the_lookup_in_his_history_and_the_next_turn_repeats_every_message(
     runner,
 ):
+    """TURNS-41."""
     hidden = "Said " + secrets.token_hex(6)
     store = ScriptedStore()
     store.found = (said(1, hidden),)

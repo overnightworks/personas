@@ -289,6 +289,7 @@ def test_the_list_of_an_empty_memory_shows_no_visit(files, database, monkeypatch
 def test_erasing_one_agent_removes_its_lines_keeps_the_others_and_prints_the_number(
     files, database, monkeypatch, capsys, caplog
 ):
+    """LOG-5."""
     spoken = Spoken()
     three_visits_of_two_agents(database, spoken)
     configured_for(files, database, monkeypatch)

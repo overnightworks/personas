@@ -60,6 +60,7 @@ def test_a_keep_period_that_reaches_before_the_calendar_sweeps_nothing():
 
 
 def test_the_lookup_is_declared_read_only_under_one_string_parameter_named_text():
+    """TURNS-39."""
     assert RECALL_DECLARATION.effect is ToolEffect.READ_ONLY
     assert RECALL_DECLARATION.parameters["properties"].keys() == {"text"}
     assert RECALL_DECLARATION.parameters["properties"]["text"]["type"] == "string"
@@ -133,6 +134,7 @@ def test_a_result_without_a_line_is_the_same_form_with_none():
 
 
 def test_a_result_holds_the_newest_lines_that_fit_and_says_when_more_matched():
+    """TURNS-40, CONFIG-37."""
     whole = len(lookup_result(_lines_said(5), 100_000).encode())
 
     all_fit = json.loads(lookup_result(_lines_said(5), whole))

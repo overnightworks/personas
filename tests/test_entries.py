@@ -57,6 +57,7 @@ def test_taken_lines_are_the_visits_lines_as_kept_with_the_time_of_the_read():
 
 
 def test_a_line_that_is_an_act_is_kept_as_one_and_told_with_the_mark_while_any_other_line_is_told_without_the_key():
+    """TURNS-11."""
     acting = PlaceEntry(seq=1, kind="message", name="Ada", text="took a card", own=False, act=True)
     talking = PlaceEntry(seq=2, kind="message", name="Ada", text="good luck", own=False)
 
@@ -90,6 +91,7 @@ def test_a_history_its_lines_and_its_views_show_no_name_no_text_and_no_state_in_
     ids=["no picture, no key", "a picture, told as image"],
 )
 def test_an_answer_is_told_with_the_image_mark_only_when_a_picture_was_shown(answered, told):
+    """TURNS-13."""
     assert told_outcome(answered) == told
 
 

@@ -228,6 +228,7 @@ async def test_an_agent_whose_lock_is_held_is_served_and_one_whose_lock_another_
 
 
 async def test_an_agent_is_not_served_before_the_grace_has_passed_after_its_lock_was_taken():
+    """CONFIG-29, CONFIG-31."""
     clock = GatedClock(gating_the_grace=True)
     pod = Pod(clock, ScriptedLocks(clock, {AGENT}, {AGENT}, {AGENT}))
     task = pod.start()
@@ -248,6 +249,7 @@ def rounds_in(events: list[tuple[str, str]]) -> list[int]:
 
 
 async def test_an_agent_whose_lock_is_no_longer_held_is_stopped_and_has_ended_before_the_next_round(clock):
+    """LOG-22, LOG-23."""
     events: list[tuple[str, str]] = []
     unwinding = asyncio.Event()
     locks = ScriptedLocks(clock, {AGENT}, After((AGENT,), set()), trail=events)
@@ -285,6 +287,7 @@ class StopCause(Enum):
 async def test_a_stop_that_outlasts_the_cancel_margin_writes_one_line_for_the_agent_and_the_loss_once_it_ended(
     clock, causes, lost
 ):
+    """LOG-23, LOG-24."""
     unwinding = asyncio.Event()
     rounds = ({AGENT}, After((AGENT,), set())) if StopCause.HOLD_LOST in causes else ({AGENT},)
     refused_writes = {AGENT} if StopCause.WRITE_REFUSED in causes else set[str]()
@@ -469,6 +472,7 @@ async def test_a_lost_lock_connection_stops_every_agent_and_the_pod_takes_them_a
 
 
 async def test_a_round_starts_one_contend_interval_after_the_start_of_the_one_before(clock):
+    """CONFIG-26."""
     pod = Pod(clock, ScriptedLocks(clock, set(), set(), seconds_per_round=0.75))
     task = pod.start()
     await pod.until_spent()

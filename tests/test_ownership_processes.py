@@ -65,6 +65,7 @@ async def holder_and_other(pods: Pods) -> tuple[Runner, Runner]:
 
 
 async def test_two_pods_turn_ready_and_each_agent_listens_from_exactly_one_of_them(pods):
+    """LOG-22."""
     first, second = pods.start("first"), pods.start("second")
 
     await until(lambda: first.is_ready() and second.is_ready(), "both pods ready")
@@ -282,6 +283,7 @@ async def test_a_line_whose_turn_a_sigterm_cut_before_it_spoke_gets_exactly_one_
 
 
 async def test_a_line_whose_turn_had_spoken_when_a_sigterm_cut_it_gets_no_turn_on_the_pod_that_takes_over(pods):
+    """TURNS-38."""
     pods.script_gateway(tool_round(say(FIRST_ANSWER)), *says(PLACE_ID, SECOND_ANSWER))
     pods.app.stand(AGENT_SUBJECT, active(PLACE_ID))
     holder, other = await holder_and_other(pods)

@@ -510,6 +510,7 @@ def texts_found(found: tuple[KeptLine, ...]) -> list[str]:
 
 
 async def test_a_search_gives_the_lines_of_this_agents_room_across_its_visits_and_the_line_as_it_was_kept(store):
+    """TURNS-39."""
     await store.keep(a_read_in(a_visit("morning"), line(1, "From the morning"), hours_after_start=1))
     await store.keep(a_read_in(a_visit("noon"), line(1, "From the noon"), hours_after_start=2))
 
@@ -574,6 +575,7 @@ async def test_a_search_gives_no_line_of_another_place_kind_app_or_agent_whateve
 async def test_a_line_is_found_when_it_holds_every_word_and_a_text_without_a_word_gives_every_line_newest_first(
     store, words, found
 ):
+    """TURNS-40."""
     await store.keep(a_read_in(a_visit("v"), line(1, "The red fox jumps"), hours_after_start=1))
     await store.keep(a_read_in(a_visit("v"), line(2, "the Fox is red"), hours_after_start=2))
     await store.keep(a_read_in(a_visit("v"), line(3, "a red dog"), hours_after_start=3))
@@ -584,6 +586,7 @@ async def test_a_line_is_found_when_it_holds_every_word_and_a_text_without_a_wor
 async def test_a_line_first_read_at_or_after_the_time_is_not_found_and_the_newest_rows_come_first_up_to_the_bound(
     store,
 ):
+    """TURNS-40."""
     await store.keep(a_read_in(a_visit("v"), line(1, "one"), line(2, "two"), hours_after_start=1))
     await store.keep(a_read_in(a_visit("v"), line(3, "three"), hours_after_start=2))
     await store.keep(a_read_in(a_visit("v"), line(4, "four"), hours_after_start=3))
@@ -724,6 +727,7 @@ def told_lines(opening) -> list[str]:
 async def test_a_line_a_window_held_at_a_restart_and_one_said_in_a_pause_are_told_to_no_turn_and_a_lookup_gives_them(
     runner, store, database
 ):
+    """TURNS-17."""
     runner.remember_in(store)
     runner.gateway = Gateway(tool_round(tool_call("call-0", RECALL_TOOL, {"text": ""})), completion("done"))
     runner.app.speak(PLACE_ID, PERSON, "Ada", RESTART_LINE)

@@ -281,6 +281,7 @@ async def test_every_sentence_sent_is_counted_the_refused_one_included_and_a_sen
 
 
 async def test_a_round_that_opens_with_the_silent_marker_is_counted_and_sends_no_sentence():
+    """TURNS-26, LOG-29."""
     scenario = SpeakingScenario("[silent]")
     scenario.renewal_gate.set()
     await scenario.speaking.play()
@@ -289,6 +290,7 @@ async def test_a_round_that_opens_with_the_silent_marker_is_counted_and_sends_no
 
 
 async def test_a_request_not_answered_by_the_deadline_enters_once_as_unanswered_and_ends_the_turn_limit_exceeded():
+    """TURNS-28."""
     scenario = SpeakingScenario("One.", answers_lost=True)
     scenario.renewal_gate.set()
     sleeps = HeldSleeps(scenario)

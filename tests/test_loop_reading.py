@@ -27,6 +27,7 @@ async def test_after_a_restart_an_addressed_line_still_in_the_window_is_not_answ
 
 
 async def test_lines_said_during_a_pause_are_not_answered_after_the_resume_and_a_line_after_it_is(runner):
+    """TURNS-3."""
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
     pause_seen = runner.app.hold_next_read()
@@ -75,6 +76,7 @@ async def test_a_pause_and_a_resume_seen_while_a_turn_runs_elsewhere_leave_the_l
 async def test_when_the_window_moved_past_his_position_the_turn_is_told_lines_were_missed_and_none_is_answered_twice(
     runner,
 ):
+    """TURNS-4."""
     runner.gateway = Gateway(*says_after_a_hold(PLACE_ID, ANSWER), *says(PLACE_ID, "Once more."))
     first_round = runner.gateway.hold_request(1)
     await restarted_in_the_call(runner)
@@ -100,6 +102,7 @@ async def test_when_the_window_moved_past_his_position_the_turn_is_told_lines_we
 async def test_a_vanished_window_costs_one_more_standing_read_and_restarts_the_place_without_answering_old_lines(
     runner,
 ):
+    """TURNS-4."""
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
     standing_reads = runner.app.reads[STANDING_URI]
@@ -122,6 +125,8 @@ async def test_a_vanished_window_costs_one_more_standing_read_and_restarts_the_p
 
 
 async def test_a_place_invited_again_when_its_window_vanished_is_joined_in_that_wake_and_read_from_seq_1(runner):
+    """TURNS-3."""
+
     def addressed_once_joined(change):
         if change.event is Event.JOINED:
             runner.app.stand(SUBJECT, active(PLACE_ID))

@@ -87,6 +87,7 @@ async def store(database: DatabaseTarget) -> AsyncIterator[PostgresLineStore]:
 async def test_the_first_sweep_removes_the_line_first_read_longer_ago_than_the_keep_period_and_keeps_the_younger(
     runner, store, database
 ):
+    """CONFIG-34."""
     now = runner.clock.wall()
     await store.keep(read_of("Older", days_ago=OLD_DAYS, now=now))
     await store.keep(read_of("Younger", days_ago=YOUNG_DAYS, now=now))
@@ -101,6 +102,7 @@ async def test_the_first_sweep_removes_the_line_first_read_longer_ago_than_the_k
 async def test_a_line_that_ages_past_the_period_while_the_runner_runs_is_removed_at_the_next_sweep_and_not_before(
     runner, store, database
 ):
+    """CONFIG-34, CONFIG-35."""
     await store.keep(read_of("Ages", days_ago=0, now=runner.clock.wall()))
     clock = sweeping(runner, store)
     runner.start()

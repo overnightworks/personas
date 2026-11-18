@@ -58,6 +58,7 @@ async def test_an_addressed_line_gets_exactly_one_say_under_the_agents_own_finge
 
 
 async def test_his_own_line_naming_him_starts_no_turn(runner):
+    """TURNS-5."""
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
     runner.app.stand(SUBJECT, active(PLACE_ID))
     say_in_the_call(runner, "Mozart will say it himself", author=SUBJECT, name="Mozart")
@@ -255,6 +256,7 @@ async def test_a_turns_backend_is_closed_once_the_gateway_failed_the_turn(runner
 async def test_a_turn_refused_for_a_spent_budget_waits_the_backoff_base_before_his_next_turn_and_logs_the_pause_once(
     runner,
 ):
+    """TURNS-37, LOG-15."""
     runner.clock = SweepClock(BACKOFF_BASE_SECONDS)
     runner.gateway = Gateway(BUDGET_SPENT, *says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
@@ -275,6 +277,7 @@ async def test_a_turn_refused_for_a_spent_budget_waits_the_backoff_base_before_h
 
 
 async def test_a_lines_turn_the_gateway_failed_runs_again_after_the_wait_with_its_seqs_in_its_woke(runner):
+    """TURNS-38."""
     runner.clock = SweepClock(BACKOFF_BASE_SECONDS)
     runner.gateway = Gateway(Reply(status=HTTPStatus.SERVICE_UNAVAILABLE), *says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
@@ -362,6 +365,8 @@ async def test_a_tool_that_answers_gone_shows_the_model_that_and_leaves_the_life
 
 
 async def test_a_turn_binds_the_tools_the_app_lists_right_now_and_a_missing_one_is_no_failure(runner):
+    """TURNS-18."""
+
     async def lists_no_tools(reply):
         await reply.result(ListToolsResult(tools=[]))
 
@@ -574,6 +579,7 @@ async def test_a_window_the_app_lost_is_skipped_and_is_no_suspension(runner):
 
 
 async def test_a_refused_and_an_answered_turn_log_a_code_and_no_secret_or_content(runner, caplog):
+    """LOG-3."""
     runner.gateway = Gateway(Reply(status=HTTPStatus.TOO_MANY_REQUESTS), *says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
@@ -585,6 +591,7 @@ async def test_a_refused_and_an_answered_turn_log_a_code_and_no_secret_or_conten
 
 
 async def test_the_started_line_names_the_model_each_agent_runs_on(runner, caplog):
+    """LOG-6."""
     runner.config = replace(
         runner.config, agents=(replace(runner.config.agents[0], persona=replace_model(runner, "text/sonnet-low")),)
     )
