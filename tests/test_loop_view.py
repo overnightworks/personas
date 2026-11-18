@@ -18,20 +18,11 @@ from tests.support.fakes import CANCELLED_TURN, SweepClock
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
 from tests.support.history import after_start, entry, history_of, said_and_taken, settled, view_entry, woke_at_table
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import (
-    CALL,
-    READ,
-    SAY_TOOL,
-    a_traceparent,
-    active,
-    invited,
-    lines_of,
-    paused,
-    trace_id_of,
-    written_by_the_runner,
-)
+from tests.support.hopin import CALL, READ, SAY_TOOL, a_traceparent, trace_id_of
+from tests.support.logs import lines_of, written_by_the_runner
 from tests.support.realm import AGENT_NAME
 from tests.support.songmaker import CREATE_SONG, GENERATE_SONG
+from tests.support.standings import active, invited, paused
 from tests.support.wire import cuts
 
 pytestmark = pytest.mark.anyio

@@ -9,36 +9,31 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from personas.decision import (
-    EMPTY_PRESENT,
+from personas.decision import AppPlace, backoff_delay, budget_pause, held_apps, refusal_retry_at, sync_checkpoints
+from personas.due import (
     NO_TURNS,
-    AppPlace,
     Claim,
     TurnState,
-    answered_into,
-    backoff_delay,
-    budget_pause,
     claimed,
     cut_by_stop,
     due_again,
-    held_apps,
     pause_left,
     paused_for,
-    refusal_retry_at,
     released,
-    sync_checkpoints,
-    taken_into,
     with_due,
     without_due,
 )
+from personas.present import EMPTY_PRESENT, answered_into, taken_into
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
     from agents.member import Standing
 
-    from personas.decision import Checkpoint, Due, Present
+    from personas.decision import Checkpoint
+    from personas.due import Due
     from personas.entries import Entry, History, Occasion, TurnTold
+    from personas.present import Present
 
 
 class Mind:

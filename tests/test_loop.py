@@ -46,7 +46,8 @@ from tests.support.fakes import (
     window_of,
 )
 from tests.support.gateway import Gateway, says
-from tests.support.hopin import LIMIT_SECONDS, active, invited
+from tests.support.hopin import LIMIT_SECONDS
+from tests.support.standings import active, invited
 
 pytestmark = pytest.mark.anyio
 

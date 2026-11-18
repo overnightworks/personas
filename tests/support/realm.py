@@ -11,7 +11,7 @@ from urllib.parse import parse_qs
 
 import httpx2
 
-from tests.support.hopin import ISSUER
+from tests.support.hopin_places import ISSUER
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence

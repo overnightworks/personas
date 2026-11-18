@@ -2,78 +2,54 @@
 
 The front, its resources and its change signal are the library's; the app's standings and
 the accept tool are scripted. A test may script the answer to a request method to misbehave once.
+Its places live in ``hopin_places`` and its voice in ``hopin_voice``.
 """
 
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
-import logging
 import secrets
 from collections import defaultdict
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 
-from agents.mcp_server import McpPersonFront, PersonRequest, PersonTool, ResourceChanges
+from agents.mcp_server import McpPersonFront, PersonRequest, PersonTool
 from agents.mcp_wire import MCP_ENDPOINT_PATH
 from agents.member import (
     ACCEPT_INVITATION_TOOL,
-    CONTINUE_SPEAKING_TOOL,
     SPEAK_TOOL,
     STANDING_URI,
-    STOP_SPEAKING_TOOL,
     AcceptInvitationArguments,
-    ContinueSpeakingArguments,
-    ContinueSpeakingRefusal,
-    ContinueSpeakingRefused,
-    DroppedSpeaking,
     Interrupted,
-    Invitation,
     MemberStanding,
-    ParentPlace,
-    PartialSpeech,
     PlaceEntry,
     PlaceRef,
     PlaceView,
     PlaceWindow,
-    SpeakArguments,
-    SpeakRefusal,
-    SpeakRefused,
-    Spoken,
     Standing,
-    StandingState,
-    StoppedSpeaking,
-    StopSpeakingArguments,
-    StopSpeakingRefusal,
-    StopSpeakingRefused,
     TalkedOver,
-    VoiceState,
-    Written,
     place_ref_from_view_uri,
     place_ref_from_window_uri,
     place_view_uri,
     place_window_uri,
 )
-from agents.tools import ToolDeclaration, ToolEffect, ToolImage, ToolOutcome
+from agents.tools import ToolDeclaration, ToolEffect, ToolOutcome
 from agents.turn import JsonObject, Principal
 
-from personas.main import configure_logging
+from tests.support.hopin_places import ACCEPTED_NAME, ISSUER
+from tests.support.hopin_voice import CONTINUE_DECLARATION, SPEAK_DECLARATION, STOP_DECLARATION, AppVoice
 from tests.support.loopback import serving
-from tests.support.placestore import MemoryPlaceStore
+from tests.support.pictures import base64_of
 from tests.support.wire import ConnectionCut, Handler, Reply, Rpc
 
 if TYPE_CHECKING:
-    import io
     from collections.abc import AsyncIterator, Callable, Iterator
 
-    import pytest
 
 AGENT_SUBJECT = "agent-subject"
-ISSUER = "https://realm.test/realms/test"
 LIMIT_SECONDS = 10
 _SUBJECT_KEY = "test.subject"
 
@@ -90,8 +66,6 @@ ACKNOWLEDGED = "acknowledged"
 SAY_TOOL = "say"
 PLAY_TOOL = "play"
 GENERATION = "generation-1"
-WINDOW_LINES = 100
-"""How many of a place's newest lines its window holds, as hopin's chat window does."""
 
 _SAY_DECLARATION = ToolDeclaration(
     name=SAY_TOOL,
@@ -104,133 +78,12 @@ _SAY_DECLARATION = ToolDeclaration(
     effect=ToolEffect.SIDE_EFFECTING,
 )
 
-_SPEAK_DECLARATION = ToolDeclaration(
-    name=SPEAK_TOOL,
-    description="Speaks a sentence in a call.",
-    parameters=SpeakArguments.model_json_schema(),
-    effect=ToolEffect.SIDE_EFFECTING,
-)
-
-_CONTINUE_DECLARATION = ToolDeclaration(
-    name=CONTINUE_SPEAKING_TOOL,
-    description="Lets a held sentence go on.",
-    parameters=ContinueSpeakingArguments.model_json_schema(),
-    effect=ToolEffect.SIDE_EFFECTING,
-)
-
-_STOP_DECLARATION = ToolDeclaration(
-    name=STOP_SPEAKING_TOOL,
-    description="Cuts the member's sentence and queue, or drops a held one.",
-    parameters=StopSpeakingArguments.model_json_schema(),
-    effect=ToolEffect.SIDE_EFFECTING,
-)
-
 _ACCEPT_DECLARATION = ToolDeclaration(
     name=ACCEPT_INVITATION_TOOL,
     description="Joins the place an invitation is for.",
     parameters=AcceptInvitationArguments.model_json_schema(),
     effect=ToolEffect.SIDE_EFFECTING,
 )
-
-
-def a_picture(size: int = 64) -> ToolImage:
-    """A still picture as the library's wire takes it: random bytes behind the JPEG start marker."""
-    return ToolImage(content=b"\xff\xd8\xff" + secrets.token_bytes(size))
-
-
-_REAL_JPEG = (
-    "/9j/4AAQSkZJRgABAgAAAQABAAD//gAQTGF2YzYyLjExLjEwMAD/2wBDAAg+Pkk+SVVVVVVVVWRdZGhoaGRkZGRoaGhwcHCDg4Nw"
-    "cHBoaHBwfHyDg4+Tj4eHg4eTk5ubm7q6srLZ2eD/////xABMAAEBAAAAAAAAAAAAAAAAAAAABgEBAQAAAAAAAAAAAAAAAAAABgcQ"
-    "AQAAAAAAAAAAAAAAAAAAAAARAQAAAAAAAAAAAAAAAAAAAAD/wAARCAAIAAgDASIAAhEAAxEA/9oADAMBAAIRAxEAPwCLAE1/f//Z"
-)
-
-
-def a_real_picture() -> ToolImage:
-    """A complete 8 by 8 JPEG file, the shape of a picture a real app answers with."""
-    return ToolImage(content=base64.b64decode(_REAL_JPEG))
-
-
-def base64_of(picture: ToolImage) -> str:
-    """The picture as an image block of a tool result and a data URL of a model request write it."""
-    return base64.b64encode(picture.content).decode("ascii")
-
-
-def invited(
-    place_id: str,
-    invitation_id: str,
-    epoch: int = 0,
-    kind: str = "call",
-    *,
-    serves_view: bool = False,
-    parent: ParentPlace | None = None,
-) -> Standing:
-    invitation = Invitation(id=invitation_id, epoch=epoch, expires_at=datetime(2099, 1, 1, tzinfo=UTC))
-    return Standing(
-        place=PlaceRef(kind=kind, id=place_id),
-        state=StandingState.INVITED,
-        invitation=invitation,
-        serves_view=serves_view,
-        parent=parent,
-    )
-
-
-@dataclass(frozen=True)
-class Line:
-    """A line of a place, as the app keeps it: who said it and what name it shows."""
-
-    seq: int
-    author: str
-    name: str
-    text: str
-    spoken: bool = False
-    cut: bool = False
-    act: bool = False
-    traceparent: str | None = None
-
-
-def active(place_id: str, kind: str = "call", *, serves_view: bool = False) -> Standing:
-    return Standing(place=PlaceRef(kind=kind, id=place_id), state=StandingState.ACTIVE, serves_view=serves_view)
-
-
-def paused(place_id: str, kind: str = "call", *, serves_view: bool = False) -> Standing:
-    """The sponsor is away: the member keeps the place and its window, and nobody reads it meanwhile."""
-    return Standing(place=PlaceRef(kind=kind, id=place_id), state=StandingState.PAUSED, serves_view=serves_view)
-
-
-ACCEPTED_NAME = "Mozart"
-
-
-_RECORD_ATTRIBUTES = frozenset(vars(logging.makeLogRecord({}))) | {"message", "asctime"}
-
-
-def fields_of(record: logging.LogRecord) -> dict[str, object]:
-    """The fields a record carries beside its message, as the JSON line holds them."""
-    return {key: value for key, value in vars(record).items() if key not in _RECORD_ATTRIBUTES}
-
-
-class _FormatterWithFields(logging.Formatter):
-    def format(self, record: logging.LogRecord) -> str:
-        return f"{super().format(record)} {json.dumps(fields_of(record), default=str, sort_keys=True)}"
-
-
-def configure_logging_into(caplog: pytest.LogCaptureFixture) -> None:
-    """The entry point's logging, with the lines of every logger also in ``caplog`` and its fields in their text."""
-    configure_logging()
-    caplog.handler.setFormatter(_FormatterWithFields())
-    logging.getLogger().addHandler(caplog.handler)
-    caplog.set_level(logging.DEBUG)
-
-
-def formatted(records: list[logging.LogRecord]) -> str:
-    """The records as a handler writes them, with the fields and the traceback of each."""
-    formatter = _FormatterWithFields()
-    return "\n".join(formatter.format(record) for record in records)
-
-
-def lines_of(records: list[logging.LogRecord], event: str | None = None) -> list[dict[str, object]]:
-    """The runner's lines among ``records`` as their JSON holds them, only those of ``event`` when it is given."""
-    lines = [{"event": record.getMessage(), **fields_of(record)} for record in records if record.name == "personas"]
-    return lines if event is None else [line for line in lines if line["event"] == event]
 
 
 def a_traceparent() -> str:
@@ -240,12 +93,6 @@ def a_traceparent() -> str:
 
 def trace_id_of(traceparent: str) -> str:
     return traceparent.split("-")[1]
-
-
-def written_by_the_runner(written: io.StringIO) -> list[dict[str, object]]:
-    """The runner's lines among what the entry point's handler wrote into ``written``, as their JSON holds them."""
-    lines = map(json.loads, written.getvalue().splitlines())
-    return [line for line in lines if line["logger"] == "personas"]
 
 
 class RequestLog:
@@ -283,11 +130,10 @@ class RequestLog:
 
 
 @dataclass
-class FakeApp:
+class FakeApp(AppVoice):
     """What a test scripts and reads of the app: who stands where, who is let in and what was accepted."""
 
     bearers: dict[str, str] = field(default_factory=dict[str, str])
-    standings: dict[str, list[Standing]] = field(default_factory=dict[str, list[Standing]])
     refuse_with: HTTPStatus | None = None
     refused_method: str | None = None
     lists_standing: bool = True
@@ -295,36 +141,18 @@ class FakeApp:
     accept_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
     accepted: list[AcceptInvitationArguments] = field(default_factory=list[AcceptInvitationArguments])
     accepted_on_the_wire: list[tuple[str, JsonObject]] = field(default_factory=list[tuple[str, JsonObject]])
-    lines: dict[str, list[Line]] = field(default_factory=dict[str, list[Line]])
-    generations: dict[str, str] = field(default_factory=dict[str, str])
     reads: dict[str, int] = field(default_factory=dict[str, int])
     read_order: list[str] = field(default_factory=list[str])
     """The uri of each resource read, in the order the reads arrived."""
     read_added: asyncio.Event = field(default_factory=asyncio.Event)
-    vanished: set[str] = field(default_factory=set[str])
     without_window: set[str] = field(default_factory=set[str])
     """Places whose window is listed and answers a read as unknown, as an app that serves none yet does."""
     failing_windows: set[str] = field(default_factory=set[str])
     """Places whose window read the app answers with a server error."""
     say_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
-    speak_outcomes: list[ToolOutcome | None] = field(default_factory=list[ToolOutcome | None])
-    """The answer to each next ``speak`` as it arrives, in order; ``None`` lets the app play that sentence."""
-    spoken: list[tuple[str, str, str]] = field(default_factory=list[tuple[str, str, str]])
-    spoken_added: asyncio.Event = field(default_factory=asyncio.Event)
     speak_bearers: list[str] = field(default_factory=list[str])
     traceparents: list[tuple[str, str | None]] = field(default_factory=list[tuple[str, str | None]])
     """The method and the ``traceparent`` header of each request, in order; none when the request carried none."""
-    sentence_ends_held: bool = False
-    """Whether a voiced sentence plays until ``end_sentence`` or ``stop_speaking`` is called: its own line enters then,
-    and a ``speak`` that arrives meanwhile is answered only then, as the app answers it at its sentence's turn."""
-    waiting_speaks: list[asyncio.Future[bool]] = field(default_factory=list[asyncio.Future[bool]])
-    """The ``speak`` calls waiting for the playing sentence to end, in the order sent; a result says if it plays."""
-    playing: list[tuple[str, str, str]] = field(default_factory=list[tuple[str, str, str]])
-    """The place, the author and the text of each voiced sentence whose own line is held, in the order sent."""
-    written_speaks: int = 0
-    """How many of the next ``speak`` calls the app answers as written to the place instead of voiced."""
-    voice_states: dict[str, VoiceState] = field(default_factory=dict[str, VoiceState])
-    held_speak: asyncio.Event | None = None
     refused_tool: str | None = None
     calls: list[str] = field(default_factory=list[str])
     """The tools called, in the order the calls arrived."""
@@ -338,31 +166,16 @@ class FakeApp:
     window_read_held: asyncio.Event = field(default_factory=asyncio.Event)
     log: RequestLog = field(default_factory=RequestLog)
     refusals: asyncio.Queue[HTTPStatus] = field(default_factory=asyncio.Queue[HTTPStatus])
-    changes: ResourceChanges = field(default_factory=lambda: ResourceChanges(MemoryPlaceStore()))
     scripted: defaultdict[str, list[Handler]] = field(default_factory=lambda: defaultdict(list[Handler]))
     held_read: asyncio.Event | None = None
     read_held: asyncio.Event = field(default_factory=asyncio.Event)
-    views: dict[str, PlaceView] = field(default_factory=dict[str, PlaceView])
     presented: set[str] = field(default_factory=set[str])
-    content: set[str] = field(default_factory=lambda: {ACCEPTED_NAME})
     says_move_the_view: bool = False
     line_tool: str = SAY_TOOL
     """The name of the tool that takes a line or a move at a place of this app; ``say`` as hopin declares it."""
-    declares_hold_tools: bool = True
-    """Whether the app declares ``continue_speaking`` and ``stop_speaking``, as one that can hold the member does."""
-    holds: dict[str, tuple[str, tuple[PartialSpeech, ...] | None]] = field(
-        default_factory=dict[str, tuple[str, tuple[PartialSpeech, ...] | None]]
-    )
-    """Each place whose member is held: the hold's id and what is said over it, none once the record is gone."""
-    talked_over: dict[str, tuple[PartialSpeech, ...]] = field(default_factory=dict[str, tuple[PartialSpeech, ...]])
-    """Each place where people still talk over a member whose hold a continue ended: what each has said so far."""
-    hold_calls: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
-    """The tool and the hold id of each ``continue_speaking`` and ``stop_speaking`` that arrived."""
-    hold_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
-    """The answer to each next ``continue_speaking`` or ``stop_speaking`` as it arrives, in order."""
 
     def __post_init__(self) -> None:
-        self._announcing: set[asyncio.Task[None]] = set()
+        super().__post_init__()
         self._front = McpPersonFront(
             self._tools(),
             resolve_person=lambda scope: Principal(iss=ISSUER, sub=scope[_SUBJECT_KEY]),
@@ -374,12 +187,12 @@ class FakeApp:
         tools = [
             PersonTool(_ACCEPT_DECLARATION, self._accept),
             PersonTool(self._line_declaration(), self._say),
-            PersonTool(_SPEAK_DECLARATION, self._speak),
+            PersonTool(SPEAK_DECLARATION, self._speak),
         ]
         if self.declares_hold_tools:
             tools += [
-                PersonTool(_CONTINUE_DECLARATION, self._continue_speaking),
-                PersonTool(_STOP_DECLARATION, self._stop_speaking),
+                PersonTool(CONTINUE_DECLARATION, self._continue_speaking),
+                PersonTool(STOP_DECLARATION, self._stop_speaking),
             ]
         return tools
 
@@ -389,105 +202,6 @@ class FakeApp:
     def let_in(self, bearer: str, subject: str) -> None:
         self.bearers[bearer] = subject
         self.presented.add(bearer)
-
-    def _announce(self, principal: Principal, uri: str) -> None:
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return  # before any loop runs nothing listens, and a loop's first sweep reads the state
-        task = loop.create_task(self.changes.changed(principal, uri))
-        self._announcing.add(task)
-        task.add_done_callback(self._announcing.discard)
-
-    def stand(self, subject: str, *standings: Standing) -> None:
-        """Sets the subject's standings and signals the change, as an app does once the state is visible."""
-        self.standings[subject] = list(standings)
-        for each in standings:
-            self.content.update([each.place.id, *([each.invitation.id] if each.invitation else [])])
-        self._announce(Principal(iss=ISSUER, sub=subject), STANDING_URI)
-
-    def speak(
-        self,
-        place_id: str,
-        author: str,
-        name: str,
-        text: str,
-        *,
-        spoken: bool = False,
-        cut: bool = False,
-        act: bool = False,
-        traceparent: str | None = None,
-    ) -> int:
-        """Adds a line, entered in ``traceparent``, to a place and signals its window to every member standing there,
-        once it is visible."""
-        place_lines = self.lines.setdefault(place_id, [])
-        seq = place_lines[-1].seq + 1 if place_lines else 1
-        place_lines.append(Line(seq, author, name, text, spoken, cut, act, traceparent))
-        del place_lines[:-WINDOW_LINES]
-        self.content.add(text)
-        self._signal_window(place_id)
-        return seq
-
-    def _signal_window(self, place_id: str) -> None:
-        for subject, standings in self.standings.items():
-            for each in standings:
-                if each.place.id == place_id:
-                    self._announce(Principal(iss=ISSUER, sub=subject), place_window_uri(each.place))
-
-    def hold(self, place_id: str, hold_id: str, *said: tuple[str, str]) -> None:
-        """The member is held at the place: the window states the hold and, over it, what each person has said so far
-        (a name and its words), and signals the change."""
-        self.holds[place_id] = (hold_id, tuple(PartialSpeech(name=name, text=text) for name, text in said))
-        self._signal_window(place_id)
-
-    def talk_over(self, place_id: str, *said: tuple[str, str]) -> None:
-        """What is said over the held member changes, under the same hold."""
-        if place_id in self.talked_over:
-            self.talked_over[place_id] = tuple(PartialSpeech(name=name, text=text) for name, text in said)
-            self._signal_window(place_id)
-            return
-        hold_id, _ = self.holds[place_id]
-        self.hold(place_id, hold_id, *said)
-
-    def end_record(self, place_id: str) -> None:
-        """The record of what was said over the held member is gone while the hold stands."""
-        hold_id, _ = self.holds[place_id]
-        self.holds[place_id] = (hold_id, None)
-        self._signal_window(place_id)
-
-    def state_voice(self, place_id: str, state: VoiceState | None) -> None:
-        """Sets what every window of the place states of his voice, none when ``state`` is ``None``, and signals it."""
-        if state is None:
-            self.voice_states.pop(place_id, None)
-        else:
-            self.voice_states[place_id] = state
-        self._signal_window(place_id)
-
-    def show_view(
-        self,
-        place_id: str,
-        revision: int,
-        state: dict[str, Any],
-        *,
-        awaits_you: bool = True,
-        traceparent: str | None = None,
-    ) -> None:
-        """Sets a place's view, moved in ``traceparent``, for every member standing there and signals it, as an app
-        does once it is visible."""
-        self.views[place_id] = PlaceView(
-            revision=revision, awaits_you=awaits_you, state=dict(state), traceparent=traceparent
-        )
-        self.content.update(value for value in state.values() if isinstance(value, str))
-        for subject, standings in self.standings.items():
-            for each in standings:
-                if each.place.id == place_id and each.serves_view:
-                    self._announce(Principal(iss=ISSUER, sub=subject), place_view_uri(each.place))
-
-    def join(self, place_id: str) -> None:
-        """A join gives the place a new, existing window: a fresh generation, numbered from seq 1, with no old line."""
-        self.generations[place_id] = f"generation-{secrets.token_hex(4)}"
-        self.lines[place_id] = []
-        self.vanished.discard(place_id)
 
     def hold_next_window_read(self) -> asyncio.Event:
         """The next window read takes its snapshot, tells ``window_read_held`` and answers once the event is set."""
@@ -501,11 +215,6 @@ class FakeApp:
         if outcome.image is not None:
             self.content.update((base64_of(outcome.image), repr(outcome.image.content)))
         return outcome
-
-    def hold_next_speak(self) -> asyncio.Event:
-        """The next ``speak`` that arrives is answered once the event is set."""
-        self.held_speak = asyncio.Event()
-        return self.held_speak
 
     def kept_out_of_logs(self) -> set[str]:
         """Every bearer this app let in or was shown, and every piece of content it served or took."""
@@ -609,89 +318,6 @@ class FakeApp:
             moved = self.views[place_id]
             self.show_view(place_id, moved.revision + 1, {"hand": secrets.token_hex(8)}, awaits_you=False)
         return ToolOutcome("said", is_error=False)
-
-    async def _speak(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
-        """Takes a sentence, appends it as the member's own line and answers that it starts or that it was written."""
-        taken = SpeakArguments.model_validate(arguments)
-        self.content.add(taken.text)
-        if (held := self.held_speak) is not None:
-            self.held_speak = None
-            await held.wait()
-        if self.speak_outcomes and (scripted := self.speak_outcomes.pop(0)) is not None:
-            return scripted
-        if self.sentence_ends_held and self.playing:
-            turn = asyncio.get_running_loop().create_future()
-            self.waiting_speaks.append(turn)
-            if not await turn:
-                return ToolOutcome(SpeakRefused(refused=SpeakRefusal.STOPPED).model_dump_json(), is_error=True)
-        self.spoken.append((request.principal.sub, taken.place.id, taken.text))
-        self.spoken_added.set()
-        if self.written_speaks:
-            self.written_speaks -= 1
-            self.speak(taken.place.id, request.principal.sub, ACCEPTED_NAME, taken.text)
-            return ToolOutcome(Written(written=True).model_dump_json(), is_error=False)
-        if self.sentence_ends_held:
-            self.playing.append((taken.place.id, request.principal.sub, taken.text))
-        else:
-            self.speak(taken.place.id, request.principal.sub, ACCEPTED_NAME, taken.text, spoken=True)
-        return ToolOutcome(Spoken(spoken=True).model_dump_json(), is_error=False)
-
-    async def _continue_speaking(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
-        """Lets the held sentence play to its end, so that the sentence waiting for its turn is answered."""
-        taken = ContinueSpeakingArguments.model_validate(arguments)
-        self.hold_calls.append((CONTINUE_SPEAKING_TOOL, taken.interrupted))
-        if self.hold_outcomes:
-            return self.hold_outcomes.pop(0)
-        if not self._ends_hold(taken.place.id, taken.interrupted, keep_record=True):
-            refusal = ContinueSpeakingRefused(refused=ContinueSpeakingRefusal.NOT_INTERRUPTED)
-            return ToolOutcome(refusal.model_dump_json(), is_error=True)
-        if self.playing:
-            self.end_sentence()
-        return ToolOutcome(json.dumps({"continued": True}), is_error=False)
-
-    async def _stop_speaking(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
-        """Cuts the held sentence and drops every sentence waiting for its turn."""
-        taken = StopSpeakingArguments.model_validate(arguments)
-        self.hold_calls.append((STOP_SPEAKING_TOOL, taken.interrupted or ""))
-        if self.hold_outcomes:
-            return self.hold_outcomes.pop(0)
-        if taken.interrupted is not None and not self._ends_hold(taken.place.id, taken.interrupted):
-            refusal = StopSpeakingRefused(refused=StopSpeakingRefusal.NOT_INTERRUPTED)
-            return ToolOutcome(refusal.model_dump_json(), is_error=True)
-        if not self.playing:
-            return ToolOutcome(DroppedSpeaking(dropped=True).model_dump_json(), is_error=False)
-        cut = self.playing[0][2]
-        self.stop_speaking()
-        return ToolOutcome(StoppedSpeaking(cut=cut).model_dump_json(), is_error=False)
-
-    def _ends_hold(self, place_id: str, hold_id: str, *, keep_record: bool = False) -> bool:
-        """Whether the hold stands at the place; it ends, and the window says so. A continue keeps the record: people
-        go on talking over him without holding him again."""
-        if self.holds.get(place_id, ("", None))[0] != hold_id:
-            return False
-        said = self.holds.pop(place_id)[1]
-        self.talked_over.pop(place_id, None)
-        if keep_record and said:
-            self.talked_over[place_id] = said
-        self._signal_window(place_id)
-        return True
-
-    def end_sentence(self, *, cut: bool = False) -> None:
-        """The playing sentence ends: its own line enters its place, whole or cut, and the next ``speak`` waiting for
-        its turn is answered."""
-        place_id, author, text = self.playing.pop(0)
-        self.speak(place_id, author, ACCEPTED_NAME, text, spoken=True, cut=cut)
-        if self.waiting_speaks:
-            self.waiting_speaks.pop(0).set_result(True)
-
-    def stop_speaking(self) -> None:
-        """The member's own ``stop_speaking``: the playing sentence is cut, its own line entering cut, and every
-        ``speak`` waiting for its turn is answered stopped."""
-        place_id, author, text = self.playing.pop(0)
-        self.speak(place_id, author, ACCEPTED_NAME, text, spoken=True, cut=True)
-        for waiting in self.waiting_speaks:
-            waiting.set_result(False)
-        self.waiting_speaks.clear()
 
     async def until_window_read_held(self) -> None:
         async with asyncio.timeout(LIMIT_SECONDS):

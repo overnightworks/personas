@@ -13,7 +13,8 @@ from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_i
 from tests.support.fakes import CANCELLED_TURN, COMPLETED_TURN, refused_turn
 from tests.support.gateway import Gateway, says
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import CALL, LISTEN, lines_of, written_by_the_runner
+from tests.support.hopin import CALL, LISTEN
+from tests.support.logs import lines_of, written_by_the_runner
 from tests.support.voice import TWO_SENTENCES, a_voice_call, ended_by, holding_sentence_ends
 from tests.support.wire import cuts
 

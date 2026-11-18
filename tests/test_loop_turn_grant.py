@@ -11,9 +11,10 @@ from personas.decision import SUSPENDED_RETRY_SECONDS, status_code
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway
-from tests.support.hopin import AGENT_SUBJECT, LIST_TOOLS, active
+from tests.support.hopin import AGENT_SUBJECT, LIST_TOOLS
 from tests.support.pods import SECOND_AGENT, SECOND_SUBJECT
 from tests.support.songmaker import CREATE_SONG, GENERATE_SONG, SCOPE
+from tests.support.standings import active
 
 pytestmark = pytest.mark.anyio
 

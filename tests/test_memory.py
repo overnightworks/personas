@@ -36,7 +36,8 @@ from tests.support.history import (
     url_of,
 )
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import LIMIT_SECONDS, active, formatted, invited, paused
+from tests.support.hopin import LIMIT_SECONDS
+from tests.support.logs import formatted
 from tests.support.postgres import (
     Forwarder,
     at_an_unknown_revision,
@@ -47,6 +48,7 @@ from tests.support.postgres import (
     waiting_statements,
 )
 from tests.support.realm import AGENT_NAME
+from tests.support.standings import active, invited, paused
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

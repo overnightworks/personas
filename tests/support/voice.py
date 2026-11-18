@@ -8,7 +8,8 @@ from tests.support.call import PLACE_ID, restarted_in_the_call
 from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
 from tests.support.gateway import Gateway
 from tests.support.history import at_table
-from tests.support.hopin import AGENT_SUBJECT, LIMIT_SECONDS, active
+from tests.support.hopin import AGENT_SUBJECT, LIMIT_SECONDS
+from tests.support.standings import active
 
 TWO_SENTENCES = "First sentence. Second sentence."
 

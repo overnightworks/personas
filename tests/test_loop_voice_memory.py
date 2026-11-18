@@ -18,8 +18,9 @@ from personas.reporting import Event
 from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import LIMIT_SECONDS, SAY_TOOL, active
+from tests.support.hopin import LIMIT_SECONDS, SAY_TOOL
 from tests.support.postgres import kept_lines, lines_table_locked
+from tests.support.standings import active
 
 if TYPE_CHECKING:
     from personas.config import DatabaseTarget

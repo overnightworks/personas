@@ -15,7 +15,8 @@ from personas.decision import NO_ANSWER_REASON
 from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import FakeClock
 from tests.support.gateway import Gateway, says
-from tests.support.hopin import LIST_TOOLS, LISTEN, a_traceparent, lines_of, trace_id_of, written_by_the_runner
+from tests.support.hopin import LIST_TOOLS, LISTEN, a_traceparent, trace_id_of
+from tests.support.logs import lines_of, written_by_the_runner
 
 pytestmark = pytest.mark.anyio
 

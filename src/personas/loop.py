@@ -29,19 +29,13 @@ from personas.decision import (
     decisive_failure,
     failure_code,
     forget_gone,
-    history_delta,
     is_defect,
     is_voice_app,
-    kept_turns,
     left_out_for,
-    left_standing,
     lends_tools,
-    pause_deadline,
     perceive,
-    present_of,
     reaction_to,
     renewal_due,
-    resumed_turns,
     speaks_aloud,
     sync_turned_revisions,
     turn_ending,
@@ -49,6 +43,7 @@ from personas.decision import (
     view_turn_due,
     waking_line,
 )
+from personas.due import kept_turns, left_standing, pause_deadline, resumed_turns
 from personas.entries import Lines, ViewSeen, Visit, Waiting, WindowRead, taken_lines
 from personas.failures import (
     STORE_TIMEOUT_CODE,
@@ -60,6 +55,7 @@ from personas.failures import (
     raise_if_cancelled,
 )
 from personas.mind import Mind
+from personas.present import history_delta, present_of
 from personas.recall import LookupBounds
 from personas.remembering import LineStore, Remembering
 from personas.reporting import Event, Reporter, StateChange, StoreOutage, TurnTally, start_turn_tally, step_timer

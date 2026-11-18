@@ -10,7 +10,8 @@ from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in
 from tests.support.gateway import Gateway, says, says_after_a_hold
 from tests.support.history import settled
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import WINDOW_LINES, active, invited, paused
+from tests.support.hopin_places import WINDOW_LINES
+from tests.support.standings import active, invited, paused
 
 pytestmark = pytest.mark.anyio
 

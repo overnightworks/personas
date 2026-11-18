@@ -8,13 +8,15 @@ from datetime import UTC, datetime, timedelta
 
 from agents.member import STANDING_URI, PlaceRef, PlaceView, Spoken
 
-from personas.decision import EMPTY_PRESENT, taken_into
-from personas.entries import ActDone, Answered, KeptLine, SaidAloud, Visit
+from personas.entries import ActDone, Answered, History, KeptLine, SaidAloud, ViewSeen, Visit
+from personas.present import EMPTY_PRESENT, Present, taken_into
 from tests.support.call import PERSON
 from tests.support.hopin import AGENT_SUBJECT as SUBJECT
-from tests.support.hopin import FakeApp, active
+from tests.support.hopin import FakeApp
+from tests.support.standings import active
 
 TABLE = PlaceRef(kind="table", id="table-1")
+OTHER_TABLE = PlaceRef(kind="table", id="table-2")
 OTHER_CALL_ID = "room-9"
 SPEAKER = "Ada"
 REMARK = "Play the jack."
@@ -207,6 +209,10 @@ async def shows(app, revision: int, state=None, *, awaits_you: bool = False) -> 
 LATER = datetime(2026, 11, 10, 18, 0, tzinfo=UTC)
 
 
+ONCE_DROPPED = History((), left_out=1, heard=0)
+"""A history whose bound dropped one entry and that holds none."""
+
+
 MORNING = Visit("https://app.test/mcp", PlaceRef(kind="call", id="room-7"), "morning")
 
 
@@ -245,3 +251,12 @@ def an_act(*, arguments=None, outcome=None, tool="say", app=APP, at=LATER - time
 
 def a_sentence(*, text="Guten Tag.", outcome=None, at=LATER - timedelta(seconds=9)) -> SaidAloud:
     return SaidAloud(APP, MORNING.place, text, Spoken(spoken=True) if outcome is None else outcome, at)
+
+
+def a_marked_present() -> tuple[str, Present]:
+    """A marker, and a present whose history holds a view state, an act and a line that each carry it."""
+    marker = secrets.token_hex(8)
+    view = ViewSeen(APP, TABLE, PlaceView(revision=1, awaits_you=True, state={"hand": marker}), LATER)
+    act = ActDone(APP, "say", {"text": marker}, Answered(marker, is_error=False), LATER)
+    line = KeptLine(MORNING, 1, LATER, marker, "message", marker, own=False, spoken=False, cut=False, act=False)
+    return marker, taken_into(EMPTY_PRESENT, (line, view, act), ROOMY_BYTES, ROOMY_BYTES)
