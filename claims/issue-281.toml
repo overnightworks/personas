@@ -1,0 +1,8 @@
+claim_id = "6686f34ea2f84d12a1986ea3478eea95"
+agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
+role = "builder"
+base = "04da5aa17ee285cd7b0c2514da3d06e894b3624e"
+branch = "claude/issue-281-the-test-and-debt-rules-are-checked-by-m"
+scope = ["AGENTS.md", "pyproject.toml", "quality", "src/personas", "tests"]
+opened_commit = "c78c718d8339e6af47249a9b9590787947fccb5a"
+whole_reason = "one pass that makes the repository's own rules machine-checked and its tests refactor-proof"
