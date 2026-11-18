@@ -16,7 +16,8 @@ events and their fields.
   or of the view revision, or its own when the app gives none or one that cannot be read. Every request to
   an app, the realm and the gateway carries that trace's `traceparent`. agents adds `model_request.ended`
   and `tool_call.ended` in the same trace; its `docs/connector.md` lists them.
-- `personas migrate` and `personas memory` write no JSON line; they print their result on stdout.
+- `personas migrate` and `personas memory` write no JSON line. `personas memory` prints its result on stdout;
+  `personas migrate` prints nothing on success and exits 0, which is its result.
 
 ## Events
 

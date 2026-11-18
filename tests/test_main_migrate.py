@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -97,6 +100,20 @@ def test_migrating_a_database_at_a_revision_it_does_not_know_changes_nothing_and
     migrate(files, monkeypatch)
 
     assert revision_of(database) == newer
+
+
+@pytest.mark.postgres
+def test_the_console_script_prints_nothing_when_it_migrates_an_empty_or_a_migrated_database(files, unmigrated_database):
+    files.use_database(unmigrated_database)
+    environment = {**os.environ, CONFIG_ENVIRONMENT_VARIABLE: str(files.write()[CONFIG_ENVIRONMENT_VARIABLE])}
+    console_script = Path(sys.executable).with_name("personas")
+
+    first, second = (
+        subprocess.run([console_script, MIGRATE_COMMAND], env=environment, capture_output=True, text=True, check=False)
+        for _ in range(2)
+    )
+
+    assert [(each.returncode, each.stdout, each.stderr) for each in (first, second)] == [(0, "", "")] * 2
 
 
 def test_migrating_a_store_that_cannot_be_reached_stops_with_its_code_and_no_traceback(
