@@ -3,15 +3,17 @@ import re
 from pathlib import Path
 
 REPOSITORY = Path(__file__).resolve().parents[1]
+DOCS = REPOSITORY / "docs"
+REFERENCE_DOCUMENTS = ("turns.md", "configuration.md", "log.md")
 DOCUMENTED_ID = re.compile(r"\(([A-Z]+-\d+)\)")
 CITATION = re.compile(r"[A-Z]+-\d+(?:, [A-Z]+-\d+)*(?=[:.])")
 
 
-def documented_ids() -> set[str]:
+def documented_ids(docs: Path) -> set[str]:
     return {
         rule_id
-        for document in (REPOSITORY / "docs").rglob("*.md")
-        for rule_id in DOCUMENTED_ID.findall(document.read_text(encoding="utf-8"))
+        for name in REFERENCE_DOCUMENTS
+        for rule_id in DOCUMENTED_ID.findall((docs / name).read_text(encoding="utf-8"))
     }
 
 
@@ -29,7 +31,7 @@ def cited_ids() -> dict[str, set[str]]:
 
 
 def test_every_id_a_test_cites_names_a_rule_of_a_reference_document():
-    documented = documented_ids()
+    documented = documented_ids(DOCS)
 
     unknown = {rule_id: tests for rule_id, tests in cited_ids().items() if rule_id not in documented}
 
@@ -37,6 +39,16 @@ def test_every_id_a_test_cites_names_a_rule_of_a_reference_document():
 
 
 def test_every_rule_of_a_reference_document_is_cited_by_a_test():
-    uncited = documented_ids() - set(cited_ids())
+    uncited = documented_ids(DOCS) - set(cited_ids())
 
     assert uncited == set()
+
+
+def test_an_id_written_outside_the_reference_documents_names_no_rule(tmp_path):
+    for name in REFERENCE_DOCUMENTS:
+        (tmp_path / name).write_text("# A reference\n", encoding="utf-8")
+    (tmp_path / "ARCHITECTURE.md").write_text(
+        "See the window rule (TURNS-3) in the turns reference.\n", encoding="utf-8"
+    )
+
+    assert documented_ids(tmp_path) == set()
