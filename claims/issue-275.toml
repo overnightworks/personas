@@ -1,0 +1,8 @@
+claim_id = "d1e26498cb8c4baa8392c969722e56f1"
+agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
+role = "builder"
+base = "ec023464e7facf33b9c2c3f2fa70bfc0a78de62d"
+branch = "claude/issue-275-a-release-names-the-configuration-change"
+scope = [".github/workflows/release.yml", "README.md", "docs", "scripts", "tests"]
+opened_commit = "ca1ce394cd843daa565e21c9e5642c5f55620a00"
+whole_reason = "one owner of the release-notes configuration lines, the workflow that reads it and the runbook"
