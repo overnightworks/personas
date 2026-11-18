@@ -192,10 +192,10 @@ def _validators_given_the_fields(core_schema: object) -> Iterator[str]:
         return
     if not isinstance(core_schema, dict):
         return
-    node = cast("dict[str, object]", core_schema)
+    node = cast("JsonDict", core_schema)
     function = node.get("function")
-    if isinstance(function, dict) and cast("dict[str, object]", function).get("type") == "with-info":
-        validator = cast("dict[str, object]", function)["function"]
+    if isinstance(function, dict) and function.get("type") == "with-info":
+        validator = function["function"]
         yield getattr(validator, "__name__", repr(validator))
     for value in node.values():
         yield from _validators_given_the_fields(value)
