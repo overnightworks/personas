@@ -12,6 +12,7 @@ import pytest
 from agents.backend.fake_gateway import Reply
 from agents.member import (
     SET_TURN_STATE_TOOL,
+    PlaceRef,
     SetTurnStateArguments,
     SetTurnStateRefusal,
     SetTurnStateRefused,
@@ -266,6 +267,30 @@ async def test_a_loop_that_stops_taking_turns_states_unavailable_and_the_next_fu
     await runner.app.until_turn_states(len(earlier) + 2)
 
     assert statements(runner) == [*earlier, UNAVAILABLE, ended(last)]
+
+
+async def test_unavailable_goes_to_no_further_seat_once_the_app_does_not_answer_one(runner):
+    """TURNS-44."""
+    other_place = PlaceRef(kind="call", id="room-8")
+    held = (active(PLACE_ID), active(other_place.id))
+
+    async def fails(reply: AppReply) -> None:
+        await reply.status(HTTPStatus.SERVICE_UNAVAILABLE)
+
+    runner.app.stand(SUBJECT, *held)
+    runner.start()
+    await runner.app.until_window_read(other_place.id)
+    runner.app.script(SET_TURN_STATE_TOOL, fails)
+    forbids_every_read(runner)
+    runner.app.stand(SUBJECT, *held)
+    await runner.reports.until(Event.TURN_STATE_FAILED)
+    answers_every_read(runner)
+    await runner.app.until_turn_states(2)
+
+    assert statements(runner) == [
+        SetTurnStateArguments(place=CALL_PLACE, stopped=None),
+        SetTurnStateArguments(place=other_place, stopped=None),
+    ]
 
 
 async def test_a_defect_while_stating_unavailable_ends_the_runner_loud(runner):
