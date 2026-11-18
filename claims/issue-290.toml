@@ -1,8 +1,0 @@
-claim_id = "c4c97fa1aa654691ae7054d491d9d8a6"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "bc05b57117eb25ab8dbf4bfd7bb4071dc3ed5e84"
-branch = "claude/issue-290-a-check-keeps-core-unit-tests-free-of-ad"
-scope = ["pyproject.toml", "quality", "tests/support"]
-opened_commit = "1516cc76f5c0d626cea744712867bf0d635443b7"
-whole_reason = "one import contract over the core tests and the support modules they share"
