@@ -9,8 +9,8 @@ each rule by its ID at the start of its docstring, such as `TURNS-1`.
 - An agent accepts every invitation to a call. To a place of another kind it accepts only in an app where it
   can take turns (a persona, the gateway and bound tools); one left out for that is logged once as
   `invitation.left_out` with the reason `no_turns`. Only apps configured to listen can invite it. (TURNS-1)
-- It appears under the name the realm gives it, with the AI mark, and never leaves on its own: it is removed
-  with its seat, its lease or its client. (TURNS-2)
+- It appears under the name the realm gives it and with the AI mark the app shows; it is removed with its
+  seat, its lease or its client.
 - After its own accept it reads the window from `seq` 1. A place whose reading is kept resumes where it
   stood; lines said while the place was paused are never taken; a place with no kept reading takes what its
   window holds as read and answers only what is said after. (TURNS-3)
