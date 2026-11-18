@@ -1,10 +1,10 @@
 """The configuration file's JSON schema, the one source the release notes read: each rule across fields is named."""
 
 import re
-from typing import Self
+from typing import Annotated, Self
 
 import pytest
-from pydantic import ValidationInfo, field_validator, model_validator
+from pydantic import AfterValidator, ValidationInfo, field_validator, model_validator
 
 from personas.config import ConfigError, _Entry, configuration_schema, load_config
 
@@ -68,10 +68,40 @@ class CheckedByAField(_Entry):
         return high
 
 
+def high_is_above_low(high: int, info: ValidationInfo) -> int:
+    if high <= info.data["low"]:
+        raise ValueError("high: must be above low")
+    return high
+
+
+class CheckedByAnAnnotatedField(_Entry):
+    low: int = 1
+    high: Annotated[int, AfterValidator(high_is_above_low)] = 2
+
+
+class CheckedAfterInit(_Entry):
+    low: int = 1
+    high: int = 2
+
+    def model_post_init(self, context: object, /) -> None:
+        if self.low >= self.high:
+            raise ValueError("high: must be above low")
+
+
 @pytest.mark.parametrize(
     ("entry", "check"),
-    [(CheckedByTheModel, "_low_is_below_high"), (CheckedByAField, "_high_is_above_low")],
-    ids=["model validator", "field validator reading the fields before it"],
+    [
+        (CheckedByTheModel, "_low_is_below_high"),
+        (CheckedByAField, "_high_is_above_low"),
+        (CheckedByAnAnnotatedField, "high_is_above_low"),
+        (CheckedAfterInit, "model_post_init"),
+    ],
+    ids=[
+        "model validator",
+        "field validator reading the fields before it",
+        "annotated validator reading the fields before it",
+        "model_post_init",
+    ],
 )
 def test_a_check_across_fields_that_is_no_refusal_makes_the_schema_refuse_to_be_written(entry, check):
     with pytest.raises(TypeError, match=check):

@@ -37,7 +37,6 @@ Every value is validated at start and an error names the field or path, never a 
 
 from __future__ import annotations
 
-import inspect
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -65,7 +64,7 @@ from personas.recall import SMALLEST_RESULT_BYTES
 from personas.secret import Secret
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Iterator, Mapping
 
     from pydantic.config import JsonDict
     from pydantic_core import ErrorDetails
@@ -184,20 +183,39 @@ def _refusal[EntryT: BaseModel](sentence: str) -> Callable[[Callable[[EntryT], b
     return declare
 
 
+def _validators_given_the_fields(core_schema: object) -> Iterator[str]:
+    """The name of each validator in a pydantic core schema that takes the ``ValidationInfo``, whose ``data`` holds
+    the fields validated before its own, however it was attached: decorator, ``Annotated`` or nested type."""
+    if isinstance(core_schema, list):
+        for each in cast("list[object]", core_schema):
+            yield from _validators_given_the_fields(each)
+        return
+    if not isinstance(core_schema, dict):
+        return
+    node = cast("dict[str, object]", core_schema)
+    function = node.get("function")
+    if isinstance(function, dict) and cast("dict[str, object]", function).get("type") == "with-info":
+        validator = cast("dict[str, object]", function)["function"]
+        yield getattr(validator, "__name__", repr(validator))
+    for value in node.values():
+        yield from _validators_given_the_fields(value)
+
+
 def _with_refusals(schema: JsonDict, model: type[_Entry]) -> None:
     """Writes the sentence of each rule across the entry's fields into its JSON schema, as ``refusals``.
 
     The JSON schema has no word for such a rule and the release notes read the schema alone, so a check across
-    fields that is no ``_refusal`` would leave no trace there: writing the schema refuses it, a field validator that
-    takes the ``ValidationInfo`` holding the fields validated before its own included.
+    fields that is no ``_refusal`` would leave no trace there: writing the schema refuses it, whether a model
+    validator, a ``model_post_init`` or a validator that takes the ``ValidationInfo`` holding the fields validated
+    before its own.
     """
-    decorators = model.__pydantic_decorators__
-    for name in decorators.model_validators:
-        if name != _Entry.holds_its_refusals.__name__:
-            raise TypeError(f"{model.__name__}.{name}: a check across fields is declared with _refusal")
-    for name, validator in decorators.field_validators.items():
-        if len(inspect.signature(validator.func).parameters) > (2 if validator.info.mode == "wrap" else 1):
-            raise TypeError(f"{model.__name__}.{name}: a check across fields is declared with _refusal")
+    own = _Entry.holds_its_refusals.__name__
+    checks = [name for name in model.__pydantic_decorators__.model_validators if name != own]
+    if model.model_post_init is not BaseModel.model_post_init:
+        checks.append("model_post_init")
+    checks.extend(_validators_given_the_fields(model.__pydantic_core_schema__))
+    if checks:
+        raise TypeError(f"{model.__name__}.{checks[0]}: a check across fields is declared with _refusal")
     schema["refusals"] = [refusal.sentence for refusal in model.refusals()]
 
 
