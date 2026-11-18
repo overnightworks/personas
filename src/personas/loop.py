@@ -178,7 +178,7 @@ class AgentLoop:
             self._report_tools_left_out,
             self._remembering,
         )
-        self._turn_states = TurnStates(self._use_current_token, self._report)
+        self._turn_states = TurnStates(self._use_current_token, self._report, app.call_seconds)
         self._token: Token | None = None
         self._memory = Memory()
         self._failures = 0

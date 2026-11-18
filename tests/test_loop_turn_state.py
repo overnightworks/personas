@@ -31,12 +31,14 @@ from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, paused
 from tests.support.transport import opener_whose_request_raises
 from tests.support.voice import ended_by
+from tests.support.wire import hangs
 
 if TYPE_CHECKING:
     from tests.support.wire import Reply as AppReply
 
 pytestmark = pytest.mark.anyio
 
+SHORT_CALL_SECONDS = 0.3
 THINKING = SetTurnStateArguments(place=CALL_PLACE, thinking=True)
 
 
@@ -416,3 +418,17 @@ async def test_a_seat_whose_app_answers_an_unknown_tool_gets_no_more_statements_
 
     assert runner.reports.reported(started=False).count((Event.TURN_STATE_FAILED, INVALID_PARAMS_REASON)) == 1
     assert (runner.app.log.count(SET_TURN_STATE_TOOL), statements(runner)) == (1, [])
+
+
+async def test_a_statement_the_app_does_not_answer_in_time_is_logged_as_failed_and_the_turns_round_starts(runner):
+    """TURNS-43, LOG-34."""
+    runner.bound_listening_calls_to(SHORT_CALL_SECONDS)
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    await restarted_in_the_call(runner)
+    runner.app.script(SET_TURN_STATE_TOOL, hangs)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.app.said_count(1)
+    await runner.reports.until(Event.TURN_STATE_FAILED)
+
+    assert runner.reports.reported(started=False)[0] == (Event.TURN_STATE_FAILED, NETWORK_FAILURE_CODE)
+    assert runner.gateway.arrivals == 1

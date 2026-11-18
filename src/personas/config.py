@@ -10,7 +10,8 @@ it offers and the role in the token. An app that sets ``max_tool_calls`` binds e
 turns, that many calls to it in one turn, and then the model gateway and each agent's persona file are required.
 An app with ``listens = false`` serves tools only: it starts no turn, and its tools reach the turns of the apps
 that listen. An app that listens lends its tools to a turn of another app too, while the agent holds a place
-there. ``call_seconds`` bounds each request a turn of another app makes to an app. A tool name two apps offer goes to
+there. ``call_seconds`` bounds each request a turn of another app makes to an app, and the tool list and turn state
+requests of a turn at an app's own places. A tool name two apps offer goes to
 the first app in this file, and the runner's own names, ``speak``, the voice's tool, and ``recall``, the lookup, which
 every turn holds while ``[memory]`` is set, are never taken from an app.
 The top-level ``history_bytes`` bounds the history each agent keeps in memory of the lines he took in, the views he

@@ -11,7 +11,7 @@ from agents.member import SetTurnStateArguments
 from agents.turn import StopOutcome
 
 from personas.decision import answers_unknown_tool, failure_reason, sync_seat_ends, turn_end_state
-from personas.failures import CallFailure
+from personas.failures import CallFailure, within_call_time
 from personas.reporting import Event
 
 if TYPE_CHECKING:
@@ -41,8 +41,8 @@ class TurnStates:
     A turn waits until its thinking went out, so it reaches the app before the turn's first round. A turn's end is
     only queued, so no statement's wait or failure reaches how the turn ends. One worker sends them in the order
     queued, so a turn's thinking never overtakes the end of the turn before it. A refusal or a failure of a statement
-    is logged and the next one goes out; a seat whose app answered that it serves no such tool gets no statement
-    after that one line.
+    is logged and the next one goes out; one the app does not answer within ``call_seconds`` fails as a refusal does.
+    A seat whose app answered that it serves no such tool gets no statement after that one line.
 
     Once the loop has stopped taking turns in the app, each held seat is stated ``unavailable``. Then, and after a
     session that ended with a statement failed or in flight, the next full pass states each held seat's last turn end
@@ -53,7 +53,9 @@ class TurnStates:
         self,
         use_current_token: Callable[[AppSession], Awaitable[None]],
         report: Callable[[Event, str | None, AppTarget | None, CallFailure | None], None],
+        call_seconds: float,
     ) -> None:
+        self._call_seconds = call_seconds
         self._use_current_token = use_current_token
         self._report = report
         self._seat_ends: dict[PlaceRef, StopOutcome | None] = {}
@@ -144,8 +146,9 @@ class TurnStates:
         if statement.place in self._unserved:
             return True
         try:
-            await self._use_current_token(session)
-            refusal = await session.set_turn_state(statement)
+            async with within_call_time(self._call_seconds):
+                await self._use_current_token(session)
+                refusal = await session.set_turn_state(statement)
         except CallFailure as failure:
             if answers_unknown_tool(failure):
                 self._unserved.add(statement.place)

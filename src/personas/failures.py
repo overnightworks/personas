@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Final, cast
 
 import anyio
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import AsyncGenerator, Iterator
 
 INVALID_ANSWER_CODE: Final = "invalid_answer"
 """The code of an answer that arrived but is not the kind of answer asked for."""
@@ -54,6 +55,23 @@ class TokenStatusFailure(StatusFailure):
 
 class Unreachable(CallFailure):
     """The server was not reached or timed out."""
+
+
+class CallTimedOut(Unreachable):
+    """The app did not answer within its call time."""
+
+
+@asynccontextmanager
+async def within_call_time(call_seconds: float) -> AsyncGenerator[None]:
+    """Runs its body under an app's call time; an expired bound raises ``CallTimedOut``."""
+    bound = asyncio.timeout(call_seconds)
+    try:
+        async with bound:
+            yield
+    except TimeoutError:
+        if not bound.expired():
+            raise
+        raise CallTimedOut("the app did not answer in time") from None
 
 
 class UnusableAnswer(CallFailure):

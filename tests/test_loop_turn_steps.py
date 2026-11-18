@@ -14,13 +14,14 @@ from agents.backend.fake_gateway import Reply
 from logline import current_traceparent
 
 from personas.app_session import open_mcp_session
-from personas.decision import NO_ANSWER_REASON
+from personas.decision import NETWORK_FAILURE_CODE, NO_ANSWER_REASON
 from personas.failures import StatusFailure
 from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import FakeClock
 from tests.support.gateway import Gateway, says
 from tests.support.hopin import LIST_TOOLS, LISTEN, a_traceparent, trace_id_of
 from tests.support.logs import lines_of, written_by_the_runner
+from tests.support.wire import cuts, hangs
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.anyio
 
 TOKEN_RAN_OUT_SECONDS = 10_000.0
+SHORT_CALL_SECONDS = 0.3
 
 STEPS = (
     "turn_wait.ended",
@@ -156,6 +158,40 @@ async def test_a_failed_step_ends_failed_with_a_closed_reason(runner, caplog, fa
     assert (setup["outcome"], setup["reason"]) == ("failed", NO_ANSWER_REASON)
     assert failed["error_type"]
     assert setup["error_type"]
+
+
+async def test_a_tool_list_the_turns_own_app_does_not_answer_in_time_ends_failed_and_the_model_round_starts(
+    runner, caplog
+):
+    """LOG-13."""
+    runner.bound_listening_calls_to(SHORT_CALL_SECONDS)
+    runner.gateway = Gateway(*says(PLACE_ID, "Here."))
+    await restarted_in_the_call(runner)
+    # The first listing is the one the client makes before the turn's thinking statement; the second is the turn's own.
+    runner.app.script(LIST_TOOLS, hangs, hangs)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.reports.until_a_turn_ended()
+
+    (failed,) = lines_of(caplog.get_records("call"), "tool_list.ended")
+    (setup,) = lines_of(caplog.get_records("call"), "turn_setup.ended")
+    assert (failed["outcome"], failed["reason"]) == ("failed", NETWORK_FAILURE_CODE)
+    assert setup["outcome"] == "ok"
+    assert runner.gateway.arrivals == 1
+
+
+async def test_a_tool_list_the_turns_own_app_loses_its_stream_in_fails_the_setup_of_the_turn(runner, caplog):
+    """LOG-13."""
+    runner.bound_listening_calls_to(SHORT_CALL_SECONDS)
+    runner.gateway = Gateway(*says(PLACE_ID, "Here."))
+    await restarted_in_the_call(runner)
+    # The first listing is the one the client makes before the turn's thinking statement; the second is the turn's own.
+    runner.app.script(LIST_TOOLS, hangs, cuts)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.reports.until_a_turn_ended()
+    await runner.app.log.until(LISTEN, 2)
+
+    (setup,) = lines_of(caplog.get_records("call"), "turn_setup.ended")
+    assert (setup["outcome"], setup["reason"]) == ("failed", NETWORK_FAILURE_CODE)
 
 
 async def test_every_request_of_a_turn_carries_its_trace_and_the_requests_of_the_loop_carry_none(runner, written):

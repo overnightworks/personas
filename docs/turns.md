@@ -157,9 +157,10 @@ left out of his turns and asked again every 30 seconds. (TURNS-42)
   states again what the last turn end in this seat stated, that his turns answer when none did; so does a
   turn the runner's stop cuts, on a session of its own within `cancel_margin_seconds`, so his figure is not
   left thinking. At a seat he no longer holds nothing is stated. One app's statements go out in order, so a
-  turn's thinking never overtakes the end of the turn before it; a refused or failed statement is logged as
-  `turn_state.failed` and the turn goes on. A seat whose app answers that it serves no `set_turn_state` is
-  logged once and gets no more statements while the runner runs. (TURNS-43)
+  turn's thinking never overtakes the end of the turn before it; a refused or failed statement, or one the app
+  does not answer within its `call_seconds`, is logged as `turn_state.failed` and the turn goes on. A seat
+  whose app answers that it serves no `set_turn_state` is logged once and gets no more statements while the
+  runner runs. (TURNS-43)
 - Once the loop stops taking turns in an app, at a suspension or a backoff past its first retry, it states
   `unavailable` at each seat he holds there, on a session of its own while it waits to retry; a blip that
   recovers on its first retry states nothing. The next full pass of standing, accepts and windows states
