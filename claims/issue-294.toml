@@ -1,0 +1,8 @@
+claim_id = "846372d8146d48709d6906bfcf50c607"
+agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
+role = "builder"
+base = "aa66bb91ab81fdeaee3ad96cb826f6a74df6d170"
+branch = "claude/issue-294-a-pod-stops-within-a-bounded-time-after"
+scope = ["docs", "src/personas", "tests"]
+opened_commit = "97136b1aad784f48d017ef05ab9a1c81ec9bbb2d"
+whole_reason = "one stop deadline that spans the ownership, the loop and the app sessions"
