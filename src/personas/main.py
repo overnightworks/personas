@@ -189,8 +189,14 @@ def _cut_the_stop() -> None:
     os._exit(STOP_CUT_EXIT_CODE)
 
 
+# alembic writes its migration context at INFO on every schema check, which is no state change of the runner.
+ALEMBIC_LOGGER: Final = "alembic"
+
+
 def configure_logging() -> None:
+    """Every line one JSON object on stdout; alembic's lines below WARNING stay out."""
     configure("personas")
+    logging.getLogger(ALEMBIC_LOGGER).setLevel(logging.WARNING)
 
 
 class _RefusingArgumentParser(argparse.ArgumentParser):
