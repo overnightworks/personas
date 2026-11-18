@@ -11,6 +11,7 @@ from agents.backend import TurnStopKind, TurnStopped
 from agents.member import (
     ACCEPT_INVITATION_TOOL,
     CONTINUE_SPEAKING_TOOL,
+    DECLINE_INVITATION_TOOL,
     LISTEN_BOUND_SECONDS,
     SPEAK_TOOL,
     STOP_SPEAKING_TOOL,
@@ -625,6 +626,7 @@ def _declaration(name: str) -> ToolDeclaration:
             0,
         ),
         (["a", SPEAK_TOOL], [SPEAK_TOOL], ["a"], 0),
+        (["a", DECLINE_INVITATION_TOOL], [], ["a"], 0),
     ],
     ids=[
         "all",
@@ -634,6 +636,7 @@ def _declaration(name: str) -> ToolDeclaration:
         "none listed",
         "reserved names",
         "reserved and held",
+        "decline of an invitation",
     ],
 )
 def test_a_turn_declares_what_an_app_lists_but_the_reserved_names_and_those_an_earlier_app_holds(
