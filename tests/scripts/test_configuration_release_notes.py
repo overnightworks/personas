@@ -559,8 +559,16 @@ def test_the_script_compares_the_newest_release_tag_before_with_the_checkout_aft
     assert "- `history_bytes`: added, optional, default `1000`.\n" in result.stdout
 
 
-@pytest.mark.parametrize("arguments", [pytest.param((), id="none"), pytest.param(("",), id="empty")])
-def test_the_script_refuses_a_missing_version_with_its_usage(released_tree, arguments):
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        pytest.param((), id="none"),
+        pytest.param(("",), id="empty"),
+        pytest.param((f"v{VERSION}",), id="with a leading v"),
+        pytest.param(("--help",), id="an option"),
+    ],
+)
+def test_the_script_refuses_anything_but_a_version_with_its_usage(released_tree, arguments):
     result = run_from(released_tree, SCRIPT, *arguments)
 
     assert result.returncode == 2
