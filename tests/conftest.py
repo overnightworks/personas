@@ -20,7 +20,7 @@ from logline.testing import configured
 from personas.app_session import READ_SECONDS, open_mcp_session
 from personas.config import MemoryTarget, Voice, load_config
 from personas.loop import AgentLoop, Boundaries
-from personas.main import SweepingBoundaries, run_with_sweep
+from personas.main import ALEMBIC_LOGGER, SweepingBoundaries, run_with_sweep
 from personas.readiness import FileReadyMarker
 from personas.reporting import carry_trace, log_state_change
 from personas.secret import Secret
@@ -281,8 +281,13 @@ async def songmaker(runner: Harness) -> AsyncIterator[ToolsOnlyApp]:
 @pytest.fixture
 def restored_logging() -> Iterator[None]:
     """The logging state the entry point configures, put back at the test's end."""
-    with configured("personas"):
-        yield
+    alembic = logging.getLogger(ALEMBIC_LOGGER)
+    level = alembic.level
+    try:
+        with configured("personas"):
+            yield
+    finally:
+        alembic.setLevel(level)
 
 
 @pytest.fixture
