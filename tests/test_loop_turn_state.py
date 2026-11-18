@@ -1,4 +1,5 @@
-"""The whole runner, what a turn states at its place: thinking while it runs, and what its end calls for."""
+"""The whole runner, what a turn states at its place: thinking while it runs, and what its end calls for; and what
+his seats are told once the loop stops taking turns in the app, recovers or stops."""
 
 from __future__ import annotations
 
@@ -16,14 +17,16 @@ from agents.member import (
 )
 from agents.tools import ToolOutcome
 from agents.turn import StopOutcome
+from mcp_types import INVALID_PARAMS
 
-from personas.decision import status_code
+from personas.decision import INVALID_PARAMS_REASON, NO_ANSWER_REASON
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
-from tests.support.hopin import CALL, LIMIT_SECONDS, SAY_TOOL
+from tests.support.hopin import CALL, LIMIT_SECONDS, READ, SAY_TOOL
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, paused
+from tests.support.voice import ended_by
 
 if TYPE_CHECKING:
     from tests.support.wire import Reply as AppReply
@@ -171,7 +174,7 @@ def fails_every_statement(runner) -> None:
     ("breaks", "reported"),
     [
         (refuses_the_thinking, [(Event.TURN_STATE_FAILED, SetTurnStateRefusal.NOT_HELD.value)]),
-        (fails_every_statement, [(Event.TURN_STATE_FAILED, status_code(HTTPStatus.SERVICE_UNAVAILABLE))] * 2),
+        (fails_every_statement, [(Event.TURN_STATE_FAILED, NO_ANSWER_REASON)] * 2),
     ],
     ids=["refused", "failed"],
 )
@@ -186,3 +189,126 @@ async def test_a_statement_the_app_refuses_or_fails_is_logged_and_the_turn_goes_
     await runner.reports.until(Event.TURN_STATE_FAILED, count=len(reported))
 
     assert runner.reports.reported(started=False) == reported
+
+
+UNAVAILABLE = ended(StopOutcome.UNAVAILABLE)
+EARLIER_ENDS = pytest.mark.parametrize(
+    ("replies", "earlier", "last"),
+    [
+        ([], [], None),
+        ([Reply(status=HTTPStatus.TOO_MANY_REQUESTS)], [THINKING, ended(StopOutcome.BUSY)], StopOutcome.BUSY),
+    ],
+    ids=["no turn end", "a busy turn end"],
+)
+
+
+async def in_the_call_after(runner, replies) -> None:
+    """The runner restarted in the call, and the turn each reply answers has ended and stated its end."""
+    if replies:
+        runner.gateway = Gateway(*replies)
+    await restarted_in_the_call(runner)
+    for turn in range(1, len(replies) + 1):
+        say_in_the_call(runner, f"{ADDRESSED} {turn}")
+        await runner.reports.until_a_turn_ended(count=turn)
+    await runner.app.until_turn_states(2 * len(replies))
+
+
+def fails_the_next_read(runner) -> None:
+    async def fails(reply: AppReply) -> None:
+        await reply.status(HTTPStatus.SERVICE_UNAVAILABLE)
+
+    runner.app.script(READ, fails)
+
+
+async def a_turn_after_it(runner) -> None:
+    """A turn that answers runs and states its thinking and its end, after whatever the loop queued before it."""
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    say_in_the_call(runner, ADDRESSED)
+    await runner.reports.until_a_turn_completed()
+
+
+@EARLIER_ENDS
+async def test_a_backoff_past_its_first_retry_states_unavailable_and_the_next_full_pass_his_last_end(
+    runner, replies, earlier, last
+):
+    """TURNS-44."""
+    await in_the_call_after(runner, replies)
+
+    runner.app.failing_windows.add(PLACE_ID)
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    await runner.app.until_turn_states(len(earlier) + 1)
+    runner.app.failing_windows.clear()
+    await runner.app.until_turn_states(len(earlier) + 2)
+
+    assert statements(runner) == [*earlier, UNAVAILABLE, ended(last)]
+
+
+async def test_a_blip_that_recovers_on_its_first_retry_states_nothing(runner):
+    """TURNS-44."""
+    await in_the_call_after(runner, [])
+    reads = runner.app.window_reads(PLACE_ID)
+
+    fails_the_next_read(runner)
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    await runner.reports.until(Event.RESUMED)
+    await runner.app.until_window_read(PLACE_ID, reads + 1)
+    await a_turn_after_it(runner)
+    await runner.app.until_turn_states(2)
+
+    assert statements(runner) == [THINKING, ended(None)]
+
+
+async def test_a_statement_lost_with_its_session_is_stated_again_after_the_next_full_pass(runner):
+    """TURNS-44."""
+    entered, released = asyncio.Event(), asyncio.Event()
+
+    async def held_until_released(reply: AppReply) -> None:
+        entered.set()
+        await released.wait()
+
+    first_round = await a_turn_in_its_first_round(runner, *says(PLACE_ID, ANSWER))
+    await runner.app.until_turn_states(1)
+    runner.app.script(SET_TURN_STATE_TOOL, held_until_released)
+    first_round.set()
+    async with asyncio.timeout(LIMIT_SECONDS):
+        await entered.wait()
+
+    fails_the_next_read(runner)
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    await runner.app.until_turn_states(2)
+    released.set()
+
+    assert statements(runner) == [THINKING, ended(None)]
+
+
+@EARLIER_ENDS
+async def test_the_runners_stop_ends_the_thinking_of_the_turn_it_cuts_with_his_last_end(runner, replies, earlier, last):
+    """TURNS-43."""
+    await in_the_call_after(runner, replies)
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    runner.gateway.hold_request(1)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.gateway.until_requested(1)
+
+    runner.task.cancel()
+    await ended_by(runner.task)
+
+    assert statements(runner) == [*earlier, THINKING, ended(last)]
+
+
+@pytest.mark.parametrize("status", [HTTPStatus.BAD_REQUEST, HTTPStatus.OK], ids=["error status", "success status"])
+async def test_a_seat_whose_app_answers_an_unknown_tool_gets_no_more_statements_after_one_line(runner, status):
+    """TURNS-43, LOG-34."""
+
+    async def unknown_tool(reply: AppReply) -> None:
+        await reply.error(INVALID_PARAMS, status=status)
+
+    runner.app.script(SET_TURN_STATE_TOOL, unknown_tool)
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER), *says(PLACE_ID, ANSWER))
+    await restarted_in_the_call(runner)
+    for turn in (1, 2):
+        say_in_the_call(runner, f"{ADDRESSED} {turn}")
+        await runner.reports.until_a_turn_completed(count=turn)
+
+    assert runner.reports.reported(started=False).count((Event.TURN_STATE_FAILED, INVALID_PARAMS_REASON)) == 1
+    assert (runner.app.log.count(SET_TURN_STATE_TOOL), statements(runner)) == (1, [])

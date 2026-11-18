@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Final, Literal, NoReturn
 from logline import unit_trace
 
 from personas.decision import (
+    NETWORK_FAILURE_CODE,
     NO_TURNS_CODE,
     SUSPENDED_RETRY_SECONDS,
     AppPlace,
@@ -25,8 +26,10 @@ from personas.decision import (
     active_window_places,
     after_refusal,
     backoff_delay,
+    backoff_states_unavailable,
     decisive_failure,
     failure_code,
+    failure_reason,
     forget_gone,
     is_defect,
     is_voice_app,
@@ -77,7 +80,7 @@ from personas.turn_states import TurnStates
 from personas.turning import Admitted, Turning, TurnSetup
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator
+    from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
     from datetime import datetime
 
     from agents.member import PlaceRef, PlaceWindow, Standing
@@ -264,6 +267,7 @@ class AgentLoop:
         if window_lost:
             # A window the app lost dropped its place's checkpoint: the standing says where the place stands now.
             await self._take_standing(session)
+        self._turn_states.restate_if_due()
         await self._start_due_turn(turns)
         self._served()
 
@@ -525,7 +529,7 @@ class AgentLoop:
             self._report(Event.SUSPENDED, code, None, failure)
         self._backing_off = False
         self._token = None
-        await self._boundaries.clock.sleep(SUSPENDED_RETRY_SECONDS)
+        await self._wait_parked(SUSPENDED_RETRY_SECONDS, stopped_taking_turns=True)
 
     async def _back_off(self, failure: CallFailure) -> None:
         self._park()
@@ -533,7 +537,41 @@ class AgentLoop:
             self._backing_off = True
             self._report(Event.BACKOFF, failure_code(failure), None, failure)
         self._failures += 1
-        await self._boundaries.clock.sleep(backoff_delay(self._failures))
+        await self._wait_parked(
+            backoff_delay(self._failures), stopped_taking_turns=backoff_states_unavailable(self._failures)
+        )
+
+    async def _wait_parked(self, seconds: float, *, stopped_taking_turns: bool) -> None:
+        """Waits before the next retry. Once the loop has stopped taking turns in the app, it states ``unavailable`` at
+        his seats meanwhile, the first time until the next full pass, and retries once that has gone out too."""
+        async with asyncio.TaskGroup() as stating:
+            if stopped_taking_turns and self._turn_states.stopped_taking_turns():
+                stating.create_task(self._state_on_own_session(self._turn_states.state_unavailable))
+            await self._boundaries.clock.sleep(seconds)
+
+    async def state_on_stop(self, seconds: float) -> None:
+        """At his stop, sends within ``seconds`` what the stop left queued, the end of a turn it cut among it, and each
+        seat's last end where a statement was lost with its session; what does not go out in time is logged once."""
+        self._turn_states.restate_if_due()
+        if self._turn_states.nothing_queued():
+            return
+        try:
+            async with asyncio.timeout(seconds):
+                await self._state_on_own_session(self._turn_states.state_queued)
+        except TimeoutError:
+            self._report(Event.TURN_STATE_FAILED, NETWORK_FAILURE_CODE)
+
+    async def _state_on_own_session(self, state: Callable[[AppSession], Awaitable[None]]) -> None:
+        """States on a session of its own, outside the loop's; a failure to open it is logged as a failed statement."""
+        try:
+            token = await self._current_token()
+            async with self._boundaries.open_session(self._app, token.value) as session:
+                await state(session)
+        except Exception as error:
+            failure = decisive_failure(tuple(leaves_of(error)), already_renewed=False)
+            if failure is None:
+                raise
+            self._report(Event.TURN_STATE_FAILED, failure_reason(failure), None, failure)
 
     def _park(self) -> None:
         """A parked app holds up no place of his other apps and lends no tools to their turns: its due places are
@@ -629,12 +667,15 @@ class _WriteThrough:
         """His stop begins now; it has ``margin_seconds`` to end."""
         self._stop_deadline = self._boundaries.clock.now() + margin_seconds
 
+    def seconds_left_to_stop(self) -> float:
+        assert self._stop_deadline is not None  # noqa: S101 - a stop begins before the agent's task is cancelled
+        return max(0.0, self._stop_deadline - self._boundaries.clock.now())
+
     async def flush_on_stop(self) -> None:
         """Writes what the stop cut off, within what is left of its margin; a write the time or the store did not take
         is reported and the stop goes on, and one the fence refused is left, since another pod serves him now."""
-        assert self._stop_deadline is not None  # noqa: S101 - a stop begins before the agent's task is cancelled
         try:
-            async with asyncio.timeout(max(0.0, self._stop_deadline - self._boundaries.clock.now())):
+            async with asyncio.timeout(self.seconds_left_to_stop()):
                 await self.flush()
         except TimeoutError:
             self._outage.failed(STORE_TIMEOUT_CODE)
@@ -667,14 +708,12 @@ async def run_all(config: Config, boundaries: Boundaries, ownership: Ownership) 
         )
         agent = agents[owned.client_id]
         write_through = _WriteThrough(mind, owned, boundaries)
+        loops = [AgentLoop(agent, app, boundaries, mind, config.apps, lookup) for app in config.apps if app.listens]
         try:
             async with asyncio.TaskGroup() as group:
                 group.create_task(write_through.run())
-                for app in config.apps:
-                    if app.listens:
-                        group.create_task(
-                            _run_loop(AgentLoop(agent, app, boundaries, mind, config.apps, lookup), agent_task)
-                        )
+                for loop in loops:
+                    group.create_task(_run_loop(loop, agent_task))
                 try:
                     await asyncio.Event().wait()
                 finally:
@@ -684,7 +723,11 @@ async def run_all(config: Config, boundaries: Boundaries, ownership: Ownership) 
                     write_through.stopping(config.ownership.cancel_margin_seconds)
         finally:
             if agent_task.cancelling():
-                await write_through.flush_on_stop()
+                # The statements share his stop's margin with the write, beside it, so neither waits on the other.
+                async with asyncio.TaskGroup() as stop:
+                    stop.create_task(write_through.flush_on_stop())
+                    for loop in loops:
+                        stop.create_task(loop.state_on_stop(write_through.seconds_left_to_stop()))
         raise AssertionError("a loop ended")  # pragma: no cover
 
     await ownership.serve(list(agents), serve_agent, boundaries.ready.announce)

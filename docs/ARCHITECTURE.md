@@ -48,7 +48,8 @@ flowchart LR
   one pod at a time: a round every `contend_seconds` takes free locks and confirms held ones.
 - **A loop** (`loop.py`, `app_session.py`, `tokens.py`) holds one token and one `subscriptions/listen` per
   agent and app, reads the standing on every wake, accepts invitations, then reads windows and views;
-  `turn_states.py` states on its session what his turns at each place do.
+  `turn_states.py` states what his turns at each place do on its session, and on one of its own while the
+  loop waits to retry or he stops.
 - **The mind** (`mind.py`) holds one agent's present in memory: his history, the answered turns it tells,
   his due places, his pause, and one turn at a time across all his apps.
 - **A turn** (`turning.py`) opens its own session, lists the tools of its apps, sends the gateway the

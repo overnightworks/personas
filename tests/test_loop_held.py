@@ -479,7 +479,10 @@ async def test_a_held_app_that_refuses_after_the_turn_began_is_an_error_takes_no
 
     assert len(other.log.entries) == requests_after_the_refusal
     assert all(each.startswith("Error") for each in runner.gateway.tool_results(3))
-    assert runner.reports.reported(apps=True, started=False) == [
+    # The suspended loop's statement of his seat there, refused alike, is logged beside these in no fixed order.
+    assert [
+        each for each in runner.reports.reported(apps=True, started=False) if each.event is not Event.TURN_STATE_FAILED
+    ] == [
         (Event.SUSPENDED, status_code(HTTPStatus.FORBIDDEN), url_of(runner, 1)),
         (Event.HELD_APP_FAILED, status_code(HTTPStatus.FORBIDDEN), url_of(runner, 1)),
     ]

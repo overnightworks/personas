@@ -262,11 +262,13 @@ def failure_code(failure: CallFailure) -> str:
     return NETWORK_FAILURE_CODE
 
 
+INVALID_PARAMS_REASON: Final = "invalid_params"
+"""The reason of a JSON-RPC invalid-params error, which an app also answers to a tool it does not serve."""
 _JSONRPC_ERROR_REASONS: Final = {
     -32700: "parse_error",
     -32600: "invalid_request",
     -32601: "method_not_found",
-    -32602: "invalid_params",
+    -32602: INVALID_PARAMS_REASON,
     -32603: "internal_error",
 }
 _MEDIA_TYPE_REASONS: Final = {"application/json": "json", "text/html": "html", "text/plain": "plain_text"}
@@ -519,6 +521,17 @@ def sync_seat_ends(
         for standing in standings
         if standing.state is not StandingState.INVITED
     }
+
+
+def backoff_states_unavailable(failures: int) -> bool:
+    """Whether a backoff after the ``failures``-th failure in a row (from one) has gone past its first retry, so the
+    loop has stopped taking turns in the app; a blip that recovers on its first retry states nothing."""
+    return failures > 1
+
+
+def answers_unknown_tool(failure: CallFailure) -> bool:
+    """Whether the failure of a call is the app's answer that it serves no such tool."""
+    return failure_reason(failure) == INVALID_PARAMS_REASON
 
 
 def view_turn_due(turned_revision: int | None, view: PlaceView) -> bool:
