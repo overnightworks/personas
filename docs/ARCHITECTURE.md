@@ -116,8 +116,7 @@ database. The runner opens no port. The release path is in the [README](../READM
 | `agent_owner` | the generation of the pod that owns him | renewed by every takeover and every erase |
 | `lines`, with `[memory]` | every line of every window he read, verbatim, with speaker, text and first-read time | the first sweep after `lines_keep_days` from its first read, or `memory erase` |
 
-- The history has no period: it stays, also without `[memory]`, until newer entries push it past
-  `history_bytes` or `memory erase` runs. No picture byte is kept anywhere.
+- No picture byte is kept anywhere.
 - A line a sweep removed from a window the app still holds is kept again with a new first-read time.
 - The mind writes through on every change, under his generation, so a write from a pod that lost him is
   refused. A restart or a takeover loads his history and turns, and his next turn is told what the holder
@@ -127,8 +126,8 @@ database. The runner opens no port. The release path is in the [README](../READM
   sentence, since a line said twice is worse than one unanswered.
 - A place read before resumes where reading stood, so a line said while no pod served him gets one turn;
   how a place reads is in [the turns reference](turns.md), Joining and reading.
-- `personas memory list` shows counts and times only. `personas memory erase` deletes an agent's lines,
-  history entries and answered turns; see [the runbook](runbooks/erase-memory.md).
+- `personas memory list` and `personas memory erase` show and erase what an agent keeps; see
+  [the runbook](runbooks/erase-memory.md).
 - `personas migrate` is the only code that changes the schema, and a release only adds to it while two
   releases run.
 

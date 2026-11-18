@@ -11,7 +11,7 @@ never a secret. What the stores keep is in [the architecture](ARCHITECTURE.md), 
 | `token_endpoint` | URL | required | the realm's token endpoint |
 | `ready_file` | absolute path | required | the readiness marker |
 | `history_bytes` | integer above 0 | 49152 | the history each agent keeps and tells every turn, counted in the JSON bytes of each entry as told |
-| `history_keep_bytes` | integer above 0, at most `history_bytes` | 32768 | what stays after the step that cuts a history past `history_bytes` |
+| `history_keep_bytes` | integer above 0, at most `history_bytes` | 32768 | what stays after a cut; see [the turns reference](turns.md), What a turn is told |
 | `budget_pause_cap_seconds` | number, at least 1 | 300 | the longest pause between his turns while the gateway refuses for a spent budget |
 
 At the default history, a skat game (40 to 50 states of about 1.5 KB) fills it after about half a game.
@@ -79,7 +79,7 @@ agents' member lease of 120 seconds.
 ## `[memory]`
 
 Its presence keeps every line the agents read and gives every turn the lookup `recall`; removing it stops
-both. The history is kept either way.
+both.
 
 | Name | Type | Default | Meaning |
 |---|---|---|---|

@@ -24,8 +24,7 @@ The marker says the pod is contending, not that an agent works: a wrong secret o
 
 ## What it keeps
 
-The runner keeps each agent's history in Postgres, also without `[memory]`, and with `[memory]` every line
-he reads. What is kept, for how long and what a restart or a takeover resumes is stated once, in
+What the runner keeps in Postgres, for how long and what a restart or a takeover resumes is stated once, in
 [the architecture](docs/ARCHITECTURE.md), Persistence. To show or erase it, follow
 [the runbook](docs/runbooks/erase-memory.md).
 
