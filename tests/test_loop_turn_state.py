@@ -21,12 +21,14 @@ from agents.turn import StopOutcome
 from mcp_types import INVALID_PARAMS
 
 from personas.decision import INVALID_PARAMS_REASON, NETWORK_FAILURE_CODE, NO_ANSWER_REASON
+from personas.failures import leaves_of
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
 from tests.support.hopin import CALL, LIMIT_SECONDS, READ, SAY_TOOL
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, paused
+from tests.support.transport import opener_whose_request_raises
 from tests.support.voice import ended_by
 
 if TYPE_CHECKING:
@@ -264,6 +266,18 @@ async def test_a_loop_that_stops_taking_turns_states_unavailable_and_the_next_fu
     await runner.app.until_turn_states(len(earlier) + 2)
 
     assert statements(runner) == [*earlier, UNAVAILABLE, ended(last)]
+
+
+async def test_a_defect_while_stating_unavailable_ends_the_runner_loud(runner):
+    defect = ValueError("a defect")
+    runner.open_session = opener_whose_request_raises("set_turn_state", defect)
+    await restarted_in_the_call(runner)
+
+    forbids_every_read(runner)
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    ended_as = await ended_by(runner.task)
+
+    assert [leaf for leaf in leaves_of(ended_as) if leaf is defect] == [defect]
 
 
 async def test_a_blip_that_recovers_on_its_first_retry_states_nothing(runner):
