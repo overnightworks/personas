@@ -194,8 +194,13 @@ ALEMBIC_LOGGER: Final = "alembic"
 
 
 def configure_logging() -> None:
-    """Every line one JSON object on stdout; alembic's lines below WARNING stay out."""
-    configure("personas")
+    """Every line one JSON object on stdout; alembic's lines below WARNING stay out. A ``LOG_LEVEL`` logline refuses is
+    refused with one plain line on stderr."""
+    try:
+        configure("personas")
+    except ValueError as error:
+        sys.stderr.write(f"personas: {error}\n")
+        raise SystemExit(CONFIGURATION_ERROR_EXIT_CODE) from None
     logging.getLogger(ALEMBIC_LOGGER).setLevel(logging.WARNING)
 
 

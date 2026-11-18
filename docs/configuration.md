@@ -58,7 +58,8 @@ sets no limit of its own. (CONFIG-21)
 
 | Name | Type | Default | Meaning |
 |---|---|---|---|
-| `host`, `port`, `dbname`, `user` | strings, port 1 to 65535 | required | the Postgres every pod shares (CONFIG-22) |
+| `host`, `dbname`, `user` | strings | required | the Postgres every pod shares (CONFIG-22) |
+| `port` | integer, 1 to 65535 | required | the Postgres every pod shares (CONFIG-22) |
 | `password_file` | absolute path | required | the file holding the password (CONFIG-23) |
 | `write_seconds` | number above 0, or `inf` | 2 | the bound on one write or read against a database that answers (CONFIG-24) |
 

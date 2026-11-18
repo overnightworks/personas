@@ -8,6 +8,7 @@ from dataclasses import replace
 
 import pytest
 
+from personas.reporting import Event
 from personas.sweep import sweep_lines
 from tests.support.call import restarted_in_the_call
 from tests.support.fakes import FakeClock, Reports, SweepClock, memory_target
@@ -22,8 +23,9 @@ SWEEP_SECONDS = 420.0
 class ScriptedSweeps:
     """Counts the statements it is sent; it can stay inside the first one."""
 
-    def __init__(self, *, stays_inside: bool = False) -> None:
+    def __init__(self, *, stays_inside: bool = False, removes: int = 0) -> None:
         self.statements = 0
+        self._removes = removes
         self._stays_inside = stays_inside
         self._inside = asyncio.Event()
 
@@ -32,7 +34,7 @@ class ScriptedSweeps:
         self._inside.set()
         if self._stays_inside:
             await asyncio.Event().wait()
-        return 0
+        return self._removes
 
     async def until_inside(self) -> None:
         async with asyncio.timeout(LIMIT_SECONDS):
@@ -60,6 +62,18 @@ async def test_a_task_with_nothing_to_remove_or_no_next_sweep_ends_after_the_sta
         await sweep_lines(store, memory, FakeClock(), Reports())
 
     assert store.statements == statements
+
+
+@pytest.mark.parametrize(("removes", "swept"), [(0, []), (3, [3])], ids=["nothing erased: no line", "lines erased"])
+async def test_a_sweep_reports_its_line_count_only_when_it_erased_lines(removes, swept):
+    """LOG-21."""
+    reports = Reports()
+    memory = replace(memory_target(), sweep_minutes=math.inf)
+
+    async with asyncio.timeout(LIMIT_SECONDS):
+        await sweep_lines(ScriptedSweeps(removes=removes), memory, FakeClock(), reports)
+
+    assert [change.lines for change in reports.changes if change.event is Event.SWEPT] == swept
 
 
 async def test_a_runner_without_a_memory_table_sweeps_nothing(runner):

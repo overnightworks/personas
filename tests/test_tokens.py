@@ -119,6 +119,7 @@ async def test_each_fetch_writes_one_token_request_line_with_its_outcome_and_a_c
 
     refused, granted = lines_of(caplog.get_records("call"), "token_request.ended")
     assert (refused["outcome"], refused["reason"], granted["outcome"]) == ("failed", NO_ANSWER_REASON, "ok")
+    assert refused["error_type"] == TokenStatusFailure.__name__
     assert {refused["agent_id"], granted["agent_id"]} == {agent.client_id}
     assert all(isinstance(line["duration_ms"], float) for line in (refused, granted))
 
