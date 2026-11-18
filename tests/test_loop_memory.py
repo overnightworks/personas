@@ -11,10 +11,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
+from agents.mcp_server import listen
 from agents.tools import ToolEffect
 from agents.turn import FailureCode
 from mcp_types import ListToolsResult
 
+from personas.decision import NETWORK_FAILURE_CODE
 from personas.failures import (
     STORE_DEFECT_CODE,
     STORE_TIMEOUT_CODE,
@@ -35,7 +37,7 @@ from personas.recall import (
 )
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PLACE_ID, restarted_in_the_call, say_in_the_call
-from tests.support.fakes import failed_turn, memory_target
+from tests.support.fakes import CANCELLED_TURN, failed_turn, memory_target
 from tests.support.gateway import Gateway, play, say, says
 from tests.support.history import (
     MORNING,
@@ -64,6 +66,10 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.anyio
 
 OUTAGE_EVENTS = {Event.BACKOFF, Event.SUSPENDED}
+SHORT_STREAM_SECONDS = 0.5
+APP_LISTEN_BOUND_SECONDS = 0.1
+"""The app ends an idle listen before the runner's deadline, as it does at its own bound, so only a held write
+reaches that deadline."""
 
 
 class ScriptedStore:
@@ -169,6 +175,31 @@ async def test_a_write_that_ends_in_a_timeout_is_reported_by_its_code_and_the_tu
 
     assert (Event.STORE_FAILED, STORE_TIMEOUT_CODE) in runner.reports.reported()
     assert not OUTAGE_EVENTS & {event for event, _ in runner.reports.reported()}
+
+
+async def test_a_write_held_past_the_listens_deadline_cancels_the_running_turn_with_no_store_failed(
+    runner, monkeypatch
+):
+    """CONFIG-25."""
+    monkeypatch.setattr(listen, "LISTEN_BOUND_SECONDS", APP_LISTEN_BOUND_SECONDS)
+    store = ScriptedStore()
+    runner.lines = store
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    runner.gateway.hold_request(1)
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    runner.start(stream_seconds=SHORT_STREAM_SECONDS)
+    await runner.app.until_window_read(PLACE_ID)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.gateway.until_requested(1)
+    store.release = asyncio.Event()
+    say_in_the_call(runner, "A line the dark store holds")
+    await store.until_waiting()
+    await runner.reports.until_a_turn_ended()
+    await runner.reports.until(Event.BACKOFF)
+
+    assert runner.reports.turn_endings == [CANCELLED_TURN]
+    assert runner.reports.reported()[:2] == [(Event.STARTED, None), (Event.BACKOFF, NETWORK_FAILURE_CODE)]
+    assert Event.STORE_FAILED not in {event for event, _ in runner.reports.reported()}
 
 
 LATER_TOLD = "2026-11-10T18:00:00Z"
