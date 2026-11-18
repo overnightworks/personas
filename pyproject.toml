@@ -151,3 +151,19 @@ show_missing = true
 [tool.vulture]
 paths = ["src/personas", "scripts"]
 min_confidence = 80
+
+# --- Import Linter ---
+
+[tool.importlinter]
+root_packages = ["personas"]
+
+[[tool.importlinter.contracts]]
+name = "the pure decisions import one way"
+type = "layers"
+layers = [
+    "personas.due",
+    "personas.present",
+    "personas.decision",
+    "personas.recall",
+    "personas.entries",
+]
