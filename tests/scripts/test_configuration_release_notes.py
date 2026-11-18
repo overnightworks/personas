@@ -101,6 +101,10 @@ class HistoryAfter(BaseModel):
     history_bytes: int = 1000
 
 
+class HistoryCountedInKibibytes(BaseModel):
+    history_bytes: float = 48.0
+
+
 class HistoryRequired(BaseModel):
     history_bytes: int
 
@@ -258,6 +262,13 @@ def notes_between(before: type[BaseModel], after: type[BaseModel]) -> str:
             HistoryAfter,
             "- `history_bytes`: default now `1000`, was `49152`: set it to keep the old one.\n",
             id="a field whose default changed",
+        ),
+        pytest.param(
+            HistoryBefore,
+            HistoryCountedInKibibytes,
+            "- `history_bytes`: now takes `number`, was `integer`; default now `48.0`, was `49152`.\n\n"
+            "It goes above the file's first table.\n\n```toml\nhistory_bytes = 48.0\n```\n",
+            id="a field whose type and default changed",
         ),
         pytest.param(
             Ownership,

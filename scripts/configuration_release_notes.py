@@ -303,15 +303,20 @@ def written(value: object | None) -> str:
     return "none" if value is None else f"`{toml_value(value)}`"
 
 
+def default_moved(field: ConfigField, then: ConfigField) -> str:
+    return f"default now {written(field.default)}, was {written(then.default)}"
+
+
 def summary(change: Change, field: ConfigField, then: ConfigField | None) -> str:
     if change is Change.REMOVED:
         return "removed: delete it"
     if change is Change.NOW_REQUIRED:
         return "now required"
     if change is Change.TYPE_CHANGED and then is not None:
-        return f"now takes `{field.kind}`, was `{then.kind}`"
+        moved = "" if then.default == field.default else f"; {default_moved(field, then)}"
+        return f"now takes `{field.kind}`, was `{then.kind}`{moved}"
     if change is Change.DEFAULT_CHANGED and then is not None:
-        return f"default now {written(field.default)}, was {written(then.default)}: set it to keep the old one"
+        return f"{default_moved(field, then)}: set it to keep the old one"
     if field.required:
         return "added, required"
     if field.table or field.placeholder:
