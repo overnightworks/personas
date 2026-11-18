@@ -87,6 +87,7 @@ def of(event: Event, code: str | None = None, **fields: object) -> StateChange:
     ],
 )
 def test_a_change_is_one_literal_event_with_ids_the_host_of_the_app_and_closed_codes(written, change, event, fields):
+    """LOG-2, LOG-6, LOG-7, LOG-8, LOG-9, LOG-10, LOG-11, LOG-15, LOG-16, LOG-19, LOG-20."""
     line = written(change)
 
     assert line["event"] == event
@@ -97,6 +98,7 @@ def test_a_change_is_one_literal_event_with_ids_the_host_of_the_app_and_closed_c
 
 
 def test_the_sweep_belongs_to_no_agent_and_no_app_and_says_its_line_count(written):
+    """LOG-21."""
     line = written(StateChange(Event.SWEPT, None, None, lines=7))
 
     assert (line["event"], line["line_count"]) == ("lines.swept", 7)
@@ -178,6 +180,7 @@ def test_the_first_sentence_sent_marks_the_first_output(capsys):
 def test_a_turn_ends_with_its_outcome_its_reason_when_it_has_one_and_an_error_only_when_it_failed(
     turn_line, ending, outcome, level, reason
 ):
+    """LOG-12, LOG-28."""
     line = turn_line(ending)
 
     assert (line["outcome"], line["level"], line.get("reason")) == (outcome, level, reason)

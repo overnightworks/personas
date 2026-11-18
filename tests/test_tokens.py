@@ -107,6 +107,7 @@ async def test_the_request_asks_for_client_credentials_with_the_apps_scope():
 
 
 async def test_each_fetch_writes_one_token_request_line_with_its_outcome_and_a_closed_reason_for_a_failure(caplog):
+    """LOG-14."""
     caplog.set_level(logging.INFO)
     answers = iter([httpx2.Response(401), httpx2.Response(200, json={"access_token": "t", "expires_in": 5})])
     source = source_answering(lambda request: next(answers))
@@ -152,6 +153,7 @@ def _claims(**changes: object) -> dict[str, object]:
 
 
 def test_the_facts_of_a_token_are_its_principal_its_groups_and_the_agents_name():
+    """CONFIG-20."""
     claims = _claims()
 
     facts = facts_of(Secret(jwt_of(claims)))

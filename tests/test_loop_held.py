@@ -100,6 +100,7 @@ async def shows_after_the_line(runner, other):
 async def test_a_call_turn_answers_in_the_call_and_plays_at_the_table_in_one_turn_each_call_under_its_apps_token(
     runner, other
 ):
+    """TURNS-23."""
     written, played = words(2)
     await a_call_turn_claimed_before_the_table_that_waits(runner, other, tool_round(say(written), play(played)))
     await runner.gateway.until_turns(3)
@@ -146,6 +147,7 @@ async def test_the_move_his_call_turn_made_leaves_no_second_act_at_the_revision_
 async def test_a_call_turn_declares_the_tools_of_the_apps_he_holds_a_place_at_in_configuration_order_and_no_other(
     runner, other, songmaker
 ):
+    """TURNS-18, CONFIG-12."""
     await seated_in_the_call(runner, other, completion("done"))
     say_in_the_call(runner, ADDRESSED)
     await runner.gateway.until_requested(1)
@@ -263,6 +265,7 @@ async def test_a_held_app_whose_tools_cannot_be_listed_is_left_out_and_reported_
 async def test_a_failed_call_to_his_own_apps_tool_ends_the_turn_into_that_loops_reaction_and_reports_nothing_held(
     runner, other
 ):
+    """TURNS-19."""
     runner.app.script(CALL, cuts)
     await seated_in_the_call(runner, other, tool_round(say(words(1)[0]), play(words(1)[0])), completion("done"))
     say_in_the_call(runner, ADDRESSED)
@@ -291,6 +294,7 @@ def rounds_spending_every_bound(runner) -> list[object]:
 async def test_every_apps_bound_of_a_turn_is_spent_in_full_and_the_call_past_a_held_apps_bound_is_an_error(
     runner, other, songmaker
 ):
+    """TURNS-22."""
     held_bound = runner.config.apps[1].max_tool_calls
     own_bound = runner.config.apps[0].max_tool_calls
     rounds = rounds_spending_every_bound(runner)
@@ -309,6 +313,7 @@ async def test_every_apps_bound_of_a_turn_is_spent_in_full_and_the_call_past_a_h
 async def test_the_call_past_the_turn_bound_of_the_three_apps_ends_the_turn_as_limit_exceeded_and_is_not_sent(
     runner, other, songmaker
 ):
+    """TURNS-22."""
     rounds = rounds_spending_every_bound(runner)
     await seated_in_the_call(runner, other, *rounds, tool_round(play(words(1)[0])), completion("done"))
     say_in_the_call(runner, ADDRESSED)
@@ -483,6 +488,7 @@ async def test_a_held_app_that_refuses_after_the_turn_began_is_an_error_takes_no
 
 @pytest.mark.parametrize("answer_is_error", [False, True], ids=["an act the table allows", "a move the table refuses"])
 async def test_a_call_to_the_table_while_it_is_not_his_move_is_the_tables_to_answer(runner, other, answer_is_error):
+    """TURNS-23."""
     answer = secrets.token_hex(4)
     other.say_outcomes.append(ToolOutcome(answer, is_error=answer_is_error))
     await seated_in_the_call(
@@ -541,6 +547,7 @@ async def test_a_table_turn_of_a_speaking_agent_is_not_spoken_and_writes_in_his_
 async def test_a_call_to_a_held_app_after_the_move_it_caused_was_read_holds_the_next_call_of_the_turn_once(
     runner, other
 ):
+    """TURNS-20."""
     other.says_move_the_view = True
     card, written = words(2)
     await seated_in_the_call(

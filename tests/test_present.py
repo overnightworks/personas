@@ -72,6 +72,7 @@ def told_a_written_turn(
 
 @pytest.mark.parametrize("left_out", [1, 0])
 def test_the_header_tells_his_name_and_whether_older_entries_left_the_history(left_out):
+    """TURNS-9."""
     history = History((), left_out=left_out, heard=0)
 
     assert json.loads(told_header("Mozart", history)) == {"you": "Mozart", "older_dropped": left_out > 0}
@@ -89,6 +90,7 @@ def present_with_a_turn_told(line_seq: int) -> Present:
 
 
 def test_the_messages_before_the_last_do_not_change_with_the_clock_a_turn_is_composed_at():
+    """TURNS-15."""
     present = present_with_a_turn_told(1)
     next_turn = a_lines_turn(1, through=1)
 
@@ -132,6 +134,7 @@ def told_one_bytes() -> int:
 
 
 def test_a_view_turn_message_tells_its_admission_what_woke_him_and_every_entry_with_the_time_it_happened_at():
+    """TURNS-10."""
     view = PlaceView(revision=3, awaits_you=True, state={"hand": ["x", {"seen": True}], "umläut": "ä"})
     history = history_holding(
         (
@@ -175,6 +178,7 @@ def test_a_view_turn_message_tells_its_admission_what_woke_him_and_every_entry_w
 
 
 def test_a_time_is_told_in_utc_whatever_the_zone_it_is_held_in():
+    """TURNS-10."""
     zone = timezone(timedelta(hours=2))
     turn = TurnTold(datetime(2026, 11, 10, 20, 0, 5, tzinfo=zone), APP, TABLE, Waiting(3), aloud=False, through=0)
 
@@ -185,6 +189,7 @@ def test_a_time_is_told_in_utc_whatever_the_zone_it_is_held_in():
 def test_a_written_turn_is_told_in_which_place_it_woke_which_lines_it_is_for_and_whether_older_ones_were_not_seen(
     missed,
 ):
+    """TURNS-10."""
     woke = json.loads(told_a_written_turn(missed=missed, seqs=(9, 3)))["woke"]
 
     assert woke == {
@@ -197,6 +202,7 @@ def test_a_written_turn_is_told_in_which_place_it_woke_which_lines_it_is_for_and
 
 
 def test_a_turn_that_is_spoken_is_told_so_in_what_woke_him_and_any_other_turn_is_told_no_such_key():
+    """TURNS-10."""
     assert json.loads(told_a_written_turn(aloud=True))["woke"]["aloud"] is True
     assert "aloud" not in json.loads(told_a_written_turn())["woke"]
 
@@ -257,6 +263,7 @@ def test_the_newest_entry_stays_even_when_it_alone_is_past_the_bound_and_the_his
 
 
 def test_a_view_the_history_holds_by_app_place_and_revision_adds_nothing_whatever_its_state():
+    """TURNS-12."""
     held = ViewSeen(APP, TABLE, a_view(3), LATER)
     again = ViewSeen(APP, TABLE, a_view(3), LATER + timedelta(seconds=5))
 
@@ -371,6 +378,7 @@ def test_an_act_the_history_already_holds_is_appended_again():
 
 
 def test_an_answered_act_is_told_with_its_app_tool_arguments_answer_and_time():
+    """TURNS-13."""
     act = an_act(arguments={"place": "room-7", "text": "ä"}, outcome=Answered("gone", is_error=True))
 
     told_entries = json.loads(told_a_written_turn(history_holding((act,))))["entries"]
@@ -388,6 +396,7 @@ def test_an_answered_act_is_told_with_its_app_tool_arguments_answer_and_time():
 
 
 def test_an_unanswered_act_is_told_with_the_code_and_no_text():
+    """TURNS-13."""
     act = an_act(outcome=Unanswered(TURN_CANCELLED_CODE))
 
     told_entry = json.loads(told_a_written_turn(history_holding((act,))))["entries"][0]
@@ -405,6 +414,7 @@ def test_an_unanswered_act_is_told_with_the_code_and_no_text():
     ],
 )
 def test_a_spoken_sentence_is_told_as_a_speech_entry_with_its_text_time_and_how_the_app_took_it(outcome, told_outcome):
+    """TURNS-14."""
     sentence = a_sentence(text="Grüß dich.", outcome=outcome)
 
     told_entries = json.loads(told_a_written_turn(history_holding((sentence,))))["entries"]
@@ -495,6 +505,7 @@ def test_the_history_counts_the_entries_not_his_own_it_took_in(entries, heard):
 
 
 def test_a_revision_the_history_already_holds_is_not_heard_again():
+    """TURNS-35."""
     held = a_view_seen(3)
 
     history = taking(taking(EMPTY_HISTORY, held), a_view_seen(3))
@@ -648,6 +659,7 @@ def told_held(arrived: Arrived) -> dict:
 
 
 def test_a_held_call_is_told_it_was_not_sent_and_every_arrived_entry_his_own_act_too():
+    """TURNS-20."""
     act = an_act(at=LATER - timedelta(seconds=4))
     line = said(2, "Spiel den Buben", name="Ada")
 

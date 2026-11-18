@@ -88,6 +88,7 @@ async def test_an_addressed_line_runs_the_bound_tools_of_a_tools_only_app_in_ord
 
 
 async def test_each_app_sees_only_the_bearers_issued_for_its_own_scope(runner, songmaker):
+    """TURNS-19."""
     await a_song_is_made_and_announced(runner, songmaker)
 
     songmaker_bearers = songmaker.presented - {""}
@@ -201,6 +202,7 @@ async def test_a_tools_only_app_that_lists_one_of_its_two_bound_tools_lends_that
 async def test_a_tool_the_app_lists_beyond_the_configuration_is_declared_and_the_reserved_names_never_are(
     runner, songmaker
 ):
+    """TURNS-18."""
     added = "remix_song"
 
     async def lists_an_added_tool_and_the_reserved_names(reply):
@@ -228,6 +230,7 @@ async def test_a_tool_the_app_lists_beyond_the_configuration_is_declared_and_the
 async def test_a_name_two_apps_offer_goes_to_the_first_app_and_the_later_app_is_reported_once_per_session(
     runner, songmaker
 ):
+    """TURNS-18, LOG-18."""
     second = ToolsOnlyApp()
     async with second.serving() as second_url:
         runner.add_tools_only_app(second, second_url, "mcp-second")
@@ -312,6 +315,7 @@ async def test_a_session_of_a_tools_only_call_whose_sdk_child_is_lost_shows_the_
 async def test_a_tools_only_app_whose_call_failed_takes_no_more_calls_in_the_turn_and_is_reported_once(
     runner, songmaker
 ):
+    """TURNS-19, LOG-19."""
     songmaker.script(CALL, refuses_with_a_server_error)
     runner.gateway = Gateway(calling(CREATE_SONG, GENERATE_SONG), saying(ANSWER), completion("done"))
 
@@ -583,6 +587,7 @@ async def test_a_runner_cancelled_during_a_tools_only_call_ends_cancelled_with_n
 
 
 async def test_calls_past_an_apps_own_bound_are_errors_and_the_other_apps_calls_still_run(runner, songmaker):
+    """TURNS-22."""
     over_the_bound = CALLS + 1
     runner.gateway = Gateway(calling(*[CREATE_SONG] * over_the_bound), saying(ANSWER), completion("done"))
 
@@ -640,6 +645,7 @@ async def test_a_leaf_that_is_no_call_failure_ends_the_runner_though_a_tools_onl
 
 
 async def test_a_tools_only_outcome_that_is_an_error_shows_the_model_its_text(runner, songmaker):
+    """TURNS-19."""
     refused = ToolOutcome("the song limit of the account is reached", is_error=True)
     songmaker.outcomes.append(refused)
     songmaker.content.add(refused.content)

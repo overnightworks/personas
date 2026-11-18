@@ -87,6 +87,7 @@ async def a_call_turn_beside_a_table_that_waits_for_the_model(runner):
 
 
 async def test_a_line_that_does_not_name_him_gives_one_turn_woken_for_it_at_its_place(runner):
+    """TURNS-5."""
     await restarted_in_the_call(runner)
     say_in_the_call(runner, "Hello everyone", author=PERSON)
     await runner.gateway.until_turns(1, why="lines")
@@ -97,6 +98,7 @@ async def test_a_line_that_does_not_name_him_gives_one_turn_woken_for_it_at_its_
 
 
 async def test_an_act_line_of_someone_else_gives_no_turn_and_is_told_marked_with_the_next_line_that_does(runner):
+    """TURNS-5."""
     await restarted_in_the_call(runner)
     await said_and_taken(runner.app, PLACE_ID, "took a card", act=True)
     assert runner.gateway.openings() == []
@@ -179,6 +181,7 @@ async def test_a_table_that_starts_waiting_at_another_app_during_his_call_turn_g
 
 
 async def test_lines_said_in_three_reads_during_another_apps_turn_are_told_together_in_one_turn_after_it(runner, other):
+    """TURNS-6."""
     running = await at_a_table_turn_that_waits_for_the_model(runner, other)
     for number in (1, 2, 3):
         await said_and_taken(runner.app, PLACE_ID, f"{REMARK} {number}")

@@ -133,6 +133,7 @@ async def test_lines_of_two_calls_of_two_apps_are_told_in_the_order_they_were_ta
 
 
 async def test_his_own_line_is_told_as_his_own_and_starts_no_turn(runner):
+    """TURNS-5, TURNS-11."""
     await restarted_in_the_call(runner)
     await said_and_taken(runner.app, PLACE_ID, REMARK, author=SUBJECT, name=AGENT_NAME)
     runner.app.stand(SUBJECT, active(PLACE_ID), at_table())
@@ -518,6 +519,7 @@ async def test_a_window_read_again_with_the_same_lines_tells_each_line_once(runn
 async def test_a_line_said_while_a_view_turn_runs_holds_its_call_once_and_is_told_to_the_next_turn_with_the_recall(
     runner, other
 ):
+    """TURNS-20."""
     runner.gateway = Gateway(*says_after_a_hold(TABLE.id, ANSWER, tool=PLAY_TOOL))
     running = runner.gateway.hold_request(1)
     other.stand(SUBJECT, at_table())
@@ -655,6 +657,7 @@ async def test_two_lines_taken_in_one_read_of_which_one_names_him_are_both_what_
 
 
 async def test_what_was_said_in_the_call_before_the_runner_started_is_told_to_no_turn_without_a_memory(runner):
+    """TURNS-17."""
     runner.app.speak(PLACE_ID, PERSON, SPEAKER, "before the start")
     await restarted_in_the_call(runner)
     runner.app.speak(PLACE_ID, PERSON, SPEAKER, ADDRESSED)
@@ -665,6 +668,7 @@ async def test_what_was_said_in_the_call_before_the_runner_started_is_told_to_no
 
 
 async def test_a_line_is_told_with_the_time_it_was_taken_at_and_the_turn_with_the_time_it_was_admitted_at(runner):
+    """TURNS-10."""
     await restarted_in_the_call(runner)
     await said_and_taken(runner.app, PLACE_ID, REMARK)
     runner.clock.time += 90
@@ -702,6 +706,7 @@ async def test_a_window_the_app_lost_enters_no_line_again_and_the_earlier_one_st
 
 
 async def test_no_line_state_or_name_of_the_history_reaches_a_log_line(runner, other, caplog):
+    """LOG-3."""
     name = secrets.token_hex(8)
     await restarted_in_the_call(runner)
     await said_and_taken(runner.app, PLACE_ID, REMARK, name=name)
@@ -715,6 +720,7 @@ async def test_no_line_state_or_name_of_the_history_reaches_a_log_line(runner, o
 
 
 async def test_a_later_turn_sends_all_the_messages_of_the_earlier_one_byte_for_byte_and_one_more(runner):
+    """TURNS-9, TURNS-15."""
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER, ANSWER))
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
@@ -747,6 +753,7 @@ async def test_his_act_and_a_line_that_arrived_during_a_held_call_are_each_told_
 
 
 async def test_a_turn_refused_for_a_spent_budget_adds_no_message_and_the_next_turn_tells_its_entries(runner):
+    """TURNS-15."""
     runner.clock = SweepClock(BACKOFF_BASE_SECONDS)
     runner.gateway = Gateway(BUDGET_SPENT, *says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
@@ -763,6 +770,7 @@ async def test_a_turn_refused_for_a_spent_budget_adds_no_message_and_the_next_tu
 
 
 async def test_a_turn_cancelled_with_its_place_adds_no_message_and_the_next_turn_tells_its_entries(runner):
+    """TURNS-15."""
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
     runner.gateway.hold_request(1)
     await restarted_in_the_call(runner)

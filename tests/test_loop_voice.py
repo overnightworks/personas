@@ -66,6 +66,7 @@ async def turns_over(runner, count: int) -> None:
 async def test_a_line_at_a_voice_place_makes_a_turn_told_aloud_that_holds_every_apps_tools_and_never_speak(
     runner, songmaker, text, spoken
 ):
+    """TURNS-24."""
     await a_voice_call(runner, completion(ANSWER))
     say_in_the_call(runner, text, spoken=spoken)
     await runner.app.spoken_count(1)
@@ -104,6 +105,7 @@ async def test_sentences_released_while_a_reply_is_written_are_sent_in_order_the
 async def test_each_sentence_answered_as_spoken_lets_the_next_out_at_once_never_two_ahead_of_the_one_playing(
     runner, cut
 ):
+    """TURNS-25."""
     holding_sentence_ends(runner)
     await a_voice_call(runner, completion("First sentence. Second sentence. Third sentence."))
     say_in_the_call(runner, ADDRESSED, spoken=True)
@@ -129,6 +131,7 @@ async def test_each_sentence_answered_as_spoken_lets_the_next_out_at_once_never_
 async def test_the_next_turn_is_told_each_sentence_and_his_line_for_it_in_order_whole_or_cut_with_the_part_heard(
     runner,
 ):
+    """TURNS-25."""
     holding_sentence_ends(runner)
     await a_voice_call(runner, completion("First sentence. Second sentence."), completion("done"))
     say_in_the_call(runner, ADDRESSED, spoken=True)
@@ -192,6 +195,7 @@ async def test_a_sentence_a_call_and_a_sentence_go_out_in_that_order_and_the_nex
     "reply", [completion("[silent]"), completion("[quiet]")], ids=["silent", "a marker the reader does not know"]
 )
 async def test_a_turn_that_stays_silent_says_nothing_relays_nothing_and_logs_nothing(runner, reply):
+    """TURNS-26."""
     await a_voice_call(runner, reply)
     await turns_over(runner, 1)
 
@@ -259,6 +263,7 @@ async def test_a_table_turn_of_a_voice_call_is_not_told_aloud_and_its_text_is_no
 async def test_a_refused_sentence_ends_the_turns_speech_but_not_the_turn_and_the_next_turn_is_told_the_refusal(
     runner, refusal
 ):
+    """TURNS-27, LOG-16."""
     replies = speaks_and_says(PLACE_ID, TWO_SENTENCES, "Written.", after="Muted.")
     await a_voice_call(runner, *replies, completion("Later."))
     runner.app.speak_outcomes.append(refusing(refusal))
@@ -278,6 +283,7 @@ async def test_a_refused_sentence_ends_the_turns_speech_but_not_the_turn_and_the
 async def test_a_turn_at_a_place_whose_window_says_his_voice_is_unavailable_is_written_and_a_say_call_goes_through(
     runner,
 ):
+    """TURNS-24."""
     runner.app.state_voice(PLACE_ID, VoiceState.UNAVAILABLE)
     await a_voice_call(runner, *says(PLACE_ID, "Written."))
     say_in_the_call(runner, ADDRESSED)
@@ -323,6 +329,7 @@ async def test_a_voice_down_at_one_call_writes_only_the_turn_at_that_place(runne
 
 
 async def test_a_sentence_the_app_wrote_to_the_place_instead_is_told_as_written_and_his_speech_goes_on(runner):
+    """TURNS-27."""
     await a_voice_call(runner, completion(TWO_SENTENCES), completion("done"))
     runner.app.written_speaks = 1
     say_in_the_call(runner, ADDRESSED)
@@ -362,6 +369,7 @@ async def test_a_line_said_while_he_speaks_is_not_in_the_running_turn_and_is_tol
 async def test_a_call_reaches_the_app_only_after_the_sentence_before_it_was_answered_and_his_line_for_it_entered(
     runner,
 ):
+    """TURNS-25."""
     holding_sentence_ends(runner)
     await a_voice_call(runner, *speaks_and_says(PLACE_ID, ANSWER, "Written."))
     answer = runner.app.hold_next_speak()
@@ -534,6 +542,7 @@ async def test_a_line_heard_while_he_speaks_holds_the_call_after_the_sentence_on
 
 
 async def test_the_next_turn_is_told_which_lines_were_said_aloud_and_that_his_own_sentence_was_one(runner):
+    """TURNS-11."""
     await a_voice_call(runner, completion(ANSWER), completion("done"))
     say_in_the_call(runner, "Anyone there?", spoken=True)
     await runner.app.spoken_count(1)
@@ -550,6 +559,7 @@ async def test_the_next_turn_is_told_which_lines_were_said_aloud_and_that_his_ow
 
 
 async def test_the_next_turn_is_told_a_line_the_app_marked_as_cut_as_cut_with_the_part_heard(runner):
+    """TURNS-11."""
     await a_voice_call(runner, completion("[silent]"), completion("done"))
     say_in_the_call(runner, "Anyone th", spoken=True, cut=True)
     await runner.gateway.until_turns(1)

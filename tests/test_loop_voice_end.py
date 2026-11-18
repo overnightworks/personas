@@ -59,6 +59,7 @@ async def test_a_place_removed_or_paused_while_a_sentence_waits_cancels_the_turn
 
 
 async def test_a_restart_in_a_call_answers_nothing_that_was_said_before_it(runner):
+    """TURNS-3."""
     before = f"{ADDRESSED} Before the start."
     say_in_the_call(runner, before, spoken=True)
     await a_voice_call(runner, completion(ANSWER))
@@ -157,6 +158,7 @@ async def test_a_lifecycle_connection_lost_while_a_sentence_is_sent_cancels_the_
 async def test_a_speak_that_fails_as_a_call_or_answers_no_spoken_ends_the_turn_into_the_reaction_and_a_new_turn_speaks(
     runner, break_speak, mend_speak, events
 ):
+    """TURNS-27."""
     await a_voice_call(runner, *speaks_and_says(PLACE_ID, TWO_SENTENCES, "Written.", after="Later."))
     sleeps = gated(runner)
     break_speak(runner.app)
@@ -286,6 +288,7 @@ async def sentences_playing_with_the_next_open(runner, sent):
 async def test_a_turn_past_its_deadline_when_his_line_entered_sends_no_call_or_sentence_and_ends_limit_exceeded_once(
     runner, replies, sent
 ):
+    """TURNS-28."""
     sleeps = holding_sentence_ends(runner)
     await a_voice_call(runner, *replies, completion("Later."))
     say_in_the_call(runner, ADDRESSED)

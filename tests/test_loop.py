@@ -134,6 +134,7 @@ async def test_a_refused_token_suspends_the_loop_without_an_app_call_and_logs_it
     ids=["403", "400", "protocol error", "redirect"],
 )
 async def test_an_app_refusal_suspends_the_loop_and_it_resumes_when_a_read_answers(scenario, failure, code):
+    """TURNS-42, LOG-7, LOG-8."""
     run = scenario([failure, failure, read_of(), read_of()])
 
     await run.play()

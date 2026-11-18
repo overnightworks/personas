@@ -148,6 +148,7 @@ def _exit_raising(code: int) -> NoReturn:
 def test_a_stop_that_outlasts_its_deadline_is_logged_once_and_ends_the_entry_point_with_its_exit_code(
     files: Files, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], restored_logging: None
 ):
+    """CONFIG-32, LOG-25."""
     files.text += _ownership_table(TIMINGS)
     monkeypatch.setenv(CONFIG_ENVIRONMENT_VARIABLE, files.write()[CONFIG_ENVIRONMENT_VARIABLE])
     monkeypatch.setattr(os, "_exit", _exit_raising)

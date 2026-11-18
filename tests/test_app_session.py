@@ -843,6 +843,7 @@ async def test_a_window_with_an_act_line_is_read_with_the_mark_kept(app, bearer,
 
 
 async def test_a_window_with_a_voice_state_a_cut_line_and_people_talking_over_him_is_read_whole(app, bearer, place):
+    """TURNS-29."""
     window = PlaceWindow(
         generation="generation-1",
         starts_at=1,
@@ -918,6 +919,7 @@ async def test_a_window_that_is_no_window_is_an_unusable_answer(app, bearer, con
 
 
 async def test_a_view_holds_the_revision_the_wait_and_the_state_as_the_app_sent_them(app, bearer, table):
+    """TURNS-34."""
     state = {"hand": secrets.token_hex(4), "stack": [1, {"seen": True}]}
     app.stand(SUBJECT, active(table.id, table.kind, serves_view=True))
     app.show_view(table.id, 7, state)
@@ -1081,6 +1083,7 @@ def malformed_picture_answer(request: pytest.FixtureRequest) -> dict[str, object
 async def test_a_picture_that_breaks_the_wire_is_an_unusable_answer_and_no_validation_error(
     app, bearer, malformed_picture_answer
 ):
+    """TURNS-33."""
     answer = malformed_picture_answer
 
     async def answers_with_a_bad_picture(reply):
@@ -1099,6 +1102,8 @@ async def test_a_picture_that_breaks_the_wire_is_an_unusable_answer_and_no_valid
 
 
 async def test_audio_and_resource_blocks_of_a_result_are_ignored_beside_its_text(app, bearer):
+    """TURNS-33."""
+
     async def answers_with_other_blocks(reply):
         await reply.raw_result(
             {

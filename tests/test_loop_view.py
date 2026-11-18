@@ -99,6 +99,7 @@ async def test_an_invitation_to_a_view_place_at_an_app_that_binds_no_tools_is_no
 async def test_an_invitation_the_loop_leaves_out_is_reported_once_with_its_place_kind_and_a_reason_and_no_content(
     runner, caplog
 ):
+    """TURNS-1, LOG-11."""
     await an_invited_table_at_an_app_that_binds_no_tools_read_twice(runner)
 
     [left_out] = runner.reports.changes_of(Event.INVITATION_LEFT_OUT)
@@ -131,6 +132,7 @@ async def test_a_table_that_serves_no_view_yet_is_accepted_with_figure_and_voice
 
 
 async def test_an_invitation_to_a_place_that_serves_a_view_is_accepted_once_and_the_place_is_then_served(runner):
+    """TURNS-34."""
     told = []
 
     def seated_once_joined(change):
@@ -176,6 +178,7 @@ async def test_a_view_that_does_not_wait_for_him_or_sits_in_a_paused_place_start
 async def test_a_view_that_moves_to_a_revision_waiting_for_him_gets_one_turn_told_the_state_and_no_instruction(
     runner, songmaker
 ):
+    """TURNS-7, TURNS-9, TURNS-12."""
     runner.app.stand(SUBJECT, at_table())
     first_state = a_state()
     runner.app.show_view(TABLE.id, 1, first_state, awaits_you=False)
@@ -202,6 +205,7 @@ async def test_a_view_that_moves_to_a_revision_waiting_for_him_gets_one_turn_tol
 
 
 async def test_a_turn_a_view_woke_writes_its_end_in_the_trace_the_view_moved_in(runner, written):
+    """LOG-4."""
     runner.app.stand(SUBJECT, at_table())
     traceparent = a_traceparent()
     runner.app.show_view(TABLE.id, 1, a_state(), traceparent=traceparent)
@@ -227,6 +231,7 @@ async def test_a_turn_a_view_woke_writes_its_end_in_the_trace_the_view_moved_in(
 async def test_a_turn_that_ends_and_leaves_its_revision_waiting_gets_no_second_turn_however_the_loop_wakes(
     runner, replies, relay_fails
 ):
+    """TURNS-7."""
     runner.gateway = Gateway(*replies)
     if relay_fails:
         runner.app.script(CALL, cuts)
@@ -273,6 +278,7 @@ async def test_a_newer_revision_during_the_pause_replaces_the_one_that_was_due_a
 
 
 async def test_a_place_left_during_the_pause_gets_no_turn_and_the_next_place_follows(runner):
+    """TURNS-38."""
     runner.clock = SweepClock(BACKOFF_BASE_SECONDS)
     runner.gateway = Gateway(BUDGET_SPENT, completion("done"))
     first = await seated_at_a_table_whose_view_waits(runner)
@@ -287,6 +293,7 @@ async def test_a_place_left_during_the_pause_gets_no_turn_and_the_next_place_fol
 
 
 async def test_a_turn_that_moves_the_app_to_a_revision_that_waits_again_starts_that_revision_afresh(runner):
+    """TURNS-7."""
     runner.gateway = Gateway(completion("done"))
     ending = runner.gateway.hold_request(1)
     first = await seated_at_a_table_whose_view_waits(runner)
@@ -392,6 +399,7 @@ async def test_a_line_that_addresses_him_while_a_view_turn_runs_gets_its_turn_on
 
 
 async def test_the_state_of_a_view_reaches_no_report_and_no_log_line(runner, caplog):
+    """LOG-3."""
     first = await seated_at_a_table_whose_view_waits(runner)
     await runner.app.until_view_read(TABLE, 2)
     logged = caplog.text
@@ -432,6 +440,7 @@ PLACES_WITH_A_VIEW = [
 async def test_the_lines_of_a_place_enter_his_history_before_the_view_of_that_wake_and_only_the_view_woke_the_turn(
     runner, place
 ):
+    """TURNS-35."""
     said = ("opening line", "second")
     shown = joined_at(runner, place, said=said, awaits_you=True)
     await runner.gateway.until_turns(1, why="view")
@@ -481,6 +490,7 @@ async def test_the_lines_said_between_his_accept_and_the_first_view_are_told_tho
 
 @pytest.mark.parametrize("act", [False, True], ids=["a line said", "an act line"])
 async def test_a_line_of_someone_else_at_a_place_with_a_view_starts_no_turn_and_is_told_with_the_next_one(runner, act):
+    """TURNS-5."""
     joined_at(runner, TABLE)
     await runner.app.until_view_read(TABLE)
     await said_and_taken(runner.app, TABLE.id, "a remark", act=act, place_kind=TABLE.kind)
@@ -495,6 +505,7 @@ async def test_a_line_of_someone_else_at_a_place_with_a_view_starts_no_turn_and_
 
 
 async def test_a_view_place_with_an_empty_window_is_read_view_first_then_window_with_no_extra_standing_read(runner):
+    """TURNS-34."""
     state = await seated_at_a_table_whose_view_waits(runner)
     await runner.gateway.until_turns(1, why="view")
 
@@ -503,6 +514,7 @@ async def test_a_view_place_with_an_empty_window_is_read_view_first_then_window_
 
 
 async def test_an_app_that_lists_the_window_and_answers_its_read_as_unknown_costs_no_extra_turn_and_no_failure(runner):
+    """TURNS-36."""
     runner.app.without_window.add(TABLE.id)
     first = await seated_at_a_table_whose_view_waits(runner)
     await runner.gateway.until_turns(1, why="view")

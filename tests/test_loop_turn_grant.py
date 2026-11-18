@@ -66,6 +66,7 @@ async def a_turn(runner, number: int) -> None:
 async def test_a_tools_only_app_that_is_not_granted_is_left_out_of_every_turn_and_logged_once(
     runner, songmaker, refuse, grant, code
 ):
+    """TURNS-42."""
     refuse(runner, songmaker)
     runner.gateway = Gateway(completion("done"))
     await restarted_in_the_call(runner)
@@ -104,6 +105,7 @@ async def test_a_tools_only_app_comes_back_to_a_turn_once_the_retry_is_due_and_t
 
 
 async def test_a_still_refused_tools_only_app_is_asked_again_at_the_retry_and_logged_once(runner, songmaker):
+    """TURNS-42."""
     refused_by_the_realm(runner, songmaker)
     runner.gateway = Gateway(completion("done"))
     await restarted_in_the_call(runner)

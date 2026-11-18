@@ -94,6 +94,7 @@ async def test_a_pod_whose_session_was_ended_leaves_its_agents_to_the_second_pod
 
 
 async def test_a_round_on_a_connection_that_goes_dark_is_cut_at_the_heartbeat_timeout(database):
+    """CONFIG-27."""
     forwarder = Forwarder(database)
     async with forwarder.serving() as through:
         locks = PostgresAgentLocks(through, TIMINGS)

@@ -129,6 +129,7 @@ def _since(turns: Turns, at: AppPlace) -> float:
 
 
 def test_a_join_and_a_replacement_keep_the_earliest_moment_the_place_became_due():
+    """LOG-27."""
     turns = with_due(Turns(), CALL_AT_A, Lines("g1", frozenset({1}), missed=False), NOW)
     turns = with_due(turns, TABLE_AT_A, Waiting(1), NOW + 1)
 

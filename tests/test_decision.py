@@ -111,6 +111,7 @@ TRANSIENT_REFUSALS = [
 
 
 def test_an_invited_call_standing_is_accepted_with_its_place_invitation_and_epoch():
+    """TURNS-1."""
     held = (invited("room-7", "inv-3", epoch=4),)
 
     assert accepts_for(held, Memory(), takes_turns=False) == (Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 4),)
@@ -460,6 +461,7 @@ def test_a_place_of_another_kind_that_serves_no_view_gets_no_checkpoint():
     ids=["restarted", "paused", "joined", "reading"],
 )
 def test_only_a_restarted_or_paused_checkpoint_waits_for_a_read_to_set_where_reading_starts(checkpoint, sets_start):
+    """TURNS-3."""
     assert sets_where_reading_starts(checkpoint) is sets_start
 
 
@@ -650,6 +652,7 @@ def test_a_turn_declares_what_an_app_lists_but_the_reserved_names_and_those_an_e
 def test_the_places_of_an_app_are_spoken_only_for_an_agent_with_a_voice_and_an_app_that_declares_speak(
     has_voice, declared_names
 ):
+    """TURNS-24."""
     declared = [_declaration(name) for name in declared_names]
 
     assert is_voice_app(has_voice, declared) is (has_voice and SPEAK_TOOL in declared_names)
@@ -774,6 +777,7 @@ def serving(place: PlaceRef = TABLE, *, state: StandingState = StandingState.ACT
 def test_an_invited_place_that_is_no_call_is_accepted_wherever_the_loop_takes_turns_whether_or_not_it_serves_a_view(
     serves_view,
 ):
+    """TURNS-1."""
     standing = invited("table-1", "inv-3", kind="table", serves_view=serves_view)
 
     assert accepts_for((standing,), Memory(), takes_turns=True) == (Accept(TABLE, "inv-3", 0),)
@@ -877,6 +881,7 @@ def test_the_standing_decides_which_turned_revisions_are_kept():
     ],
 )
 def test_a_view_is_due_a_turn_while_it_waits_at_a_revision_no_turn_was_started_for(turned_revision, view, due):
+    """TURNS-7."""
     assert view_turn_due(turned_revision, view) is due
 
 
@@ -904,6 +909,7 @@ LINES = Lines(MORNING.generation, frozenset({1}), missed=False)
 def test_a_turn_for_lines_at_a_voice_app_is_spoken_unless_the_last_window_states_his_voice_unavailable(
     voice_app, occasion, checkpoint, aloud
 ):
+    """TURNS-24."""
     assert speaks_aloud(voice_app, occasion, checkpoint) is aloud
 
 

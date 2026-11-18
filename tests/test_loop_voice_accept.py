@@ -35,6 +35,7 @@ def the_voices_sent(app, subject: str = SUBJECT) -> list[str] | None:
 async def test_an_agent_with_named_voices_brings_them_in_order_beside_his_figure_to_a_call_and_a_second_apps_table(
     runner, other
 ):
+    """CONFIG-18, CONFIG-19."""
     figure = FigureRef(url=f"https://figures.test/{secrets.token_hex(6)}.glb", sha256=secrets.token_hex(32))
     runner.config = replace(
         runner.config, agents=(replace(runner.config.agents[0], figure=figure, voice=Voice(VOICE_NAMES)),)

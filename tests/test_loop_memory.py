@@ -222,6 +222,7 @@ async def ended_by(task):
 
 
 async def test_a_written_turn_with_a_memory_is_handed_the_lookup_first_declared_read_only_before_the_apps_tools(runner):
+    """TURNS-39."""
     await looking_in_the_call(runner, ScriptedStore(), completion("done"))
     await runner.gateway.until_requested(1)
 
@@ -244,6 +245,7 @@ async def test_a_turn_at_a_view_with_a_memory_is_handed_the_lookup_first_declare
 async def test_a_turns_call_total_is_his_apps_bounds_plus_his_lookups_and_the_one_a_held_call_counts(
     runner, lists_tools
 ):
+    """TURNS-22, CONFIG-36."""
     if not lists_tools:
         runner.app.script(LIST_TOOLS, lists_nothing)
     stored_in(runner, ScriptedStore())
@@ -268,6 +270,7 @@ async def test_a_turns_call_total_is_his_apps_bounds_plus_his_lookups_and_the_on
 
 @pytest.mark.parametrize("at_a_view", [False, True], ids=["written turn", "turn at a view"])
 async def test_a_lookup_asks_for_the_turns_own_room_whatever_arguments_the_model_gave(runner, at_a_view):
+    """TURNS-39."""
     elsewhere = {"place": "elsewhere", "app": "https://elsewhere.test", "client_id": "another", "kind": "call"}
     replies = (tool_round(recalling("some words", **elsewhere)), completion("done"))
     store = ScriptedStore()
@@ -315,6 +318,7 @@ async def test_a_result_holds_the_newest_lines_within_lookup_bytes_and_says_when
 
 
 async def test_a_lookup_past_lookup_calls_is_refused_with_a_text_of_its_own_and_reads_nothing(runner):
+    """CONFIG-36."""
     store = ScriptedStore()
     await looking_in_the_call(
         runner, store, tool_round(recalling(), recalling(), recalling()), completion("done"), lookup_calls=2
@@ -328,6 +332,7 @@ async def test_a_lookup_past_lookup_calls_is_refused_with_a_text_of_its_own_and_
 
 
 async def test_a_lookup_is_not_held_back_by_what_arrived_and_does_not_use_up_the_hold(runner):
+    """TURNS-41."""
     store = ScriptedStore()
     stored_in(runner, store)
     runner.gateway = Gateway(tool_round(recalling()), tool_round(say(ANSWER)), completion("done"))
@@ -367,6 +372,7 @@ async def test_a_text_that_is_missing_no_string_or_too_long_is_an_error_result_a
 
 
 async def test_a_store_that_cannot_answer_gives_an_error_result_and_store_failed_once_and_his_answer_goes_out(runner):
+    """TURNS-41, LOG-20."""
     store = ScriptedStore()
     store.search_failure = StoreUnavailable(STORE_UNREACHABLE_CODE)
     await looking_in_the_call(
@@ -404,6 +410,7 @@ async def test_a_defect_or_a_schema_behind_its_head_met_in_a_lookup_ends_the_run
 async def test_a_turn_that_looked_leaves_nothing_of_the_lookup_in_his_history_and_the_next_turn_repeats_every_message(
     runner,
 ):
+    """TURNS-41."""
     hidden = "Said " + secrets.token_hex(6)
     store = ScriptedStore()
     store.found = (said(1, hidden),)
