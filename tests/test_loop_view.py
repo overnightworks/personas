@@ -110,9 +110,7 @@ async def test_an_invitation_the_loop_leaves_out_is_reported_once_with_its_place
     assert not [value for value in (TABLE.id, "inv-3") if value in str(logged)]
 
 
-async def test_the_started_line_of_an_agent_with_a_persona_at_an_app_that_binds_no_tools_names_no_model(
-    runner, caplog
-):
+async def test_the_started_line_of_an_agent_with_a_persona_at_an_app_that_binds_no_tools_names_no_model(runner, caplog):
     """LOG-6."""
     assert runner.config.agents[0].persona is not None
     runner.config = replace(runner.config, apps=(replace(runner.config.apps[0], max_tool_calls=None),))
