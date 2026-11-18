@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from contextlib import aclosing
 from dataclasses import dataclass, replace
 from functools import partial
@@ -374,7 +373,7 @@ class AgentLoop:
                 continue
             self._mind.take((seen,))
             if view_turn_due(self._turned_revisions.get(place), seen.view):
-                self._mind.due(at, Waiting(seen.view.revision, seen.view.traceparent), time.perf_counter())
+                self._mind.due(at, Waiting(seen.view.revision, seen.view.traceparent), self._boundaries.clock.now())
             elif not seen.view.awaits_you:
                 self._mind.undue(partial(eq, at))
 
@@ -425,7 +424,7 @@ class AgentLoop:
         if waking is not None:
             seqs = frozenset(line.seq for line in perception.new)
             lines = Lines(window.generation, seqs, perception.missed, waking.traceparent)
-            self._mind.due(at, lines, time.perf_counter())
+            self._mind.due(at, lines, self._boundaries.clock.now())
 
     def _start_turn(
         self,
@@ -445,7 +444,7 @@ class AgentLoop:
                 "turn_wait.ended",
                 self._agent.client_id,
                 self._app.mcp_url,
-                started_at=min(due_since, time.perf_counter()),
+                elapsed_seconds=max(0.0, self._boundaries.clock.now() - due_since),
             ).end()
             tally = start_turn_tally(self._agent.client_id, self._app.mcp_url)
             task = turns.create_task(self._take_once_kept(claimed, setup, admitted, tally))
@@ -639,7 +638,7 @@ async def run_all(config: Config, boundaries: Boundaries, ownership: Ownership) 
         agent_task = asyncio.current_task()
         assert agent_task is not None  # noqa: S101 - an agent is served inside its own task
         clock = boundaries.clock
-        resumed = resumed_turns(owned.history.turns, clock.now(), clock.wall(), time.perf_counter())
+        resumed = resumed_turns(owned.history.turns, clock.now(), clock.wall())
         mind = Mind(
             config.history_bytes,
             config.history_keep_bytes,

@@ -269,10 +269,10 @@ def test_turns_kept_and_resumed_keep_the_due_order_and_the_checkpoints_but_no_ru
     wall = datetime(2026, 11, 17, tzinfo=UTC)
 
     kept = kept_turns(state, pause_deadline(50.0, 20.0, wall))
-    resumed = resumed_turns(kept, 100.0, wall + timedelta(seconds=10), 7.0)
+    resumed = resumed_turns(kept, 100.0, wall + timedelta(seconds=10))
 
     assert resumed == TurnState(
-        Turns(False, {second: Due(lines, 7.0), first: Due(Waiting(3), 7.0)}, not_before=120.0),
+        Turns(False, {second: Due(lines, 100.0), first: Due(Waiting(3), 100.0)}, not_before=120.0),
         {first: Joined(), second: Reading("visit", 4)},
         unanswered=3,
     )
