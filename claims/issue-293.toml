@@ -1,0 +1,8 @@
+claim_id = "5e97715418ce42bb93eb6e430796fb37"
+agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
+role = "builder"
+base = "bc05b57117eb25ab8dbf4bfd7bb4071dc3ed5e84"
+branch = "claude/issue-293-readme-and-architecture-read-cleanly-sho"
+scope = ["README.md", "docs"]
+opened_commit = "61ce2ade9978357985827341ef128a94b75f8990"
+whole_reason = "one wording pass over the two overviews"
