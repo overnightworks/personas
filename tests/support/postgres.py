@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import secrets
 import string
@@ -17,6 +18,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
 from personas.config import DatabaseTarget
+from personas.entries import NO_TURNS_KEPT, KeptTurns, turns_from_stored
 from personas.memory import MIGRATIONS_DIRECTORY, migrate
 from personas.secret import Secret
 
@@ -292,3 +294,16 @@ def answered_turns_kept(target: DatabaseTarget, client_id: str) -> int:
             ).scalar_one()
     finally:
         engine.dispose()
+
+
+def turns_kept(target: DatabaseTarget, client_id: str) -> KeptTurns:
+    """The agent's turns as the store holds them; no turns when it holds none of his."""
+    engine = engine_of(target.dbname)
+    try:
+        with engine.connect() as connection:
+            stored = connection.execute(
+                text("SELECT turns FROM agent_turns WHERE client_id = :client_id"), {"client_id": client_id}
+            ).scalar_one_or_none()
+    finally:
+        engine.dispose()
+    return NO_TURNS_KEPT if stored is None else turns_from_stored(json.loads(stored))
