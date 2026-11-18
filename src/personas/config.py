@@ -24,7 +24,9 @@ refused. The optional ``[ownership]`` table sets how the pods
 share the agents: ``contend_seconds`` is how often a pod checks its locks and takes the free ones,
 ``heartbeat_timeout_seconds`` how long one such check may take, ``cancel_margin_seconds`` the time a pod that lost
 its hold is given to stop its loops and ``grace_seconds`` how long a pod that took an agent waits before it
-starts; the grace is above the other three together, so that the pod that lost the agent has stopped by then.
+starts; the grace is above the first three together, so that the pod that lost the agent has stopped by then.
+``stop_seconds`` is how long after a SIGTERM the runner may take to stop before it ends at once; it is above the
+cancel margin, so that it never cuts the write a stopping agent's margin allows.
 The optional ``[memory]`` table keeps every line the agents read in that database: how long a line is
 kept (``lines_keep_days``) and how often older ones are swept (``sweep_minutes``); ``inf`` keeps every line or sweeps
 once, at the start. A turn may look up what was said in its place before its history (``lookup_calls``, the lookups one
@@ -80,6 +82,7 @@ DEFAULT_CONTEND_SECONDS: Final = 5.0
 DEFAULT_HEARTBEAT_TIMEOUT_SECONDS: Final = 3.0
 DEFAULT_CANCEL_MARGIN_SECONDS: Final = 2.0
 DEFAULT_GRACE_SECONDS: Final = 12.0
+DEFAULT_STOP_SECONDS: Final = 10.0
 
 
 class ConfigError(Exception):
@@ -127,12 +130,14 @@ class DatabaseTarget:
 
 @dataclass(frozen=True)
 class OwnershipTimings:
-    """How the pods share the agents, in seconds; the grace is above the other three together."""
+    """How the pods share the agents and how long a pod's stop may take, in seconds; the grace is above the contend
+    interval, the heartbeat timeout and the cancel margin together, and the stop above the cancel margin."""
 
     contend_seconds: float = DEFAULT_CONTEND_SECONDS
     heartbeat_timeout_seconds: float = DEFAULT_HEARTBEAT_TIMEOUT_SECONDS
     cancel_margin_seconds: float = DEFAULT_CANCEL_MARGIN_SECONDS
     grace_seconds: float = DEFAULT_GRACE_SECONDS
+    stop_seconds: float = DEFAULT_STOP_SECONDS
 
 
 @dataclass(frozen=True)
@@ -219,6 +224,15 @@ class _OwnershipEntry(_Entry):
         default=DEFAULT_CANCEL_MARGIN_SECONDS, strict=True, allow_inf_nan=False
     )
     grace_seconds: PositiveFloat = Field(default=DEFAULT_GRACE_SECONDS, strict=True, allow_inf_nan=False)
+    stop_seconds: PositiveFloat = Field(default=DEFAULT_STOP_SECONDS, strict=True, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def _the_stop_outlasts_the_flush_its_margin_allows(self) -> Self:
+        """A stopping agent writes what his stop cut off within his cancel margin, and that write is cut by the margin
+        itself, so a stop deadline above the margin never cuts a write the margin allows; one at or below it would."""
+        if self.stop_seconds <= self.cancel_margin_seconds:
+            raise ValueError("stop_seconds: must be above cancel_margin_seconds")
+        return self
 
     @model_validator(mode="after")
     def _the_grace_outlasts_the_hold_it_takes_over_from(self) -> Self:

@@ -40,6 +40,7 @@ events and their fields.
 | `agent.taken` | a pod holds an agent's lock | the agent only |
 | `agent.lost` | a pod stops an agent it served | `reason`: `hold_lost`, `generation_stale` or the store's code |
 | `agent.stop_overran` | an agent took longer than `cancel_margin_seconds` to stop | the agent only |
+| `runner.stop_cut` | the runner had not stopped `stop_seconds` after a SIGTERM and ends at once | none; no agent or app |
 
 A `status` is the integer of an error status, absent for a JSON-RPC error sent with a success status. A
 `reason` of a failed call is a standard JSON-RPC error or a known media type by name, else one fixed word,
