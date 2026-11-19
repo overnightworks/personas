@@ -19,6 +19,7 @@ def test_the_writer_writes_one_file_per_persona(tmp_path):
         "humboldt.vrm",
         "leonardo.room.glb",
         "leonardo.vrm",
+        "lovelace.vrm",
         "mozart.room.glb",
         "mozart.vrm",
     ]

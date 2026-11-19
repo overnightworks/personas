@@ -8,14 +8,15 @@ from typing import TYPE_CHECKING
 from figures.figure_body import open_point
 from figures.figure_head import NECK_BINDER
 from figures.figure_parts import Colour, Material, mixed, part
+from figures.figure_shapes import add, ellipsoid, scaled, subtract
 from figures.figure_skeleton import EYE_HEIGHT
-from figures.figure_surfaces import shell, smoothstep, spread
+from figures.figure_surfaces import shell, smoothstep, spread, sweep
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from figures.figure_parts import Paint, Part
-    from figures.figure_shapes import Vector
+    from figures.figure_shapes import Shape, Vector
     from figures.figure_surfaces import Key
 
 ROWS = 24
@@ -24,6 +25,9 @@ COLUMNS = 48
 BASE = 0.003
 # The height over which the hair thickens from its edge.
 EDGE = 0.03
+RINGLET_STEPS = 36
+# Over this share of its length a ringlet thins towards its tip.
+RINGLET_TAPER = 0.35
 
 
 def hair_cap(course: Sequence[Key], paint: Paint, body: float, tousle: float, tufts: float) -> list[Part]:
@@ -71,3 +75,30 @@ def strands(
         return mixed(first, second, share + swing * math.cos(turns * math.atan2(x, z) + wander * height))
 
     return paint
+
+
+def knot(main: tuple[float, float], main_radii: Vector, coil: Vector, coil_radii: Vector, paint: Paint) -> list[Part]:
+    """A knot of hair on the head: one rounded coil, given by its level above the eye line and how far behind the middle
+    it lies, with a smaller one tucked against it, given by how far to the side, its level and how far behind."""
+    level, behind = main
+    side, low, back = coil
+    coils = (
+        ellipsoid((0.0, EYE_HEIGHT + level, behind), main_radii, 8, 14),
+        ellipsoid((side, EYE_HEIGHT + low, back), coil_radii, 7, 12),
+    )
+    return [part(shape, paint, Material.HAIR, "head") for shape in coils]
+
+
+def ringlet(top: Vector, bottom: Vector, turns: float, curl: float, thickness: float) -> Shape:
+    """A lock of hair wound into a corkscrew round the line from `top` to `bottom`, `turns` times at a distance `curl`
+    from it, as thick as `thickness` and thinning to its tip."""
+    path: list[Vector] = []
+    radii: list[tuple[float, float]] = []
+    for step in range(RINGLET_STEPS + 1):
+        along = step / RINGLET_STEPS
+        angle = 2.0 * math.pi * turns * along
+        axis = add(top, scaled(subtract(bottom, top), along))
+        path.append(add(axis, (curl * math.cos(angle), 0.0, curl * math.sin(angle))))
+        radius = thickness * (1.0 - 0.7 * smoothstep(1.0 - RINGLET_TAPER, 1.0, along))
+        radii.append((radius, radius))
+    return sweep(path, radii, (0.0, 1.0, 0.0), 10)

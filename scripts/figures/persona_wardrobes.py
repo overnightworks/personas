@@ -1,4 +1,5 @@
-"""The wardrobes of the personas: the faces, hair and clothes that tell Mozart, Leonardo, Humboldt and Curie apart."""
+"""The wardrobes of the personas: the faces, hair and clothes that tell Mozart, Leonardo, Humboldt, Curie and Lovelace
+apart."""
 
 from __future__ import annotations
 
@@ -12,6 +13,8 @@ from figures.humboldt_coat import humboldt_clothes
 from figures.humboldt_hair import humboldt_hair
 from figures.leonardo_hair import leonardo_hair
 from figures.leonardo_robe import leonardo_clothes
+from figures.lovelace_dress import lovelace_clothes
+from figures.lovelace_hair import lovelace_hair
 from figures.mozart_coat import mozart_clothes
 from figures.mozart_wig import mozart_wig
 
@@ -21,6 +24,10 @@ if TYPE_CHECKING:
 
 def _dress_curie(face: Face) -> list[Part]:
     return [*curie_clothes(face), *curie_hair()]
+
+
+def _dress_lovelace(face: Face) -> list[Part]:
+    return [*lovelace_clothes(face), *lovelace_hair()]
 
 
 def _dress_mozart(face: Face) -> list[Part]:
@@ -114,4 +121,24 @@ CURIE = Wardrobe(
         cheek=0.001,
     ),
     dress=_dress_curie,
+)
+LOVELACE = Wardrobe(
+    name="Lovelace",
+    face=Face(
+        skin=(240, 218, 204),
+        blush=(222, 158, 150),
+        lips=(184, 98, 102),
+        iris=(58, 42, 34),
+        brow=(56, 38, 30),
+        brow_weight=0.9,
+        length=1.0,
+        jaw=0.93,
+        nose_length=1.0,
+        nose_height=0.022,
+        nose_width=0.9,
+        brow_ridge=0.002,
+        eye_set=0.0062,
+        cheek=0.002,
+    ),
+    dress=_dress_lovelace,
 )

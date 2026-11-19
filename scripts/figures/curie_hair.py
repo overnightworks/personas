@@ -4,11 +4,12 @@ with soft volume round the head."""
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING
 
-from figures.figure_hair import hair_cap, strands
-from figures.figure_parts import Material, Part, part
-from figures.figure_shapes import ellipsoid
-from figures.figure_skeleton import EYE_HEIGHT
+from figures.figure_hair import hair_cap, knot, strands
+
+if TYPE_CHECKING:
+    from figures.figure_parts import Part
 
 BLONDE = (150, 124, 90)
 GREY = (170, 162, 150)
@@ -41,15 +42,4 @@ COIL_RADII = (0.034, 0.030, 0.034)
 
 
 def curie_hair() -> list[Part]:
-    return [*hair_cap(HAIR, STRANDS, BODY, TOUSLE, TUFTS), *_knot()]
-
-
-def _knot() -> list[Part]:
-    """The loose knot: one rounded coil on the crown with a smaller one tucked against it."""
-    level, behind = KNOT
-    side, low, back = COIL
-    coils = (
-        ellipsoid((0.0, EYE_HEIGHT + level, behind), KNOT_RADII, 8, 14),
-        ellipsoid((side, EYE_HEIGHT + low, back), COIL_RADII, 7, 12),
-    )
-    return [part(coil, STRANDS, Material.HAIR, "head") for coil in coils]
+    return [*hair_cap(HAIR, STRANDS, BODY, TOUSLE, TUFTS), *knot(KNOT, KNOT_RADII, COIL, COIL_RADII, STRANDS)]
