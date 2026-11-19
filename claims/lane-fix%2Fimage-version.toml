@@ -1,0 +1,7 @@
+claim_id = "edb8203d1dd94943b2acfc44a12e6b90"
+agent = "Claude d21def74-68af-4c98-89a2-70bc45cbdd6a"
+role = "builder"
+base = "7dd6c19c790e9455a9674a536ee4cde9bf68d28f"
+branch = "fix/image-version"
+scope = ["Dockerfile"]
+opened_commit = "870b200d6a48d9b10c67c76de98ab3c884e2e009"
