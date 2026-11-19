@@ -41,7 +41,7 @@ class TurnBound:
         self._mind = mind
         self._report_lines_missing = report_lines_missing
         self._deadline: asyncio.Task[None] | None = None
-        self._lapse: tuple[float, asyncio.Task[None]] | None = None
+        self._lapse: asyncio.Task[None] | None = None
 
     @property
     def ends_at(self) -> float:
@@ -75,7 +75,7 @@ class TurnBound:
         if self._deadline is not None:
             self._deadline.cancel()
         if self._lapse is not None:
-            self._lapse[1].cancel()
+            self._lapse.cancel()
 
     @staticmethod
     async def first_of(taken: asyncio.Event, *ends: asyncio.Task[object]) -> None:
@@ -107,8 +107,7 @@ class TurnBound:
         """The sleep that ends when the turn that sent the lines is over, none when the turn's own bound comes first."""
         if until is None or until >= self.ends_at:
             return ()
-        if self._lapse is None or self._lapse[0] != until or self._lapse[1].done():
-            if self._lapse is not None:
-                self._lapse[1].cancel()
-            self._lapse = (until, asyncio.create_task(self._clock.sleep(max(until - self._clock.now(), 0.0))))
-        return (self._lapse[1],)
+        if self._lapse is not None:
+            self._lapse.cancel()
+        self._lapse = asyncio.create_task(self._clock.sleep(max(until - self._clock.now(), 0.0)))
+        return (self._lapse,)

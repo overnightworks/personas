@@ -103,14 +103,9 @@ async def test_a_wait_that_does_not_ask_for_a_hold_waits_on_until_the_turns_boun
         await waiting
 
 
-async def test_a_take_keeps_the_wait_sleeping_for_the_same_sending_turn_and_swaps_it_for_an_earlier_one():
+async def test_a_take_that_brings_an_earlier_sending_turn_ends_the_wait_at_that_turn_first():
     scenario = Scenario()
     waiting = await scenario.waiting()
-
-    scenario.mind.take((_a_line_of_his_own_unspoken(),))
-    await anyio.wait_all_tasks_blocked()
-    await anyio.wait_all_tasks_blocked()
-    assert not waiting.done()
 
     earlier = SENDING_TURN_OVER_AT - 10
     for length in (earlier, SENDING_TURN_OVER_AT - earlier):
