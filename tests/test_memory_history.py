@@ -156,9 +156,10 @@ async def test_a_write_with_a_generation_that_is_not_current_is_refused_and_chan
     assert await histories.load(AGENT) == before
 
 
-async def test_the_turns_written_last_load_with_the_history_whether_a_delta_came_with_them_or_not(histories):
+@pytest.mark.parametrize("seqs", [frozenset({3}), frozenset[int]()], ids=["with a line", "a hold with no line"])
+async def test_the_turns_written_last_load_with_the_history_whether_a_delta_came_with_them_or_not(histories, seqs):
     mine = await histories.take_over(AGENT)
-    due = KeptDue(APP, TABLE, Lines("first-generation", frozenset({3}), missed=True, traceparent=None))
+    due = KeptDue(APP, TABLE, Lines("first-generation", seqs, missed=bool(seqs), traceparent=None))
     reading = Reading("first-generation", 3, VoiceState.UNAVAILABLE)
     await histories.write(AGENT, mine, appended(0, said(1, "kept")), KeptTurns((KeptCheckpoint(APP, TABLE, None),)))
     paused = KeptTurns((KeptCheckpoint(APP, TABLE, reading),), (due,), 2, LATER)

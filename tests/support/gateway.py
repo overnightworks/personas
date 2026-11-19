@@ -378,7 +378,8 @@ class Gateway(FakeGateway):
         return json.loads(self.requests[request_number - 1].content)
 
     def rounds(self) -> list[int]:
-        """The numbers (from one) of the requests that decide a hold: the last message of each tells he is held."""
+        """The numbers (from one) of the requests that tell him he is held, whether a round beside his parked run or the
+        first of a turn that starts with the hold: the last message of each does."""
         return [
             number
             for number, _ in enumerate(self.requests, start=1)
