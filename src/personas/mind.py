@@ -145,6 +145,10 @@ class Mind:
             self._set_speech(at, hold_marked_told(record))
         return held
 
+    def hold_makes_due(self, at: AppPlace) -> bool:
+        """Whether the hold that stands at the place may be told to a turn, which a read of it then makes due."""
+        return hold_untold(self._speech.get(at, NO_SPEECH)) is not None
+
     def hold_turn_ended(self, at: AppPlace) -> None:
         """The turn told the hold at the place ended: a hold it did not decide stays undecided."""
         self._set_speech(at, hold_turn_ended(self._speech.get(at, NO_SPEECH)))

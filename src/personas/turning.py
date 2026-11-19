@@ -55,7 +55,7 @@ from personas.recall import (
 )
 from personas.reporting import Event, TurnTally, step_timer, stepping
 from personas.sizing import Sizing
-from personas.speech import Held, HoldOutcome, Telling, hold_tellable
+from personas.speech import Held, HoldOutcome, Telling
 from personas.task_record import (
     RelayFailed,
     ending_loud_when_cancelled,
@@ -139,12 +139,6 @@ class _Voiced:
     speaking: Speaking
     record: TaskRecord
     inbox: HoldInbox
-    told: TurnHold | None
-
-    @property
-    def deciding_first(self) -> bool:
-        """Whether the turn was told a hold that he has not decided."""
-        return self.told is not None and self.told.pending
 
 
 @dataclass(frozen=True)
@@ -349,7 +343,7 @@ class Turning:
                     tally,
                     None if held.told is None else held.told.released,
                 )
-                voiced = _Voiced(setup, admitted, turn, request, held, speaking, record, held.inbox, held.told)
+                voiced = _Voiced(setup, admitted, turn, request, held, speaking, record, held.inbox)
                 try:
                     final = await self._speak_along(voiced, events, tally)
                 finally:
@@ -388,6 +382,7 @@ class Turning:
         self, events: AsyncIterator[TurnEvent], voiced: _Voiced, tally: TurnTally
     ) -> FinalEvent | None:
         speaking = voiced.speaking
+        told = voiced.held.told
         final = None
         try:
             async for event in events:
@@ -395,7 +390,7 @@ class Turning:
                 if isinstance(event, ToolCallEvent):
                     tally.tool_call_count += 1
                     voiced.inbox.waiting = event
-                    if not voiced.deciding_first:
+                    if told is None or not told.pending:
                         await speaking.spoken()
                     voiced.inbox.waiting = None
                 elif isinstance(event, FinalEvent):
@@ -403,7 +398,7 @@ class Turning:
         except Exception:
             await speaking.settle()
             raise
-        if voiced.deciding_first:
+        if told is not None and told.pending:
             speaking.cut()
         else:
             speaking.end()
@@ -422,7 +417,7 @@ class Turning:
         elif held.telling is Telling.UNDECIDED:
             await session.stop_speaking(place, held.id)
             self._hold_decided(place, held.id, HoldOutcome.UNDECIDED)
-        elif held.telling is Telling.NOT_TOLD and hold_tellable(held):
+        elif self._mind.hold_makes_due(at):
             self._mind.due_for_hold(at, window.generation, self._clock.now())
 
     def _hold_decided(self, place: PlaceRef, hold_id: str, outcome: HoldOutcome) -> None:
