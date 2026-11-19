@@ -4,6 +4,7 @@ his seats are told once the loop stops taking turns in the app, recovers or stop
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import replace
 from http import HTTPStatus
 from typing import TYPE_CHECKING
@@ -326,10 +327,11 @@ async def test_a_blip_that_recovers_on_its_first_retry_states_nothing(runner, re
     assert statements(runner) == [*earlier, THINKING, ended(None)]
 
 
-async def test_a_blip_while_a_turns_end_is_answered_backs_off_told_by_the_reads_answer_and_states_no_unavailable(
+async def test_a_blip_while_a_turns_end_is_answered_backs_off_as_its_read_tells_logs_no_warning_states_no_unavailable(
     runner, caplog
 ):
-    """TURNS-44, LOG-9: the answer to the statement beside the failed read does not tell how the read failed."""
+    """TURNS-44, LOG-9, LOG-35: the answer to the statement beside the failed read does not tell how the read failed,
+    and the runner recovers from the blip on its own."""
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
@@ -347,10 +349,11 @@ async def test_a_blip_while_a_turns_end_is_answered_backs_off_told_by_the_reads_
     (backed_off,) = lines_of(caplog.records, "loop.backed_off")
     assert (backed_off.get("status"), backed_off.get("mcp_method")) == (HTTPStatus.SERVICE_UNAVAILABLE, READ)
     assert UNAVAILABLE not in statements(runner)
+    assert [record.getMessage() for record in caplog.records if record.levelno >= logging.WARNING] == []
 
 
-async def test_a_statement_lost_with_its_session_is_stated_again_after_the_next_full_pass(runner):
-    """TURNS-44."""
+async def test_a_statement_lost_with_its_session_is_logged_as_lost_and_stated_again_after_the_next_full_pass(runner):
+    """TURNS-44, LOG-34, LOG-35."""
     entered, released = asyncio.Event(), asyncio.Event()
 
     async def held_until_released(reply: AppReply) -> None:
@@ -370,6 +373,8 @@ async def test_a_statement_lost_with_its_session_is_stated_again_after_the_next_
     released.set()
 
     assert statements(runner) == [THINKING, ended(None)]
+    reported = [event for event, _ in runner.reports.reported(started=False)]
+    assert reported == [Event.TURN_STATE_LOST, Event.BACKOFF, Event.RESUMED]
 
 
 @EARLIER_ENDS

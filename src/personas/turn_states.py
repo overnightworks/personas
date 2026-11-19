@@ -63,6 +63,7 @@ class TurnStates:
         self._unserved: set[PlaceRef] = set()
         self._unavailable = False
         self._lost = False
+        self._ended_session: AppSession | None = None
 
     def sync_seats(self, standings: tuple[Standing, ...]) -> None:
         """Forgets the last turn end of each seat he no longer holds, and that its app served it no statement, so a
@@ -101,6 +102,11 @@ class TurnStates:
         failed or in flight; where ``unavailable`` stands, no full pass went through, so it stays."""
         if self._lost and not self._unavailable:
             self._restate()
+
+    def session_ended(self, session: AppSession) -> None:
+        """The loop's ``session`` is ending on another call's failure or his stop: a statement on it that fails from
+        now on was lost with it, not failed by the app."""
+        self._ended_session = session
 
     def _restate(self) -> None:
         self._unavailable = self._lost = False
@@ -159,6 +165,9 @@ class TurnStates:
                 await self._use_current_token(session)
                 refusal = await session.set_turn_state(statement)
         except CallFailure as failure:
+            if session is self._ended_session:
+                self._report(Event.TURN_STATE_LOST, None, None, None)
+                return False
             if answers_unknown_tool(failure):
                 self._unserved.add(statement.place)
             self._report(Event.TURN_STATE_FAILED, failure_reason(failure), None, failure)

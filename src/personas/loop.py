@@ -215,14 +215,17 @@ class AgentLoop:
             self._boundaries.open_session(self._app, token.value) as session,
         ):
             turns.create_task(self._turn_states.state_each(session))
-            self._turning.new_session()
-            self._voice_app = await self._is_voice_app(session)
-            while True:
-                await self._use_current_token(session)
-                async with session.changes() as changes, aclosing(self._wakes(changes)) as wakes:
-                    await self._reconcile(session, turns)
-                    async for _ in wakes:
+            try:
+                self._turning.new_session()
+                self._voice_app = await self._is_voice_app(session)
+                while True:
+                    await self._use_current_token(session)
+                    async with session.changes() as changes, aclosing(self._wakes(changes)) as wakes:
                         await self._reconcile(session, turns)
+                        async for _ in wakes:
+                            await self._reconcile(session, turns)
+            finally:
+                self._turn_states.session_ended(session)
 
     async def _is_voice_app(self, session: AppSession) -> bool:
         """Whether the turns at this app's call places are spoken, decided once for the lifecycle session."""
