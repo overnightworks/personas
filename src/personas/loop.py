@@ -140,10 +140,11 @@ class AgentLoop:
     while any turn of his runs, and every new line and every view read goes into the agent's history. A line that is
     not his own and a view that waits for him make a turn due in the agent's mind, and after each read the loop starts
     the turn of the place that has waited longest when it is in this app; at most one turn of the agent runs across all
-    his loops, over its own session, and a failure of the turn's calls to this app goes into the one reaction of the
-    loop. The turn also holds the tools of the tools-only apps and of the other apps where the agent holds an
-    active place when it is admitted, which the loops of those apps record in his mind: each request to one runs in a
-    session of its own under the token for its own scope, and its failure never reaches the reaction. Each call the
+    his loops, and the turn's own-app listing, relayed calls and speak run on this loop's session, so a failure of
+    them goes into the one reaction of the loop. The turn also holds the tools of the tools-only apps and of the other
+    apps where the agent holds an active place when it is admitted, which the loops of those apps record in his mind:
+    each request to one runs in a session of its own under the token for its own scope, and its failure never reaches
+    the reaction. Each call the
     turn relays, to this app or another, enters the agent's history when its request ends. In an app
     that declares ``speak``, for an agent whose entry has a voice table, a turn at a call place is spoken: its text
     is said sentence by sentence through ``speak``.

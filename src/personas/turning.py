@@ -1,4 +1,4 @@
-"""What one turn of an agent in an app does: the session, the tools held and how the turn ends."""
+"""What one turn of an agent in an app does: the tools held, the sessions its requests run on and how the turn ends."""
 
 from __future__ import annotations
 
