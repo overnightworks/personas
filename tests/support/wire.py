@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 
+from agents.member import STANDING_URI
 from mcp.shared.subscriptions import SUBSCRIPTION_ID_META_KEY
 from mcp_types import (
     ErrorData,
@@ -152,6 +153,20 @@ def hangs_once_entered(entered: asyncio.Event) -> Handler:
         await asyncio.Event().wait()
 
     return hang
+
+
+def lost_on_demand(said: asyncio.Event, lost: asyncio.Event, place_window: str) -> Handler:
+    """A stream that opens, stands the place's window once ``said`` is set and is cut once ``lost`` is set."""
+
+    async def is_lost_on_demand(reply: Reply) -> None:
+        await reply.open_stream()
+        await reply.acknowledge([STANDING_URI])
+        await said.wait()
+        await reply.pulse(place_window)
+        await lost.wait()
+        reply.cut()
+
+    return is_lost_on_demand
 
 
 async def cuts(reply: Reply) -> None:

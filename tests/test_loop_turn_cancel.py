@@ -25,7 +25,8 @@ from tests.support.transport import (
     opener_whose_request_raises,
     transport_closing_with_late_answers,
 )
-from tests.support.wire import hangs, hangs_once_entered
+from tests.support.voice import a_turn_whose_speak_is_in_flight
+from tests.support.wire import hangs, hangs_once_entered, lost_on_demand
 
 pytestmark = pytest.mark.anyio
 
@@ -237,8 +238,16 @@ async def a_turn_whose_call_is_in_flight(runner, said: asyncio.Event | None = No
     await runner.app.log.until(CALL, 1)
 
 
-async def test_a_runner_stopped_while_a_turns_own_app_call_is_in_flight_ends_the_turn_cancelled(runner):
-    await a_turn_whose_call_is_in_flight(runner)
+@pytest.fixture(params=["an own-app call", "a speak"])
+def in_flight(request, runner):
+    """Arranges a turn whose request to the app is in flight: a call it relays, or a sentence it speaks."""
+    if request.param == "a speak":
+        return lambda said=None: a_turn_whose_speak_is_in_flight(runner, said)
+    return lambda said=None: a_turn_whose_call_is_in_flight(runner, said)
+
+
+async def test_a_runner_stopped_while_a_turns_request_is_in_flight_ends_the_turn_cancelled(runner, in_flight):
+    await in_flight()
 
     runner.task.cancel()
 
@@ -267,21 +276,12 @@ async def test_a_runner_stopped_while_a_turns_own_app_listing_is_in_flight_ends_
     assert [due.place for due in kept.due] == [CALL_PLACE]
 
 
-async def test_a_lost_stream_while_a_turns_own_app_call_is_in_flight_ends_the_turn_cancelled_and_backs_off_once(
-    runner,
+async def test_a_lost_stream_while_a_turns_request_is_in_flight_ends_the_turn_cancelled_and_backs_off_once(
+    runner, in_flight
 ):
     said, lost = asyncio.Event(), asyncio.Event()
-
-    async def is_lost_on_demand(reply):
-        await reply.open_stream()
-        await reply.acknowledge([STANDING_URI])
-        await said.wait()
-        await reply.pulse(place_window_uri(CALL_PLACE))
-        await lost.wait()
-        reply.cut()
-
-    runner.app.script(LISTEN, is_lost_on_demand)
-    await a_turn_whose_call_is_in_flight(runner, said)
+    runner.app.script(LISTEN, lost_on_demand(said, lost, place_window_uri(CALL_PLACE)))
+    await in_flight(said)
 
     lost.set()
     await runner.reports.until(Event.BACKOFF)

@@ -8,23 +8,31 @@ from http import HTTPStatus
 import anyio
 import pytest
 from agents.backend.fake_gateway import completion
-from agents.member import SPEAK_TOOL, STANDING_URI, place_window_uri
+from agents.member import SPEAK_TOOL
 from agents.tools import ToolOutcome
-from agents.turn import FailureCode, StopOutcome
+from agents.turn import FailureCode
 
 from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE, status_code
 from personas.failures import INVALID_ANSWER_CODE, leaves_of
 from personas.reporting import Event
-from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PLACE_ID, pulses_the_window_once, say_in_the_call
+from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, pulses_the_window_once, say_in_the_call
 from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
 from tests.support.fakes import CANCELLED_TURN, failed_turn
 from tests.support.gateway import Gateway, speaks_and_says
-from tests.support.hopin import CALL, LIMIT_SECONDS, LISTEN, READ, SAY_TOOL
+from tests.support.hopin import CALL, LISTEN, READ, SAY_TOOL
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, paused
 from tests.support.transport import opener_whose_request_raises
-from tests.support.voice import TWO_SENTENCES, a_voice_call, ended_by, gated, holding_sentence_ends, sentences_spoken
-from tests.support.wire import cuts, hangs_once_entered
+from tests.support.voice import (
+    TWO_SENTENCES,
+    a_turn_whose_speak_is_in_flight,
+    a_voice_call,
+    ended_by,
+    gated,
+    holding_sentence_ends,
+    sentences_spoken,
+)
+from tests.support.wire import cuts
 
 pytestmark = pytest.mark.anyio
 
@@ -351,52 +359,19 @@ async def test_a_defect_in_speaks_request_ends_the_runner_loud(runner, speak_def
     assert runner.reports.reported() == [(Event.STARTED, None)]
 
 
-async def a_turn_whose_speak_is_in_flight(runner, said: asyncio.Event | None = None):
-    """The runner restarted in a voice call; the turn's first sentence reached the app's ``speak``, which never
-    answers."""
-    entered = asyncio.Event()
-    runner.app.script(CALL, hangs_once_entered(entered))
-    await a_voice_call(runner, completion(TWO_SENTENCES))
-    say_in_the_call(runner, ADDRESSED, spoken=True)
-    if said is not None:
-        said.set()
-    async with asyncio.timeout(LIMIT_SECONDS):
-        await entered.wait()
-
-
-async def test_a_runner_stopped_while_a_turns_speak_is_in_flight_ends_the_turn_cancelled_and_states_no_unavailable(
-    runner,
-):
+async def test_a_place_left_while_a_turns_speak_is_in_flight_ends_the_turn_cancelled_and_the_next_read_works(runner):
     await a_turn_whose_speak_is_in_flight(runner)
 
-    runner.task.cancel()
-
-    assert isinstance(await ended_by(runner.task), asyncio.CancelledError)
-    assert runner.reports.turn_endings == [CANCELLED_TURN]
-    assert StopOutcome.UNAVAILABLE not in [statement.stopped for _, statement in runner.app.turn_states]
-
-
-async def test_a_lost_stream_while_a_turns_speak_is_in_flight_ends_the_turn_cancelled_and_backs_off_once(runner):
-    said, lost = asyncio.Event(), asyncio.Event()
-
-    async def is_lost_on_demand(reply):
-        await reply.open_stream()
-        await reply.acknowledge([STANDING_URI])
-        await said.wait()
-        await reply.pulse(place_window_uri(CALL_PLACE))
-        await lost.wait()
-        reply.cut()
-
-    runner.app.script(LISTEN, is_lost_on_demand)
-    await a_turn_whose_speak_is_in_flight(runner, said)
-
-    lost.set()
-    await runner.reports.until(Event.BACKOFF)
+    runner.app.stand(SUBJECT)
     await runner.reports.until_a_turn_ended()
+    later_read = runner.app.hold_next_read()
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    await runner.app.until_read_held()
 
     assert runner.reports.turn_endings == [CANCELLED_TURN]
-    assert StopOutcome.UNAVAILABLE not in [statement.stopped for _, statement in runner.app.turn_states]
-    assert [event for event, _ in runner.reports.reported(started=False)].count(Event.BACKOFF) == 1
+    assert runner.reports.reported() == [(Event.STARTED, None)]
+    assert not runner.task.done()
+    later_read.set()
 
 
 async def test_a_speak_the_app_cuts_ends_the_turn_into_the_reaction(runner):

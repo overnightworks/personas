@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import asyncio
 
-from tests.support.call import PLACE_ID, restarted_in_the_call
+from agents.backend.fake_gateway import completion
+
+from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
 from tests.support.gateway import Gateway
 from tests.support.history import at_table
-from tests.support.hopin import LIMIT_SECONDS
+from tests.support.hopin import CALL, LIMIT_SECONDS
 from tests.support.standings import AGENT_SUBJECT, active
+from tests.support.wire import hangs_once_entered
 
 TWO_SENTENCES = "First sentence. Second sentence."
 
@@ -76,6 +79,19 @@ async def a_voice_call(runner, *replies, max_duration_seconds=PERSONA_MAX_DURATI
     runner.give_voice(max_duration_seconds)
     runner.gateway = Gateway(*replies)
     await restarted_in_the_call(runner)
+
+
+async def a_turn_whose_speak_is_in_flight(runner, said: asyncio.Event | None = None):
+    """The runner restarted in a voice call; the turn's first sentence reached the app's ``speak``, which never
+    answers."""
+    entered = asyncio.Event()
+    runner.app.script(CALL, hangs_once_entered(entered))
+    await a_voice_call(runner, completion(TWO_SENTENCES))
+    say_in_the_call(runner, ADDRESSED, spoken=True)
+    if said is not None:
+        said.set()
+    async with asyncio.timeout(LIMIT_SECONDS):
+        await entered.wait()
 
 
 async def in_a_voice_call_and_at_a_table(runner, *replies):
