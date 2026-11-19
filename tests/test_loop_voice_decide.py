@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import replace
+from typing import TYPE_CHECKING
 
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
@@ -18,6 +18,7 @@ from agents.member import (
 from agents.tools import ToolOutcome
 from agents.turn import FailureCode
 
+from personas.recall import RECALL_TOOL
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, PLACE_ID, say_in_the_call
 from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
@@ -26,7 +27,31 @@ from tests.support.hopin import CALL, SAY_TOOL
 from tests.support.voice import TWO_SENTENCES, a_voice_call, gated, holding_sentence_ends, sentences_spoken
 from tests.support.wire import refuses_with_a_server_error
 
+if TYPE_CHECKING:
+    from datetime import datetime
+
+    from personas.entries import KeptLine, WindowRead
+    from personas.recall import LineSearch
+
 pytestmark = pytest.mark.anyio
+
+
+class WatchedLines:
+    """A store of lines that keeps none and finds none, and counts the searches."""
+
+    def __init__(self) -> None:
+        self.searches = 0
+
+    async def keep(self, read: WindowRead) -> None:
+        return None
+
+    async def search(self, search: LineSearch) -> tuple[KeptLine, ...]:
+        self.searches += 1
+        return ()
+
+    async def erase_before(self, first_read_before: datetime) -> int:
+        return 0
+
 
 HOLD_ID = "hold-1"
 SAID = ("Ada", "wait a moment")
@@ -134,7 +159,6 @@ async def test_his_sentences_wait_unsent_and_every_other_call_is_answered_decidi
     await runner.reports.until_a_turn_completed()
 
     results = runner.gateway.tool_results(4)
-    assert [json.loads(each) if not each.startswith("Error") else None for each in results][1] is not None
     assert [each.startswith("Error") for each in results] == [True, False, True]
     assert SAY_TOOL not in runner.app.calls
     assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
@@ -177,6 +201,42 @@ async def test_a_stop_the_app_refuses_ends_the_hold_and_is_not_sent_again(runner
     assert runner.reports.codes_of(Event.HOLD_DECIDED) == ["undecided"]
 
 
+async def test_a_stop_whose_call_failed_is_sent_again_by_a_later_read_and_decided_once(runner):
+    """TURNS-31, LOG-17."""
+    await a_voice_call(runner, completion("[silent]"))
+    runner.app.script(CALL, refuses_with_a_server_error)
+
+    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
+    await runner.reports.until(Event.BACKOFF)
+    assert runner.reports.codes_of(Event.HOLD_DECIDED) == []
+    runner.sleeps.let_through()
+    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
+
+    assert await decided(runner) == ["undecided"]
+    assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
+
+
+async def test_a_turn_told_a_hold_answers_the_lookup_that_it_decides_first_and_spends_no_lookup(runner):
+    """TURNS-31."""
+    store = WatchedLines()
+    runner.remember_in(store)
+    await a_voice_call(
+        runner,
+        tool_round(tool_call("look", RECALL_TOOL, {"text": "anything"})),
+        tool_round(say("early", PLACE_ID)),
+        deciding(CONTINUE_SPEAKING_TOOL),
+        completion("[silent]"),
+    )
+
+    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
+    await decided(runner)
+
+    lookup, other = runner.gateway.tool_results(3)
+    assert lookup.startswith("Error")
+    assert lookup == other
+    assert store.searches == 0
+
+
 async def test_a_hold_joins_the_lines_already_due_into_one_written_turn_that_is_offered_both_decisions(runner):
     runner.app.state_voice(PLACE_ID, VoiceState.UNAVAILABLE)
     await a_voice_call(runner, completion("done"), deciding(STOP_SPEAKING_TOOL), completion("[silent]"))
@@ -186,7 +246,7 @@ async def test_a_hold_joins_the_lines_already_due_into_one_written_turn_that_is_
 
     runner.app.hold(PLACE_ID, HOLD_ID, SAID)
     await window_read_after(runner)
-    line = say_in_the_call(runner, "Are you still there?")
+    say_in_the_call(runner, "Are you still there?")
     await window_read_after(runner)
     answer.set()
 
@@ -195,7 +255,6 @@ async def test_a_hold_joins_the_lines_already_due_into_one_written_turn_that_is_
     assert number == 2
     assert "Are you still there?" in runner.gateway.told_in(number)
     assert {CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL} <= set(runner.gateway.offered_tools(number))
-    assert line is not None
     assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
 
 
