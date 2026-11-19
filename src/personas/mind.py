@@ -12,12 +12,19 @@ from typing import TYPE_CHECKING
 from personas.decision import (
     NO_SPEECH,
     AppPlace,
+    Held,
     SpeechRecord,
     backoff_delay,
     budget_pause,
     held_apps,
+    hold_decided,
+    hold_marked_told,
+    hold_read,
+    hold_turn_ended,
+    hold_untold,
     refusal_retry_at,
     speech_answered,
+    speech_ended,
     speech_line_entered,
     speech_sent,
     sync_checkpoints,
@@ -29,6 +36,7 @@ from personas.due import (
     claimed,
     cut_by_stop,
     due_again,
+    due_for_hold,
     pause_left,
     paused_for,
     released,
@@ -42,7 +50,7 @@ from personas.present import EMPTY_PRESENT, answered_into, taken_into
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
-    from agents.member import Standing
+    from agents.member import PlaceWindow, Standing
 
     from personas.decision import Checkpoint
     from personas.due import Due
@@ -122,8 +130,41 @@ class Mind:
         return self._speech.get(at, NO_SPEECH).saying
 
     def speech_ended(self, at: AppPlace) -> None:
-        """The turn that sent at the place ended: its requests in flight and what it still owes are dropped."""
-        self._speech.pop(at, None)
+        """The turn that sent at the place ended: its requests in flight and what it still owes are dropped, and the
+        hold that stands stays."""
+        self._set_speech(at, speech_ended(self._speech.get(at, NO_SPEECH)))
+
+    def hold_read(self, at: AppPlace, window: PlaceWindow) -> Held | None:
+        """The place's window was read: the hold it states stands in the record, with the words people said over him
+        kept after their record ends and whether a turn was told it. The hold that stands, none when it was decided."""
+        record = hold_read(self._speech.get(at, NO_SPEECH), window)
+        self._set_speech(at, record)
+        return record.hold
+
+    def hold_to_tell(self, at: AppPlace) -> Held | None:
+        """The hold a turn that starts at the place is told, marked as told: the one that stands, that no turn was
+        told and that may be told."""
+        record = self._speech.get(at, NO_SPEECH)
+        held = hold_untold(record)
+        if held is not None:
+            self._set_speech(at, hold_marked_told(record))
+        return held
+
+    def hold_turn_ended(self, at: AppPlace) -> None:
+        """The turn told the hold at the place ended: a hold it did not decide stays undecided."""
+        self._set_speech(at, hold_turn_ended(self._speech.get(at, NO_SPEECH)))
+
+    def hold_decided(self, at: AppPlace, hold_id: str) -> None:
+        """The hold ``hold_id`` at the place was decided: it stands no more and is not decided again."""
+        self._set_speech(at, hold_decided(self._speech.get(at, NO_SPEECH), hold_id))
+
+    def hold_decided_id(self, at: AppPlace) -> str | None:
+        """The id of the hold decided last at the place."""
+        return self._speech.get(at, NO_SPEECH).decided
+
+    def hold_standing(self, at: AppPlace) -> Held | None:
+        """The hold that stands at the place."""
+        return self._speech.get(at, NO_SPEECH).hold
 
     def _set_speech(self, at: AppPlace, record: SpeechRecord) -> None:
         if record == NO_SPEECH:
@@ -244,6 +285,14 @@ class Mind:
         """The place is due for ``occasion`` from ``since``, on the clock's monotonic scale."""
         self._turns = with_due(self._turns, at, occasion, since)
         self._change()
+
+    def due_for_hold(self, at: AppPlace, generation: str, since: float) -> None:
+        """A hold that may be told stands at the place: it is due from ``since`` as lines of the window's generation
+        with none, unless it is due already, when the turn that comes is told the hold."""
+        turns = due_for_hold(self._turns, at, generation, since)
+        if turns is not self._turns:
+            self._turns = turns
+            self._change()
 
     def due_again(self, at: AppPlace, occasion: Occasion, since: float) -> None:
         """The turn at ``at`` ended without an answer: the place is due for ``occasion`` again from ``since``, the end

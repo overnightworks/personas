@@ -78,11 +78,22 @@ def with_due(turns: Turns, at: AppPlace, occasion: Occasion, since: float) -> Tu
     return Turns(turns.running, {**turns.due, at: due}, turns.not_before)
 
 
+def due_for_hold(turns: Turns, at: AppPlace, generation: str, since: float) -> Turns:
+    """A hold that may be told stands at ``at``: the place is due from ``since`` for lines of the window's generation
+    with none, unless it is due already, when the turn it has is the one that is told the hold."""
+    if at in turns.due:
+        return turns
+    return with_due(turns, at, Lines(generation, frozenset(), missed=False), since)
+
+
 def due_again(turns: Turns, at: AppPlace, occasion: Occasion, since: float) -> Turns:
     """A turn due again at ``at`` for ``occasion`` from ``since``, the end of the pause the turn left, which a turn
     ended without an answer: a place due meanwhile keeps what is newer, except that lines of the same generation join;
-    any other place goes to the back of the order."""
+    any other place goes to the back of the order. A hold that made it due without a line brings no turn again: the
+    read after the turn decides it."""
     held = turns.due.get(at)
+    if held is None and isinstance(occasion, Lines) and not occasion.seqs:
+        return turns
     if held is None or (
         isinstance(held.occasion, Lines)
         and isinstance(occasion, Lines)
