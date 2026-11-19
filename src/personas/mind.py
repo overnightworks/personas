@@ -168,9 +168,9 @@ class Mind:
         """The turn told the hold at the place ended: a hold it did not decide stays undecided."""
         self._set_speech(at, hold_turn_ended(self._speech.get(at, NO_SPEECH)))
 
-    def hold_decided(self, at: AppPlace, hold_id: str, bound: float | None) -> None:
-        """The hold ``hold_id`` at the place was decided: it stands no more and is not decided again. A turn
-        that decided it, over by ``bound`` on the clock's monotonic scale, owes the held sentence's line from now."""
+    def hold_decided(self, at: AppPlace, hold_id: str, bound: float) -> None:
+        """The hold ``hold_id`` at the place was decided: it stands no more and is not decided again. Its
+        held sentence's line is owed over by ``bound`` on the clock's monotonic scale."""
         self._set_speech(at, hold_decided(self._speech.get(at, NO_SPEECH), hold_id, bound))
 
     def hold_decided_id(self, at: AppPlace) -> str | None:

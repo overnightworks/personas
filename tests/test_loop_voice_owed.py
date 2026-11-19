@@ -7,7 +7,7 @@ import json
 
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
-from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL, VoiceState
+from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL, StoppedSpeaking, VoiceState
 from agents.tools import ToolOutcome
 from agents.turn import FailureCode
 
@@ -301,4 +301,27 @@ async def test_a_written_turn_whose_own_bound_passes_while_it_waits_for_a_line_e
 
     assert runner.reports.reported()[-1] == (Event.PAUSED, FailureCode.LIMIT_EXCEEDED.value)
     assert runner.app.said == []
+    assert Event.SPEAK_LINE_MISSING not in [event for event, _ in runner.reports.reported()]
+
+
+async def test_a_hold_the_told_turn_left_undecided_and_the_loop_stopped_leaves_its_line_owed_for_a_later_call(runner):
+    """TURNS-25, LOG-36."""
+    await a_last_sentence_that_plays(runner, completion("[silent]"), *says(OTHER_PLACE_ID, NEXT))
+    await at_a_second_place(runner)
+    runner.clock.time += 2 * PERSONA_MAX_DURATION_SECONDS
+    runner.app.hold_outcomes.append(ToolOutcome(StoppedSpeaking(cut=ANSWER).model_dump_json(), is_error=False))
+    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
+    await runner.reports.until_a_turn_completed(count=2)
+    await settled(runner.app)
+    assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
+    runner.app.state_voice(OTHER_PLACE_ID, VoiceState.UNAVAILABLE)
+    said_at(runner, OTHER_PLACE_ID, AGAIN, spoken=False)
+    await runner.app.until_called(2)
+    await settled(runner.app)
+
+    assert runner.app.said == []
+    runner.app.stop_speaking()
+    await runner.app.said_count(1)
+
+    assert runner.app.said == [(SUBJECT, OTHER_PLACE_ID, NEXT)]
     assert Event.SPEAK_LINE_MISSING not in [event for event, _ in runner.reports.reported()]

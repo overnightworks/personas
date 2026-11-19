@@ -243,7 +243,6 @@ def test_a_decided_hold_re_arms_the_bound_of_the_line_it_held_for_the_turn_that_
     record = SpeechRecord(credit=2, hold=_held(), bounds=(50.0, 70.0))
 
     assert hold_decided(record, "h1", 120.0).bounds == (120.0, 70.0)
-    assert hold_decided(record, "h1", None).bounds == (50.0, 70.0)
 
 
 def test_the_lines_owed_together_are_counted_with_the_first_hold_over_one_and_the_earliest_bound_of_the_others():

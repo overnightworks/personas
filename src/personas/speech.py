@@ -221,10 +221,10 @@ def hold_turn_ended(record: SpeechRecord) -> SpeechRecord:
     return replace(record, hold=replace(held, telling=Telling.UNDECIDED))
 
 
-def hold_decided(record: SpeechRecord, hold_id: str, bound: float | None) -> SpeechRecord:
+def hold_decided(record: SpeechRecord, hold_id: str, bound: float) -> SpeechRecord:
     """The hold ended with a decision: it stands no more and is never decided again, and its sentence's line, which
-    enters only now, is owed by the turn that decided it, over by ``bound``, when a turn did."""
-    bounds = record.bounds if bound is None or not record.bounds else (bound, *record.bounds[1:])
+    enters only now, is owed over by ``bound``."""
+    bounds = (bound, *record.bounds[1:]) if record.bounds else record.bounds
     return replace(record, hold=None, decided=hold_id, bounds=bounds)
 
 
