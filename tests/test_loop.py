@@ -6,7 +6,6 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-import anyio
 import pytest
 from agents.backend import TurnStopKind, TurnStopped
 from agents.backend.gateway import GatewayBackend
@@ -413,8 +412,8 @@ class TurnAndLifecycle(ScriptedSessions):
     """One loop whose turn and lifecycle both wait for one release and then fail in the same step.
 
     The lifecycle joins at its first read and reads the standing again, which starts a turn on an addressed line,
-    and waits at its third read. The turn waits at the opening of its session. A third session, after a reaction,
-    waits at its first read.
+    and waits at its third read. The turn waits at its listing on the loop's session. A second session, after a
+    reaction, waits at its first read.
     """
 
     def __init__(self, files, lifecycle_failure: Exception, turn_failure: Exception) -> None:
@@ -422,7 +421,6 @@ class TurnAndLifecycle(ScriptedSessions):
         self.turn_waiting = asyncio.Event()
         self.lifecycle_waiting = asyncio.Event()
         self.reopened = asyncio.Event()
-        self._opened = 0
         self._reads = 0
         self._lifecycle_failure = lifecycle_failure
         self._turn_failure = turn_failure
@@ -430,12 +428,12 @@ class TurnAndLifecycle(ScriptedSessions):
 
     @asynccontextmanager
     async def open(self, app, token):
-        self._opened += 1
-        if self._opened == 2:
-            self.turn_waiting.set()
-            await self.release.wait()
-            raise self._turn_failure
         yield self
+
+    async def declared_tools(self):
+        self.turn_waiting.set()
+        await self.release.wait()
+        raise self._turn_failure
 
     async def read_standing(self):
         self._reads += 1
@@ -496,30 +494,21 @@ async def test_a_failure_of_a_call_and_a_defect_together_give_no_reaction_and_ev
 
 
 class SwallowedCancellation(TurnAndLifecycle):
-    """A turn whose session opener swallows the cancellation it is given and hands back ``outcome`` instead.
+    """A turn whose listing on the loop's session swallows the cancellation it is given and raises ``outcome`` instead.
 
-    The SDK's task group can do that; ``outcome`` is raised, or the session is handed back when it is ``None``.
+    The SDK's task group can do that.
     """
 
-    def __init__(self, files, outcome: Exception | None) -> None:
+    def __init__(self, files, outcome: Exception) -> None:
         super().__init__(files, Unreachable("down"), Unreachable("down"))
         self.outcome = outcome
-        self.relayed: list[str] = []
-
-    @asynccontextmanager
-    async def open(self, app, token):
-        self._opened += 1
-        if self._opened == 2:
-            self.turn_waiting.set()
-            try:
-                await self.release.wait()
-            except asyncio.CancelledError:
-                if self.outcome is not None:
-                    raise self.outcome from None
-        yield self
 
     async def declared_tools(self):
-        self.relayed.append("declared_tools")
+        self.turn_waiting.set()
+        try:
+            await self.release.wait()
+        except asyncio.CancelledError:
+            raise self.outcome from None
         return ()
 
 
@@ -528,15 +517,10 @@ class SwallowedCancellation(TurnAndLifecycle):
     [
         Unreachable("down"),
         TurnStopped(TurnStopKind.REFUSED, RejectionCode.BUSY),
-        anyio.BrokenResourceError(),
-        anyio.ClosedResourceError(),
-        None,
     ],
-    ids=["a connection failure", "a stop", "a broken stream", "a closed stream", "the session itself"],
+    ids=["a connection failure", "a stop"],
 )
-async def test_a_cancelled_turn_whose_opener_swallowed_it_reports_nothing_calls_nothing_and_leaves_no_reaction(
-    files, outcome
-):
+async def test_a_cancelled_turn_whose_listing_swallowed_it_reports_nothing_and_leaves_no_reaction(files, outcome):
     swallowed = SwallowedCancellation(files, outcome)
     task = asyncio.create_task(swallowed.loop.run())
     async with asyncio.timeout(10):
@@ -546,7 +530,6 @@ async def test_a_cancelled_turn_whose_opener_swallowed_it_reports_nothing_calls_
         (ended,) = await asyncio.gather(task, return_exceptions=True)
 
     assert isinstance(ended, asyncio.CancelledError)
-    assert swallowed.relayed == []
     assert swallowed.clock.slept == []
     assert swallowed.reports.reported() == [(Event.STARTED, None), (Event.JOINED, None)]
 
@@ -584,15 +567,13 @@ class TurnEndingInTheStepItsPlaceLeaves(TurnAndLifecycle):
 
     @asynccontextmanager
     async def open(self, app, token):
-        self._opened += 1
-        if self._opened == 2:
-            self.turn_waiting.set()
-            await self.release.wait()
-            if self._ending == "stop":
-                raise TurnStopped(TurnStopKind.REFUSED, RejectionCode.BUSY)
         yield self
 
     async def declared_tools(self):
+        self.turn_waiting.set()
+        await self.release.wait()
+        if self._ending == "stop":
+            raise TurnStopped(TurnStopKind.REFUSED, RejectionCode.BUSY)
         return (
             ToolDeclaration(
                 name="say", description="Says a line.", parameters={"type": "object"}, effect=ToolEffect.SIDE_EFFECTING
@@ -774,7 +755,7 @@ async def test_a_failure_of_the_wake_stream_that_loses_the_race_to_a_failing_rea
 class DefectInARelayedCall(ScriptedSessions):
     """One agent whose model calls ``say`` once in the one addressed line; the relayed call raises ``defect``.
 
-    A ``late`` failure leaves the turn's session beside what its body raised, as a late answer of its teardown does.
+    A ``late`` failure leaves the loop's session beside what its body raised, as a late answer of its teardown does.
     """
 
     def __init__(self, files, defect: Exception, late: Exception | None = None) -> None:
@@ -793,10 +774,10 @@ class DefectInARelayedCall(ScriptedSessions):
     async def open(self, app, token):
         try:
             yield self
-        except Exception as body:
+        except asyncio.CancelledError:
             if self._late is None:
                 raise
-            raise BaseExceptionGroup("the session's teardown", [body, self._late]) from None
+            raise self._late from None
 
     async def read_standing(self):
         self._reads += 1

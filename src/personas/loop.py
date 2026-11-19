@@ -232,7 +232,7 @@ class AgentLoop:
         """A turn in flight ends cancelled while the session it shares is still open, so its place stays due and its
         request is not answered with a closed connection."""
         turn = self._turn
-        if turn is not None:
+        if turn is not None and not turn.task.done():
             turn.task.cancel()
             await asyncio.wait({turn.task})
 
