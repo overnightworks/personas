@@ -16,7 +16,6 @@ from agents.voice.reply import ReplyReader
 from personas.decision import AppPlace, may_send_next, past_deadline, remaining_seconds, speech_outcome
 from personas.entries import SaidAloud
 from personas.failures import task_is_being_cancelled
-from personas.present import own_spoken_lines_since
 from personas.reporting import Event
 from personas.task_record import RelayFailed
 
@@ -69,15 +68,10 @@ class Speaking:
         self._mind = mind
         self._tally = tally
         self._at = AppPlace(app, place)
-        self._mark: int | None = None
-        self._answered_spoken = 0
-        self._lines_entered = 0
         self._reader = ReplyReader()
         self._queue: asyncio.Queue[str | None] = asyncio.Queue()
         self._silenced = False
         self.was_cut = False
-        self.saying: str | None = None
-        """The sentence the app last answered as spoken, the one he is in while he plays."""
         self.unsaid: deque[str] = deque()
         """The sentences heard that the app has not answered as spoken, the one in flight first."""
         self._idle = asyncio.Event()
@@ -143,7 +137,7 @@ class Speaking:
     @property
     def _owed(self) -> int:
         """The own spoken lines that sentences answered as spoken have not yet brought into the history."""
-        return self._answered_spoken - self._lines_entered
+        return self._mind.speech_owed(self._at)
 
     async def _speak(self, sentence: str) -> None:
         self._stop_past_deadline()
@@ -163,30 +157,18 @@ class Speaking:
                 self._report(Event.SPEAK_REFUSED, outcome.value)
             self._silenced = True
         else:
-            self._said(sentence, spoken=isinstance(outcome, Spoken))
+            self._said()
 
-    def _said(self, sentence: str, *, spoken: bool) -> None:
+    def _said(self) -> None:
         """The app took the sentence, voiced or written: it is no longer unsaid."""
         if not self.was_cut:
             self.unsaid.popleft()
-        if spoken:
-            self._answered_spoken += 1
-            self.saying = sentence
-
-    def _fold_lines(self) -> None:
-        """Counts the lines that entered since the last count and moves the mark past them, so that the history's
-        bound can drop them; nothing counts before the first sentence is sent."""
-        if self._mark is None:
-            return
-        self._lines_entered += own_spoken_lines_since(self._mind.history, self._mark, self._at)
-        self._mark = self._mind.history.taken
 
     async def _until(self, reached: Callable[[], bool]) -> None:
         """Returns once ``reached`` holds, judged at every take of the mind; the turn's deadline, the one bound of all
         the waits of the speech, ends the turn first when it passes before, a tie going to it."""
         while True:
             taken = self._mind.next_take()
-            self._fold_lines()
             if self._deadline is not None and self._deadline.done():
                 self._deadline.result()
                 raise TurnStopped(TurnStopKind.FAILED, FailureCode.LIMIT_EXCEEDED)
@@ -222,13 +204,11 @@ class Speaking:
         self, request: Coroutine[None, None, SpeakAnswer | SpeakRefusal]
     ) -> SpeakAnswer | SpeakRefusal:
         """The answer of the request, which the app holds back while the sentence before plays; a request not answered
-        by the turn's deadline is given up, the turn ending ``limit_exceeded``. The lines that enter meanwhile are
-        counted at each take, before the history's bound can drop them."""
+        by the turn's deadline is given up, the turn ending ``limit_exceeded``."""
         sending = asyncio.create_task(request)
         try:
             while True:
                 taken = self._mind.next_take()
-                self._fold_lines()
                 if sending.done():
                     return sending.result()
                 if self._deadline_bound().done():
@@ -246,14 +226,15 @@ class Speaking:
         Whether the turn is being cancelled is asked once the request and every scope inside it have exited.
         """
         ended: SpeakAnswer | SpeakRefusal | BaseException | None = None
+        sent = False
         self._idle.clear()
         try:
             await self._renew_token()
             if self._silenced or self._past_deadline():
                 return None
-            if self._mark is None:
-                self._mark = self._mind.history.taken
             self._tally.sentence_sent()
+            self._mind.speech_sent(self._at)
+            sent = True
             answer = await self._answered_before_the_deadline(self._session.speak(self._place, sentence))
             ended = answer
             return answer
@@ -264,6 +245,8 @@ class Speaking:
             ended = cancelled
             raise
         finally:
+            if sent:
+                self._mind.speech_answered(self._at, sentence, spoken=isinstance(ended, Spoken))
             self._idle.set()
             outcome = None if ended is None else speech_outcome(ended, cancelling=task_is_being_cancelled())
             if outcome is not None:

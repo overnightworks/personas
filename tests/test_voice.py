@@ -12,7 +12,7 @@ from agents.member import PlaceRef, SpeakAnswer, SpeakRefusal, Spoken, Written
 from agents.turn import FailureCode
 from agents.turn_events import AssistantTextEvent, FinalEvent
 
-from personas.decision import DEFAULT_BUDGET_PAUSE_CAP_SECONDS, TURN_CANCELLED_CODE
+from personas.decision import DEFAULT_BUDGET_PAUSE_CAP_SECONDS, TURN_CANCELLED_CODE, AppPlace
 from personas.entries import KeptLine, SaidAloud, Unanswered, Visit
 from personas.mind import Mind
 from personas.reporting import Event, start_turn_tally
@@ -327,5 +327,9 @@ async def test_a_sentence_in_flight_at_his_stop_is_still_answered_and_entered_an
 
     await scenario.speaking.play()
 
-    assert (scenario.sent, tuple(scenario.speaking.unsaid), scenario.speaking.saying) == (["One."], (), "One.")
+    assert (scenario.sent, tuple(scenario.speaking.unsaid), scenario.mind.speech_saying(AppPlace(APP, PLACE))) == (
+        ["One."],
+        (),
+        "One.",
+    )
     assert len(scenario.entered) == 1

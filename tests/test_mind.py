@@ -380,3 +380,54 @@ def test_the_newest_entry_stays_when_it_alone_is_past_the_kept_bytes():
     sent = turn_messages("Mozart", mind.present, a_lines_turn(mind, 5))
 
     assert [seqs_told(each) for each in sent[1:]] == [[5]]
+
+
+def an_own_spoken_line(visit: Visit, seq: int) -> KeptLine:
+    return KeptLine(visit, seq, READ_AT, "Mozart", "message", "x", own=True, spoken=True, cut=False, act=False)
+
+
+def test_his_own_spoken_line_at_a_place_brings_in_the_sentence_owed_there_and_no_other_place():
+    mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
+    here, there = AppPlace(CALL.app, CALL.place), AppPlace(OTHER_CALL.app, OTHER_CALL.place)
+    for at in (here, there):
+        mind.speech_sent(at)
+        mind.speech_answered(at, "One.", spoken=True)
+
+    mind.take((an_own_spoken_line(CALL, 1),))
+
+    assert (mind.speech_owed(here), mind.speech_owed(there)) == (0, 1)
+    assert mind.speech_saying(there) == "One."
+
+
+def test_his_own_spoken_line_is_credited_when_the_history_bound_drops_it_at_once():
+    mind = Mind(1, 1, BUDGET_PAUSE_CAP_SECONDS)
+    at = AppPlace(CALL.app, CALL.place)
+    mind.speech_sent(at)
+    mind.speech_answered(at, "One.", spoken=True)
+
+    mind.take((an_own_spoken_line(CALL, 1),))
+
+    assert mind.speech_owed(at) == 0
+
+
+def test_a_line_that_enters_before_the_answer_of_its_request_leaves_nothing_owed():
+    mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
+    at = AppPlace(CALL.app, CALL.place)
+    mind.speech_sent(at)
+
+    mind.take((an_own_spoken_line(CALL, 1),))
+    mind.speech_answered(at, "One.", spoken=True)
+
+    assert mind.speech_owed(at) == 0
+
+
+def test_the_end_of_the_sending_turn_drops_what_it_owes_and_the_sentence_that_played():
+    mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
+    at = AppPlace(CALL.app, CALL.place)
+    mind.speech_sent(at)
+    mind.speech_answered(at, "One.", spoken=True)
+    mind.speech_sent(at)
+
+    mind.speech_ended(at)
+
+    assert (mind.speech_owed(at), mind.speech_saying(at)) == (0, None)
