@@ -103,13 +103,17 @@ STOCK = ((1.425, (0.060, 0.052, 0.065)), (1.45, (0.062, 0.054, 0.067)), (1.484, 
 def mozart_clothes(face: Face) -> list[Part]:
     return [
         *_coat(),
-        *waistcoat(WAISTCOAT, PALE_GOLD, GILT, (0.922, 1.21, 7)),
+        *_waistcoat(),
         *_arms(),
         *_jabot(),
         part(trunk(STOCK, 4), LACE, Material.CLOTH, NECK_BINDER),
         *_legs(),
         *hands(face.skin),
     ]
+
+
+def _waistcoat() -> list[Part]:
+    return waistcoat(WAISTCOAT, PALE_GOLD, GILT, (0.922, 1.21, 7))
 
 
 def _coat() -> list[Part]:

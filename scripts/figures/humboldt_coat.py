@@ -93,7 +93,7 @@ KNOT = (0.0, 1.462, 0.058)
 def humboldt_clothes(face: Face) -> list[Part]:
     return [
         *_coat(),
-        *waistcoat(WAISTCOAT, CREAM, BRASS, (0.97, 1.21, 6)),
+        *_waistcoat(),
         *both_sides(arm_tube(SLEEVE, 28), NAVY, Material.CLOTH, arm_binder),
         part(trunk(CRAVAT, 4), LINEN, Material.CLOTH, NECK_BINDER),
         part(_knot(), LINEN, Material.CLOTH, NECK_BINDER),
@@ -102,6 +102,10 @@ def humboldt_clothes(face: Face) -> list[Part]:
         *shoes(BLACK),
         *hands(face.skin),
     ]
+
+
+def _waistcoat() -> list[Part]:
+    return waistcoat(WAISTCOAT, CREAM, BRASS, (0.97, 1.21, 6))
 
 
 def _coat() -> list[Part]:
