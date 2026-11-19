@@ -19,6 +19,7 @@ from personas.due import (
     claimed,
     cut_by_stop,
     due_again,
+    due_for_hold,
     kept_turns,
     left_standing,
     pause_deadline,
@@ -151,6 +152,27 @@ def test_a_turn_due_again_waits_from_the_moment_given_and_a_place_due_meanwhile_
     newer = due_again(again, CALL_AT_B, Waiting(0), NOW + 30)
 
     assert (_since(again, TABLE_AT_A), _since(joined, CALL_AT_A), _since(newer, CALL_AT_B)) == (NOW + 30, NOW + 2, NOW)
+
+
+def test_a_hold_makes_its_place_due_for_no_line_unless_the_place_is_due_already_and_the_turn_it_has_is_told_the_hold():
+    lines = Lines("g1", frozenset({4}), missed=False)
+    turns = with_due(Turns(), CALL_AT_B, Waiting(1), NOW)
+
+    held = due_for_hold(turns, CALL_AT_A, "g1", NOW + 1)
+    already = due_for_hold(held, CALL_AT_B, "g1", NOW + 2)
+    joined = with_due(held, CALL_AT_A, lines, NOW + 3)
+
+    assert _occasions(held) == {CALL_AT_B: Waiting(1), CALL_AT_A: Lines("g1", frozenset(), missed=False)}
+    assert already is held
+    assert _occasions(joined)[CALL_AT_A] == Lines("g1", frozenset({4}), missed=False)
+    assert list(joined.due) == [CALL_AT_B, CALL_AT_A]
+
+
+def test_a_turn_that_the_hold_alone_made_due_and_that_ended_without_an_answer_is_not_due_again():
+    turns = with_due(Turns(), CALL_AT_B, Waiting(1), NOW)
+    hold_only = Lines("g1", frozenset(), missed=False)
+
+    assert due_again(turns, CALL_AT_A, hold_only, NOW + 5) is turns
 
 
 def test_the_claimed_turn_says_since_when_it_was_due():
