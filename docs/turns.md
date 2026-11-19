@@ -66,9 +66,12 @@ An entry has its app and the time he took it (`at`), and is one of:
   active place, and those of the tools-only apps, declared in the configuration's order. A name two apps
   offer goes to the first; `accept_invitation`, `speak`, `recall`, `continue_speaking`, `stop_speaking` and
   `set_turn_state` are the runner's own and never taken from an app. (TURNS-18)
-- A call goes to its app in a session of its own under a token for that app's scope. A call to another app
-  that fails gives the model an error result and that app takes no more calls in the turn; a failed call to
-  the turn's own app ends the turn. A tool's error result reaches the model inside the same turn. (TURNS-19)
+- The turn's own app's listing, its relayed calls and `speak` go on the loop's session of that app, under the
+  token the loop holds; a hold's decision and every call to another app go in a session of their own under a
+  token for that app's scope. A call to another app that fails gives the model an error result and that app
+  takes no more calls in the turn; a failed call to the turn's own app ends the turn, and a turn still running
+  when the loop's session ends is cancelled before it closes. A tool's error result reaches the model inside
+  the same turn. (TURNS-19)
 - Before the turn's next call goes out, once per turn, anything not his own that arrived since the turn
   began holds that call: it is not sent, the model is told what arrived, and decides again. (TURNS-20)
 - Every relayed call enters his history when the app answers or the relay ends without an answer, with the

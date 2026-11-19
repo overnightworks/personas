@@ -13,7 +13,7 @@ from personas import app_session
 from personas.app_session import open_mcp_session
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Callable
+    from collections.abc import AsyncGenerator, Awaitable, Callable
     from contextlib import AbstractAsyncContextManager
 
     from personas.app_session import AppSession, SessionOpener
@@ -113,6 +113,24 @@ class ClosingHold:
 
         return waiting
 
+    def opener_holding_cancelled(self, request: str) -> SessionOpener:
+        """A session opener of real sessions whose first ``request`` waits, telling ``closing``, and when cancelled
+        tells ``cancelled`` and unwinds only once ``release`` is set."""
+
+        async def around(real: Callable[[], Awaitable[object]]) -> object:
+            if self.closing.is_set():
+                return await real()
+            self.closing.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.cancelled.set()
+                await self.release.wait()
+                raise
+            return await real()
+
+        return _opener_around(request, around, of_url=None)
+
     def opener(self, *, nth: int = 1, of_url: str | None = None) -> SessionOpener:
         """A session opener whose ``nth`` session leaves only once ``release`` is set, the real session at that app.
 
@@ -136,53 +154,99 @@ class ClosingHold:
         return waiting
 
 
-class _RaisingSession:
-    """The real session at one app, whose ``request`` raises ``defect`` while ``raises`` allows it."""
+type _Around = Callable[[Callable[[], Awaitable[object]]], Awaitable[object]]
 
-    def __init__(self, session: AppSession, request: str, defect: Exception, raises: Callable[[], bool]) -> None:
+
+class _AroundSession:
+    """The real session at one app, whose named requests run inside their ``around``, which gets the real request to
+    call."""
+
+    def __init__(self, session: AppSession, arounds: dict[str, _Around]) -> None:
         self._session = session
-        self._request = request
-        self._defect = defect
-        self._raises = raises
+        self._arounds = arounds
 
     def __getattr__(self, name: str) -> object:
         real = getattr(self._session, name)
-        if name != self._request:
+        around = self._arounds.get(name)
+        if around is None:
             return real
 
-        async def raising(*arguments: object) -> object:
-            if self._raises():
-                raise self._defect
-            return await real(*arguments)
+        async def wrapped(*arguments: object) -> object:
+            return await around(lambda: real(*arguments))
 
-        return raising
+        return wrapped
 
 
-def opener_whose_request_raises(
-    request: str, defect: Exception, *, of_url: str | None = None, once: bool = False
-) -> SessionOpener:
-    """A session opener of real sessions whose ``request``, an ``AppSession`` method, raises ``defect``.
+def _opener_around(request: str, around: _Around, *, of_url: str | None) -> SessionOpener:
+    return _opener_arounds({request: around}, of_url=of_url)
 
-    With ``of_url`` only the sessions at that URL raise, and with ``once`` only the first such request does.
-    """
-    raised = False
 
-    def raises() -> bool:
-        nonlocal raised
-        if once and raised:
-            return False
-        raised = True
-        return True
-
+def _opener_arounds(arounds: dict[str, _Around], *, of_url: str | None) -> SessionOpener:
     @asynccontextmanager
     async def opened(app: AppTarget, token: Secret) -> AsyncGenerator[AppSession]:
         async with open_mcp_session(app, token) as session:
             if of_url in (None, str(app.mcp_url)):
-                yield cast("AppSession", _RaisingSession(session, request, defect, raises))
+                yield cast("AppSession", _AroundSession(session, arounds))
             else:
                 yield session
 
     return opened
+
+
+def opener_whose_request_raises(
+    request: str,
+    defect: Exception,
+    *,
+    of_url: str | None = None,
+    once: bool = False,
+    arrived: asyncio.Event | None = None,
+    when_cancelled: bool = False,
+) -> SessionOpener:
+    """A session opener of real sessions whose ``request``, an ``AppSession`` method, raises ``defect``.
+
+    With ``of_url`` only the sessions at that URL raise, and with ``once`` only the first such request does. With
+    ``when_cancelled`` the request waits, tells ``arrived`` and raises ``defect`` in place of the cancellation that
+    reaches it.
+    """
+    raised = False
+
+    async def around(real: Callable[[], Awaitable[object]]) -> object:
+        nonlocal raised
+        if once and raised:
+            return await real()
+        raised = True
+        if not when_cancelled:
+            raise defect
+        if arrived is not None:
+            arrived.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            raise defect from None
+        return None
+
+    return _opener_around(request, around, of_url=of_url)
+
+
+def opener_whose_requests_raise_together(
+    defects: dict[str, tuple[Exception, int]], *, released: asyncio.Event
+) -> SessionOpener:
+    """A session opener of real sessions whose named requests wait for ``released`` and then each raise its defect.
+
+    A request raises after as many turns of the loop as its number says, so that a scenario can let one failure
+    leave its task group while the other is still on its way.
+    """
+
+    def raising(defect: Exception, loop_turns: int) -> _Around:
+        async def around(_real: Callable[[], Awaitable[object]]) -> object:
+            await released.wait()
+            for _ in range(loop_turns):
+                await asyncio.sleep(0)
+            raise defect
+
+        return around
+
+    return _opener_arounds({request: raising(*each) for request, each in defects.items()}, of_url=None)
 
 
 def transport_whose_session_loses_a_child(

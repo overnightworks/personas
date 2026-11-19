@@ -205,8 +205,10 @@ async def test_a_write_held_past_the_listens_deadline_cancels_the_running_turn_w
     await runner.reports.until(Event.BACKOFF)
 
     assert runner.reports.turn_endings == [CANCELLED_TURN]
-    assert runner.reports.reported()[:2] == [(Event.STARTED, None), (Event.BACKOFF, NETWORK_FAILURE_CODE)]
-    assert Event.STORE_FAILED not in {event for event, _ in runner.reports.reported()}
+    # The turn's end statement may be cut by the session's close, which logs it as lost.
+    reported = [report for report in runner.reports.reported() if report[0] is not Event.TURN_STATE_LOST]
+    assert reported[:2] == [(Event.STARTED, None), (Event.BACKOFF, NETWORK_FAILURE_CODE)]
+    assert Event.STORE_FAILED not in {event for event, _ in reported}
 
 
 LATER_TOLD = "2026-11-10T18:00:00Z"

@@ -34,6 +34,7 @@ from tests.support.gateway import BUDGET_SPENT, Gateway, says, says_after_a_hold
 from tests.support.history import act_entry, after_start, unanswered, url_of, woke_at_lines
 from tests.support.hopin import CALL, DISCOVER, LIMIT_SECONDS, LIST_TOOLS, LISTEN, READ, SAY_TOOL
 from tests.support.logs import lines_of
+from tests.support.realm import LIFETIME_SECONDS
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, invited
 from tests.support.transport import transport_closing_with_late_answers
@@ -201,6 +202,35 @@ async def test_every_line_addressed_to_him_gets_its_own_turn_one_after_the_other
         refused_turn(RejectionCode.BUDGET_SPENT),
         refused_turn(RejectionCode.BUSY),
     ]
+
+
+async def test_two_turns_in_a_row_open_no_session_besides_the_loops(runner):
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER), *says(PLACE_ID, "Again."))
+    await restarted_in_the_call(runner)
+    for count in (1, 2):
+        say_in_the_call(runner, f"{ADDRESSED} Round {count}.")
+        await runner.app.said_count(count)
+        await runner.reports.until_a_turn_ended(count=count)
+
+    assert runner.app.log.count(DISCOVER) == 1
+    assert runner.app.log.count(LISTEN) == 1
+
+
+async def test_a_turn_lists_the_tools_of_its_app_with_the_token_the_loop_holds_when_it_lists(runner):
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    await restarted_in_the_call(runner)
+
+    async def passes_renewal_due(reply):
+        runner.clock.time += LIFETIME_SECONDS
+        await reply.result(ListToolsResult(tools=[]))
+
+    runner.app.script(LIST_TOOLS, passes_renewal_due)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.app.said_count(1)
+
+    *earlier, last = runner.app.list_bearers
+    assert last not in earlier
+    assert last == runner.realm.issued[-1]
 
 
 async def a_turn_ended_short(runner, code):
@@ -396,22 +426,20 @@ async def lists_nothing(reply):
 
 
 @pytest.mark.parametrize(
-    ("method", "fails", "events"),
+    ("fails", "events"),
     [
-        (DISCOVER, cuts, [(Event.STARTED, None), (Event.BACKOFF, NETWORK_FAILURE_CODE), (Event.RESUMED, None)]),
-        (LIST_TOOLS, cuts, [(Event.STARTED, None), (Event.BACKOFF, NETWORK_FAILURE_CODE), (Event.RESUMED, None)]),
-        (DISCOVER, refuses_the_token, [(Event.STARTED, None)]),
-        (LIST_TOOLS, refuses_the_token, [(Event.STARTED, None)]),
+        (cuts, [(Event.STARTED, None), (Event.BACKOFF, NETWORK_FAILURE_CODE), (Event.RESUMED, None)]),
+        (refuses_the_token, [(Event.STARTED, None)]),
     ],
-    ids=["discovery cut", "tool listing cut", "discovery refuses the token", "tool listing refuses the token"],
+    ids=["tool listing cut", "tool listing refuses the token"],
 )
-async def test_a_turn_whose_session_fails_before_the_model_is_asked_leads_to_one_lifecycle_reaction_and_no_second_turn(
-    runner, method, fails, events
+async def test_a_turn_whose_listing_fails_before_the_model_is_asked_leads_to_one_lifecycle_reaction_and_no_second_turn(
+    runner, fails, events
 ):
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
     # The loop's session lists the tools first, to check the answer of the turn's thinking.
-    runner.app.script(method, *((lists_nothing,) if method == LIST_TOOLS else ()), fails)
+    runner.app.script(LIST_TOOLS, lists_nothing, fails)
     say_in_the_call(runner, ADDRESSED)
     await runner.app.log.until(LISTEN, 2)
     await runner.app.log.until(READ, 3)
@@ -421,57 +449,6 @@ async def test_a_turn_whose_session_fails_before_the_model_is_asked_leads_to_one
     assert runner.reports.reported() == events
     assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[2]]
     assert len(runner.realm.issued) == (2 if fails is refuses_the_token else 1)
-
-
-@pytest.mark.parametrize(
-    "echo", [anyio.BrokenResourceError, anyio.ClosedResourceError], ids=["broken stream", "closed stream"]
-)
-async def test_a_turn_ended_short_beside_a_late_answer_is_reported_and_costs_one_backoff_and_no_second_turn(
-    runner, monkeypatch, echo
-):
-    failing = transport_closing_with_late_answers(echo=echo, only_close=1)
-    monkeypatch.setattr(app_session, "streamable_http_client", failing)
-    runner.gateway = Gateway(Reply(status=HTTPStatus.TOO_MANY_REQUESTS))
-    await restarted_in_the_call(runner)
-    say_in_the_call(runner, ADDRESSED)
-    await runner.reports.until(Event.RESUMED)
-    await runner.app.log.until(LISTEN, 2)
-
-    await runner.reports.until_a_turn_ended()
-    assert runner.reports.reported() == [
-        (Event.STARTED, None),
-        (Event.PAUSED, RejectionCode.BUSY.value),
-        (Event.BACKOFF, NETWORK_FAILURE_CODE),
-        (Event.RESUMED, None),
-    ]
-    assert runner.reports.turn_endings == [refused_turn(RejectionCode.BUSY)]
-    assert not runner.task.done()
-    assert len(runner.gateway.requests) == 1
-
-
-@pytest.mark.parametrize(
-    "echo", [anyio.BrokenResourceError, anyio.ClosedResourceError], ids=["broken stream", "closed stream"]
-)
-async def test_a_turn_failure_cancelling_a_lifecycle_that_unwinds_with_a_late_answer_gives_one_reaction(
-    runner, monkeypatch, echo
-):
-    failing = transport_closing_with_late_answers(echo=echo, only_close=2)
-    monkeypatch.setattr(app_session, "streamable_http_client", failing)
-    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
-    await restarted_in_the_call(runner)
-    runner.app.script(DISCOVER, cuts)
-    say_in_the_call(runner, ADDRESSED)
-    await runner.app.log.until(LISTEN, 2)
-    await runner.app.log.until(READ, 3)
-    say_in_the_call(runner, f"{ADDRESSED} Again.")
-    await runner.app.said_count(1)
-
-    assert runner.reports.reported() == [
-        (Event.STARTED, None),
-        (Event.BACKOFF, NETWORK_FAILURE_CODE),
-        (Event.RESUMED, None),
-    ]
-    assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[2]]
 
 
 async def relayed_say_fails(runner, fails):

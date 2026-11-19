@@ -1,5 +1,5 @@
-"""How a turn opens its sessions: its own app's, and one of its own for each request to another app, under the token
-for that app's scope and within its call time."""
+"""How a turn reaches another app: in a session of its own for each request, under the token for that app's scope and
+within its call time."""
 
 from __future__ import annotations
 
@@ -23,13 +23,10 @@ if TYPE_CHECKING:
 
 
 class TurnSessions:
-    """Opens the sessions of one agent's turns in one app, and asks another app in a session of its own."""
+    """Asks another app for one agent's turns in a session of its own."""
 
-    def __init__(
-        self, agent: AgentCredentials, app: AppTarget, tokens: TokenSource, open_session: SessionOpener
-    ) -> None:
+    def __init__(self, agent: AgentCredentials, tokens: TokenSource, open_session: SessionOpener) -> None:
         self._agent = agent
-        self._app = app
         self._tokens = tokens
         self._open_session = open_session
 
@@ -63,12 +60,10 @@ class TurnSessions:
             return failure
 
     async def opened(self, opened: AsyncExitStack, app: AppTarget, token: Secret, *, measured: bool) -> AppSession:
-        """The session at ``app``, closed with ``opened``; its opening is a step when ``measured``."""
+        """The session at another ``app``, closed with ``opened``; its opening is a step when ``measured``."""
         if not measured:
             return await opened.enter_async_context(self._open_session(app, token))
-        with stepping(
-            step_timer("session_open.ended", self._agent.client_id, app.mcp_url), turn_goes_on=app != self._app
-        ):
+        with stepping(step_timer("session_open.ended", self._agent.client_id, app.mcp_url), turn_goes_on=True):
             return await opened.enter_async_context(self._open_session(app, token))
 
     async def _within_call_time[Answer](

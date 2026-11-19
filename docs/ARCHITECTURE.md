@@ -54,8 +54,8 @@ flowchart LR
   his due places, his pause, one turn at a time across all his apps, and per place a speech record, in
   memory only: the requests in flight, the sentences answered as spoken whose line has not entered and the
   sentence that plays, which `voice.py` writes and the turn that sent them drops when it ends.
-- **A turn** (`turning.py`) opens its own session, lists the tools of its apps, sends the gateway the
-  persona and the told messages, and relays each call; `voice.py` speaks an aloud turn, `holds.py` decides
+- **A turn** (`turning.py`) runs on its loop's session at its own app, lists the tools of its apps, sends the
+  gateway the persona and the told messages, and relays each call; `voice.py` speaks an aloud turn, `holds.py` decides
   a hold, `held_tools.py` and `turn_sessions.py` reach the other apps a turn holds.
 - **Decisions** (`entries` <- `recall` <- `decision` <- `present` <- `due`) are pure: no process, network or
   clock. `config.py` alone owns the TOML's fields and refusals.
@@ -86,7 +86,7 @@ sequenceDiagram
     Loop->>Mind: claim the oldest due place
     Mind-->>Loop: the claim is kept in the store
     Loop->>Turn: start the turn
-    Turn->>App: list the tools, own session and token
+    Turn->>App: list the tools, on the loop's session
     Turn->>Gateway: persona and told messages
     Gateway-->>Turn: a tool call, say
     Turn->>Mind: did anything arrive that holds the call?

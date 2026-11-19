@@ -7,9 +7,11 @@ import json
 from dataclasses import replace
 from http import HTTPStatus
 
+import anyio
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL, VoiceState
+from anyio import BrokenResourceError
 
 from personas import app_session
 from personas.decision import status_code
@@ -19,8 +21,8 @@ from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, say_in_the_call
 from tests.support.fakes import COMPLETED_TURN
 from tests.support.gateway import BUDGET_SPENT, say
 from tests.support.hopin import CALL, LIMIT_SECONDS, SAY_TOOL
-from tests.support.transport import transport_closing_with_late_answers
-from tests.support.voice import TWO_SENTENCES, a_voice_call, holding_sentence_ends, sentences_spoken
+from tests.support.transport import opener_whose_requests_raise_together, transport_closing_with_late_answers
+from tests.support.voice import TWO_SENTENCES, a_voice_call, ended_by, holding_sentence_ends, sentences_spoken
 from tests.support.wire import cuts, refuses_with_a_server_error
 
 pytestmark = pytest.mark.anyio
@@ -353,6 +355,27 @@ async def test_a_decision_whose_call_fails_beside_a_defect_ends_the_runner_loud_
         (ended,) = await asyncio.gather(runner.task, return_exceptions=True)
 
     assert sorted(type(leaf).__name__ for leaf in leaves_of(ended)) == [RuntimeError.__name__, Unreachable.__name__]
+    assert runner.reports.codes_of(Event.HOLD_DECIDED) == []
+
+
+async def test_a_decision_whose_call_fails_beside_a_speak_that_fails_ends_the_runner_loud_with_both(runner):
+    released = asyncio.Event()
+    speak_turns_behind_the_decision = 5
+    defects = {
+        "speak": (BrokenResourceError(), speak_turns_behind_the_decision),
+        "continue_speaking": (KeyError("decision"), 0),
+    }
+    runner.open_session = opener_whose_requests_raise_together(defects, released=released)
+    await a_voice_call(runner, completion(TWO_SENTENCES), deciding(CONTINUE_SPEAKING_TOOL))
+    say_in_the_call(runner, ADDRESSED, spoken=True)
+    await runner.gateway.until_requested(1)
+    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
+    await anyio.wait_all_tasks_blocked()
+    released.set()
+
+    ended = await ended_by(runner.task)
+
+    assert sorted(type(leaf).__name__ for leaf in leaves_of(ended)) == [BrokenResourceError.__name__, KeyError.__name__]
     assert runner.reports.codes_of(Event.HOLD_DECIDED) == []
 
 
