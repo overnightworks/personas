@@ -55,6 +55,11 @@ class TurnHold:
         self.released.set()
 
 
+def deciding_first(told: TurnHold | None) -> bool:
+    """Whether the turn was told a hold that he has not decided."""
+    return told is not None and told.pending
+
+
 async def close_when_over(inbox: HoldInbox, *speech: asyncio.Task[object]) -> None:
     await asyncio.wait(speech)
     inbox.close()

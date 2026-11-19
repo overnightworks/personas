@@ -382,7 +382,7 @@ class Turning:
         self, events: AsyncIterator[TurnEvent], voiced: _Voiced, tally: TurnTally
     ) -> FinalEvent | None:
         speaking = voiced.speaking
-        told = voiced.held.told
+        held = voiced.held
         final = None
         try:
             async for event in events:
@@ -390,7 +390,7 @@ class Turning:
                 if isinstance(event, ToolCallEvent):
                     tally.tool_call_count += 1
                     voiced.inbox.waiting = event
-                    if told is None or not told.pending:
+                    if not held.deciding_first:
                         await speaking.spoken()
                     voiced.inbox.waiting = None
                 elif isinstance(event, FinalEvent):
@@ -398,7 +398,7 @@ class Turning:
         except Exception:
             await speaking.settle()
             raise
-        if told is not None and told.pending:
+        if held.deciding_first:
             speaking.cut()
         else:
             speaking.end()
