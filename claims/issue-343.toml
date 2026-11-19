@@ -3,6 +3,6 @@ agent = "Claude d21def74-68af-4c98-89a2-70bc45cbdd6a"
 role = "builder"
 base = "6bf7fcaff0a737545b5ed3a90617dbb1b8e8a775"
 branch = "claude/issue-343-hold-decided-by-his-next-turn"
-scope = ["docs/configuration.md", "docs/log.md", "docs/turns.md", "src/personas/decision.py", "src/personas/entries.py", "src/personas/holds.py", "src/personas/loop.py", "src/personas/mind.py", "src/personas/present.py", "src/personas/reporting.py", "src/personas/turning.py", "src/personas/voice.py", "tests"]
+scope = ["AGENTS.md", "docs/ARCHITECTURE.md", "docs/configuration.md", "docs/log.md", "docs/turns.md", "pyproject.toml", "quality/baseline.toml", "src/personas/decision.py", "src/personas/due.py", "src/personas/entries.py", "src/personas/held_tools.py", "src/personas/holds.py", "src/personas/loop.py", "src/personas/mind.py", "src/personas/present.py", "src/personas/reporting.py", "src/personas/sizing.py", "src/personas/speech.py", "src/personas/turning.py", "src/personas/voice.py", "tests"]
 opened_commit = "e2d783302867089d90fee1d4d108176cfff41d28"
 whole_reason = "one decision path from the window read through the loop to the deciding turn, with its loop proof and documents"
