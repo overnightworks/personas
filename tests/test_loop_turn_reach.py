@@ -678,7 +678,7 @@ REQUEST_AT = pytest.mark.parametrize("where", ["listing", "call"])
 
 @REQUEST_AT
 @CHILD_LOST
-async def test_a_defect_in_a_tools_only_request_whose_turn_session_loses_a_child_while_it_closes_ends_the_runner_loud(
+async def test_a_defect_in_a_tools_only_request_whose_loop_session_loses_a_child_while_it_closes_ends_the_runner_loud(
     runner, songmaker, monkeypatch, where, child
 ):
     defect = ValueError("a defect")
@@ -686,7 +686,7 @@ async def test_a_defect_in_a_tools_only_request_whose_turn_session_loses_a_child
     failing = asyncio.Event()
     closing = ClosingHold()
     held = closing.transport(nth=1 if where == "listing" else 2, of_url=songmaker_url(runner))
-    lost = transport_whose_session_loses_a_child(failing, nth=2, of_url=runner.app_url, error=child)
+    lost = transport_whose_session_loses_a_child(failing, nth=1, of_url=runner.app_url, error=child)
     monkeypatch.setattr(
         app_session,
         "streamable_http_client",
@@ -703,7 +703,7 @@ async def test_a_defect_in_a_tools_only_request_whose_turn_session_loses_a_child
     finally:
         closing.release.set()
 
-    await ends_with_the_defect_beside(runner, defect, Unreachable)
+    await ends_with_the_defect_beside(runner, defect)
 
 
 async def test_a_second_defect_of_the_turns_session_body_leaves_beside_the_first_one_a_tools_only_call_recorded(

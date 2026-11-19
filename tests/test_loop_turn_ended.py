@@ -137,8 +137,6 @@ async def test_every_line_a_turn_writes_shares_its_trace_and_no_line_outside_it_
     assert [line["event"] for line in in_the_turn] == [
         "turn_wait.ended",
         "claim_write.ended",
-        "token_hold.ended",
-        "session_open.ended",
         "tool_list.ended",
         "turn_setup.ended",
         "turns.paused",

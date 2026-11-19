@@ -8,30 +8,25 @@ from http import HTTPStatus
 import anyio
 import pytest
 from agents.backend.fake_gateway import completion
-from agents.member import SPEAK_TOOL
+from agents.member import SPEAK_TOOL, STANDING_URI, place_window_uri
 from agents.tools import ToolOutcome
-from agents.turn import FailureCode
+from agents.turn import FailureCode, StopOutcome
 
-from personas import app_session
-from personas.app_session import READ_SECONDS, open_mcp_session
 from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE, status_code
 from personas.failures import INVALID_ANSWER_CODE, leaves_of
 from personas.reporting import Event
-from personas.task_record import UnrequestedCancellationError
-from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, pulses_the_window_once, say_in_the_call
+from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PLACE_ID, pulses_the_window_once, say_in_the_call
 from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
 from tests.support.fakes import CANCELLED_TURN, failed_turn
 from tests.support.gateway import Gateway, speaks_and_says
 from tests.support.hopin import CALL, LIMIT_SECONDS, LISTEN, READ, SAY_TOOL
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, paused
-from tests.support.transport import ClosingHold, opener_whose_request_raises, transport_whose_session_loses_a_child
+from tests.support.transport import opener_whose_request_raises
 from tests.support.voice import TWO_SENTENCES, a_voice_call, ended_by, gated, holding_sentence_ends, sentences_spoken
-from tests.support.wire import hangs
+from tests.support.wire import cuts, hangs_once_entered
 
 pytestmark = pytest.mark.anyio
-
-SHORT_SPEAK_SECONDS = 0.3
 
 
 @pytest.mark.parametrize(
@@ -356,61 +351,59 @@ async def test_a_defect_in_speaks_request_ends_the_runner_loud(runner, speak_def
     assert runner.reports.reported() == [(Event.STARTED, None)]
 
 
-async def test_a_defect_in_speaks_request_whose_place_then_leaves_ends_the_runner_loud_without_a_cancel(
-    runner, monkeypatch, speak_defect
-):
-    closing = ClosingHold()
-    monkeypatch.setattr(app_session, "streamable_http_client", closing.transport(of_url=runner.app_url))
+async def a_turn_whose_speak_is_in_flight(runner, said: asyncio.Event | None = None):
+    """The runner restarted in a voice call; the turn's first sentence reached the app's ``speak``, which never
+    answers."""
+    entered = asyncio.Event()
+    runner.app.script(CALL, hangs_once_entered(entered))
     await a_voice_call(runner, completion(TWO_SENTENCES))
     say_in_the_call(runner, ADDRESSED, spoken=True)
-    try:
-        async with asyncio.timeout(LIMIT_SECONDS):
-            await closing.closing.wait()
-        runner.app.stand(SUBJECT)
-        async with asyncio.timeout(LIMIT_SECONDS):
-            await closing.cancelled.wait()
-    finally:
-        closing.release.set()
-
-    ended = await ended_by(runner.task)
-
-    assert list(leaves_of(ended)) == [speak_defect]
-    assert runner.reports.reported() == [(Event.STARTED, None)]
+    if said is not None:
+        said.set()
+    async with asyncio.timeout(LIMIT_SECONDS):
+        await entered.wait()
 
 
-async def test_a_turn_task_that_ends_cancelled_while_nobody_cancelled_it_ends_the_runner_loud(runner, monkeypatch):
-    failing = asyncio.Event()
-    monkeypatch.setattr(
-        app_session, "streamable_http_client", transport_whose_session_loses_a_child(failing, of_url=runner.app_url)
-    )
-    sleeps = holding_sentence_ends(runner)
-    await a_voice_call(runner, completion(TWO_SENTENCES))
-    say_in_the_call(runner, ADDRESSED, spoken=True)
-    await sleeps.until_began(1)
-
-    failing.set()
-    ended = await ended_by(runner.task)
-
-    (leaf,) = leaves_of(ended)
-    assert isinstance(leaf, UnrequestedCancellationError)
-    assert isinstance(leaf.__cause__, asyncio.CancelledError)
-
-
-async def test_a_speak_that_never_answers_is_given_up_at_the_sessions_read_bound_and_the_turn_ends_into_the_reaction(
+async def test_a_runner_stopped_while_a_turns_speak_is_in_flight_ends_the_turn_cancelled_and_states_no_unavailable(
     runner,
 ):
-    opens = 0
+    await a_turn_whose_speak_is_in_flight(runner)
 
-    def short_after_the_lifecycle(app, token):
-        nonlocal opens
-        opens += 1
-        return open_mcp_session(app, token, stream_seconds=READ_SECONDS if opens == 1 else SHORT_SPEAK_SECONDS)
+    runner.task.cancel()
 
+    assert isinstance(await ended_by(runner.task), asyncio.CancelledError)
+    assert runner.reports.turn_endings == [CANCELLED_TURN]
+    assert StopOutcome.UNAVAILABLE not in [statement.stopped for _, statement in runner.app.turn_states]
+
+
+async def test_a_lost_stream_while_a_turns_speak_is_in_flight_ends_the_turn_cancelled_and_backs_off_once(runner):
+    said, lost = asyncio.Event(), asyncio.Event()
+
+    async def is_lost_on_demand(reply):
+        await reply.open_stream()
+        await reply.acknowledge([STANDING_URI])
+        await said.wait()
+        await reply.pulse(place_window_uri(CALL_PLACE))
+        await lost.wait()
+        reply.cut()
+
+    runner.app.script(LISTEN, is_lost_on_demand)
+    await a_turn_whose_speak_is_in_flight(runner, said)
+
+    lost.set()
+    await runner.reports.until(Event.BACKOFF)
+    await runner.reports.until_a_turn_ended()
+
+    assert runner.reports.turn_endings == [CANCELLED_TURN]
+    assert StopOutcome.UNAVAILABLE not in [statement.stopped for _, statement in runner.app.turn_states]
+    assert [event for event, _ in runner.reports.reported(started=False)].count(Event.BACKOFF) == 1
+
+
+async def test_a_speak_the_app_cuts_ends_the_turn_into_the_reaction(runner):
     runner.give_voice()
     runner.gateway = Gateway(completion(TWO_SENTENCES))
-    runner.app.script(CALL, hangs)
+    runner.app.script(CALL, cuts)
     runner.app.stand(SUBJECT, active(PLACE_ID))
-    runner.open_session = short_after_the_lifecycle
     runner.start()
     await runner.app.until_window_read(PLACE_ID)
     say_in_the_call(runner, ADDRESSED, spoken=True)

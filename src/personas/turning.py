@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import AsyncExitStack, aclosing
+from contextlib import aclosing
 from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Final
@@ -84,7 +84,6 @@ if TYPE_CHECKING:
     from personas.app_session import AppSession, SessionOpener
     from personas.clock import Clock
     from personas.config import AgentCredentials, AppTarget
-    from personas.decision import Token
     from personas.entries import History, Occasion
     from personas.mind import Mind
     from personas.present import Present
@@ -202,7 +201,7 @@ class Admitted:
 
 
 class Turning:
-    """Runs the turns of one agent in one app, each over a session of its own, holding the tools of every app in the
+    """Runs the turns of one agent in one app, each over the loop's session, holding the tools of every app in the
     configuration's order: the app's own, those of the apps in ``admitted.apps`` and those of the tools-only apps,
     after the lookup when ``[memory]`` is set.
 
@@ -223,7 +222,6 @@ class Turning:
         open_session: SessionOpener,
         mind: Mind,
         clock: Clock,
-        current_token: Callable[[], Awaitable[Token]],
         use_current_token: Callable[[AppSession], Awaitable[None]],
         report: Callable[[Event, str | None, AppTarget | None, CallFailure | None], None],
         report_pause: Callable[[float, str], None],
@@ -233,10 +231,9 @@ class Turning:
         self._agent = agent
         self._app = app
         self._apps = tuple((each, each.max_tool_calls) for each in apps if each.max_tool_calls is not None)
-        self._sessions = TurnSessions(agent, app, tokens, open_session)
+        self._sessions = TurnSessions(agent, tokens, open_session)
         self._mind = mind
         self._clock = clock
-        self._current_token = current_token
         self._use_current_token = use_current_token
         self._report = report
         self._report_pause = report_pause
@@ -246,25 +243,30 @@ class Turning:
         self._listening: tuple[PlaceRef, HoldInbox] | None = None
         self._decided: dict[PlaceRef, str] = {}
 
-    async def take(self, setup: TurnSetup, admitted: Admitted, record: TaskRecord, tally: TurnTally) -> None:
+    async def take(
+        self, session: AppSession, setup: TurnSetup, admitted: Admitted, record: TaskRecord, tally: TurnTally
+    ) -> None:
         """Runs one turn; whatever way it ends, a defect a request of it met ends the runner loud.
 
         A session whose close cuts a request short can lose the defect from what leaves, so the turn's record
         joins it. A cancelled turn ends as the cancellation unless a defect was met or nobody cancelled it.
         """
         await ending_loud_when_cancelled(
-            ending_with_recorded_defect(self._judge_turn(setup, admitted, record, tally), record), record.loud_end
+            ending_with_recorded_defect(self._judge_turn(session, setup, admitted, record, tally), record),
+            record.loud_end,
         )
 
-    async def _judge_turn(self, setup: TurnSetup, admitted: Admitted, record: TaskRecord, tally: TurnTally) -> None:
-        """Runs one turn over its own session.
+    async def _judge_turn(
+        self, session: AppSession, setup: TurnSetup, admitted: Admitted, record: TaskRecord, tally: TurnTally
+    ) -> None:
+        """Runs one turn over the loop's session.
 
         A turn the gateway ends short is told to the tally unless a defect was met; a failed relayed call and any other
         error go to the group. Every error of a cancelled turn ends as the cancellation.
         """
         sizing = _Sizing()
         try:
-            await self._run_turn(setup, admitted, record, sizing, tally)
+            await self._run_turn(session, setup, admitted, record, sizing, tally)
         except Exception as error:
             raise_if_cancelled()
             leaves = list(leaves_of(error))
@@ -297,11 +299,15 @@ class Turning:
         self._mind.due_again(AppPlace(self._app.mcp_url, admitted.place), admitted.occasion, now + seconds)
 
     async def _run_turn(
-        self, setup: TurnSetup, admitted: Admitted, record: TaskRecord, sizing: _Sizing, tally: TurnTally
+        self,
+        session: AppSession,
+        setup: TurnSetup,
+        admitted: Admitted,
+        record: TaskRecord,
+        sizing: _Sizing,
+        tally: TurnTally,
     ) -> None:
-        agent = self._agent.client_id
-        begun = self._clock.now()
-        with stepping(step_timer("turn_setup.ended", agent, self._app.mcp_url)) as hand_off:
+        with stepping(step_timer("turn_setup.ended", self._agent.client_id, self._app.mcp_url)) as hand_off:
             turn = TurnTold(
                 admitted.at,
                 self._app.mcp_url,
@@ -311,16 +317,11 @@ class Turning:
                 through=admitted.history.taken,
             )
             told = turn_messages(admitted.facts.name, admitted.present, turn)
-            held_since = self._clock.now() - begun
-            with stepping(step_timer("token_hold.ended", agent, self._app.mcp_url, elapsed_seconds=held_since)):
-                token = await self._current_token()
-            async with AsyncExitStack() as opened:
-                session = await self._sessions.opened(opened, self._app, token.value, measured=True)
-                try:
-                    await self._run_session_body(setup, admitted, turn, told, session, record, sizing, tally, hand_off)
-                except Exception as error:
-                    record.note(error)
-                    raise
+            try:
+                await self._run_session_body(setup, admitted, turn, told, session, record, sizing, tally, hand_off)
+            except Exception as error:
+                record.note(error)
+                raise
 
     async def _run_session_body(
         self,
@@ -645,6 +646,7 @@ class Turning:
         with stepping(timer):
             try:
                 async with within_call_time(self._app.call_seconds):
+                    await self._use_current_token(session)
                     return await session.declared_tools()
             except CallTimedOut as failure:
                 timer.handled()

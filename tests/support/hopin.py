@@ -163,6 +163,7 @@ class FakeApp(AppVoice):
     """Places whose window read the app answers with a server error."""
     say_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
     speak_bearers: list[str] = field(default_factory=list[str])
+    list_bearers: list[str] = field(default_factory=list[str])
     traceparents: list[tuple[str, str | None]] = field(default_factory=list[tuple[str, str | None]])
     """The method and the ``traceparent`` header of each request, in order; none when the request carried none."""
     refused_tool: str | None = None
@@ -475,6 +476,8 @@ class FakeApp(AppVoice):
         self.traceparents.append((method, headers.get("traceparent")))
         if method == CALL and (document.get("params") or {}).get("name") == SPEAK_TOOL:
             self.speak_bearers.append(bearer)
+        if method == LIST_TOOLS:
+            self.list_bearers.append(bearer)
         noting = self._noting_acknowledgements(send)
         reply = Reply(Rpc(document.get("id", 0), method, document.get("params") or {}), noting, receive)
         if bearer not in self.bearers:

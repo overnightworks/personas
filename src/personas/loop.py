@@ -171,7 +171,6 @@ class AgentLoop:
             boundaries.open_session,
             mind,
             boundaries.clock,
-            self._current_token,
             self._use_current_token,
             self._report,
             self._report_pause,
@@ -225,7 +224,16 @@ class AgentLoop:
                         async for _ in wakes:
                             await self._reconcile(session, turns)
             finally:
+                await self._end_turn_before_session()
                 self._turn_states.session_ended(session)
+
+    async def _end_turn_before_session(self) -> None:
+        """A turn in flight ends cancelled while the session it shares is still open, so its place stays due and its
+        request is not answered with a closed connection."""
+        turn = self._turn
+        if turn is not None:
+            turn.task.cancel()
+            await asyncio.wait({turn.task})
 
     async def _is_voice_app(self, session: AppSession) -> bool:
         """Whether the turns at this app's call places are spoken, decided once for the lifecycle session."""
@@ -271,7 +279,7 @@ class AgentLoop:
             # A window the app lost dropped its place's checkpoint: the standing says where the place stands now.
             await self._take_standing(session)
         self._turn_states.restate_after_full_pass()
-        await self._start_due_turn(turns)
+        await self._start_due_turn(turns, session)
         self._served()
 
     async def _take_standing(self, session: AppSession) -> tuple[Standing, ...]:
@@ -395,7 +403,7 @@ class AgentLoop:
             elif not seen.view.awaits_you:
                 self._mind.undue(partial(eq, at))
 
-    async def _start_due_turn(self, turns: asyncio.TaskGroup) -> None:
+    async def _start_due_turn(self, turns: asyncio.TaskGroup, session: AppSession) -> None:
         """Starts the turn of the place that has waited longest when it is in this app and none of his runs. The claim
         and the turn's start share one synchronous step; the turn waits until the claim is kept, so a pod that takes
         him over before then answers the place instead of him."""
@@ -416,7 +424,7 @@ class AgentLoop:
         aloud = speaks_aloud(self._voice_app, occasion, self._mind.checkpoint(at))
         apps = self._mind.held_apps(self._app.mcp_url)
         admitted = Admitted(facts, at.place, occasion, self._mind.present, self._boundaries.clock.wall(), aloud, apps)
-        self._start_turn(turns, setup, at.place, admitted, due, claimed)
+        self._start_turn(turns, session, setup, at.place, admitted, due, claimed)
 
     def _wake_when_pause_over(self, turns: asyncio.TaskGroup, now: float) -> None:
         """A pause holds the turn of the place at this app that has waited longest: one waiter of this loop wakes
@@ -447,6 +455,7 @@ class AgentLoop:
     def _start_turn(
         self,
         turns: asyncio.TaskGroup,
+        session: AppSession,
         setup: TurnSetup,
         place: PlaceRef,
         admitted: Admitted,
@@ -467,16 +476,18 @@ class AgentLoop:
             wait.add(wait_reason=due.waited_on.value)
             wait.end()
             tally = start_turn_tally(self._agent.client_id, self._app.mcp_url)
-            task = turns.create_task(self._take_once_kept(claimed, setup, admitted, tally))
+            task = turns.create_task(self._take_once_kept(claimed, session, setup, admitted, tally))
             self._turn = ActiveTurn(task, place, tally)
             task.add_done_callback(self._turn_over)
 
-    async def _take_once_kept(self, claimed: int, setup: TurnSetup, admitted: Admitted, tally: TurnTally) -> None:
+    async def _take_once_kept(
+        self, claimed: int, session: AppSession, setup: TurnSetup, admitted: Admitted, tally: TurnTally
+    ) -> None:
         """Takes the turn once the ``claimed``-th change of his mind, its claim, is kept in the store."""
         with stepping(step_timer("claim_write.ended", self._agent.client_id, self._app.mcp_url)):
             await self._mind.until_written(claimed)
         await self._turn_states.turn_started(admitted.place)
-        await self._turning.take(setup, admitted, TaskRecord(), tally)
+        await self._turning.take(session, setup, admitted, TaskRecord(), tally)
 
     def _turn_over(self, task: asyncio.Task[None]) -> None:
         """The one writer of ``turn.ended``, whatever way the task ended."""
