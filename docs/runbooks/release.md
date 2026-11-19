@@ -15,7 +15,9 @@ release changes the runner, its characters and its figures together. The rules i
    from the version in `pyproject.toml` at the newest `v<version>` tag up to the one on `main`. Its names
    are changes, removals or additions: a name is an addition when `docs/calling.md` at the previous
    release does not list it (compare the two files), and otherwise a change or removal. A line that says
-   `unchanged.` holds nothing. For each name that holds, keep the served apps from the deployment's
+   `unchanged.` holds nothing. A line that says `changed` and names nothing (its change is written in
+   prose) is read by hand: it holds when a kept app uses the change its prose describes, judged against
+   the previous release's notes. For each name that holds, keep the served apps from the deployment's
    runner configuration (`apps/personas/personas.toml` in platform) that use the changed or removed
    tool, record or field, or every served app for an added tool, then read each kept app's `main` for
    its agents pin.
