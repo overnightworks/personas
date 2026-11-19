@@ -1,4 +1,4 @@
-"""The wardrobes of the two personas: the faces, hair and clothes that tell Mozart and Leonardo apart."""
+"""The wardrobes of the personas: the faces, hair and clothes that tell Mozart, Leonardo and Humboldt apart."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 
 from figures.figure_head import Face
 from figures.humanoid_figure import Wardrobe
+from figures.humboldt_coat import humboldt_clothes
+from figures.humboldt_hair import humboldt_hair
 from figures.leonardo_hair import leonardo_hair
 from figures.leonardo_robe import leonardo_clothes
 from figures.mozart_coat import mozart_clothes
@@ -21,6 +23,10 @@ def _dress_mozart(face: Face) -> list[Part]:
 
 def _dress_leonardo(face: Face) -> list[Part]:
     return [*leonardo_clothes(face), *leonardo_hair(face)]
+
+
+def _dress_humboldt(face: Face) -> list[Part]:
+    return [*humboldt_clothes(face), *humboldt_hair()]
 
 
 MOZART = Wardrobe(
@@ -62,4 +68,24 @@ LEONARDO = Wardrobe(
         cheek=0.0005,
     ),
     dress=_dress_leonardo,
+)
+HUMBOLDT = Wardrobe(
+    name="Humboldt",
+    face=Face(
+        skin=(222, 190, 166),
+        blush=(204, 144, 128),
+        lips=(170, 110, 104),
+        iris=(96, 112, 120),
+        brow=(120, 104, 92),
+        brow_weight=0.95,
+        length=1.04,
+        jaw=0.97,
+        nose_length=1.08,
+        nose_height=0.025,
+        nose_width=0.98,
+        brow_ridge=0.004,
+        eye_set=0.0062,
+        cheek=-0.001,
+    ),
+    dress=_dress_humboldt,
 )
