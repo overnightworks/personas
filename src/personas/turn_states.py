@@ -65,8 +65,10 @@ class TurnStates:
         self._restate_due = False
 
     def sync_seats(self, standings: tuple[Standing, ...]) -> None:
-        """Forgets the last turn end of each seat he no longer holds."""
+        """Forgets the last turn end of each seat he no longer holds, and that its app served it no statement, so a
+        new seat at the same place starts with nothing stated."""
         self._seat_ends = sync_seat_ends(self._seat_ends, standings)
+        self._unserved &= self._seat_ends.keys()
 
     async def turn_started(self, place: PlaceRef) -> None:
         await self._queue_statement(SetTurnStateArguments(place=place, thinking=True))

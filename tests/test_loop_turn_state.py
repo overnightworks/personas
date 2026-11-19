@@ -12,6 +12,7 @@ import pytest
 from agents.backend.fake_gateway import Reply
 from agents.member import (
     SET_TURN_STATE_TOOL,
+    STANDING_URI,
     PlaceRef,
     SetTurnStateArguments,
     SetTurnStateRefusal,
@@ -408,14 +409,17 @@ async def test_a_stops_statement_that_does_not_go_out_within_its_margin_is_logge
     assert runner.reports.reported(started=False).count((Event.TURN_STATE_FAILED, NETWORK_FAILURE_CODE)) == 1
 
 
-@pytest.mark.parametrize("status", [HTTPStatus.BAD_REQUEST, HTTPStatus.OK], ids=["error status", "success status"])
-async def test_a_seat_whose_app_answers_an_unknown_tool_gets_no_more_statements_after_one_line(runner, status):
-    """TURNS-43, LOG-34."""
-
+def answers_an_unknown_tool(status: HTTPStatus):
     async def unknown_tool(reply: AppReply) -> None:
         await reply.error(INVALID_PARAMS, status=status)
 
-    runner.app.script(SET_TURN_STATE_TOOL, unknown_tool)
+    return unknown_tool
+
+
+@pytest.mark.parametrize("status", [HTTPStatus.BAD_REQUEST, HTTPStatus.OK], ids=["error status", "success status"])
+async def test_a_seat_whose_app_answers_an_unknown_tool_gets_no_more_statements_after_one_line(runner, status):
+    """TURNS-43, LOG-34."""
+    runner.app.script(SET_TURN_STATE_TOOL, answers_an_unknown_tool(status))
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER), *says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
     for turn in (1, 2):
@@ -438,6 +442,28 @@ async def test_a_statement_the_app_does_not_answer_in_time_is_logged_as_failed_a
 
     assert runner.reports.reported(started=False)[0] == (Event.TURN_STATE_FAILED, NETWORK_FAILURE_CODE)
     assert runner.gateway.arrivals == 1
+
+
+async def test_a_new_seat_at_the_place_of_a_seat_whose_app_served_no_statement_starts_with_nothing_stated(runner):
+    """TURNS-43."""
+    runner.app.script(SET_TURN_STATE_TOOL, answers_an_unknown_tool(HTTPStatus.BAD_REQUEST))
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER), *says(PLACE_ID, ANSWER))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, f"{ADDRESSED} 1")
+    await runner.reports.until_a_turn_completed()
+
+    standing_reads = runner.app.reads.get(STANDING_URI, 0)
+    runner.app.stand(SUBJECT)
+    await runner.app.until_standing_read(standing_reads + 1)
+    seated_again_read = runner.app.hold_next_window_read()
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    await runner.app.until_window_read_held()
+    say_in_the_call(runner, f"{ADDRESSED} 2")
+    seated_again_read.set()
+    await runner.reports.until_a_turn_completed(count=2)
+    await runner.app.until_turn_states(2)
+
+    assert statements(runner) == [THINKING, ended(None)]
 
 
 async def test_a_backoff_whose_window_reads_keep_failing_logs_resumed_once_a_full_pass_went_through(runner):
