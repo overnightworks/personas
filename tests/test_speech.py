@@ -185,7 +185,7 @@ def test_a_hold_the_turn_that_was_told_it_did_not_decide_stays_undecided_and_a_d
     assert hold_turn_ended(told).hold == _held(Telling.UNDECIDED)
     assert hold_turn_ended(_record_with(_held())).hold == _held()
     assert hold_turn_ended(SpeechRecord()) == SpeechRecord()
-    assert hold_decided(told, "h1", None) == SpeechRecord(saying="One.", hold=None, decided="h1")
+    assert hold_decided(told, "h1", 120.0) == SpeechRecord(saying="One.", hold=None, decided="h1")
 
 
 def test_the_end_of_the_sending_turn_keeps_the_lines_it_owes_and_the_sentence_that_plays_and_forgets_the_rest():
