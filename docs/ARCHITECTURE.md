@@ -53,11 +53,12 @@ flowchart LR
 - **The mind** (`mind.py`) holds one agent's present in memory: his history, the answered turns it tells,
   his due places, his pause, one turn at a time across all his apps, and per place a speech record, in
   memory only: the requests in flight, the sentences answered as spoken whose line has not entered and the
-  sentence that plays, which `voice.py` writes and the turn that sent them drops when it ends.
+  sentence that plays, which `voice.py` writes and the turn that sent them drops when it ends, and the hold that
+  stands there with what was said over him and whether a turn was told it, which outlives that turn.
 - **A turn** (`turning.py`) runs on its loop's session at its own app, lists the tools of its apps, sends the
   gateway the persona and the told messages, and relays each call; `voice.py` speaks an aloud turn, `holds.py` decides
   a hold, `held_tools.py` and `turn_sessions.py` reach the other apps a turn holds.
-- **Decisions** (`entries` <- `recall` <- `decision` <- `present` <- `due`) are pure: no process, network or
+- **Decisions** (`entries` <- `recall` <- `speech` <- `decision` <- `present` <- `due`) are pure: no process, network or
   clock. `config.py` alone owns the TOML's fields and refusals.
 - **The stores** (`memory.py`, its migrations in `src/personas/migrations`) are the history store, always,
   and the line store with `[memory]`; `sweep.py` removes old lines.

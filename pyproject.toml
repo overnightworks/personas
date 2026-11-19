@@ -164,6 +164,7 @@ layers = [
     "personas.due",
     "personas.present",
     "personas.decision",
+    "personas.speech",
     "personas.recall",
     "personas.entries",
 ]

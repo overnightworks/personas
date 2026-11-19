@@ -424,7 +424,10 @@ class AgentLoop:
             self._turned_revisions[at.place] = occasion.revision
         aloud = speaks_aloud(self._voice_app, occasion, self._mind.checkpoint(at))
         apps = self._mind.held_apps(self._app.mcp_url)
-        admitted = Admitted(facts, at.place, occasion, self._mind.present, self._boundaries.clock.wall(), aloud, apps)
+        held = self._mind.hold_to_tell(at)
+        admitted = Admitted(
+            facts, at.place, occasion, self._mind.present, self._boundaries.clock.wall(), aloud, apps, held
+        )
         self._start_turn(turns, session, setup, at.place, admitted, due, claimed)
 
     def _wake_when_pause_over(self, turns: asyncio.TaskGroup, now: float) -> None:
@@ -504,6 +507,7 @@ class AgentLoop:
         )
         tally.end(ending)
         self._turn_states.turn_ended(turn.place, ending)
+        self._mind.hold_turn_ended(AppPlace(self._app.mcp_url, turn.place))
         if cancelled and not tally.answered and not turn.cancel_requested:
             self._mind.cut()
         self._mind.release()

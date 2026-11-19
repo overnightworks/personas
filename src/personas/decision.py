@@ -26,7 +26,6 @@ from agents.member import (
     SPEAK_TOOL,
     STOP_SPEAKING_TOOL,
     AcceptInvitationRefusal,
-    PartialSpeech,
     PlaceEntry,
     PlaceRef,
     PlaceView,
@@ -88,8 +87,6 @@ SUSPENDED_RETRY_SECONDS: Final = 30.0
 """How often a suspended loop, and a tools-only app the realm refused, ask the realm and then the app again."""
 TURN_ROLE: Final[AgentRole] = "user"
 """The app role a turn acts under: an agent holds no admin right."""
-SENTENCES_AHEAD: Final = 1
-"""How many sentences he sends ahead of the one playing: the wire answers a sentence at its turn, in the order sent."""
 TURN_CANCELLED_CODE: Final = "cancelled"
 """The code of an act whose call was cut while it was in flight, by a cancellation of its turn or by the turn's
 deadline."""
@@ -595,54 +592,6 @@ def speech_outcome(ended: SpeakAnswer | SpeakRefusal | BaseException, *, cancell
     return _unanswered(ended, cancelling=cancelling)
 
 
-def may_send_next(owed: int) -> bool:
-    """Whether his next sentence may go to ``speak`` while ``owed`` own spoken lines, one per sentence answered as
-    spoken, have not entered: the wire holds a sentence back until the one before it ends, so only the sentence playing
-    may still owe its line."""
-    return owed <= SENTENCES_AHEAD
-
-
-@dataclass(frozen=True)
-class SpeechRecord:
-    """What he still owes of his speech at one place: the requests in flight, the lines still owed, one per sentence
-    answered as spoken, and the sentence that plays. A line credited before the answer of its request leaves the count
-    below zero until that answer."""
-
-    in_flight: int = 0
-    credit: int = 0
-    saying: str | None = None
-
-    @property
-    def owed(self) -> int:
-        """The own spoken lines that sentences answered as spoken have not yet brought into the history."""
-        return max(self.credit, 0)
-
-
-NO_SPEECH: Final = SpeechRecord()
-
-
-def speech_sent(record: SpeechRecord) -> SpeechRecord:
-    """A request to ``speak`` counts from its send."""
-    return SpeechRecord(record.in_flight + 1, record.credit, record.saying)
-
-
-def speech_answered(record: SpeechRecord, sentence: str, *, spoken: bool) -> SpeechRecord:
-    """A request ended: it stops counting on any answer other than ``Spoken``, which owes a line and is the sentence
-    that plays."""
-    in_flight = record.in_flight - 1
-    if spoken:
-        return SpeechRecord(in_flight, record.credit + 1, sentence)
-    return SpeechRecord(in_flight, max(record.credit, 0) if in_flight == 0 else record.credit, record.saying)
-
-
-def speech_line_entered(record: SpeechRecord) -> SpeechRecord:
-    """His own spoken line entered at the place: it is credited while a request is in flight or a line is still owed,
-    and ignored otherwise."""
-    if record.in_flight > 0 or record.credit > 0:
-        return SpeechRecord(record.in_flight, record.credit - 1, record.saying)
-    return record
-
-
 @dataclass(frozen=True)
 class Perception:
     """What reading a window from a checkpoint yields: the checkpoint after it, the lines taken and whether older ones
@@ -711,48 +660,6 @@ class AppPlace:
 
     app: str
     place: PlaceRef
-
-
-@dataclass(frozen=True)
-class Held:
-    """A hold as the window states it: its id and what people said over him, which stays what the last read that had
-    a record said once the record is gone."""
-
-    id: str
-    speech: tuple[PartialSpeech, ...]
-    record_gone: bool
-
-
-class HoldOutcome(StrEnum):
-    """How a hold ended on the runner's side, as the one line per hold id reports it."""
-
-    CONTINUED = "continued"
-    STOPPED = "stopped"
-    UNDECIDED = "undecided"
-    NO_TURN = "no_turn"
-
-
-def hold_stated(window: PlaceWindow, seen: Held | None) -> Held | None:
-    """The hold the window states, or ``None`` when he is not held; a hold whose record has gone keeps the words an
-    earlier read of the same hold had."""
-    hold = window.interrupted
-    if hold is None:
-        return None
-    talked_over = window.talked_over
-    kept = seen.speech if seen is not None and seen.id == hold.id else ()
-    return Held(hold.id, kept if talked_over is None else talked_over.speech, record_gone=talked_over is None)
-
-
-def hold_tellable(held: Held) -> bool:
-    """Whether a hold may be told: a person has said words over him, or the record is gone and no more will come."""
-    return held.record_gone or any(each.text for each in held.speech)
-
-
-def untold_words(said: Iterable[PartialSpeech], told: Iterable[PartialSpeech]) -> tuple[PartialSpeech, ...]:
-    """What people have said over him that he was not told: each partial with words that differs from the one of the
-    same name that was told."""
-    known = {(each.name, each.text) for each in told}
-    return tuple(each for each in said if each.text and (each.name, each.text) not in known)
 
 
 def round_seconds(remaining: float) -> int:

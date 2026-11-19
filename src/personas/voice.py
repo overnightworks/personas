@@ -13,10 +13,11 @@ from agents.turn import FailureCode
 from agents.voice import StayedSilent
 from agents.voice.reply import ReplyReader
 
-from personas.decision import AppPlace, may_send_next, past_deadline, remaining_seconds, speech_outcome
+from personas.decision import AppPlace, past_deadline, remaining_seconds, speech_outcome
 from personas.entries import SaidAloud
 from personas.failures import task_is_being_cancelled
 from personas.reporting import Event
+from personas.speech import may_send_next
 from personas.task_record import RelayFailed
 
 if TYPE_CHECKING:
@@ -43,6 +44,9 @@ class Speaking:
     turn as ``limit_exceeded``. Each sentence sent enters the agent's history as a ``SaidAloud`` however its request
     ends. A refusal, a stop included, ends the speech and is reported; the turn goes on without it. The turn's tally
     counts each sentence sent and each silent round. His own stop (``cut``) is no refusal and is not reported.
+
+    A turn told a hold hands ``released``: no sentence is sent until it is set, which a decision does, and his own stop
+    or a failed turn does too, so that the sentences waiting end unsent.
     """
 
     def __init__(
@@ -56,6 +60,7 @@ class Speaking:
         report: Callable[[Event, str | None], None],
         mind: Mind,
         tally: TurnTally,
+        released: asyncio.Event | None = None,
     ) -> None:
         self._session = session
         self._app = app
@@ -67,6 +72,7 @@ class Speaking:
         self._report = report
         self._mind = mind
         self._tally = tally
+        self._released = released
         self._at = AppPlace(app, place)
         self._reader = ReplyReader()
         self._queue: asyncio.Queue[str | None] = asyncio.Queue()
@@ -91,7 +97,8 @@ class Speaking:
         """His own stop: no sentence is sent from now on and the speech ends once the one in flight is answered; the
         sentences not yet said are returned."""
         unsaid = tuple(self.unsaid)
-        self.was_cut = self._silenced = True
+        self.was_cut = True
+        self._silence()
         self.unsaid.clear()
         self._queue.put_nowait(None)
         return unsaid
@@ -105,8 +112,13 @@ class Speaking:
 
     async def settle(self) -> None:
         """The turn's events failed: no sentence is sent from now on, and one in flight is answered and entered."""
-        self._silenced = True
+        self._silence()
         await self._idle.wait()
+
+    def _silence(self) -> None:
+        self._silenced = True
+        if self._released is not None:
+            self._released.set()
 
     async def spoken(self) -> None:
         """Returns once every sentence heard so far is answered and every line owed for them has entered; a turn past
@@ -139,8 +151,23 @@ class Speaking:
         """The own spoken lines that sentences answered as spoken have not yet brought into the history."""
         return self._mind.speech_owed(self._at)
 
+    async def _until_released(self) -> None:
+        """Returns once the hold the turn was told is decided or the speech is silenced; the turn's deadline ends the
+        turn first when it passes before."""
+        if self._released is None or self._released.is_set():
+            return
+        waiting = asyncio.create_task(self._released.wait())
+        try:
+            await asyncio.wait({waiting, self._deadline_bound()}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            waiting.cancel()
+        if not self._released.is_set():
+            self._deadline_bound().result()
+            raise TurnStopped(TurnStopKind.FAILED, FailureCode.LIMIT_EXCEEDED)
+
     async def _speak(self, sentence: str) -> None:
         self._stop_past_deadline()
+        await self._until_released()
         await self._until(lambda: may_send_next(self._owed))
         try:
             outcome = await self._entered_as_said(sentence)

@@ -17,15 +17,12 @@ from agents.member import (
     STOP_SPEAKING_TOOL,
     AcceptInvitationRefusal,
     FigureRef,
-    Interrupted,
-    PartialSpeech,
     PlaceRef,
     PlaceWindow,
     SpeakRefusal,
     Spoken,
     Standing,
     StandingState,
-    TalkedOver,
     VoiceState,
     Written,
 )
@@ -43,7 +40,6 @@ from personas.decision import (
     RENEW_BEFORE_EXPIRY_SECONDS,
     TURN_CANCELLED_CODE,
     Accept,
-    Held,
     Joined,
     Memory,
     Paused,
@@ -67,15 +63,12 @@ from personas.decision import (
     failure_reason,
     forget_gone,
     held_apps,
-    hold_stated,
-    hold_tellable,
     holds_a_place,
     is_not_granted,
     is_voice_app,
     jsonrpc_code,
     left_out_for,
     lends_tools,
-    may_send_next,
     offered_declarations,
     past_deadline,
     perceive,
@@ -90,7 +83,6 @@ from personas.decision import (
     turn_call_bound,
     turn_ending,
     turn_invalid,
-    untold_words,
     view_turn_due,
     waking_line,
 )
@@ -991,76 +983,3 @@ def test_a_turn_is_past_its_deadline_once_its_longest_duration_has_gone_by(start
 )
 def test_what_is_left_of_a_turns_longest_duration_is_never_below_zero(now, remaining):
     assert remaining_seconds(now, 1000.0, 30) == remaining
-
-
-@pytest.mark.parametrize(
-    ("owed", "may_send"),
-    [(0, True), (1, True), (2, False), (3, False)],
-    ids=["nothing owed", "the one playing is owed", "one playing and one before it not yet entered", "more"],
-)
-def test_the_next_sentence_goes_out_while_at_most_the_one_playing_is_owed_a_line(owed, may_send):
-    assert may_send_next(owed) is may_send
-
-
-def _window(*, interrupted: str | None, speech: tuple[PartialSpeech, ...] | None) -> PlaceWindow:
-    talked_over = None if speech is None else TalkedOver(id="talk", playing=True, speech=speech)
-    return PlaceWindow(
-        generation="g",
-        starts_at=1,
-        entries=(),
-        talked_over=talked_over,
-        interrupted=None if interrupted is None else Interrupted(id=interrupted),
-    )
-
-
-ADA_SAYS = (PartialSpeech(name="Ada", text="wait"),)
-ADA_STARTED = (PartialSpeech(name="Ada", text=""),)
-
-
-@pytest.mark.parametrize(
-    ("window", "seen", "stated"),
-    [
-        (_window(interrupted=None, speech=ADA_SAYS), None, None),
-        (_window(interrupted="h1", speech=ADA_SAYS), None, Held("h1", ADA_SAYS, record_gone=False)),
-        (_window(interrupted="h1", speech=None), Held("h1", ADA_SAYS, record_gone=False), Held("h1", ADA_SAYS, True)),
-        (_window(interrupted="h2", speech=None), Held("h1", ADA_SAYS, record_gone=False), Held("h2", (), True)),
-    ],
-    ids=["not held", "held", "record gone keeps the words of the same hold", "record gone of a new hold has none"],
-)
-def test_a_window_states_the_hold_with_what_was_said_over_him(window, seen, stated):
-    assert hold_stated(window, seen) == stated
-
-
-@pytest.mark.parametrize(
-    ("held", "tellable"),
-    [
-        (Held("h", ADA_STARTED, record_gone=False), False),
-        (Held("h", ADA_SAYS, record_gone=False), True),
-        (Held("h", ADA_STARTED, record_gone=True), True),
-        (Held("h", (), record_gone=True), True),
-    ],
-    ids=["a person started and said no words", "words", "record gone", "record gone, no one said anything"],
-)
-def test_a_hold_may_be_told_once_someone_has_said_words_or_the_record_is_gone(held, tellable):
-    assert hold_tellable(held) is tellable
-
-
-@pytest.mark.parametrize(
-    ("said", "told", "untold"),
-    [
-        (ADA_SAYS, ADA_SAYS, ()),
-        (ADA_SAYS, (), ADA_SAYS),
-        (ADA_STARTED, (), ()),
-        (
-            (PartialSpeech(name="Ada", text="wait a moment"),),
-            ADA_SAYS,
-            (PartialSpeech(name="Ada", text="wait a moment"),),
-        ),
-        ((PartialSpeech(name="Ben", text="no"), *ADA_SAYS), ADA_SAYS, (PartialSpeech(name="Ben", text="no"),)),
-    ],
-    ids=["told", "not told", "no words yet", "more words", "another person"],
-)
-def test_the_words_said_over_him_that_were_not_told_are_each_partial_with_words_that_differs_from_the_told(
-    said, told, untold
-):
-    assert untold_words(said, told) == untold

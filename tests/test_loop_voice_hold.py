@@ -17,7 +17,7 @@ from personas import app_session
 from personas.decision import status_code
 from personas.failures import Unreachable, leaves_of
 from personas.reporting import Event
-from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, say_in_the_call
+from tests.support.call import ADDRESSED, PLACE_ID, say_in_the_call
 from tests.support.fakes import COMPLETED_TURN
 from tests.support.gateway import BUDGET_SPENT, say
 from tests.support.hopin import CALL, LIMIT_SECONDS, SAY_TOOL
@@ -164,35 +164,6 @@ async def test_a_hold_without_words_starts_no_round_until_it_has_words_or_its_re
     assert runner.gateway.hold_told(number)["talked_over"] == [
         {"name": SAID[0], "text": SAID[1] if arrival == "words" else ""}
     ]
-
-
-async def test_a_hold_with_no_spoken_turn_of_his_is_stopped_with_its_id_once_and_no_round_runs(runner):
-    """TURNS-31, LOG-17."""
-    await a_voice_call(runner, completion(ANSWER))
-
-    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
-    assert await decided(runner) == ["no_turn"]
-    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
-    await window_read_after_the_hold(runner)
-
-    assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
-    assert runner.reports.codes_of(Event.HOLD_DECIDED) == ["no_turn"]
-    assert runner.gateway.arrivals == 0
-
-
-async def test_a_hold_at_a_place_where_his_turn_is_written_is_stopped_without_a_round(runner):
-    runner.app.state_voice(PLACE_ID, VoiceState.UNAVAILABLE)
-    await a_voice_call(runner, completion("done"))
-    answer = runner.gateway.hold_request(1)
-    say_in_the_call(runner, ADDRESSED)
-    await runner.gateway.until_requested(1)
-
-    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
-    assert await decided(runner) == ["no_turn"]
-    answer.set()
-
-    assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
-    assert runner.gateway.rounds() == []
 
 
 async def test_a_call_waiting_on_his_speech_is_sent_after_a_continue(runner):
@@ -377,19 +348,3 @@ async def test_a_decision_whose_call_fails_beside_a_speak_that_fails_ends_the_ru
 
     assert sorted(type(leaf).__name__ for leaf in leaves_of(ended)) == [BrokenResourceError.__name__, KeyError.__name__]
     assert runner.reports.codes_of(Event.HOLD_DECIDED) == []
-
-
-async def test_a_hold_with_no_words_when_his_speech_is_over_is_stopped_undecided_and_no_round_runs(runner):
-    """TURNS-31, LOG-17."""
-    await held_in_the_first_sentence(runner, completion(TWO_SENTENCES), said=(("Ada", ""),))
-    await window_read_after_the_hold(runner)
-
-    await runner.app.spoken_count(1)
-    runner.app.end_sentence()
-    await runner.app.spoken_count(2)
-    runner.app.end_sentence()
-
-    assert await decided(runner) == ["undecided"]
-    await runner.reports.until_a_turn_completed()
-    assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
-    assert runner.gateway.rounds() == []

@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from personas.decision import call_within_bound
+from personas.holds import deciding_first
 from personas.present import arrived_since
 
 if TYPE_CHECKING:
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
     from agents.tools import HandTool, ToolDeclaration
 
     from personas.entries import History
-    from personas.holds import HoldInbox
+    from personas.holds import HoldInbox, TurnHold
     from personas.present import Arrived
 
 
@@ -43,7 +44,12 @@ class HoldBack:
 
     admitted: History = field(repr=False)
     inbox: HoldInbox | None
+    told: TurnHold | None = None
     spent: bool = False
+
+    @property
+    def deciding_first(self) -> bool:
+        return deciding_first(self.told)
 
     def holding(self, current: History) -> Arrived | None:
         """What arrived for the first call that finds news; every later call of the turn is let through."""
@@ -64,6 +70,11 @@ class HeldTools:
     tools: tuple[HandTool, ...]
     max_tool_calls: int | None
     inbox: HoldInbox | None = None
+    told: TurnHold | None = None
+
+    @property
+    def deciding_first(self) -> bool:
+        return deciding_first(self.told)
 
     @property
     def declarations(self) -> tuple[ToolDeclaration, ...]:

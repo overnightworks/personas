@@ -102,11 +102,15 @@ An entry has its app and the time he took it (`at`), and is one of:
 
 - While he speaks the app may hold him: someone talks over him and the window states the hold
   (`interrupted`, with an `id`) and what each person said (`talked_over`). (TURNS-29)
-- A round beside his parked run is told his history and, once per hold id, what was said over him, the
-  sentence he was in, his unsaid sentences and his waiting call. It runs on `hold_model` when set. (TURNS-30)
+- While a spoken turn of his runs at the place, a round beside his parked run is told his history and, once per
+  hold id, what was said over him, the sentence that plays, his unsaid sentences and his waiting call.
+  Otherwise, once words were said over him or their record is gone, the hold makes the place due for its lines,
+  and that turn is told the hold first. A round or turn told a hold runs on `hold_model` when set. (TURNS-30)
 - He calls `continue_speaking(id)` to go on or `stop_speaking(id)` to drop the rest: no unsent sentence is
-  spoken, a waiting call is never sent and the turn ends. Any other ending, a turn already over, or a hold
-  where no spoken turn of his runs stops him too. Each id is logged once as `hold.decided`. (TURNS-31)
+  spoken and a waiting call is never sent. A turn told a hold says nothing and sends no other call until he
+  decided. After a stop its sentences play at once, after a continue behind the rest. A round or turn that ends
+  without a decision stops him, and what waited is dropped unsaid. Each id is logged once as `hold.decided`.
+  (TURNS-31)
 - After he went on, a call of his is not sent while people said words no round told him; its result says
   so (`sent` false, `talked_over`). (TURNS-32)
 

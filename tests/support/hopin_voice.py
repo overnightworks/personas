@@ -125,8 +125,11 @@ class AppVoice(AppPlaces):
         return self.held_speak
 
     async def _speak(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
-        """Takes a sentence, appends it as the member's own line and answers that it starts or that it was written."""
+        """Takes a sentence, appends it as the member's own line and answers that it starts or that it was written; a
+        held member's sentence that names no hold is refused ``held`` and changes nothing."""
         taken = SpeakArguments.model_validate(arguments)
+        if taken.interrupted is None and taken.place.id in self.holds:
+            return ToolOutcome(SpeakRefused(refused=SpeakRefusal.HELD).model_dump_json(), is_error=True)
         self.content.add(taken.text)
         if (held := self.held_speak) is not None:
             self.held_speak = None

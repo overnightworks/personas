@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Final
 from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL
 from agents.tools import ToolDeclaration, ToolEffect
 
-from personas.decision import Held, hold_stated, hold_tellable, untold_words
+from personas.speech import Held, HoldOutcome, hold_stated, hold_tellable, untold_words
 
 if TYPE_CHECKING:
     from agents.member import PartialSpeech, PlaceWindow
@@ -37,6 +37,29 @@ DECISION_DECLARATIONS: Final = tuple(
 )
 
 
+class TurnHold:
+    """The hold a turn was told at its start and has not decided yet: until he decides, the turn's sentences wait
+    unsent and its every other call is answered that he decides first."""
+
+    def __init__(self, held: Held) -> None:
+        self.held = held
+        self.outcome: HoldOutcome | None = None
+        self.released = asyncio.Event()
+        """Set when the turn's sentences may go out: after the decision, or when the speech is silenced."""
+
+    @property
+    def pending(self) -> bool:
+        return self.outcome is None
+
+    def decided(self) -> None:
+        self.released.set()
+
+
+def deciding_first(told: TurnHold | None) -> bool:
+    """Whether the turn was told a hold that he has not decided."""
+    return told is not None and told.pending
+
+
 async def close_when_over(inbox: HoldInbox, *speech: asyncio.Task[object]) -> None:
     await asyncio.wait(speech)
     inbox.close()
@@ -46,12 +69,12 @@ class HoldInbox:
     """What the window says of him while a spoken turn runs: the hold that stands, the call that waits, and what people
     say over him, with what a round told him of it."""
 
-    def __init__(self) -> None:
-        self.hold: Held | None = None
+    def __init__(self, standing: Held | None = None, *, told: bool = False) -> None:
+        self.hold = standing
         self.waiting: ToolCallEvent | None = None
-        self.told: tuple[PartialSpeech, ...] | None = None
-        self._said: tuple[PartialSpeech, ...] = ()
-        self._taken: str | None = None
+        self.told: tuple[PartialSpeech, ...] | None = standing.speech if told and standing is not None else None
+        self._said: tuple[PartialSpeech, ...] = () if standing is None else standing.speech
+        self._taken: str | None = standing.id if told and standing is not None else None
         self._closed = False
         self._changed = asyncio.Event()
 

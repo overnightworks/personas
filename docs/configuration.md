@@ -39,7 +39,7 @@ come and go last. An app with `max_tool_calls` requires `[gateway]` and a `perso
 | `secret_file` | absolute path | required | the file holding its client secret (CONFIG-14) |
 | `persona_file` | absolute path | none | its agent file `<name>.md`; the image holds them at `/app/characters/` (CONFIG-15) |
 | `model` | `text/<model>` | the agent file's | the gateway model his turns run on; needs `persona_file` (CONFIG-16) |
-| `hold_model` | `text/<model>` | the agent's model | the model of the round that decides a hold; needs `persona_file` (CONFIG-17) |
+| `hold_model` | `text/<model>` | the agent's model | the model of the round or turn that decides a hold; needs `persona_file` (CONFIG-17) |
 | `[agents.figure]` | `url` (absolute `https`, no user, query or fragment), `sha256` (64 lowercase hex) | none | carried by every accept; an app that shows figures and allows the address shows him with it (CONFIG-18) |
 | `[agents.voice]` | table, optional `names`: 1 to 8 distinct voice ids, first choice first | none | turns spoken turns on; every accept carries `names` as `voices` (CONFIG-19) |
 
