@@ -27,7 +27,15 @@ from personas.loop import Boundaries, run_all
 from personas.memory import PostgresHistoryStore, PostgresLineStore, PostgresMemory, migrate
 from personas.ownership import LockedOwnership
 from personas.readiness import FileReadyMarker, ReadinessError, ReadyMarker
-from personas.reporting import Event, StateChange, StoreOutage, carry_trace, log_state_change
+from personas.reporting import (
+    MCP_CLIENT_LOGGER,
+    Event,
+    StateChange,
+    StoreOutage,
+    carry_trace,
+    demote_a_closed_stream,
+    log_state_change,
+)
 from personas.sweep import sweep_lines
 from personas.tokens import HttpTokenSource
 
@@ -194,14 +202,15 @@ ALEMBIC_LOGGER: Final = "alembic"
 
 
 def configure_logging() -> None:
-    """Every line one JSON object on stdout; alembic's lines below WARNING stay out. A ``LOG_LEVEL`` logline refuses is
-    refused with one plain line on stderr."""
+    """Every line one JSON object on stdout; alembic's lines below WARNING stay out, and so does the mcp client's ERROR
+    for a closed stream. A ``LOG_LEVEL`` logline refuses is refused with one plain line on stderr."""
     try:
         configure("personas")
     except ValueError as error:
         sys.stderr.write(f"personas: {error}\n")
         raise SystemExit(CONFIGURATION_ERROR_EXIT_CODE) from None
     logging.getLogger(ALEMBIC_LOGGER).setLevel(logging.WARNING)
+    logging.getLogger(MCP_CLIENT_LOGGER).addFilter(demote_a_closed_stream)
 
 
 class _RefusingArgumentParser(argparse.ArgumentParser):

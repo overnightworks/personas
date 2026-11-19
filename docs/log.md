@@ -8,10 +8,11 @@ events and their fields. A test cites each rule by its ID at the start of its do
 
 - Every line is one JSON object through [logline](https://github.com/overnightworks/logline), with
   `service` `personas`. `LOG_LEVEL` sets the level (default `info`) on every command, `SERVICE_VERSION` the `version`.
-  alembic, which checks the memory's schema at the start, writes only its warnings and errors. An uncaught
-  exception of any command writes logline's `process.crashed` line at level critical, with `error_type` and
-  `exception`, Python's traceback with its frames and messages; a configuration it refuses before it starts is
-  one plain line on stderr. (LOG-1)
+  alembic, which checks the memory's schema at the start, writes only its warnings and errors. The mcp client's
+  ERROR for a stream that closed under a request, which a recovered blip causes, is written at info; any other error of
+  that client stays at error. An uncaught exception of any command writes logline's `process.crashed` line at level
+  critical, with `error_type` and `exception`, Python's traceback with its frames and messages; a configuration it
+  refuses before it starts is one plain line on stderr. (LOG-1)
 - An event is `<noun>.<verb_past>`, written once per state change. Its ids are `agent_id` and `app_id`, the
   host of the app's URL; a `reason` is a closed code. (LOG-2)
 - A line holds ids, numbers named with their unit and closed codes: never text a person or an app wrote,
@@ -49,7 +50,7 @@ events and their fields. A test cites each rule by its ID at the start of its do
 | `agent.stop_overran` | an agent took longer than `cancel_margin_seconds` to stop | the agent only (LOG-24) |
 | `runner.stop_cut` | the runner had not stopped `stop_seconds` after a SIGTERM and ends at once | none; no agent or app (LOG-25) |
 | `turn_state.failed` | the app refused or failed a statement of his turns at a place, or a stop's statements did not go out within its margin | `reason` (the app's refusal code, the failed call's reason, `invalid_params` for a tool the app does not serve, `network` for a stop's margin); `status` and `mcp_method` when a call failed (LOG-34) |
-| `turn_state.lost` | a statement whose answer was lost when its session ended on another call's failure; the runner recovers on its own, since the next full pass states it again, so it logs at info | none (LOG-35) |
+| `turn_state.lost` | a statement whose answer was lost when its session ended on another call's failure or on the runner's stop; the runner recovers on its own, since the next full pass states it again, and the stop states each seat's last end again within its margin, so it logs at info, once for the statement and not again for that restatement | none (LOG-35) |
 
 A `status` is the integer of an error status, absent for a JSON-RPC error sent with a success status. A
 `reason` of a failed call is a standard JSON-RPC error or a known media type by name, else one fixed word,

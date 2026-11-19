@@ -234,6 +234,26 @@ async def test_a_4xx_suspends_the_loop_with_its_status_and_it_resumes_once_a_ful
     ]
 
 
+async def test_a_403_after_a_backoff_is_logged_as_suspended_again(runner):
+    """LOG-7, LOG-8."""
+    runner.app.stand(SUBJECT, invited("room-7", "inv-3"))
+    runner.app.refused_method = READ
+    runner.app.refuse_with = HTTPStatus.FORBIDDEN
+    runner.start()
+    await runner.reports.until(Event.SUSPENDED)
+    runner.app.refuse_with = HTTPStatus.SERVICE_UNAVAILABLE
+    await runner.reports.until(Event.BACKOFF)
+    runner.app.refuse_with = HTTPStatus.FORBIDDEN
+    await runner.reports.until(Event.SUSPENDED, count=2)
+
+    assert [event for event, _ in runner.reports.reported()][:4] == [
+        Event.STARTED,
+        Event.SUSPENDED,
+        Event.BACKOFF,
+        Event.SUSPENDED,
+    ]
+
+
 @pytest.mark.parametrize(
     ("answers", "answer"),
     [

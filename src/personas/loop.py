@@ -533,6 +533,7 @@ class AgentLoop:
 
     async def _back_off(self, failure: CallFailure) -> None:
         self._park()
+        self._suspension = None
         if not self._backing_off:
             self._backing_off = True
             self._report(Event.BACKOFF, failure_code(failure), None, failure)

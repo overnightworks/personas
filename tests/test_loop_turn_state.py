@@ -359,8 +359,10 @@ async def test_a_blip_while_a_turns_end_is_answered_backs_off_as_its_read_tells_
     assert [record.getMessage() for record in caplog.records if record.levelno >= logging.WARNING] == []
 
 
-async def test_a_statement_lost_with_its_session_is_logged_as_lost_and_stated_again_after_the_next_full_pass(runner):
-    """TURNS-44, LOG-34, LOG-35."""
+async def test_a_statement_lost_with_its_session_is_logged_as_lost_and_stated_again_after_the_next_full_pass(
+    runner, caplog
+):
+    """TURNS-44, LOG-1, LOG-34, LOG-35: the recovered blip writes no line at ERROR or above from any logger."""
     entered, released = asyncio.Event(), asyncio.Event()
 
     async def held_until_released(reply: AppReply) -> None:
@@ -382,6 +384,32 @@ async def test_a_statement_lost_with_its_session_is_logged_as_lost_and_stated_ag
     assert statements(runner) == [THINKING, ended(None)]
     reported = [event for event, _ in runner.reports.reported(started=False)]
     assert reported == [Event.TURN_STATE_LOST, Event.BACKOFF, Event.RESUMED]
+    assert [record.getMessage() for record in caplog.records if record.levelno >= logging.ERROR] == []
+
+
+async def test_the_runners_stop_that_cuts_a_statement_in_flight_logs_it_as_lost_once_and_states_the_end_again(runner):
+    """LOG-35, TURNS-44."""
+    entered, released = asyncio.Event(), asyncio.Event()
+
+    async def held_until_released(reply: AppReply) -> None:
+        entered.set()
+        await released.wait()
+
+    first_round = await a_turn_in_its_first_round(runner, *says(PLACE_ID, ANSWER))
+    await runner.app.until_turn_states(1)
+    runner.app.script(SET_TURN_STATE_TOOL, held_until_released)
+    first_round.set()
+    async with asyncio.timeout(LIMIT_SECONDS):
+        await entered.wait()
+
+    runner.task.cancel()
+    try:
+        await ended_by(runner.task)
+    finally:
+        released.set()
+
+    assert statements(runner) == [THINKING, ended(None)]
+    assert [event for event, _ in runner.reports.reported(started=False)] == [Event.TURN_STATE_LOST]
 
 
 @EARLIER_ENDS

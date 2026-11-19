@@ -11,6 +11,7 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING, Final
 from urllib.parse import urlsplit
 
+from anyio import BrokenResourceError, ClosedResourceError
 from anyio.lowlevel import checkpoint
 from logline import Outcome, StepTimer, current_traceparent
 
@@ -28,6 +29,18 @@ if TYPE_CHECKING:
     from personas.failures import CallFailure
 
 _LOG: Final = logging.getLogger("personas")
+
+# The mcp client logs "Error parsing SSE message" at ERROR when its stream closes under a request, which a recovered
+# blip does too; the library's own comment names that case as no parse failure. The loop reports the failure itself
+# (`loop.backed_off`), so the closed-stream line drops to INFO and any other error of that logger stays at ERROR.
+MCP_CLIENT_LOGGER: Final = "mcp.client.streamable_http"
+
+
+def demote_a_closed_stream(record: logging.LogRecord) -> bool:
+    """A logging filter: a record of a closed or broken stream is written at INFO; it always lets the record pass."""
+    if record.exc_info and isinstance(record.exc_info[1], ClosedResourceError | BrokenResourceError):
+        record.levelno, record.levelname = logging.INFO, logging.getLevelName(logging.INFO)
+    return True
 
 
 class Event(Enum):
