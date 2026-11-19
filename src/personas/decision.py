@@ -623,7 +623,7 @@ NO_SPEECH: Final = SpeechRecord()
 
 def speech_sent(record: SpeechRecord) -> SpeechRecord:
     """A request to ``speak`` counts from its send."""
-    return replace(record, in_flight=record.in_flight + 1)
+    return SpeechRecord(record.in_flight + 1, record.credit, record.saying)
 
 
 def speech_answered(record: SpeechRecord, sentence: str, *, spoken: bool) -> SpeechRecord:
@@ -639,7 +639,7 @@ def speech_line_entered(record: SpeechRecord) -> SpeechRecord:
     """His own spoken line entered at the place: it is credited while a request is in flight or a line is still owed,
     and ignored otherwise."""
     if record.in_flight > 0 or record.credit > 0:
-        return replace(record, credit=record.credit - 1)
+        return SpeechRecord(record.in_flight, record.credit - 1, record.saying)
     return record
 
 
