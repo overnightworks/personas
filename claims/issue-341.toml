@@ -1,8 +1,0 @@
-claim_id = "d4eb4750132845d1ba408670d7c10b87"
-agent = "Claude d21def74-68af-4c98-89a2-70bc45cbdd6a"
-role = "builder"
-base = "22cdc970b679f58b8a3d19acbd59c446b3124539"
-branch = "claude/issue-341-turn-runs-on-the-loops-session"
-scope = ["docs/ARCHITECTURE.md", "docs/log.md", "docs/turns.md", "quality/baseline.toml", "src/personas/loop.py", "src/personas/turn_sessions.py", "src/personas/turning.py", "tests"]
-opened_commit = "f94c189281ba3d1c28be60ec4a6803b961f8591d"
-whole_reason = "one path, the turn's own-app session, with the step tests and documents that pin it"
