@@ -12,8 +12,8 @@ import pytest
 from agents.member import PlaceView, SpeakRefusal, Spoken, Written
 from agents.turn import MAX_EVENT_BYTES
 
-from personas.decision import TURN_CANCELLED_CODE, AppPlace
-from personas.entries import Answered, Entry, History, KeptLine, Lines, TurnTold, Unanswered, ViewSeen, Visit, Waiting
+from personas.decision import TURN_CANCELLED_CODE
+from personas.entries import Answered, Entry, History, KeptLine, Lines, TurnTold, Unanswered, ViewSeen, Waiting
 from personas.present import (
     EMPTY_PRESENT,
     Arrived,
@@ -21,7 +21,6 @@ from personas.present import (
     answered_into,
     arrived_since,
     held_told,
-    own_spoken_lines_since,
     taken_into,
     told_header,
     told_turn,
@@ -470,13 +469,6 @@ def an_own_line(seq: int, text: str = "mine") -> KeptLine:
     return KeptLine(MORNING, seq, LATER, "Mozart", "message", text, own=True, spoken=False, cut=False, act=False)
 
 
-MORNING_AT = AppPlace(MORNING.app, MORNING.place)
-
-
-def a_spoken_line(seq: int, *, visit: Visit = MORNING, cut: bool = False) -> KeptLine:
-    return KeptLine(visit, seq, LATER, "Mozart", "message", "a sentence", own=True, spoken=True, cut=cut, act=False)
-
-
 def a_view_seen(revision: int, *, size: int | None = None) -> ViewSeen:
     state = {"hand": "x" * size} if size is not None else {"hand": secrets.token_hex(4)}
     return ViewSeen(APP, TABLE, PlaceView(revision=revision, awaits_you=False, state=state), LATER)
@@ -603,55 +595,6 @@ def test_what_arrived_when_the_bound_leaves_only_the_newest_entry_taken_during_t
     after = taking(taking(admitted, *between), *during, size_bytes=50)
 
     assert arrived_since(after, admitted) == Arrived(during, older_dropped=older_dropped)
-
-
-@pytest.mark.parametrize("cut", [False, True], ids=["whole", "cut"])
-def test_each_own_spoken_line_at_the_place_entered_since_the_mark_counts_once_whole_or_cut(cut):
-    sent = taking(EMPTY_HISTORY, said(1, "before"))
-
-    after = taking(sent, said(2, "theirs"), a_spoken_line(3, cut=cut), a_spoken_line(4, cut=cut))
-
-    assert own_spoken_lines_since(after, sent.taken, MORNING_AT) == 2
-
-
-@pytest.mark.parametrize(
-    "arrivals",
-    [
-        pytest.param((), id="nothing entered"),
-        pytest.param((said(2, "theirs", spoken=True),), id="another's spoken line"),
-        pytest.param((an_own_line(2),), id="his own written line"),
-        pytest.param(
-            (KeptLine(MORNING, 2, LATER, "Mozart", "message", "x", own=True, spoken=False, cut=False, act=True),),
-            id="his own act line",
-        ),
-        pytest.param((a_spoken_line(2, visit=NOON),), id="his own spoken line at another place"),
-        pytest.param(
-            (a_spoken_line(2, visit=replace(MORNING, app="https://other.test/mcp")),),
-            id="his own spoken line at the place of another app",
-        ),
-        pytest.param((a_sentence(),), id="the sentence he sent"),
-        pytest.param((a_view_seen(1),), id="a view"),
-    ],
-)
-def test_nothing_but_his_own_spoken_line_at_the_place_counts_as_a_line_entered(arrivals):
-    sent = taking(EMPTY_HISTORY, said(1, "before"))
-
-    assert own_spoken_lines_since(taking(sent, *arrivals), sent.taken, MORNING_AT) == 0
-
-
-def test_his_own_spoken_line_that_entered_before_the_mark_does_not_count():
-    sent = taking(EMPTY_HISTORY, a_spoken_line(1))
-
-    assert own_spoken_lines_since(taking(sent, said(2, "theirs")), sent.taken, MORNING_AT) == 0
-
-
-def test_the_lines_entered_since_the_mark_count_when_the_bound_left_out_older_entries_than_the_mark(told_one_bytes):
-    sent = taking(EMPTY_HISTORY, *(said(each, "one") for each in range(1, 4)), size_bytes=told_one_bytes + 5)
-
-    after = taking(sent, a_spoken_line(4), size_bytes=2 * told_one_bytes + 5)
-
-    assert after.left_out > 0
-    assert own_spoken_lines_since(after, sent.taken, MORNING_AT) == 1
 
 
 def told_held(arrived: Arrived) -> dict:

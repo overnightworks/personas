@@ -39,7 +39,6 @@ if TYPE_CHECKING:
 
     from agents.member import PlaceRef
 
-    from personas.decision import AppPlace
 
 
 def _revision_key(view: ViewSeen) -> tuple[str, PlaceRef, int]:
@@ -155,19 +154,6 @@ def arrived_since(current: History, admitted: History) -> Arrived | None:
     if current.heard == admitted.heard:
         return None
     return Arrived(_entered_since(current, admitted.taken), current.left_out > admitted.taken)
-
-
-def own_spoken_lines_since(history: History, mark: int, at: AppPlace) -> int:
-    """How many of his own spoken lines at ``at`` entered since ``history`` had taken ``mark`` entries, whole or cut."""
-    return sum(
-        1
-        for entry in _entered_since(history, mark)
-        if isinstance(entry, KeptLine)
-        and entry.own
-        and entry.spoken
-        and entry.visit.app == at.app
-        and entry.visit.place == at.place
-    )
 
 
 def spoke_since(history: History, mark: int) -> bool:

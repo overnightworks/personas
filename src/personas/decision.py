@@ -603,6 +603,47 @@ def may_send_next(owed: int) -> bool:
 
 
 @dataclass(frozen=True)
+class SpeechRecord:
+    """What he still owes of his speech at one place: the requests in flight, the lines still owed, one per sentence
+    answered as spoken, and the sentence that plays. A line credited before the answer of its request leaves the count
+    below zero until that answer."""
+
+    in_flight: int = 0
+    credit: int = 0
+    saying: str | None = None
+
+    @property
+    def owed(self) -> int:
+        """The own spoken lines that sentences answered as spoken have not yet brought into the history."""
+        return max(self.credit, 0)
+
+
+NO_SPEECH: Final = SpeechRecord()
+
+
+def speech_sent(record: SpeechRecord) -> SpeechRecord:
+    """A request to ``speak`` counts from its send."""
+    return replace(record, in_flight=record.in_flight + 1)
+
+
+def speech_answered(record: SpeechRecord, sentence: str, *, spoken: bool) -> SpeechRecord:
+    """A request ended: it stops counting on any answer other than ``Spoken``, which owes a line and is the sentence
+    that plays."""
+    in_flight = record.in_flight - 1
+    if spoken:
+        return SpeechRecord(in_flight, record.credit + 1, sentence)
+    return SpeechRecord(in_flight, max(record.credit, 0) if in_flight == 0 else record.credit, record.saying)
+
+
+def speech_line_entered(record: SpeechRecord) -> SpeechRecord:
+    """His own spoken line entered at the place: it is credited while a request is in flight or a line is still owed,
+    and ignored otherwise."""
+    if record.in_flight > 0 or record.credit > 0:
+        return replace(record, credit=record.credit - 1)
+    return record
+
+
+@dataclass(frozen=True)
 class Perception:
     """What reading a window from a checkpoint yields: the checkpoint after it, the lines taken and whether older ones
     were never seen."""

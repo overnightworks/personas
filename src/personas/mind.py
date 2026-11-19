@@ -9,7 +9,19 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from personas.decision import AppPlace, backoff_delay, budget_pause, held_apps, refusal_retry_at, sync_checkpoints
+from personas.decision import (
+    NO_SPEECH,
+    AppPlace,
+    SpeechRecord,
+    backoff_delay,
+    budget_pause,
+    held_apps,
+    refusal_retry_at,
+    speech_answered,
+    speech_line_entered,
+    speech_sent,
+    sync_checkpoints,
+)
 from personas.due import (
     NO_TURNS,
     Claim,
@@ -24,6 +36,7 @@ from personas.due import (
     with_due,
     without_due,
 )
+from personas.entries import KeptLine
 from personas.present import EMPTY_PRESENT, answered_into, taken_into
 
 if TYPE_CHECKING:
@@ -67,6 +80,7 @@ class Mind:
         self._not_granted: dict[str, float] = {}
         self._wake_events: list[asyncio.Event] = []
         self._next_take = asyncio.Event()
+        self._speech: dict[AppPlace, SpeechRecord] = {}
 
     @property
     def present(self) -> Present:
@@ -83,9 +97,39 @@ class Mind:
         if not taken:
             return
         previous, self._next_take = self._next_take, asyncio.Event()
+        for entry in taken:
+            if isinstance(entry, KeptLine) and entry.own and entry.spoken:
+                at = AppPlace(entry.visit.app, entry.visit.place)
+                self._set_speech(at, speech_line_entered(self._speech.get(at, NO_SPEECH)))
         self._present = taken_into(self._present, taken, self._history_bytes, self._history_keep_bytes)
         previous.set()
         self._change()
+
+    def speech_sent(self, at: AppPlace) -> None:
+        """A request to ``speak`` at the place goes out."""
+        self._set_speech(at, speech_sent(self._speech.get(at, NO_SPEECH)))
+
+    def speech_answered(self, at: AppPlace, sentence: str, *, spoken: bool) -> None:
+        """The request at the place for ``sentence`` ended, answered as spoken or not."""
+        self._set_speech(at, speech_answered(self._speech.get(at, NO_SPEECH), sentence, spoken=spoken))
+
+    def speech_owed(self, at: AppPlace) -> int:
+        """The own spoken lines at the place that sentences answered as spoken have not yet brought in."""
+        return self._speech.get(at, NO_SPEECH).owed
+
+    def speech_saying(self, at: AppPlace) -> str | None:
+        """The sentence that plays at the place: the one last answered as spoken."""
+        return self._speech.get(at, NO_SPEECH).saying
+
+    def speech_ended(self, at: AppPlace) -> None:
+        """The turn that sent at the place ended: its requests in flight and what it still owes are dropped."""
+        self._speech.pop(at, None)
+
+    def _set_speech(self, at: AppPlace, record: SpeechRecord) -> None:
+        if record == NO_SPEECH:
+            self._speech.pop(at, None)
+        else:
+            self._speech[at] = record
 
     def next_take(self) -> asyncio.Event:
         """The event the next take sets. A waiter reads it in the same synchronous step as the history it judges, so a
