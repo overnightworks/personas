@@ -158,30 +158,35 @@ type _Around = Callable[[Callable[[], Awaitable[object]]], Awaitable[object]]
 
 
 class _AroundSession:
-    """The real session at one app, whose ``request`` runs inside ``around``, which gets the real request to call."""
+    """The real session at one app, whose named requests run inside their ``around``, which gets the real request to
+    call."""
 
-    def __init__(self, session: AppSession, request: str, around: _Around) -> None:
+    def __init__(self, session: AppSession, arounds: dict[str, _Around]) -> None:
         self._session = session
-        self._request = request
-        self._around = around
+        self._arounds = arounds
 
     def __getattr__(self, name: str) -> object:
         real = getattr(self._session, name)
-        if name != self._request:
+        around = self._arounds.get(name)
+        if around is None:
             return real
 
         async def wrapped(*arguments: object) -> object:
-            return await self._around(lambda: real(*arguments))
+            return await around(lambda: real(*arguments))
 
         return wrapped
 
 
 def _opener_around(request: str, around: _Around, *, of_url: str | None) -> SessionOpener:
+    return _opener_arounds({request: around}, of_url=of_url)
+
+
+def _opener_arounds(arounds: dict[str, _Around], *, of_url: str | None) -> SessionOpener:
     @asynccontextmanager
     async def opened(app: AppTarget, token: Secret) -> AsyncGenerator[AppSession]:
         async with open_mcp_session(app, token) as session:
             if of_url in (None, str(app.mcp_url)):
-                yield cast("AppSession", _AroundSession(session, request, around))
+                yield cast("AppSession", _AroundSession(session, arounds))
             else:
                 yield session
 
@@ -221,6 +226,27 @@ def opener_whose_request_raises(
         return None
 
     return _opener_around(request, around, of_url=of_url)
+
+
+def opener_whose_requests_raise_together(
+    defects: dict[str, tuple[Exception, int]], *, released: asyncio.Event
+) -> SessionOpener:
+    """A session opener of real sessions whose named requests wait for ``released`` and then each raise its defect.
+
+    A request raises after as many turns of the loop as its number says, so that a scenario can let one failure
+    leave its task group while the other is still on its way.
+    """
+
+    def raising(defect: Exception, loop_turns: int) -> _Around:
+        async def around(_real: Callable[[], Awaitable[object]]) -> object:
+            await released.wait()
+            for _ in range(loop_turns):
+                await asyncio.sleep(0)
+            raise defect
+
+        return around
+
+    return _opener_arounds({request: raising(*each) for request, each in defects.items()}, of_url=None)
 
 
 def transport_whose_session_loses_a_child(
