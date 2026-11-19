@@ -1,0 +1,8 @@
+claim_id = "68ac4ab5a8fa4024b226a9e14169b96f"
+agent = "Claude d21def74-68af-4c98-89a2-70bc45cbdd6a"
+role = "builder"
+base = "5abee96741f0f8a43f5f79a30c30d281afe893fa"
+branch = "claude/issue-358-curie-figure"
+scope = ["scripts/figures", "scripts/write_figures.py", "src/characters", "tests/scripts/test_write_figures.py"]
+opened_commit = "e231b21365fbcf4a3650dcd80a5bf93cafa5a6fb"
+whole_reason = "one persona's figure from the shared generator, proven by the shared check and a render"
