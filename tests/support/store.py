@@ -30,21 +30,20 @@ class ScriptedStore:
         self.waiting = asyncio.Event()
         self.release: asyncio.Event | None = None
         self.attempts = 0
-        self._attempted = asyncio.Event()
+        self._attempted = asyncio.Condition()
 
     async def until_waiting(self) -> None:
         async with asyncio.timeout(LIMIT_SECONDS):
             await self.waiting.wait()
 
     async def until_attempts(self, count: int) -> None:
-        async with asyncio.timeout(LIMIT_SECONDS):
-            while self.attempts < count:
-                self._attempted.clear()
-                await self._attempted.wait()
+        async with asyncio.timeout(LIMIT_SECONDS), self._attempted:
+            await self._attempted.wait_for(lambda: self.attempts >= count)
 
     async def keep(self, read: WindowRead) -> None:
-        self.attempts += 1
-        self._attempted.set()
+        async with self._attempted:
+            self.attempts += 1
+            self._attempted.notify_all()
         if self.release is not None:
             self.waiting.set()
             await self.release.wait()
