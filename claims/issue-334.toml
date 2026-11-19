@@ -1,0 +1,7 @@
+claim_id = "35f1abc684a144b49e550da73062e044"
+agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
+role = "builder"
+base = "5382c5442961b24280b117481419ec4cff124298"
+branch = "claude/issue-334-the-release-check-holds-a-release-only-f"
+scope = ["docs/runbooks/release.md"]
+opened_commit = "0434f72d9ad5a2c6f759a1716d6de1e0cedcd875"
