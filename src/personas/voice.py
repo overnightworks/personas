@@ -168,8 +168,6 @@ class Speaking:
     async def _speak(self, sentence: str) -> None:
         self._stop_past_deadline()
         await self._until_released()
-        if self._silenced:
-            return
         await self._until(lambda: may_send_next(self._owed))
         try:
             outcome = await self._entered_as_said(sentence)
