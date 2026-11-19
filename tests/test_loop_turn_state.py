@@ -21,16 +21,17 @@ from agents.tools import ToolOutcome
 from agents.turn import StopOutcome
 from mcp_types import INVALID_PARAMS
 
-from personas.decision import INVALID_PARAMS_REASON, NETWORK_FAILURE_CODE, NO_ANSWER_REASON
+from personas.decision import INVALID_PARAMS_REASON, NETWORK_FAILURE_CODE, NO_ANSWER_REASON, SUSPENDED_RETRY_SECONDS
 from personas.failures import leaves_of
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PLACE_ID, restarted_in_the_call, say_in_the_call
+from tests.support.fakes import FakeClock
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
 from tests.support.hopin import CALL, LIMIT_SECONDS, READ, SAY_TOOL
 from tests.support.logs import lines_of
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, paused
-from tests.support.transport import opener_whose_request_raises
+from tests.support.transport import ClosingHold, opener_whose_request_raises
 from tests.support.voice import ended_by
 from tests.support.wire import hangs
 
@@ -449,3 +450,40 @@ async def test_a_backoff_whose_window_reads_keep_failing_logs_resumed_once_a_ful
     await runner.app.until_turn_states(2)
 
     assert [event for event, _ in runner.reports.reported(started=False)] == [Event.BACKOFF, Event.RESUMED]
+
+
+class WaitFailingOnceStated(FakeClock):
+    """A fake clock whose wait before a suspended loop's retry fails with ``defect`` once ``stated`` is set."""
+
+    def __init__(self, stated: asyncio.Event, defect: Exception) -> None:
+        super().__init__()
+        self._stated = stated
+        self._defect = defect
+
+    async def sleep(self, seconds: float) -> None:
+        if seconds != SUSPENDED_RETRY_SECONDS:
+            await super().sleep(seconds)
+            return
+        async with asyncio.timeout(LIMIT_SECONDS):
+            await self._stated.wait()
+        raise self._defect
+
+
+async def test_a_wait_before_a_retry_that_fails_leaves_no_unavailable_statement_running(runner):
+    """TURNS-44."""
+    hold = ClosingHold()
+    defect = ValueError("a defect")
+    runner.clock = WaitFailingOnceStated(hold.closing, defect)
+    # The first session is the loop's; the second states unavailable beside the wait.
+    runner.open_session = hold.opener(nth=2)
+    await restarted_in_the_call(runner)
+
+    forbids_every_read(runner)
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    try:
+        ended_as = await ended_by(runner.task)
+    finally:
+        hold.release.set()
+
+    assert [leaf for leaf in leaves_of(ended_as) if leaf is defect] == [defect]
+    assert (statements(runner), hold.cancelled.is_set()) == ([UNAVAILABLE], True)

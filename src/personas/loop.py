@@ -548,11 +548,11 @@ class AgentLoop:
         stating = asyncio.create_task(self._state_on_own_session(self._turn_states.state_unavailable))
         try:
             await self._boundaries.clock.sleep(seconds)
-        except asyncio.CancelledError:
+            await stating
+        finally:
+            # A wait that ends on an error or a cancel leaves no statement running beside the loop.
             stating.cancel()
             await asyncio.gather(stating, return_exceptions=True)
-            raise
-        await stating
 
     async def state_on_stop(self, seconds: float) -> None:
         """At his stop, sends within ``seconds`` what the stop left queued, the end of a turn it cut among it, and each
