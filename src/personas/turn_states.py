@@ -46,7 +46,7 @@ class TurnStates:
 
     Once the loop has stopped taking turns in the app, each held seat is stated ``unavailable``. Then, and after a
     session that ended with a statement failed or in flight, the next full pass states each held seat's last turn end
-    again.
+    again; his stop does so only for such a session, and only while ``unavailable`` does not stand.
     """
 
     def __init__(
@@ -62,7 +62,7 @@ class TurnStates:
         self._queue: asyncio.Queue[_Queued] = asyncio.Queue()
         self._unserved: set[PlaceRef] = set()
         self._unavailable = False
-        self._restate_due = False
+        self._lost = False
 
     def sync_seats(self, standings: tuple[Standing, ...]) -> None:
         """Forgets the last turn end of each seat he no longer holds, and that its app served it no statement, so a
@@ -87,16 +87,23 @@ class TurnStates:
         something_to_state = bool(self._seat_ends) or not self._queue.empty()
         if self._unavailable or not something_to_state:
             return False
-        self._unavailable = self._restate_due = True
+        self._unavailable = True
         return True
 
-    def restate_if_due(self) -> None:
+    def restate_after_full_pass(self) -> None:
         """Once the loop had stopped taking turns, or a session ended with a statement failed or in flight, queues
-        each held seat's last turn end again, ``None`` where there was none; the loop calls it after a full pass and
-        at his stop."""
-        if not self._restate_due:
-            return
-        self._unavailable = self._restate_due = False
+        each held seat's last turn end again, ``None`` where there was none."""
+        if self._unavailable or self._lost:
+            self._restate()
+
+    def restate_at_stop(self) -> None:
+        """At his stop, queues each held seat's last turn end again after a session that ended with a statement
+        failed or in flight; where ``unavailable`` stands, no full pass went through, so it stays."""
+        if self._lost and not self._unavailable:
+            self._restate()
+
+    def _restate(self) -> None:
+        self._unavailable = self._lost = False
         for place, stopped in self._seat_ends.items():
             self._queue_statement(SetTurnStateArguments(place=place, stopped=stopped))
 
@@ -120,7 +127,7 @@ class TurnStates:
                 unsure = not await self._send(session, queued) or unsure_before
         finally:
             if unsure:
-                self._restate_due = True
+                self._lost = True
 
     async def state_queued(self, session: AppSession) -> None:
         """Sends what is queued now, in order, on ``session``."""

@@ -166,5 +166,5 @@ left out of his turns and asked again every 30 seconds. (TURNS-42)
   recovers on its first retry states nothing. The next full pass of standing, accepts and windows states
   at each held seat its last turn end in this seat again, that his turns answer when none did; so does the
   first full pass after a session that ended with a statement failed or in flight, and the runner's stop
-  while either is still due. Stating `unavailable` stops at the first seat whose statement the app does not
-  answer. (TURNS-44)
+  while that is still due and `unavailable` does not stand, since no full pass went through since. Stating
+  `unavailable` stops at the first seat whose statement the app does not answer. (TURNS-44)

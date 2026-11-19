@@ -267,7 +267,7 @@ class AgentLoop:
         if window_lost:
             # A window the app lost dropped its place's checkpoint: the standing says where the place stands now.
             await self._take_standing(session)
-        self._turn_states.restate_if_due()
+        self._turn_states.restate_after_full_pass()
         await self._start_due_turn(turns)
         self._served()
 
@@ -556,8 +556,9 @@ class AgentLoop:
 
     async def state_on_stop(self, seconds: float) -> None:
         """At his stop, sends within ``seconds`` what the stop left queued, the end of a turn it cut among it, and each
-        seat's last end where a statement was lost with its session; what does not go out in time is logged once."""
-        self._turn_states.restate_if_due()
+        seat's last end where a statement was lost with its session and ``unavailable`` does not stand; what does not go
+        out in time is logged once."""
+        self._turn_states.restate_at_stop()
         if self._turn_states.nothing_queued():
             return
         try:

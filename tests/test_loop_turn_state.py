@@ -466,6 +466,20 @@ async def test_a_new_seat_at_the_place_of_a_seat_whose_app_served_no_statement_s
     assert statements(runner) == [THINKING, ended(None)]
 
 
+@EARLIER_ENDS
+async def test_a_stop_while_unavailable_stands_states_nothing_more(runner, replies, earlier, last):
+    """TURNS-44."""
+    await in_the_call_after(runner, replies)
+    fails_the_window_reads(runner)
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    await runner.app.until_turn_states(len(earlier) + 1)
+
+    runner.task.cancel()
+    await ended_by(runner.task)
+
+    assert statements(runner) == [*earlier, UNAVAILABLE]
+
+
 async def test_a_backoff_whose_window_reads_keep_failing_logs_resumed_once_a_full_pass_went_through(runner):
     """LOG-8, LOG-9."""
     await restarted_in_the_call(runner)
