@@ -1,8 +1,0 @@
-claim_id = "8974a964aca74fcc9f772e6c90bda1a8"
-agent = "Claude d21def74-68af-4c98-89a2-70bc45cbdd6a"
-role = "builder"
-base = "22cdc970b679f58b8a3d19acbd59c446b3124539"
-branch = "claude/issue-342-speech-record-in-the-mind"
-scope = ["docs/ARCHITECTURE.md", "src/personas/decision.py", "src/personas/mind.py", "src/personas/present.py", "src/personas/turning.py", "src/personas/voice.py", "tests"]
-opened_commit = "60e7c200c2be02f409993ed48cbb27b081ef3834"
-whole_reason = "one piece of state moved from the turn to the Mind, with its callers and tests"
