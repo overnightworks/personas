@@ -214,7 +214,10 @@ async def test_a_401_is_renewed_once_and_a_second_one_suspends_the_loop(runner, 
 
 @pytest.mark.parametrize("status", [HTTPStatus.FORBIDDEN, HTTPStatus.BAD_REQUEST])
 @pytest.mark.parametrize("method", [DISCOVER, LISTEN, READ, CALL])
-async def test_a_4xx_suspends_the_loop_with_its_status_and_it_resumes_when_the_app_answers(runner, method, status):
+async def test_a_4xx_suspends_the_loop_with_its_status_and_it_resumes_once_a_full_pass_went_through(
+    runner, method, status
+):
+    """LOG-7, LOG-8."""
     runner.app.stand(SUBJECT, invited("room-7", "inv-3"))
     runner.app.refuse_with = status
     runner.app.refused_method = method
@@ -226,6 +229,7 @@ async def test_a_4xx_suspends_the_loop_with_its_status_and_it_resumes_when_the_a
     assert runner.reports.reported() == [
         (Event.STARTED, None),
         (Event.SUSPENDED, status_code(status)),
+        (Event.JOINED, None),
         (Event.RESUMED, None),
     ]
 

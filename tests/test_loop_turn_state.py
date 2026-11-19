@@ -4,6 +4,8 @@ his seats are told once the loop stops taking turns in the app, recovers or stop
 from __future__ import annotations
 
 import asyncio
+import logging
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from http import HTTPStatus
 from typing import TYPE_CHECKING
@@ -12,6 +14,7 @@ import pytest
 from agents.backend.fake_gateway import Reply
 from agents.member import (
     SET_TURN_STATE_TOOL,
+    STANDING_URI,
     PlaceRef,
     SetTurnStateArguments,
     SetTurnStateRefusal,
@@ -21,20 +24,27 @@ from agents.tools import ToolOutcome
 from agents.turn import StopOutcome
 from mcp_types import INVALID_PARAMS
 
-from personas.decision import INVALID_PARAMS_REASON, NETWORK_FAILURE_CODE, NO_ANSWER_REASON
+from personas.app_session import open_mcp_session
+from personas.decision import INVALID_PARAMS_REASON, NETWORK_FAILURE_CODE, NO_ANSWER_REASON, SUSPENDED_RETRY_SECONDS
 from personas.failures import leaves_of
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PLACE_ID, restarted_in_the_call, say_in_the_call
+from tests.support.fakes import FakeClock
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
 from tests.support.hopin import CALL, LIMIT_SECONDS, READ, SAY_TOOL
 from tests.support.logs import lines_of
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, paused
-from tests.support.transport import opener_whose_request_raises
+from tests.support.transport import ClosingHold, opener_whose_request_raises
 from tests.support.voice import ended_by
 from tests.support.wire import hangs
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
+    from personas.app_session import AppSession
+    from personas.config import AppTarget
+    from personas.secret import Secret
     from tests.support.wire import Reply as AppReply
 
 pytestmark = pytest.mark.anyio
@@ -324,10 +334,11 @@ async def test_a_blip_that_recovers_on_its_first_retry_states_nothing(runner, re
     assert statements(runner) == [*earlier, THINKING, ended(None)]
 
 
-async def test_a_blip_while_a_turns_end_is_answered_backs_off_told_by_the_reads_answer_and_states_no_unavailable(
+async def test_a_blip_while_a_turns_end_is_answered_backs_off_as_its_read_tells_logs_no_warning_states_no_unavailable(
     runner, caplog
 ):
-    """TURNS-44, LOG-9: the answer to the statement beside the failed read does not tell how the read failed."""
+    """TURNS-44, LOG-9, LOG-35: the answer to the statement beside the failed read does not tell how the read failed,
+    and the runner recovers from the blip on its own."""
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
@@ -345,10 +356,11 @@ async def test_a_blip_while_a_turns_end_is_answered_backs_off_told_by_the_reads_
     (backed_off,) = lines_of(caplog.records, "loop.backed_off")
     assert (backed_off.get("status"), backed_off.get("mcp_method")) == (HTTPStatus.SERVICE_UNAVAILABLE, READ)
     assert UNAVAILABLE not in statements(runner)
+    assert [record.getMessage() for record in caplog.records if record.levelno >= logging.WARNING] == []
 
 
-async def test_a_statement_lost_with_its_session_is_stated_again_after_the_next_full_pass(runner):
-    """TURNS-44."""
+async def test_a_statement_lost_with_its_session_is_logged_as_lost_and_stated_again_after_the_next_full_pass(runner):
+    """TURNS-44, LOG-34, LOG-35."""
     entered, released = asyncio.Event(), asyncio.Event()
 
     async def held_until_released(reply: AppReply) -> None:
@@ -368,6 +380,8 @@ async def test_a_statement_lost_with_its_session_is_stated_again_after_the_next_
     released.set()
 
     assert statements(runner) == [THINKING, ended(None)]
+    reported = [event for event, _ in runner.reports.reported(started=False)]
+    assert reported == [Event.TURN_STATE_LOST, Event.BACKOFF, Event.RESUMED]
 
 
 @EARLIER_ENDS
@@ -407,14 +421,17 @@ async def test_a_stops_statement_that_does_not_go_out_within_its_margin_is_logge
     assert runner.reports.reported(started=False).count((Event.TURN_STATE_FAILED, NETWORK_FAILURE_CODE)) == 1
 
 
-@pytest.mark.parametrize("status", [HTTPStatus.BAD_REQUEST, HTTPStatus.OK], ids=["error status", "success status"])
-async def test_a_seat_whose_app_answers_an_unknown_tool_gets_no_more_statements_after_one_line(runner, status):
-    """TURNS-43, LOG-34."""
-
+def answers_an_unknown_tool(status: HTTPStatus):
     async def unknown_tool(reply: AppReply) -> None:
         await reply.error(INVALID_PARAMS, status=status)
 
-    runner.app.script(SET_TURN_STATE_TOOL, unknown_tool)
+    return unknown_tool
+
+
+@pytest.mark.parametrize("status", [HTTPStatus.BAD_REQUEST, HTTPStatus.OK], ids=["error status", "success status"])
+async def test_a_seat_whose_app_answers_an_unknown_tool_gets_no_more_statements_after_one_line(runner, status):
+    """TURNS-43, LOG-34."""
+    runner.app.script(SET_TURN_STATE_TOOL, answers_an_unknown_tool(status))
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER), *says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
     for turn in (1, 2):
@@ -437,3 +454,119 @@ async def test_a_statement_the_app_does_not_answer_in_time_is_logged_as_failed_a
 
     assert runner.reports.reported(started=False)[0] == (Event.TURN_STATE_FAILED, NETWORK_FAILURE_CODE)
     assert runner.gateway.arrivals == 1
+
+
+async def test_a_new_seat_at_the_place_of_a_seat_whose_app_served_no_statement_starts_with_nothing_stated(runner):
+    """TURNS-43."""
+    runner.app.script(SET_TURN_STATE_TOOL, answers_an_unknown_tool(HTTPStatus.BAD_REQUEST))
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER), *says(PLACE_ID, ANSWER))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, f"{ADDRESSED} 1")
+    await runner.reports.until_a_turn_completed()
+
+    standing_reads = runner.app.reads.get(STANDING_URI, 0)
+    runner.app.stand(SUBJECT)
+    await runner.app.until_standing_read(standing_reads + 1)
+    seated_again_read = runner.app.hold_next_window_read()
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    await runner.app.until_window_read_held()
+    say_in_the_call(runner, f"{ADDRESSED} 2")
+    seated_again_read.set()
+    await runner.reports.until_a_turn_completed(count=2)
+    await runner.app.until_turn_states(2)
+
+    assert statements(runner) == [THINKING, ended(None)]
+
+
+@EARLIER_ENDS
+async def test_a_stop_while_unavailable_stands_states_nothing_more(runner, replies, earlier, last):
+    """TURNS-44."""
+    await in_the_call_after(runner, replies)
+    fails_the_window_reads(runner)
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    await runner.app.until_turn_states(len(earlier) + 1)
+
+    runner.task.cancel()
+    await ended_by(runner.task)
+
+    assert statements(runner) == [*earlier, UNAVAILABLE]
+
+
+async def test_a_backoff_whose_window_reads_keep_failing_logs_resumed_once_a_full_pass_went_through(runner):
+    """LOG-8, LOG-9."""
+    await restarted_in_the_call(runner)
+    fails_the_window_reads(runner)
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    await runner.app.until_turn_states(1)
+    answers_the_window_reads(runner)
+    await runner.app.until_turn_states(2)
+
+    assert [event for event, _ in runner.reports.reported(started=False)] == [Event.BACKOFF, Event.RESUMED]
+
+
+class WaitFailingOnceStated(FakeClock):
+    """A fake clock whose wait before a suspended loop's retry fails with ``defect`` once ``stated`` is set."""
+
+    def __init__(self, stated: asyncio.Event, defect: Exception) -> None:
+        super().__init__()
+        self._stated = stated
+        self._defect = defect
+
+    async def sleep(self, seconds: float) -> None:
+        if seconds != SUSPENDED_RETRY_SECONDS:
+            await super().sleep(seconds)
+            return
+        async with asyncio.timeout(LIMIT_SECONDS):
+            await self._stated.wait()
+        raise self._defect
+
+
+async def test_a_wait_before_a_retry_that_fails_leaves_no_unavailable_statement_running(runner):
+    """TURNS-44."""
+    hold = ClosingHold()
+    defect = ValueError("a defect")
+    runner.clock = WaitFailingOnceStated(hold.closing, defect)
+    # The first session is the loop's; the second states unavailable beside the wait.
+    runner.open_session = hold.opener(nth=2)
+    await restarted_in_the_call(runner)
+
+    forbids_every_read(runner)
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    try:
+        ended_as = await ended_by(runner.task)
+    finally:
+        hold.release.set()
+
+    assert [leaf for leaf in leaves_of(ended_as) if leaf is defect] == [defect]
+    assert (statements(runner), hold.cancelled.is_set()) == ([UNAVAILABLE], True)
+
+
+def opener_failing_while(stopping: asyncio.Event, defect: Exception):
+    """A session opener of real sessions that raises ``defect`` in place of each session it opens once ``stopping`` is
+    set."""
+
+    @asynccontextmanager
+    async def opened(app: AppTarget, token: Secret) -> AsyncGenerator[AppSession]:
+        if stopping.is_set():
+            raise defect
+        async with open_mcp_session(app, token) as session:
+            yield session
+
+    return opened
+
+
+async def test_a_defect_in_a_stops_statement_still_writes_the_turn_the_stop_cut(runner):
+    """TURNS-38, TURNS-43."""
+    stopping = asyncio.Event()
+    defect = ValueError("a defect")
+    runner.open_session = opener_failing_while(stopping, defect)
+    await a_turn_in_its_first_round(runner, *says(PLACE_ID, ANSWER))
+    await runner.app.until_turn_states(1)
+
+    stopping.set()
+    runner.task.cancel()
+    ended_as = await ended_by(runner.task)
+
+    assert [leaf for leaf in leaves_of(ended_as) if leaf is defect] == [defect]
+    kept = runner.histories.turns[runner.config.agents[0].client_id]
+    assert [due.place for due in kept.due] == [CALL_PLACE]

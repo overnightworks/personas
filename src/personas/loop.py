@@ -215,14 +215,17 @@ class AgentLoop:
             self._boundaries.open_session(self._app, token.value) as session,
         ):
             turns.create_task(self._turn_states.state_each(session))
-            self._turning.new_session()
-            self._voice_app = await self._is_voice_app(session)
-            while True:
-                await self._use_current_token(session)
-                async with session.changes() as changes, aclosing(self._wakes(changes)) as wakes:
-                    await self._reconcile(session, turns)
-                    async for _ in wakes:
+            try:
+                self._turning.new_session()
+                self._voice_app = await self._is_voice_app(session)
+                while True:
+                    await self._use_current_token(session)
+                    async with session.changes() as changes, aclosing(self._wakes(changes)) as wakes:
                         await self._reconcile(session, turns)
+                        async for _ in wakes:
+                            await self._reconcile(session, turns)
+            finally:
+                self._turn_states.session_ended(session)
 
     async def _is_voice_app(self, session: AppSession) -> bool:
         """Whether the turns at this app's call places are spoken, decided once for the lifecycle session."""
@@ -267,7 +270,7 @@ class AgentLoop:
         if window_lost:
             # A window the app lost dropped its place's checkpoint: the standing says where the place stands now.
             await self._take_standing(session)
-        self._turn_states.restate_if_due()
+        self._turn_states.restate_after_full_pass()
         await self._start_due_turn(turns)
         self._served()
 
@@ -275,7 +278,6 @@ class AgentLoop:
         """Reads the standing, keeps the checkpoints in line with it and accepts what it invites to."""
         await self._use_current_token(session)
         standing = await session.read_standing()
-        self._resume_if_unwell()
         self._memory = forget_gone(self._memory, standing.standings)
         self._mind.sync_checkpoints(self._app.mcp_url, standing.standings, self._standings)
         self._standings = standing.standings
@@ -307,12 +309,10 @@ class AgentLoop:
         return self._token
 
     def _served(self) -> None:
-        """A read and every accept it led to went through: the failure counters start over."""
+        """A full pass of standing, accepts and windows went through: the failure counters start over, and a
+        suspension or backoff has ended."""
         self._failures = 0
         self._renewed_after_401 = False
-
-    def _resume_if_unwell(self) -> None:
-        """A read answered: the app is reachable and accepts the token, whatever an accept then does."""
         if self._suspension is not None or self._backing_off:
             self._suspension = None
             self._backing_off = False
@@ -551,16 +551,17 @@ class AgentLoop:
         stating = asyncio.create_task(self._state_on_own_session(self._turn_states.state_unavailable))
         try:
             await self._boundaries.clock.sleep(seconds)
-        except asyncio.CancelledError:
+            await stating
+        finally:
+            # A wait that ends on an error or a cancel leaves no statement running beside the loop.
             stating.cancel()
             await asyncio.gather(stating, return_exceptions=True)
-            raise
-        await stating
 
     async def state_on_stop(self, seconds: float) -> None:
         """At his stop, sends within ``seconds`` what the stop left queued, the end of a turn it cut among it, and each
-        seat's last end where a statement was lost with its session; what does not go out in time is logged once."""
-        self._turn_states.restate_if_due()
+        seat's last end where a statement was lost with its session and ``unavailable`` does not stand; what does not go
+        out in time is logged once."""
+        self._turn_states.restate_at_stop()
         if self._turn_states.nothing_queued():
             return
         try:

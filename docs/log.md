@@ -30,7 +30,7 @@ events and their fields. A test cites each rule by its ID at the start of its do
 |---|---|---|
 | `loop.started` | a loop starts | `model` when the agent can take turns (LOG-6) |
 | `loop.suspended` | the realm or an app refuses the agent | `reason`; `status` and `mcp_method` when a call failed (LOG-7) |
-| `loop.resumed` | the refusal ended | none (LOG-8) |
+| `loop.resumed` | a full pass of standing, accepts and windows went through after a suspension or a backoff, so a retry whose window reads still fail logs none | none (LOG-8) |
 | `loop.backed_off` | a network failure, a lost stream or a 5xx | `reason`; `status` and `mcp_method` when a call failed (LOG-9) |
 | `invitation.accepted`, `invitation.refused` | an accept answered | `reason` for a refusal (LOG-10) |
 | `invitation.left_out` | an invitation the agent cannot take turns at | `place_kind`, `reason` `no_turns` (LOG-11) |
@@ -48,7 +48,8 @@ events and their fields. A test cites each rule by its ID at the start of its do
 | `agent.lost` | a pod stops an agent it served | `reason`: `hold_lost`, `generation_stale` or the store's code (LOG-23) |
 | `agent.stop_overran` | an agent took longer than `cancel_margin_seconds` to stop | the agent only (LOG-24) |
 | `runner.stop_cut` | the runner had not stopped `stop_seconds` after a SIGTERM and ends at once | none; no agent or app (LOG-25) |
-| `turn_state.failed` | the app refused or failed a statement of his turns at a place, or a stop's statements did not go out within its margin | `reason` (the app's refusal code, the failed call's reason, `invalid_params` for a tool the app does not serve, `network` for a stop's margin and for a statement whose answer was lost when its session ended on another call's failure, which is stated again after the next full pass); `status` and `mcp_method` when a call failed (LOG-34) |
+| `turn_state.failed` | the app refused or failed a statement of his turns at a place, or a stop's statements did not go out within its margin | `reason` (the app's refusal code, the failed call's reason, `invalid_params` for a tool the app does not serve, `network` for a stop's margin); `status` and `mcp_method` when a call failed (LOG-34) |
+| `turn_state.lost` | a statement whose answer was lost when its session ended on another call's failure; the runner recovers on its own, since the next full pass states it again, so it logs at info | none (LOG-35) |
 
 A `status` is the integer of an error status, absent for a JSON-RPC error sent with a success status. A
 `reason` of a failed call is a standard JSON-RPC error or a known media type by name, else one fixed word,

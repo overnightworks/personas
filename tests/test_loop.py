@@ -226,14 +226,13 @@ async def test_an_accept_the_app_cannot_answer_suspends_the_loop_with_its_code_a
     assert run.reports.reported() == [
         (Event.STARTED, None),
         (Event.SUSPENDED, jsonrpc_code(INVALID_PARAMS)),
-        (Event.RESUMED, None),
-        (Event.SUSPENDED, jsonrpc_code(INVALID_PARAMS)),
-        (Event.RESUMED, None),
         (Event.JOINED, None),
+        (Event.RESUMED, None),
     ]
 
 
-async def test_a_loop_resumes_once_a_read_answers_though_the_accept_after_it_fails(scenario):
+async def test_a_loop_whose_read_answers_but_whose_accept_fails_resumes_only_once_a_full_pass_went_through(scenario):
+    """LOG-8."""
     standing = invited("room-7", "inv-3")
     run = scenario(
         [UnusableAnswer(jsonrpc_code(INVALID_PARAMS)), read_of(standing), read_of(standing)],
@@ -245,10 +244,9 @@ async def test_a_loop_resumes_once_a_read_answers_though_the_accept_after_it_fai
     assert run.reports.reported() == [
         (Event.STARTED, None),
         (Event.SUSPENDED, jsonrpc_code(INVALID_PARAMS)),
-        (Event.RESUMED, None),
         (Event.BACKOFF, status_code(503)),
-        (Event.RESUMED, None),
         (Event.JOINED, None),
+        (Event.RESUMED, None),
     ]
 
 
