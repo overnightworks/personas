@@ -437,3 +437,15 @@ async def test_a_statement_the_app_does_not_answer_in_time_is_logged_as_failed_a
 
     assert runner.reports.reported(started=False)[0] == (Event.TURN_STATE_FAILED, NETWORK_FAILURE_CODE)
     assert runner.gateway.arrivals == 1
+
+
+async def test_a_backoff_whose_window_reads_keep_failing_logs_resumed_once_a_full_pass_went_through(runner):
+    """LOG-8, LOG-9."""
+    await restarted_in_the_call(runner)
+    fails_the_window_reads(runner)
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    await runner.app.until_turn_states(1)
+    answers_the_window_reads(runner)
+    await runner.app.until_turn_states(2)
+
+    assert [event for event, _ in runner.reports.reported(started=False)] == [Event.BACKOFF, Event.RESUMED]

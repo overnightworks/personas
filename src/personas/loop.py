@@ -275,7 +275,6 @@ class AgentLoop:
         """Reads the standing, keeps the checkpoints in line with it and accepts what it invites to."""
         await self._use_current_token(session)
         standing = await session.read_standing()
-        self._resume_if_unwell()
         self._memory = forget_gone(self._memory, standing.standings)
         self._mind.sync_checkpoints(self._app.mcp_url, standing.standings, self._standings)
         self._standings = standing.standings
@@ -307,12 +306,10 @@ class AgentLoop:
         return self._token
 
     def _served(self) -> None:
-        """A read and every accept it led to went through: the failure counters start over."""
+        """A full pass of standing, accepts and windows went through: the failure counters start over, and a
+        suspension or backoff has ended."""
         self._failures = 0
         self._renewed_after_401 = False
-
-    def _resume_if_unwell(self) -> None:
-        """A read answered: the app is reachable and accepts the token, whatever an accept then does."""
         if self._suspension is not None or self._backing_off:
             self._suspension = None
             self._backing_off = False

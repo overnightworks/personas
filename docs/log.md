@@ -30,7 +30,7 @@ events and their fields. A test cites each rule by its ID at the start of its do
 |---|---|---|
 | `loop.started` | a loop starts | `model` when the agent can take turns (LOG-6) |
 | `loop.suspended` | the realm or an app refuses the agent | `reason`; `status` and `mcp_method` when a call failed (LOG-7) |
-| `loop.resumed` | the refusal ended | none (LOG-8) |
+| `loop.resumed` | a full pass of standing, accepts and windows went through after a suspension or a backoff, so a retry whose window reads still fail logs none | none (LOG-8) |
 | `loop.backed_off` | a network failure, a lost stream or a 5xx | `reason`; `status` and `mcp_method` when a call failed (LOG-9) |
 | `invitation.accepted`, `invitation.refused` | an accept answered | `reason` for a refusal (LOG-10) |
 | `invitation.left_out` | an invitation the agent cannot take turns at | `place_kind`, `reason` `no_turns` (LOG-11) |
