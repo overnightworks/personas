@@ -222,23 +222,38 @@ async def test_the_gateway_request_line_agents_writes_for_a_turn_carries_the_tra
     assert {line["trace_id"] for line in requests} == {ended["trace_id"]}
 
 
-async def test_a_turn_that_lists_another_apps_tools_writes_the_steps_of_each_app_and_its_token_request_in_its_trace(
-    runner, songmaker, written
-):
+async def a_turn_with_another_apps_tools(runner):
     runner.gateway = Gateway(*says(PLACE_ID, "Here."))
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
     await runner.reports.until_a_turn_ended()
 
+
+@pytest.mark.parametrize(("step", "count"), [("session_open.ended", 1), ("tool_list.ended", 2)])
+async def test_a_turn_that_lists_another_apps_tools_writes_each_step_of_it_in_its_trace(
+    runner, songmaker, written, step, count
+):
+    await a_turn_with_another_apps_tools(runner)
+
     lines = written_by_the_runner(written)
     (ended,) = [line for line in lines if line["event"] == "turn.ended"]
-    for step, count in (("session_open.ended", 1), ("tool_list.ended", 2)):
-        at = [line for line in lines if line["event"] == step]
-        assert len(at) == count
-        assert {line["trace_id"] for line in at} == {ended["trace_id"]}
-    assert {line["app_id"] for line in lines if line["event"] == "tool_list.ended"} == {
-        urlsplit(app.mcp_url).hostname for app in runner.config.apps
-    }
+    at = [line for line in lines if line["event"] == step]
+    assert len(at) == count
+    assert {line["trace_id"] for line in at} == {ended["trace_id"]}
+
+
+async def test_a_turn_lists_the_tools_of_each_app_once(runner, songmaker, written):
+    await a_turn_with_another_apps_tools(runner)
+
+    listed = [line for line in written_by_the_runner(written) if line["event"] == "tool_list.ended"]
+    assert {line["app_id"] for line in listed} == {urlsplit(app.mcp_url).hostname for app in runner.config.apps}
+
+
+async def test_a_turn_requests_its_token_in_its_trace(runner, songmaker, written):
+    await a_turn_with_another_apps_tools(runner)
+
+    lines = written_by_the_runner(written)
+    (ended,) = [line for line in lines if line["event"] == "turn.ended"]
     in_the_turn = [line for line in lines if line["event"] == "token_request.ended" and line["trace_id"] is not None]
     assert [line["trace_id"] for line in in_the_turn] == [ended["trace_id"]]
     assert [header.split("-")[1] for header in runner.realm.traceparents if header is not None] == [ended["trace_id"]]
