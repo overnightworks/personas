@@ -165,6 +165,7 @@ left out of his turns and asked again every 30 seconds. (TURNS-42)
   `unavailable` at each seat he holds there, on a session of its own while it waits to retry; a blip that
   recovers on its first retry states nothing. The next full pass of standing, accepts and windows states
   at each held seat its last turn end in this seat again, that his turns answer when none did; so does the
-  first full pass after a session that ended with a statement failed or in flight, and the runner's stop
-  while that is still due and `unavailable` does not stand, since no full pass went through since. Stating
-  `unavailable` stops at the first seat whose statement the app does not answer. (TURNS-44)
+  first full pass after a session that ended with a statement failed or in flight, and so does the runner's stop
+  while that is still due and `unavailable` does not stand. Where `unavailable` stands, the stop states nothing
+  more, because no full pass went through since: `unavailable` is what the app holds. Stating `unavailable`
+  stops at the first seat whose statement the app does not answer. (TURNS-44)
