@@ -410,6 +410,39 @@ async def test_his_line_for_the_playing_sentence_that_the_bound_cuts_while_the_n
     assert runner.reports.reported() == [(Event.STARTED, None)]
 
 
+async def test_a_line_that_enters_before_the_answer_of_its_speak_leaves_nothing_owed_and_the_turn_ends(runner):
+    answer = runner.app.hold_next_speak()
+    await a_voice_call(runner, completion(ANSWER))
+    say_in_the_call(runner, ADDRESSED)
+    await runner.app.until_called(1)
+    runner.app.speak(PLACE_ID, SUBJECT, "Mozart", ANSWER, spoken=True)
+    await settled(runner.app)
+    answer.set()
+
+    await runner.reports.until_a_turn_completed()
+
+    assert sentences_spoken(runner) == [ANSWER]
+    assert runner.reports.reported() == [(Event.STARTED, None)]
+
+
+async def test_his_own_spoken_line_at_another_place_does_not_end_the_wait_for_the_line_of_the_sentence_playing(runner):
+    other = "room-9"
+    holding_sentence_ends(runner)
+    await a_voice_call(runner, completion(ANSWER))
+    runner.app.stand(SUBJECT, active(PLACE_ID), active(other))
+    await runner.app.until_window_read(other)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.app.spoken_count(1)
+
+    runner.app.speak(other, SUBJECT, "Mozart", "Elsewhere.", spoken=True)
+    await settled(runner.app)
+    assert runner.reports.turn_endings == []
+    runner.app.end_sentence()
+    await runner.reports.until_a_turn_completed()
+
+    assert sentences_spoken(runner) == [ANSWER]
+
+
 async def test_a_sentence_dropped_by_a_stop_yields_no_line_and_the_turn_does_not_wait_for_one(runner):
     holding_sentence_ends(runner)
     await a_voice_call(runner, completion(TWO_SENTENCES))

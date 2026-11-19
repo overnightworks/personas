@@ -368,7 +368,10 @@ class Turning:
                     tally,
                 )
                 voiced = _Voiced(setup, admitted, turn, request, held, speaking, record, held.inbox)
-                final = await self._speak_along(voiced, events, tally)
+                try:
+                    final = await self._speak_along(voiced, events, tally)
+                finally:
+                    self._mind.speech_ended(AppPlace(self._app.mcp_url, admitted.place))
                 cut = speaking.was_cut
             else:
                 final = await _final_event_of(events, tally)
@@ -455,7 +458,7 @@ class Turning:
             told_hold(
                 hold.id,
                 hold.speech,
-                speaking.saying,
+                self._mind.speech_saying(AppPlace(self._app.mcp_url, admitted.place)),
                 speaking.unsaid,
                 None if inbox.waiting is None else (inbox.waiting.name, inbox.waiting.input),
             ),
