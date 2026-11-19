@@ -5,12 +5,10 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING
 
-from figures.figure_hair import hair_cap
-from figures.figure_parts import Colour, mixed
+from figures.figure_hair import hair_cap, strands
 
 if TYPE_CHECKING:
     from figures.figure_parts import Part
-    from figures.figure_shapes import Vector
 
 BROWN = (122, 104, 90)
 GREY = (160, 152, 144)
@@ -31,13 +29,9 @@ BODY = 0.009
 # Tufts stand out from the skull by up to TOUSLE more.
 TOUSLE = 0.006
 TUFTS = 9.0
+# Grey-brown hair with greyer strands.
+STRANDS = strands(BROWN, GREY, 0.3, 0.25, 30.0, 9.0)
 
 
 def humboldt_hair() -> list[Part]:
-    return hair_cap(HAIR, _strands, BODY, TOUSLE, TUFTS)
-
-
-def _strands(position: Vector) -> Colour:
-    """Grey-brown hair with greyer strands that wander as they lie."""
-    x, height, z = position
-    return mixed(BROWN, GREY, 0.3 + 0.25 * math.cos(30.0 * math.atan2(x, z) + 9.0 * height))
+    return hair_cap(HAIR, STRANDS, BODY, TOUSLE, TUFTS)

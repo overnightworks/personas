@@ -4,15 +4,11 @@ with soft volume round the head."""
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
 
-from figures.figure_hair import hair_cap
-from figures.figure_parts import Colour, Material, Part, mixed, part
+from figures.figure_hair import hair_cap, strands
+from figures.figure_parts import Material, Part, part
 from figures.figure_shapes import ellipsoid
 from figures.figure_skeleton import EYE_HEIGHT
-
-if TYPE_CHECKING:
-    from figures.figure_shapes import Vector
 
 BLONDE = (150, 124, 90)
 GREY = (170, 162, 150)
@@ -34,6 +30,8 @@ HAIR = (
 BODY = 0.016
 TOUSLE = 0.003
 TUFTS = 7.0
+# Dark blonde hair with greyer strands.
+STRANDS = strands(BLONDE, GREY, 0.12, 0.12, 26.0, 11.0)
 # Where the knot sits (level above the eye line, how far behind the middle of the head) and its radii; the smaller coil
 # lies against it (how far to the side, then its level and how far behind the middle).
 KNOT = (0.108, -0.040)
@@ -43,7 +41,7 @@ COIL_RADII = (0.034, 0.030, 0.034)
 
 
 def curie_hair() -> list[Part]:
-    return [*hair_cap(HAIR, _strands, BODY, TOUSLE, TUFTS), *_knot()]
+    return [*hair_cap(HAIR, STRANDS, BODY, TOUSLE, TUFTS), *_knot()]
 
 
 def _knot() -> list[Part]:
@@ -54,10 +52,4 @@ def _knot() -> list[Part]:
         ellipsoid((0.0, EYE_HEIGHT + level, behind), KNOT_RADII, 8, 14),
         ellipsoid((side, EYE_HEIGHT + low, back), COIL_RADII, 7, 12),
     )
-    return [part(coil, _strands, Material.HAIR, "head") for coil in coils]
-
-
-def _strands(position: Vector) -> Colour:
-    """Dark blonde hair with greyer strands that wander as they lie."""
-    x, height, z = position
-    return mixed(BLONDE, GREY, 0.12 + 0.12 * math.cos(26.0 * math.atan2(x, z) + 11.0 * height))
+    return [part(coil, STRANDS, Material.HAIR, "head") for coil in coils]

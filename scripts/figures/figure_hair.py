@@ -7,12 +7,12 @@ from typing import TYPE_CHECKING
 
 from figures.figure_body import open_point
 from figures.figure_head import NECK_BINDER
-from figures.figure_parts import Material, part
+from figures.figure_parts import Colour, Material, mixed, part
 from figures.figure_skeleton import EYE_HEIGHT
 from figures.figure_surfaces import shell, smoothstep, spread
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from figures.figure_parts import Paint, Part
     from figures.figure_shapes import Vector
@@ -58,3 +58,16 @@ def _hair_point(
     tuft = 0.5 - 0.5 * math.cos(tufts * 2.0 * math.pi * column / COLUMNS + 7.0 * math.sin(23.0 * level))
     lift = tousle * tuft * smoothstep(-0.03, 0.08, level) if body else 0.0
     return open_point(heights, EYE_HEIGHT + level, column / COLUMNS, thickness + lift)
+
+
+def strands(
+    first: Colour, second: Colour, share: float, swing: float, turns: float, wander: float
+) -> Callable[[Vector], Colour]:
+    """A paint of `first` hair with strands of `second` that wander as they lie: `share` of the way to the second on
+    average, `swing` more or less, `turns` strands round the head and drifting with the height at `wander`."""
+
+    def paint(position: Vector) -> Colour:
+        x, height, z = position
+        return mixed(first, second, share + swing * math.cos(turns * math.atan2(x, z) + wander * height))
+
+    return paint
