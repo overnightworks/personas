@@ -8,6 +8,7 @@ import json
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL, VoiceState
+from agents.tools import ToolOutcome
 from agents.turn import FailureCode
 
 from personas.reporting import Event
@@ -209,6 +210,55 @@ async def test_a_line_that_never_comes_leaves_the_first_turn_ok_and_the_next_cal
     await runner.app.until_turn_states(4)
     assert [each.stopped for _, each in runner.app.turn_states if not each.thinking] == [None, None]
     assert runner.app.said == [(SUBJECT, PLACE_ID, WRITTEN)]
+
+
+async def test_a_line_that_never_comes_lets_a_call_out_at_the_sending_turns_bound_after_the_next_turn_spoke_a_sentence(
+    runner,
+):
+    """TURNS-28."""
+    sleeps = await a_last_sentence_that_plays(runner, *speaks_and_says(PLACE_ID, NEXT, WRITTEN, after="[silent]"))
+    runner.clock.time += PERSONA_MAX_DURATION_SECONDS / 2
+    said_at(runner, PLACE_ID, AGAIN)
+    await runner.gateway.until_turns(2)
+    await runner.app.until_called(2)
+    runner.app.playing.pop(0)
+    runner.app.waiting_speaks.pop(0).set_result(True)
+    await runner.app.spoken_count(2)
+    await settled(runner.app)
+    assert runner.app.said == []
+    assert sleeps.began[-1] == PERSONA_MAX_DURATION_SECONDS / 2
+
+    runner.clock.time += PERSONA_MAX_DURATION_SECONDS / 2
+    runner.app.speak(PLACE_ID, SUBJECT, "Mozart", "Taken at that time.")
+    await settled(runner.app)
+    runner.app.end_sentence()
+    await runner.app.said_count(1)
+    await runner.reports.until_a_turn_completed(count=2)
+
+    (missing,) = runner.reports.changes_of(Event.SPEAK_LINE_MISSING)
+    assert missing.lines == 1
+    assert runner.reports.turn_endings == [COMPLETED_TURN, COMPLETED_TURN]
+    assert Event.PAUSED not in [event for event, _ in runner.reports.reported()]
+    assert runner.app.said == [(SUBJECT, PLACE_ID, WRITTEN)]
+
+
+async def test_a_hold_decided_after_the_sending_turns_bound_leaves_the_line_owed_and_a_later_call_waits_for_it(runner):
+    """TURNS-25, TURNS-32."""
+    await a_last_sentence_that_plays(runner, deciding(CONTINUE_SPEAKING_TOOL), *says(PLACE_ID, WRITTEN))
+    runner.app.hold_outcomes.append(ToolOutcome(json.dumps({"continued": True}), is_error=False))
+    runner.clock.time += 2 * PERSONA_MAX_DURATION_SECONDS
+    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
+    await runner.reports.until(Event.HOLD_DECIDED)
+    await runner.gateway.until_requested(3)
+    await settled(runner.app)
+
+    assert runner.app.said == []
+    assert Event.SPEAK_LINE_MISSING not in [event for event, _ in runner.reports.reported()]
+    runner.app.end_sentence()
+    await runner.app.said_count(1)
+
+    assert runner.app.said == [(SUBJECT, PLACE_ID, WRITTEN)]
+    assert Event.SPEAK_LINE_MISSING not in [event for event, _ in runner.reports.reported()]
 
 
 async def test_a_turn_that_ended_limit_exceeded_with_a_line_still_owed_leaves_it_to_the_next_turn_that_logs_it_missing(

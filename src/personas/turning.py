@@ -139,6 +139,7 @@ class _Voiced:
     speaking: Speaking
     record: TaskRecord
     inbox: HoldInbox
+    bound: TurnBound
 
 
 class Turning:
@@ -327,7 +328,7 @@ class Turning:
                     tally,
                     None if held.told is None else held.told.released,
                 )
-                voiced = _Voiced(setup, admitted, turn, request, held, speaking, record, held.inbox)
+                voiced = _Voiced(setup, admitted, turn, request, held, speaking, record, held.inbox, bound)
                 try:
                     final = await self._speak_along(voiced, events, tally)
                 finally:
@@ -401,12 +402,12 @@ class Turning:
             return
         elif held.telling is Telling.UNDECIDED:
             refusal = await session.stop_speaking(place, held.id)
-            self._hold_decided(place, held.id, hold_ended_as(HoldOutcome.UNDECIDED, refusal))
+            self._hold_decided(place, held.id, hold_ended_as(HoldOutcome.UNDECIDED, refusal), None)
         elif self._mind.hold_makes_due(at):
             self._mind.due_for_hold(at, window.generation, self._clock.now())
 
-    def _hold_decided(self, place: PlaceRef, hold_id: str, outcome: HoldOutcome) -> None:
-        self._mind.hold_decided(self._at(place), hold_id)
+    def _hold_decided(self, place: PlaceRef, hold_id: str, outcome: HoldOutcome, bound: float | None) -> None:
+        self._mind.hold_decided(self._at(place), hold_id, bound)
         self._report(Event.HOLD_DECIDED, outcome.value, None, None)
 
     async def _decide_holds(self, voiced: _Voiced, hearing: _Hearing) -> None:
@@ -459,7 +460,10 @@ class Turning:
             pass
         if self._mind.hold_decided_id(self._at(admitted.place)) != hold.id:
             self._cut_speech(voiced, hearing)
-            if await self._end_hold(voiced.admitted.place, voiced.record, hold.id, HoldOutcome.UNDECIDED) is not None:
+            if (
+                await self._end_hold(voiced.admitted.place, voiced.record, hold.id, HoldOutcome.UNDECIDED, voiced.bound)
+                is not None
+            ):
                 self._report_told_hold_dropped(voiced)
 
     async def _answer_round(
@@ -473,7 +477,7 @@ class Turning:
         if self._mind.hold_decided_id(self._at(voiced.admitted.place)) == hold.id:
             return ToolOutcome(_DECIDED_TEXT, is_error=True)
         told = _CONTINUED_TEXT if outcome is HoldOutcome.CONTINUED else self._cut_speech(voiced, hearing)
-        ended = await self._end_hold(voiced.admitted.place, voiced.record, hold.id, outcome)
+        ended = await self._end_hold(voiced.admitted.place, voiced.record, hold.id, outcome, voiced.bound)
         if ended is None:
             return ToolOutcome(_APP_FAILED_TEXT, is_error=True)
         if outcome is HoldOutcome.STOPPED:
@@ -497,9 +501,10 @@ class Turning:
             self._report(Event.HOLD_DECIDED, HoldOutcome.UNDECIDED.value, None, None)
 
     async def _end_hold(
-        self, place: PlaceRef, record: TaskRecord, hold_id: str, outcome: HoldOutcome
+        self, place: PlaceRef, record: TaskRecord, hold_id: str, outcome: HoldOutcome, bound: TurnBound
     ) -> HoldOutcome | None:
-        """Sends his decision in a session of its own; how the hold ended, or ``None`` when the app did not answer."""
+        """Sends his decision in a session of its own; how the hold ended, or ``None`` when the app did not answer.
+        The turn that decides it owes the line of the sentence it held until its ``bound``."""
         try:
             answer = await self._sessions.ask_elsewhere(
                 self._app,
@@ -516,7 +521,7 @@ class Turning:
             self._report(_failure_event(self._app), failure_code(answer), self._app, answer)
             return None
         ended = hold_ended_as(outcome, answer)
-        self._hold_decided(place, hold_id, ended)
+        self._hold_decided(place, hold_id, ended, bound.ends_at)
         return ended
 
     def _told_standing(self, admitted: Admitted, held: Held) -> str:
@@ -528,6 +533,7 @@ class Turning:
         self,
         admitted: Admitted,
         record: TaskRecord,
+        bound: TurnBound,
         deciding: TurnHold,
         name: str,
         _principal: Principal,
@@ -538,7 +544,7 @@ class Turning:
         if not deciding.pending:
             return ToolOutcome(_DECIDED_TEXT, is_error=True)
         deciding.outcome = outcome
-        ended = await self._end_hold(admitted.place, record, deciding.held.id, outcome)
+        ended = await self._end_hold(admitted.place, record, deciding.held.id, outcome, bound)
         if ended is None:
             deciding.outcome = None
             return ToolOutcome(_APP_FAILED_TEXT, is_error=True)
@@ -584,7 +590,7 @@ class Turning:
                 bounds.append(calls.bound)
         if deciding is not None:
             tools.extend(
-                HandTool(each, partial(self._decide_told, admitted, record, deciding, each.name))
+                HandTool(each, partial(self._decide_told, admitted, record, bound, deciding, each.name))
                 for each in DECISION_DECLARATIONS
             )
             bounds.append(DECISION_CALLS)

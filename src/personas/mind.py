@@ -130,8 +130,9 @@ class Mind:
         dropped = 0
         for place, record in tuple(places.items()):
             if speech_lapsed(record, now, by):
-                dropped += record.owed
-                self._set_speech(place, speech_dropped(record))
+                kept = speech_dropped(record, now, by)
+                dropped += record.owed - kept.owed
+                self._set_speech(place, kept)
         return lines_owed((self._speech.get(place, NO_SPEECH) for place in places), dropped)
 
     def speech_saying(self, at: AppPlace) -> str | None:
@@ -167,9 +168,10 @@ class Mind:
         """The turn told the hold at the place ended: a hold it did not decide stays undecided."""
         self._set_speech(at, hold_turn_ended(self._speech.get(at, NO_SPEECH)))
 
-    def hold_decided(self, at: AppPlace, hold_id: str) -> None:
-        """The hold ``hold_id`` at the place was decided: it stands no more and is not decided again."""
-        self._set_speech(at, hold_decided(self._speech.get(at, NO_SPEECH), hold_id))
+    def hold_decided(self, at: AppPlace, hold_id: str, bound: float | None) -> None:
+        """The hold ``hold_id`` at the place was decided: it stands no more and is not decided again. A turn
+        that decided it, over by ``bound`` on the clock's monotonic scale, owes the held sentence's line from now."""
+        self._set_speech(at, hold_decided(self._speech.get(at, NO_SPEECH), hold_id, bound))
 
     def hold_decided_id(self, at: AppPlace) -> str | None:
         """The id of the hold decided last at the place."""
