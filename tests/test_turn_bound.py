@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 
 import anyio
 import pytest
@@ -9,6 +10,7 @@ from agents.member import Interrupted, PartialSpeech, PlaceRef, PlaceWindow, Tal
 from agents.turn import FailureCode
 
 from personas.decision import DEFAULT_BUDGET_PAUSE_CAP_SECONDS, AppPlace
+from personas.entries import KeptLine, Visit
 from personas.mind import Mind
 from personas.speech import Held
 from personas.turn_bound import TurnBound
@@ -99,6 +101,46 @@ async def test_a_wait_that_does_not_ask_for_a_hold_waits_on_until_the_turns_boun
     scenario.clock.gates[OWN_BOUND_SECONDS].set()
     with pytest.raises(TurnStopped):
         await waiting
+
+
+async def test_a_take_keeps_the_wait_sleeping_for_the_same_sending_turn_and_swaps_it_for_an_earlier_one():
+    scenario = Scenario()
+    waiting = await scenario.waiting()
+
+    scenario.mind.take((_a_line_of_his_own_unspoken(),))
+    await anyio.wait_all_tasks_blocked()
+    await anyio.wait_all_tasks_blocked()
+    assert not waiting.done()
+
+    earlier = SENDING_TURN_OVER_AT - 10
+    for length in (earlier, SENDING_TURN_OVER_AT - earlier):
+        scenario.clock.gates[length] = asyncio.Event()
+        scenario.clock.gates[length].set()
+    other = AppPlace(AT.app, PlaceRef(kind="call", id="room-8"))
+    scenario.mind.speech_sent(other, earlier)
+    scenario.mind.speech_answered(other, "Two.", spoken=True)
+    scenario.mind.speech_ended(other)
+    scenario.mind.take((_a_line_of_his_own_unspoken(),))
+    await anyio.wait_all_tasks_blocked()
+    owed = await waiting
+
+    assert (owed.count, scenario.missing) == (0, [1, 1])
+
+
+def _a_line_of_his_own_unspoken() -> KeptLine:
+    visit = Visit(AT.app, AT.place, "g1")
+    return KeptLine(
+        visit,
+        1,
+        datetime(2026, 1, 1, tzinfo=UTC),
+        "Mozart",
+        "message",
+        "x",
+        own=True,
+        spoken=False,
+        cut=False,
+        act=False,
+    )
 
 
 def _window_holding(held: Held) -> PlaceWindow:

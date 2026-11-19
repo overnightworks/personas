@@ -125,6 +125,16 @@ async def test_a_round_that_makes_no_decision_stops_him_with_the_id_and_says_not
     assert sentences_spoken(runner) == [FIRST]
 
 
+async def test_a_round_that_makes_no_decision_whose_stop_the_app_cannot_take_reports_no_decision(runner):
+    await held_in_the_first_sentence(runner, completion(TWO_SENTENCES), completion("[silent]"))
+    runner.app.script(CALL, refuses_with_a_server_error)
+
+    await runner.reports.until(Event.HELD_APP_FAILED)
+
+    assert runner.reports.codes_of(Event.HOLD_DECIDED) == []
+    assert runner.reports.reported(apps=True, started=False)[0].code == status_code(HTTPStatus.INTERNAL_SERVER_ERROR)
+
+
 async def test_a_decision_for_a_hold_already_decided_starts_no_round_and_a_new_hold_starts_one(runner):
     await held_in_the_first_sentence(
         runner,
