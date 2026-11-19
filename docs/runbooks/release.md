@@ -7,11 +7,15 @@ release changes the runner, its characters and its figures together. The rules i
 ## Check
 
 1. `main`'s CI is green on the commit to release.
-2. A release whose agents bump changes the member-tool wire waits until every app the runner serves pins
-   that agents version or a newer one. Read the agents release notes from the version in `pyproject.toml`
-   at the newest `v<version>` tag up to the one on `main`. When one changes the wire, take the served apps
-   from the deployment's runner configuration (`apps/personas/personas.toml` in platform) and read each
-   app's `main` for its agents pin.
+2. A release waits only when its agents bump changes or removes a tool, record or field that an app the
+   runner serves already uses, until every such app pins that agents version or a newer one. A tool
+   that agents' `docs/calling.md` lets an app leave unserved, so that the app answers "unknown tool",
+   does not hold it. Read each agents release's `Member-tool wire:` line, from the version in
+   `pyproject.toml` at the newest `v<version>` tag up to the one on `main`. A line that only adds
+   tools is additive when `docs/calling.md` at that release lets an app leave each one unserved;
+   any change or removal, and an added tool `docs/calling.md` requires, holds. When one holds, take
+   the served apps from the deployment's runner configuration (`apps/personas/personas.toml` in
+   platform) and read each app's `main` for its agents pin.
 
 ## Fix
 
@@ -39,4 +43,5 @@ chooses which release runs.
 ## Escalate
 
 A gate refusal is fixed on `main` first and dispatched again. A served app that pins an older agents
-version than a wire-changing bump needs: the release waits, and the operator hears which app holds it.
+version than a bump that changes or removes a tool, record or field the app uses needs: the release
+waits, and the operator hears which app holds it.
