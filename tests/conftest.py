@@ -22,7 +22,7 @@ from personas.config import MemoryTarget, Voice, load_config
 from personas.loop import AgentLoop, Boundaries
 from personas.main import ALEMBIC_LOGGER, SweepingBoundaries, run_with_sweep
 from personas.readiness import FileReadyMarker
-from personas.reporting import carry_trace, log_state_change
+from personas.reporting import MCP_CLIENT_LOGGER, carry_trace, log_state_change
 from personas.secret import Secret
 from personas.tokens import HttpTokenSource
 from tests.support.configfiles import MAX_TOOL_CALLS, PERSONA_MAX_DURATION_SECONDS, Files
@@ -290,11 +290,14 @@ def restored_logging() -> Iterator[None]:
     """The logging state the entry point configures, put back at the test's end."""
     alembic = logging.getLogger(ALEMBIC_LOGGER)
     level = alembic.level
+    mcp_client = logging.getLogger(MCP_CLIENT_LOGGER)
+    filters = list(mcp_client.filters)
     try:
         with configured("personas"):
             yield
     finally:
         alembic.setLevel(level)
+        mcp_client.filters[:] = filters
 
 
 @pytest.fixture
