@@ -13,10 +13,11 @@ from agents.turn import FailureCode
 from agents.voice import StayedSilent
 from agents.voice.reply import ReplyReader
 
-from personas.decision import AppPlace, may_send_next, past_deadline, remaining_seconds, speech_outcome
+from personas.decision import AppPlace, past_deadline, remaining_seconds, speech_outcome
 from personas.entries import SaidAloud
 from personas.failures import task_is_being_cancelled
 from personas.reporting import Event
+from personas.speech import may_send_next
 from personas.task_record import RelayFailed
 
 if TYPE_CHECKING:

@@ -19,12 +19,8 @@ from agents.voice.reply import REPLY_RULES
 from personas.decision import (
     TURN_ROLE,
     AppPlace,
-    Held,
-    HoldOutcome,
-    Telling,
     act_outcome,
     failure_code,
-    hold_tellable,
     is_not_granted,
     offered_declarations,
     round_seconds,
@@ -32,11 +28,7 @@ from personas.decision import (
 )
 from personas.entries import (
     ActDone,
-    InputSizes,
     TurnTold,
-    message_bytes,
-    picture_bytes,
-    told_bytes,
     told_hold,
     told_stop,
     told_words,
@@ -62,6 +54,8 @@ from personas.recall import (
     text_refused_text,
 )
 from personas.reporting import Event, TurnTally, step_timer, stepping
+from personas.sizing import Sizing
+from personas.speech import Held, HoldOutcome, Telling, hold_tellable
 from personas.task_record import (
     RelayFailed,
     ending_loud_when_cancelled,
@@ -100,8 +94,6 @@ type BackendFactory = Callable[[Iterable[HandTool]], AbstractAsyncContextManager
 
 _CALL_BOUND_TEXT: Final = "this app takes no more calls in this turn"
 _APP_FAILED_TEXT: Final = "the app did not answer"
-_MODEL_FACING: Final = {"name", "description", "parameters"}
-_RESULT_ROLE: Final = "tool"
 _APART_TEXT: Final = (
     "a hold is decided in a round of its own when one starts: nothing is held now, so there is nothing to decide"
 )
@@ -131,37 +123,6 @@ class TurnSetup:
 
     persona: AgentDefinition
     backend: BackendFactory
-
-
-class _Sizing:
-    """What the turn's input weighs: the request's tools and told messages once it is built, and every tool result
-    relayed back to the model, held and refused calls included. Only bytes are kept."""
-
-    def __init__(self) -> None:
-        self._request: tuple[int, int] | None = None
-        self._results = 0
-        self._images = 0
-
-    def request_built(self, declarations: Iterable[ToolDeclaration], told: Iterable[str]) -> None:
-        tools = sum(told_bytes(each.model_dump(mode="json", include=_MODEL_FACING)) for each in declarations)
-        self._request = (tools, sum(message_bytes(TurnRole.USER.value, each) for each in told))
-
-    def measuring(self, tool: HandTool) -> HandTool:
-        """The tool with a handler that counts the result it returns."""
-
-        async def handler(principal: Principal, arguments: JsonObject) -> ToolOutcome:
-            outcome = await tool.handler(principal, arguments)
-            self._results += message_bytes(_RESULT_ROLE, outcome.content)
-            self._images += picture_bytes(outcome.image)
-            return outcome
-
-        return HandTool(tool.declaration, handler)
-
-    def sizes(self) -> InputSizes | None:
-        """The weights, or none while the request is not built."""
-        if self._request is None:
-            return None
-        return InputSizes(self._request[0], self._request[1], self._results, self._images)
 
 
 type _Hearing = asyncio.Task[FinalEvent | None]
@@ -279,7 +240,7 @@ class Turning:
         A turn the gateway ends short is told to the tally unless a defect was met; a failed relayed call and any other
         error go to the group. Every error of a cancelled turn ends as the cancellation.
         """
-        sizing = _Sizing()
+        sizing = Sizing()
         try:
             await self._run_turn(setup, admitted, record, sizing, tally)
         except Exception as error:
@@ -314,7 +275,7 @@ class Turning:
         self._mind.due_again(self._at(admitted.place), admitted.occasion, now + seconds)
 
     async def _run_turn(
-        self, setup: TurnSetup, admitted: Admitted, record: TaskRecord, sizing: _Sizing, tally: TurnTally
+        self, setup: TurnSetup, admitted: Admitted, record: TaskRecord, sizing: Sizing, tally: TurnTally
     ) -> None:
         agent = self._agent.client_id
         begun = self._clock.now()
@@ -349,7 +310,7 @@ class Turning:
         told: tuple[str, ...],
         session: AppSession,
         record: TaskRecord,
-        sizing: _Sizing,
+        sizing: Sizing,
         tally: TurnTally,
         hand_off: StepTimer,
     ) -> None:

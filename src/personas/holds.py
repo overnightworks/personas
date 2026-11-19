@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Final
 from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL
 from agents.tools import ToolDeclaration, ToolEffect
 
-from personas.decision import Held, HoldOutcome, hold_stated, hold_tellable, untold_words
+from personas.speech import Held, HoldOutcome, hold_stated, hold_tellable, untold_words
 
 if TYPE_CHECKING:
     from agents.member import PartialSpeech, PlaceWindow

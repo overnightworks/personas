@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from personas.decision import SpeechRecord, speech_answered, speech_line_entered, speech_sent
+from personas.speech import SpeechRecord, speech_answered, speech_line_entered, speech_sent
 
 
 def _spoken(record: SpeechRecord) -> SpeechRecord:

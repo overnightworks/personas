@@ -58,7 +58,7 @@ flowchart LR
 - **A turn** (`turning.py`) opens its own session, lists the tools of its apps, sends the gateway the
   persona and the told messages, and relays each call; `voice.py` speaks an aloud turn, `holds.py` decides
   a hold, `held_tools.py` and `turn_sessions.py` reach the other apps a turn holds.
-- **Decisions** (`entries` <- `recall` <- `decision` <- `present` <- `due`) are pure: no process, network or
+- **Decisions** (`entries` <- `recall` <- `speech` <- `decision` <- `present` <- `due`) are pure: no process, network or
   clock. `config.py` alone owns the TOML's fields and refusals.
 - **The stores** (`memory.py`, its migrations in `src/personas/migrations`) are the history store, always,
   and the line store with `[memory]`; `sweep.py` removes old lines.

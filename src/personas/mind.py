@@ -9,26 +9,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from personas.decision import (
-    NO_SPEECH,
-    AppPlace,
-    Held,
-    SpeechRecord,
-    backoff_delay,
-    budget_pause,
-    held_apps,
-    hold_decided,
-    hold_marked_told,
-    hold_read,
-    hold_turn_ended,
-    hold_untold,
-    refusal_retry_at,
-    speech_answered,
-    speech_ended,
-    speech_line_entered,
-    speech_sent,
-    sync_checkpoints,
-)
+from personas.decision import AppPlace, backoff_delay, budget_pause, held_apps, refusal_retry_at, sync_checkpoints
 from personas.due import (
     NO_TURNS,
     Claim,
@@ -46,6 +27,20 @@ from personas.due import (
 )
 from personas.entries import KeptLine
 from personas.present import EMPTY_PRESENT, answered_into, taken_into
+from personas.speech import (
+    NO_SPEECH,
+    Held,
+    SpeechRecord,
+    hold_decided,
+    hold_marked_told,
+    hold_read,
+    hold_turn_ended,
+    hold_untold,
+    speech_answered,
+    speech_ended,
+    speech_line_entered,
+    speech_sent,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
