@@ -1,0 +1,8 @@
+claim_id = "9a6f9035b7434c86a809017cfb9173b9"
+agent = "Claude d21def74-68af-4c98-89a2-70bc45cbdd6a"
+role = "builder"
+base = "7dd6c19c790e9455a9674a536ee4cde9bf68d28f"
+branch = "claude/issue-229-turn-ends-at-its-last-sentence"
+scope = ["docs/log.md", "docs/turns.md", "src/personas/decision.py", "src/personas/held_tools.py", "src/personas/mind.py", "src/personas/reporting.py", "src/personas/speech.py", "src/personas/turning.py", "src/personas/voice.py", "tests"]
+opened_commit = "f3e1963f169fdbaf9cc32cdaa07197e1083da4dc"
+whole_reason = "one wait moved from a turn's end to the Mind's speech record, with its loop proof and documents"
