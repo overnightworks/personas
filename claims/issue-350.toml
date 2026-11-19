@@ -1,8 +1,0 @@
-claim_id = "302a558cbd7c47eabb2f224301c63421"
-agent = "Claude d21def74-68af-4c98-89a2-70bc45cbdd6a"
-role = "builder"
-base = "7dd6c19c790e9455a9674a536ee4cde9bf68d28f"
-branch = "claude/issue-350-humboldt-figure"
-scope = ["scripts/figures", "scripts/write_figures.py", "src/characters", "tests/scripts/test_write_figures.py"]
-opened_commit = "358f0f5d1e1f09cc03b65d8033324083bd05da5a"
-whole_reason = "one persona's figure from the shared generator, proven by the shared check and a render"
