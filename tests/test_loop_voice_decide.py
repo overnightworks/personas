@@ -16,12 +16,14 @@ from agents.member import (
     VoiceState,
 )
 from agents.tools import ToolOutcome
+from agents.turn import FailureCode
 
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, PLACE_ID, say_in_the_call
+from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
 from tests.support.gateway import BUDGET_SPENT, say
 from tests.support.hopin import CALL, SAY_TOOL
-from tests.support.voice import TWO_SENTENCES, a_voice_call, holding_sentence_ends, sentences_spoken
+from tests.support.voice import TWO_SENTENCES, a_voice_call, gated, holding_sentence_ends, sentences_spoken
 from tests.support.wire import refuses_with_a_server_error
 
 pytestmark = pytest.mark.anyio
@@ -242,3 +244,18 @@ async def test_a_decision_the_app_could_not_take_is_told_to_him_as_not_made_and_
     (failed,) = runner.gateway.tool_results(2)
     assert failed.startswith("Error")
     assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
+
+
+async def test_a_turn_still_waiting_for_its_decision_at_its_deadline_ends_limit_exceeded_with_nothing_said(runner):
+    sleeps = gated(runner)
+    await a_voice_call(runner, completion("Never said. Nor this."))
+    runner.gateway.pause_request(1, "Never said. No", "r this.")
+
+    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
+    await sleeps.until_began(1)
+    runner.clock.time += PERSONA_MAX_DURATION_SECONDS
+    sleeps.release.set()
+    await runner.reports.until(Event.PAUSED)
+
+    assert (Event.PAUSED, FailureCode.LIMIT_EXCEEDED.value) in runner.reports.reported()
+    assert sentences_spoken(runner) == []

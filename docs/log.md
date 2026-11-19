@@ -40,7 +40,7 @@ events and their fields. A test cites each rule by its ID at the start of its do
 | `token_request.ended` | each token request | `duration_ms`, `outcome`; `reason` and `error_type` of a failed request (LOG-14) |
 | `turns.paused` | a turn without an answer pauses his turns | `reason` (the turn's code, `budget_spent` among them), `pause_ms` (LOG-15) |
 | `speak.refused` | the app refused a sentence | `reason` (the app's code) (LOG-16) |
-| `hold.decided` | once per hold id | `reason`: `continued`, `stopped`, `undecided`, `no_turn` (LOG-17) |
+| `hold.decided` | once per hold id | `reason`: `continued`, `stopped`, `undecided` (LOG-17) |
 | `tools.left_out` | an app lost tool names to an earlier app, once per session | `tool_count`, never a name (LOG-18) |
 | `held_app.failed`, `tools_only_app.failed` | a call to another app failed | `status`, `mcp_method`, `reason` (LOG-19) |
 | `store.failed`, `store.resumed` | once per store outage, and when it answers again | `reason` `store_unreachable` or `store_timeout` (LOG-20) |
