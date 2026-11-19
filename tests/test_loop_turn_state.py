@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from http import HTTPStatus
 from typing import TYPE_CHECKING
@@ -23,6 +24,7 @@ from agents.tools import ToolOutcome
 from agents.turn import StopOutcome
 from mcp_types import INVALID_PARAMS
 
+from personas.app_session import open_mcp_session
 from personas.decision import INVALID_PARAMS_REASON, NETWORK_FAILURE_CODE, NO_ANSWER_REASON, SUSPENDED_RETRY_SECONDS
 from personas.failures import leaves_of
 from personas.reporting import Event
@@ -38,6 +40,11 @@ from tests.support.voice import ended_by
 from tests.support.wire import hangs
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
+    from personas.app_session import AppSession
+    from personas.config import AppTarget
+    from personas.secret import Secret
     from tests.support.wire import Reply as AppReply
 
 pytestmark = pytest.mark.anyio
@@ -532,3 +539,34 @@ async def test_a_wait_before_a_retry_that_fails_leaves_no_unavailable_statement_
 
     assert [leaf for leaf in leaves_of(ended_as) if leaf is defect] == [defect]
     assert (statements(runner), hold.cancelled.is_set()) == ([UNAVAILABLE], True)
+
+
+def opener_failing_while(stopping: asyncio.Event, defect: Exception):
+    """A session opener of real sessions that raises ``defect`` in place of each session it opens once ``stopping`` is
+    set."""
+
+    @asynccontextmanager
+    async def opened(app: AppTarget, token: Secret) -> AsyncGenerator[AppSession]:
+        if stopping.is_set():
+            raise defect
+        async with open_mcp_session(app, token) as session:
+            yield session
+
+    return opened
+
+
+async def test_a_defect_in_a_stops_statement_still_writes_the_turn_the_stop_cut(runner):
+    """TURNS-38, TURNS-43."""
+    stopping = asyncio.Event()
+    defect = ValueError("a defect")
+    runner.open_session = opener_failing_while(stopping, defect)
+    await a_turn_in_its_first_round(runner, *says(PLACE_ID, ANSWER))
+    await runner.app.until_turn_states(1)
+
+    stopping.set()
+    runner.task.cancel()
+    ended_as = await ended_by(runner.task)
+
+    assert [leaf for leaf in leaves_of(ended_as) if leaf is defect] == [defect]
+    kept = runner.histories.turns[runner.config.agents[0].client_id]
+    assert [due.place for due in kept.due] == [CALL_PLACE]
