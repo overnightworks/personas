@@ -55,7 +55,7 @@ from personas.recall import (
 )
 from personas.reporting import Event, TurnTally, step_timer, stepping
 from personas.sizing import Sizing
-from personas.speech import Held, HoldOutcome, Telling, untold_words
+from personas.speech import Held, HoldOutcome, Telling, hold_ended_as, untold_words
 from personas.task_record import (
     RelayFailed,
     ending_loud_when_cancelled,
@@ -100,6 +100,7 @@ _APART_TEXT: Final = (
 _DECIDING_FIRST_TEXT: Final = "a hold is decided first: call continue_speaking or stop_speaking"
 _DECIDED_TEXT: Final = "this hold is decided"
 _CONTINUED_TEXT: Final = '{"continued": true}'
+_GONE_TEXT: Final = '{"gone": true}'
 
 
 def _failure_event(app: AppTarget) -> Event:
@@ -425,8 +426,8 @@ class Turning:
         elif held is None or self._aloud_at == place:
             return
         elif held.telling is Telling.UNDECIDED:
-            await session.stop_speaking(place, held.id)
-            self._hold_decided(place, held.id, HoldOutcome.UNDECIDED)
+            refusal = await session.stop_speaking(place, held.id)
+            self._hold_decided(place, held.id, hold_ended_as(HoldOutcome.UNDECIDED, refusal))
         elif self._mind.hold_makes_due(at):
             self._mind.due_for_hold(at, window.generation, self._clock.now())
 
@@ -497,9 +498,10 @@ class Turning:
         if self._mind.hold_decided_id(self._at(voiced.admitted.place)) == hold.id:
             return ToolOutcome(_DECIDED_TEXT, is_error=True)
         told = _CONTINUED_TEXT if outcome is HoldOutcome.CONTINUED else self._cut_speech(voiced, hearing)
-        if not await self._end_hold(voiced.admitted.place, voiced.record, hold.id, outcome):
+        ended = await self._end_hold(voiced.admitted.place, voiced.record, hold.id, outcome)
+        if ended is None:
             return ToolOutcome(_APP_FAILED_TEXT, is_error=True)
-        return ToolOutcome(told, is_error=False)
+        return ToolOutcome(_GONE_TEXT if ended is HoldOutcome.GONE else told, is_error=False)
 
     @staticmethod
     def _cut_speech(voiced: _Voiced, hearing: _Hearing) -> str:
@@ -510,8 +512,10 @@ class Turning:
         hearing.cancel()
         return told
 
-    async def _end_hold(self, place: PlaceRef, record: TaskRecord, hold_id: str, outcome: HoldOutcome) -> bool:
-        """Sends his decision in a session of its own; says if the app answered."""
+    async def _end_hold(
+        self, place: PlaceRef, record: TaskRecord, hold_id: str, outcome: HoldOutcome
+    ) -> HoldOutcome | None:
+        """Sends his decision in a session of its own; how the hold ended, or ``None`` when the app did not answer."""
         try:
             answer = await self._sessions.ask_elsewhere(
                 self._app,
@@ -526,9 +530,10 @@ class Turning:
             raise RelayFailed(error) from None
         if isinstance(answer, CallFailure):
             self._report(_failure_event(self._app), failure_code(answer), self._app, answer)
-            return False
-        self._hold_decided(place, hold_id, outcome)
-        return True
+            return None
+        ended = hold_ended_as(outcome, answer)
+        self._hold_decided(place, hold_id, ended)
+        return ended
 
     def _told_standing(self, admitted: Admitted, held: Held) -> str:
         """The telling of the hold a turn starts with: what was said over him and the sentence he was in, which is
@@ -549,10 +554,13 @@ class Turning:
         if not deciding.pending:
             return ToolOutcome(_DECIDED_TEXT, is_error=True)
         deciding.outcome = outcome
-        if not await self._end_hold(admitted.place, record, deciding.held.id, outcome):
+        ended = await self._end_hold(admitted.place, record, deciding.held.id, outcome)
+        if ended is None:
             deciding.outcome = None
             return ToolOutcome(_APP_FAILED_TEXT, is_error=True)
         deciding.decided()
+        if ended is HoldOutcome.GONE:
+            return ToolOutcome(_GONE_TEXT, is_error=False)
         return ToolOutcome(_CONTINUED_TEXT if outcome is HoldOutcome.CONTINUED else told_stop((), None), is_error=False)
 
     async def _hold_tools(

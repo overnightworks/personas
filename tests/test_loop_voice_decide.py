@@ -10,6 +10,8 @@ from agents.member import (
     CONTINUE_SPEAKING_TOOL,
     SPEAK_TOOL,
     STOP_SPEAKING_TOOL,
+    ContinueSpeakingRefusal,
+    ContinueSpeakingRefused,
     StopSpeakingRefusal,
     StopSpeakingRefused,
     VoiceState,
@@ -164,18 +166,42 @@ async def test_a_turn_that_ends_without_a_decision_drops_what_waited_and_the_nex
     assert runner.gateway.arrivals == arrivals
 
 
-async def test_a_stop_the_app_refuses_ends_the_hold_and_is_not_sent_again(runner):
+async def test_a_stop_the_app_refuses_because_no_such_hold_stands_ends_the_hold_as_gone_and_is_not_sent_again(runner):
+    """LOG-17."""
     await a_voice_call(runner, completion("[silent]"))
     refusal = StopSpeakingRefused(refused=StopSpeakingRefusal.NOT_INTERRUPTED)
     runner.app.hold_outcomes.append(ToolOutcome(refusal.model_dump_json(), is_error=True))
 
     runner.app.hold(PLACE_ID, HOLD_ID, SAID)
-    assert await decided(runner) == ["undecided"]
+    assert await decided(runner) == ["gone"]
     runner.app.hold(PLACE_ID, HOLD_ID, SAID)
     await window_read_after(runner)
 
     assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
-    assert runner.reports.codes_of(Event.HOLD_DECIDED) == ["undecided"]
+    assert runner.reports.codes_of(Event.HOLD_DECIDED) == ["gone"]
+
+
+@pytest.mark.parametrize(
+    ("tool", "refusal"),
+    [
+        pytest.param(
+            CONTINUE_SPEAKING_TOOL,
+            ContinueSpeakingRefused(refused=ContinueSpeakingRefusal.NOT_INTERRUPTED),
+            id="continue",
+        ),
+        pytest.param(STOP_SPEAKING_TOOL, StopSpeakingRefused(refused=StopSpeakingRefusal.NOT_INTERRUPTED), id="stop"),
+    ],
+)
+async def test_a_decision_for_a_hold_that_no_longer_stands_is_logged_gone_and_he_is_told_so(runner, tool, refusal):
+    """TURNS-31, LOG-17."""
+    await a_voice_call(runner, deciding(tool), completion("[silent]"))
+    runner.app.hold_outcomes.append(ToolOutcome(refusal.model_dump_json(), is_error=True))
+
+    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
+
+    assert await decided(runner) == ["gone"]
+    await runner.reports.until_a_turn_completed()
+    assert runner.gateway.tool_results(2) == ['{"gone": true}']
 
 
 async def test_a_stop_whose_call_failed_is_sent_again_by_a_later_read_and_decided_once(runner):

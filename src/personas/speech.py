@@ -6,6 +6,8 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
+from agents.member import ContinueSpeakingRefusal, StopSpeakingRefusal
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
@@ -146,6 +148,17 @@ class HoldOutcome(StrEnum):
     CONTINUED = "continued"
     STOPPED = "stopped"
     UNDECIDED = "undecided"
+    GONE = "gone"
+    """The hold no longer stood at the app, so the decision changed nothing there."""
+
+
+_HOLD_NOT_STANDING: Final = frozenset({ContinueSpeakingRefusal.NOT_INTERRUPTED, StopSpeakingRefusal.NOT_INTERRUPTED})
+
+
+def hold_ended_as(decided: HoldOutcome, refusal: ContinueSpeakingRefusal | StopSpeakingRefusal | None) -> HoldOutcome:
+    """How the hold ended once the app answered the decision: as decided, or gone when the app refused it because no
+    such hold stood."""
+    return HoldOutcome.GONE if refusal in _HOLD_NOT_STANDING else decided
 
 
 def hold_stated(window: PlaceWindow, seen: Held | None) -> Held | None:
