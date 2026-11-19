@@ -399,24 +399,24 @@ async def test_a_relayed_call_that_fails_at_one_app_ends_its_turn_and_the_turn_d
 async def test_while_a_cancelled_turn_still_unwinds_no_turn_of_his_starts_at_another_app_until_it_ended(runner, other):
     unwinding = ClosingHold()
     runner.gateway = Gateway(completion("done"))
-    runner.gateway.hold_request(1)
     runner.app.stand(SUBJECT, active(PLACE_ID))
     other.stand(SUBJECT, active(OTHER_CALL_ID))
-    runner.open_session = unwinding.opener(of_url=runner.app_url)
+    runner.open_session = unwinding.opener_holding_cancelled("declared_tools")
     runner.start()
     await runner.app.until_window_read(PLACE_ID)
     await other.until_window_read(OTHER_CALL_ID)
     say_in_the_call(runner, REMARK)
-    await runner.gateway.until_requested(1)
 
     try:
-        runner.app.stand(SUBJECT)
         async with asyncio.timeout(LIMIT_SECONDS):
             await unwinding.closing.wait()
+        runner.app.stand(SUBJECT)
+        async with asyncio.timeout(LIMIT_SECONDS):
+            await unwinding.cancelled.wait()
         await said_and_taken(other, OTHER_CALL_ID, AGAIN)
 
         assert runner.gateway.requests == []
-        assert runner.gateway.arrivals == 1
+        assert runner.gateway.arrivals == 0
         unwinding.release.set()
         await runner.gateway.until_turns(1, why="lines")
     finally:

@@ -3,32 +3,30 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
 from http import HTTPStatus
 
 import anyio
 import pytest
-from agents.backend.fake_gateway import Reply, completion
-from agents.member import STANDING_URI
+from agents.member import STANDING_URI, place_window_uri
+from agents.turn import StopOutcome
 
 from personas import app_session
 from personas.decision import status_code
 from personas.failures import Unreachable, leaves_of
 from personas.reporting import Event
-from personas.task_record import UnrequestedCancellationError
-from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
-from tests.support.fakes import CANCELLED_TURN, COMPLETED_TURN
+from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
+from tests.support.fakes import CANCELLED_TURN
 from tests.support.gateway import Gateway, says
-from tests.support.hopin import DISCOVER, LIMIT_SECONDS, READ
+from tests.support.hopin import CALL, DISCOVER, LIMIT_SECONDS, LIST_TOOLS, LISTEN, READ
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, paused
 from tests.support.transport import (
     ClosingHold,
     opener_whose_request_raises,
     transport_closing_with_late_answers,
-    transport_whose_close_loses_a_child,
-    transport_whose_session_loses_a_child,
 )
+from tests.support.voice import a_turn_whose_speak_is_in_flight
+from tests.support.wire import hangs, hangs_once_entered, lost_on_demand
 
 pytestmark = pytest.mark.anyio
 
@@ -45,6 +43,11 @@ async def a_turn_in_its_first_round(runner):
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
     await runner.gateway.until_requested(1)
+
+
+def without_lost_statements(runner):
+    """What the runner reported but for the turn's end statement the session's close may cut, which logs it as lost."""
+    return [report for report in runner.reports.reported() if report[0] is not Event.TURN_STATE_LOST]
 
 
 async def ended_by(task):
@@ -92,49 +95,24 @@ async def test_a_turn_paused_mid_way_is_cancelled_and_after_the_resume_the_old_l
     assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[4]]
 
 
-@LATE_ANSWERS
-async def test_a_cancelled_turn_whose_session_leaves_with_late_answers_alone_gives_no_lifecycle_reaction(
-    runner, monkeypatch, echo
-):
-    monkeypatch.setattr(
-        app_session, "streamable_http_client", transport_closing_with_late_answers(echo=echo, only_close=1)
-    )
-    await a_turn_in_its_first_round(runner)
-
-    runner.app.stand(SUBJECT)
-    await runner.reports.until_a_turn_ended()
-    later_read = runner.app.hold_next_read()
-    runner.app.stand(SUBJECT, active(PLACE_ID))
-    await runner.app.until_read_held()
-
-    await runner.reports.until_a_turn_ended()
-
-    assert runner.reports.reported() == [(Event.STARTED, None)]
-
-    assert runner.reports.turn_endings == [CANCELLED_TURN]
-    assert runner.app.log.count("subscriptions/listen") == 1
-    assert not runner.task.done()
-    later_read.set()
-
-
 async def test_while_a_cancelled_turn_still_unwinds_a_new_addressed_line_starts_no_second_turn_until_it_ended(
-    runner, monkeypatch
+    runner,
 ):
     unwinding = ClosingHold()
-    monkeypatch.setattr(app_session, "streamable_http_client", unwinding.transport())
+    runner.open_session = unwinding.opener_holding_cancelled("declared_tools")
     runner.gateway = Gateway(*says(OTHER_PLACE_ID, "There."))
-    runner.gateway.hold_request(1)
     runner.app.stand(SUBJECT, active(PLACE_ID), active(OTHER_PLACE_ID))
     runner.start()
     await runner.app.until_window_read(PLACE_ID)
     await runner.app.until_window_read(OTHER_PLACE_ID)
     say_in_the_call(runner, ADDRESSED)
-    await runner.gateway.until_requested(1)
 
     try:
-        runner.app.stand(SUBJECT, active(OTHER_PLACE_ID))
         async with asyncio.timeout(LIMIT_SECONDS):
             await unwinding.closing.wait()
+        runner.app.stand(SUBJECT, active(OTHER_PLACE_ID))
+        async with asyncio.timeout(LIMIT_SECONDS):
+            await unwinding.cancelled.wait()
         window_reads = runner.app.window_reads(OTHER_PLACE_ID)
         runner.app.speak(OTHER_PLACE_ID, PERSON, "Ada", ADDRESSED)
         await runner.app.until_standing_read(runner.app.reads[STANDING_URI] + 1)
@@ -156,38 +134,13 @@ async def test_while_a_cancelled_turn_still_unwinds_a_new_addressed_line_starts_
     assert runner.reports.turn_endings == [CANCELLED_TURN]
 
 
-async def test_a_turn_that_reported_its_end_and_meets_the_cancel_in_its_teardown_reports_no_cancel(runner, monkeypatch):
-    closing = ClosingHold()
-    monkeypatch.setattr(app_session, "streamable_http_client", closing.transport())
-    runner.gateway = Gateway(completion("done"))
-    await restarted_in_the_call(runner)
-    say_in_the_call(runner, ADDRESSED)
-    try:
-        async with asyncio.timeout(LIMIT_SECONDS):
-            await closing.closing.wait()
-        removal_read = runner.app.hold_next_read()
-        runner.app.stand(SUBJECT)
-        await runner.app.until_read_held()
-        removal_read.set()
-        async with asyncio.timeout(LIMIT_SECONDS):
-            await closing.cancelled.wait()
-        await runner.app.until_standing_read(runner.app.reads[STANDING_URI] + 1)
-    finally:
-        closing.release.set()
-
-    await runner.reports.until_a_turn_ended()
-    assert runner.reports.reported() == [(Event.STARTED, None)]
-    assert runner.reports.turn_endings == [COMPLETED_TURN]
-    assert not runner.task.done()
-
-
 async def test_a_runner_cancelled_during_a_turn_ends_cancelled_and_reports_nothing_for_the_turn(runner):
     await a_turn_in_its_first_round(runner)
 
     runner.task.cancel()
 
     assert isinstance(await ended_by(runner.task), asyncio.CancelledError)
-    assert runner.reports.reported() == [(Event.STARTED, None)]
+    assert without_lost_statements(runner) == [(Event.STARTED, None)]
 
 
 async def test_a_turns_backend_is_closed_once_the_turn_was_cancelled(runner):
@@ -229,34 +182,23 @@ SESSION_SEAMS = pytest.mark.parametrize(
 )
 
 
-async def a_turn_removed_while_its_session_closes(runner, monkeypatch, *, seam=None, error=None, gateway=None):
-    """A turn whose app seam raises ``error`` or whose gateway answers as scripted, its session's close held.
-
-    The place is then removed.
-    """
-    closing = ClosingHold()
-    monkeypatch.setattr(app_session, "streamable_http_client", closing.transport())
-    if seam is not None:
-        runner.open_session = opener_whose_request_raises(seam, error)
-    runner.gateway = gateway or Gateway(*says(PLACE_ID, ANSWER))
+async def a_turn_whose_request_fails_as_its_place_leaves(runner, *, seam, error):
+    """A turn whose app seam waits and raises ``error`` in place of the cancellation that reaches it; the place is
+    then removed."""
+    arrived = asyncio.Event()
+    runner.open_session = opener_whose_request_raises(seam, error, arrived=arrived, when_cancelled=True)
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
-    try:
-        async with asyncio.timeout(LIMIT_SECONDS):
-            await closing.closing.wait()
-        runner.app.stand(SUBJECT)
-        async with asyncio.timeout(LIMIT_SECONDS):
-            await closing.cancelled.wait()
-    finally:
-        closing.release.set()
+    async with asyncio.timeout(LIMIT_SECONDS):
+        await arrived.wait()
+    runner.app.stand(SUBJECT)
 
 
 @SESSION_SEAMS
-async def test_a_defect_in_a_turns_session_body_whose_place_then_leaves_ends_the_runner_loud_without_a_cancel(
-    runner, monkeypatch, seam
-):
+async def test_a_defect_in_a_turns_request_whose_place_then_leaves_ends_the_runner_loud_without_a_cancel(runner, seam):
     defect = ValueError("a defect")
-    await a_turn_removed_while_its_session_closes(runner, monkeypatch, seam=seam, error=defect)
+    await a_turn_whose_request_fails_as_its_place_leaves(runner, seam=seam, error=defect)
 
     ended = await ended_by(runner.task)
 
@@ -265,10 +207,8 @@ async def test_a_defect_in_a_turns_session_body_whose_place_then_leaves_ends_the
 
 
 @SESSION_SEAMS
-async def test_a_call_failure_in_a_turns_session_body_whose_place_then_leaves_ends_as_the_cancellation(
-    runner, monkeypatch, seam
-):
-    await a_turn_removed_while_its_session_closes(runner, monkeypatch, seam=seam, error=Unreachable("down"))
+async def test_a_call_failure_in_a_turns_request_whose_place_then_leaves_ends_as_the_cancellation(runner, seam):
+    await a_turn_whose_request_fails_as_its_place_leaves(runner, seam=seam, error=Unreachable("down"))
     await runner.reports.until_a_turn_ended()
     later_read = runner.app.hold_next_read()
     runner.app.stand(SUBJECT, active(PLACE_ID))
@@ -283,28 +223,78 @@ async def test_a_call_failure_in_a_turns_session_body_whose_place_then_leaves_en
     later_read.set()
 
 
-async def test_a_gateway_stop_in_a_turns_session_body_whose_place_then_leaves_ends_as_the_cancellation(
-    runner, monkeypatch
+def stopped_outcomes(runner) -> list[StopOutcome | None]:
+    return [statement.stopped for _, statement in runner.app.turn_states]
+
+
+async def a_turn_whose_call_is_in_flight(runner, said: asyncio.Event | None = None):
+    """The runner restarted in the call; the turn's relayed ``say`` reached the app, which never answers."""
+    runner.app.script(CALL, hangs)
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED)
+    if said is not None:
+        said.set()
+    await runner.app.log.until(CALL, 1)
+
+
+@pytest.fixture(params=["an own-app call", "a speak"])
+def in_flight(request, runner):
+    """Arranges a turn whose request to the app is in flight: a call it relays, or a sentence it speaks."""
+    if request.param == "a speak":
+        return lambda said=None: a_turn_whose_speak_is_in_flight(runner, said)
+    return lambda said=None: a_turn_whose_call_is_in_flight(runner, said)
+
+
+async def test_a_runner_stopped_while_a_turns_request_is_in_flight_ends_the_turn_cancelled(runner, in_flight):
+    await in_flight()
+
+    runner.task.cancel()
+
+    assert isinstance(await ended_by(runner.task), asyncio.CancelledError)
+    assert runner.reports.turn_endings == [CANCELLED_TURN]
+    assert StopOutcome.UNAVAILABLE not in stopped_outcomes(runner)
+
+
+async def test_a_runner_stopped_while_a_turns_own_app_listing_is_in_flight_ends_the_turn_cancelled_with_its_place_due(
+    runner,
 ):
-    gateway = Gateway(Reply(status=HTTPStatus.SERVICE_UNAVAILABLE))
-    await a_turn_removed_while_its_session_closes(runner, monkeypatch, gateway=gateway)
-    await runner.reports.until_a_turn_ended()
-    later_read = runner.app.hold_next_read()
-    runner.app.stand(SUBJECT, active(PLACE_ID))
-    await runner.app.until_read_held()
+    entered = asyncio.Event()
+    runner.app.script(LIST_TOOLS, hangs_once_entered(entered), hangs_once_entered(entered))
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED)
+    async with asyncio.timeout(LIMIT_SECONDS):
+        await entered.wait()
 
-    await runner.reports.until_a_turn_ended()
+    runner.task.cancel()
 
-    assert runner.reports.reported() == [(Event.STARTED, None)]
+    assert isinstance(await ended_by(runner.task), asyncio.CancelledError)
+    assert runner.reports.turn_endings == [CANCELLED_TURN]
+    assert StopOutcome.UNAVAILABLE not in stopped_outcomes(runner)
+    kept = runner.histories.turns[runner.config.agents[0].client_id]
+    assert [due.place for due in kept.due] == [CALL_PLACE]
+
+
+async def test_a_lost_stream_while_a_turns_request_is_in_flight_ends_the_turn_cancelled_and_backs_off_once(
+    runner, in_flight
+):
+    said, lost = asyncio.Event(), asyncio.Event()
+    runner.app.script(LISTEN, lost_on_demand(said, lost, place_window_uri(CALL_PLACE)))
+    await in_flight(said)
+
+    lost.set()
+    await runner.reports.until(Event.BACKOFF)
+    await runner.reports.until_a_turn_ended()
 
     assert runner.reports.turn_endings == [CANCELLED_TURN]
-    assert not runner.task.done()
-    later_read.set()
+    assert StopOutcome.UNAVAILABLE not in stopped_outcomes(runner)
+    assert [event for event, _ in runner.reports.reported(started=False)].count(Event.BACKOFF) == 1
 
 
-@asynccontextmanager
-async def a_turn_opening_its_session(runner, monkeypatch, *, only_close, echo):
-    """A turn whose ``server/discover`` is held, the closes of its session leaving with late answers alone."""
+async def a_turn_opening_a_tools_only_session(runner, songmaker, monkeypatch, *, only_close, echo):
+    """A turn whose ``server/discover`` at the tools-only app is held, the closes of its sessions leaving with late
+    answers alone. The returned event releases the held request."""
     arrived, release = asyncio.Event(), asyncio.Event()
 
     async def held(reply):
@@ -317,21 +307,19 @@ async def a_turn_opening_its_session(runner, monkeypatch, *, only_close, echo):
     )
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
-    runner.app.script(DISCOVER, held)
+    songmaker.script(DISCOVER, held)
     say_in_the_call(runner, ADDRESSED)
-    try:
-        async with asyncio.timeout(LIMIT_SECONDS):
-            await arrived.wait()
-        yield
-    finally:
-        release.set()
+    async with asyncio.timeout(LIMIT_SECONDS):
+        await arrived.wait()
+    return release
 
 
 @LATE_ANSWERS
-async def test_a_removal_that_reaches_a_turn_while_its_session_opens_with_late_answers_alone_ends_the_turn_cancelled(
-    runner, monkeypatch, echo
+async def test_a_removal_that_reaches_a_turn_while_a_tools_only_session_opens_with_late_answers_alone_ends_it_cancelled(
+    runner, songmaker, monkeypatch, echo
 ):
-    async with a_turn_opening_its_session(runner, monkeypatch, only_close=1, echo=echo):
+    release = await a_turn_opening_a_tools_only_session(runner, songmaker, monkeypatch, only_close=1, echo=echo)
+    try:
         runner.app.stand(SUBJECT)
         await runner.reports.until_a_turn_ended()
         later_read = runner.app.hold_next_read()
@@ -345,64 +333,41 @@ async def test_a_removal_that_reaches_a_turn_while_its_session_opens_with_late_a
         assert runner.reports.turn_endings == [CANCELLED_TURN]
         assert not runner.task.done()
         later_read.set()
+    finally:
+        release.set()
 
 
 @LATE_ANSWERS
-async def test_a_runner_cancelled_while_a_turn_session_opens_with_late_answers_alone_ends_cancelled(
-    runner, monkeypatch, echo
+async def test_a_runner_cancelled_while_a_turns_tools_only_session_opens_with_late_answers_alone_ends_cancelled(
+    runner, songmaker, monkeypatch, echo
 ):
-    async with a_turn_opening_its_session(runner, monkeypatch, only_close=2, echo=echo):
+    release = await a_turn_opening_a_tools_only_session(runner, songmaker, monkeypatch, only_close=2, echo=echo)
+    try:
         runner.task.cancel()
 
         assert isinstance(await ended_by(runner.task), asyncio.CancelledError)
+    finally:
+        release.set()
 
 
 @LATE_ANSWERS
-async def test_a_lifecycle_refusal_that_reaches_a_turn_while_its_session_opens_with_late_answers_alone_backs_off_once(
-    runner, monkeypatch, echo
+async def test_a_lifecycle_refusal_that_reaches_a_turn_while_a_tools_only_session_opens_backs_off_once(
+    runner, songmaker, monkeypatch, echo
 ):
     async def refused(reply):
         await reply.status(HTTPStatus.SERVICE_UNAVAILABLE)
 
-    async with a_turn_opening_its_session(runner, monkeypatch, only_close=2, echo=echo):
+    release = await a_turn_opening_a_tools_only_session(runner, songmaker, monkeypatch, only_close=2, echo=echo)
+    try:
         runner.app.script(READ, refused)
         runner.app.stand(SUBJECT, active(PLACE_ID))
         await runner.reports.until(Event.RESUMED)
 
-        assert runner.reports.reported() == [
+        assert without_lost_statements(runner) == [
             (Event.STARTED, None),
             (Event.BACKOFF, status_code(503)),
             (Event.RESUMED, None),
         ]
         assert not runner.task.done()
-
-
-async def test_a_turn_whose_session_anyio_cancelled_with_late_answers_alone_while_nobody_cancelled_it_ends_loud(
-    runner, monkeypatch
-):
-    failing = asyncio.Event()
-    monkeypatch.setattr(app_session, "streamable_http_client", transport_whose_session_loses_a_child(failing))
-    await a_turn_in_its_first_round(runner)
-
-    failing.set()
-    ended = await ended_by(runner.task)
-
-    (leaf,) = leaves_of(ended)
-    assert isinstance(leaf, UnrequestedCancellationError)
-    assert isinstance(leaf.__cause__, asyncio.CancelledError)
-
-
-async def test_a_defect_in_a_turns_session_body_whose_close_loses_a_child_ends_the_runner_loud(runner, monkeypatch):
-    defect = ValueError("a defect")
-    runner.open_session = opener_whose_request_raises("invoke", defect)
-    lost = transport_whose_close_loses_a_child(OSError, nth=2, of_url=runner.app_url)
-    monkeypatch.setattr(app_session, "streamable_http_client", lost)
-    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
-    await restarted_in_the_call(runner)
-    say_in_the_call(runner, ADDRESSED)
-
-    ended = await ended_by(runner.task)
-
-    assert sorted(type(leaf).__name__ for leaf in leaves_of(ended)) == ["Unreachable", "ValueError"]
-    assert [leaf for leaf in leaves_of(ended) if leaf is defect] == [defect]
-    assert runner.reports.reported() == [(Event.STARTED, None)]
+    finally:
+        release.set()
