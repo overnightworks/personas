@@ -345,6 +345,8 @@ async def test_a_turn_that_ended_limit_exceeded_with_a_line_still_owed_leaves_no
     await a_voice_call(runner, completion(TWO_SENTENCES), completion("Later."))
     say_in_the_call(runner, ADDRESSED)
     await sentences_playing_with_the_next_open(runner, ["First sentence.", "Second sentence."])
+    runner.app.waiting_speaks.pop(0).set_result(True)
+    await anyio.wait_all_tasks_blocked()
     runner.clock.time += PERSONA_MAX_DURATION_SECONDS
     sleeps.release.set()
     await runner.reports.until(Event.PAUSED)
