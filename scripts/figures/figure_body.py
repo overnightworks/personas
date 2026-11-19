@@ -6,7 +6,7 @@ import math
 from typing import TYPE_CHECKING
 
 from figures.figure_parts import Material, chain, part
-from figures.figure_shapes import add, normalised, scaled
+from figures.figure_shapes import add, ellipsoid, normalised, scaled
 from figures.figure_skeleton import BONE_POSITION, SHOULDER_HEIGHT
 from figures.figure_surfaces import arc, interpolated, loft, mirrored, oval, spread, sweep
 
@@ -50,6 +50,19 @@ SHOE = (
     (0.145, (0.036, 0.015, 0.016)),
     (0.166, (0.016, 0.008, 0.010)),
 )
+
+# The seat of the legwear, which joins the legs under a waistcoat's hem; its front lies back between the thighs and it
+# closes where they part. Height, then its half width, front depth and back depth there.
+SEAT = (
+    (0.785, (0.026, 0.018, 0.040)),
+    (0.81, (0.050, 0.036, 0.066)),
+    (0.86, (0.110, 0.056, 0.092)),
+    (0.94, (0.146, 0.100, 0.108)),
+)
+
+
+def button(place: Vector) -> Shape:
+    return ellipsoid(place, (0.0075, 0.0075, 0.0045), 5, 8)
 
 
 def arm_binder(prefix: str, side: float) -> Binder:
@@ -100,6 +113,16 @@ def leg_tube(course: Sequence[Key], rings: int) -> Shape:
 def trunk(course: Sequence[Key], rings: int) -> Shape:
     """A closed trunk from the bottom up; the course gives its (half width, front, back) radii by height."""
     return loft([_trunk_ring(course, height, 0.0) for height in spread(course[0][0], course[-1][0], rings)])
+
+
+def waistcoat(course: Sequence[Key], cloth: Colour, metal: Colour, buttons: tuple[float, float, int]) -> list[Part]:
+    """A satin waistcoat over the course with a row of gilt buttons down its front, given as (low, high, count)."""
+    low, high, count = buttons
+    row = [
+        part(button((0.0, height, interpolated(course, height)[1])), metal, Material.GILT, trunk_binder)
+        for height in spread(low, high, count)
+    ]
+    return [part(trunk(course, 34), cloth, Material.SATIN, trunk_binder), *row]
 
 
 def open_rows(course: Sequence[Key], rings: int, columns: int, grown: float = 0.0) -> list[list[Vector]]:

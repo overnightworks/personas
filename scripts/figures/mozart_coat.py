@@ -10,9 +10,11 @@ from figures.figure_body import (
     AHEAD,
     DOWN,
     LEG_SPACING,
+    SEAT,
     arm_binder,
     arm_tube,
     both_sides,
+    button,
     hands,
     leg_binder,
     leg_tube,
@@ -22,6 +24,7 @@ from figures.figure_body import (
     shoes,
     trunk,
     trunk_binder,
+    waistcoat,
 )
 from figures.figure_head import NECK_BINDER
 from figures.figure_parts import Colour, Material, Part, part
@@ -64,14 +67,6 @@ WAISTCOAT_GAP = 0.015
 WAISTCOAT_HEIGHTS = (0.87, *(height for height, _ in COAT[2:]))
 WAISTCOAT = tuple(
     (height, tuple(radius - WAISTCOAT_GAP for radius in interpolated(COAT, height)[:3])) for height in WAISTCOAT_HEIGHTS
-)
-# The seat of the breeches, which joins the legs under the waistcoat's hem; its front lies back between the thighs
-# and it closes where they part.
-SEAT = (
-    (0.785, (0.026, 0.018, 0.040)),
-    (0.81, (0.050, 0.036, 0.066)),
-    (0.86, (0.110, 0.056, 0.092)),
-    (0.94, (0.146, 0.100, 0.108)),
 )
 SLEEVE = (
     (0.125, (0.040, 0.040)),
@@ -117,6 +112,10 @@ def mozart_clothes(face: Face) -> list[Part]:
     ]
 
 
+def _waistcoat() -> list[Part]:
+    return waistcoat(WAISTCOAT, PALE_GOLD, GILT, (0.922, 1.21, 7))
+
+
 def _coat() -> list[Part]:
     body = shell(open_rows(COAT, COAT_RINGS, COAT_COLUMNS), open_rows(COAT, COAT_RINGS, COAT_COLUMNS, -COAT_THICKNESS))
     braid = patch(
@@ -131,7 +130,7 @@ def _coat() -> list[Part]:
     )
     hem_top = COAT[0][0] + BRAID_WIDTH
     hem = patch(open_rows((COAT[0], (hem_top, interpolated(COAT, hem_top))), 1, COAT_COLUMNS, BRAID_RELIEF))
-    left = [braid, *(_button(_coat_front(height, 0.036)) for height in spread(0.99, 1.31, 6))]
+    left = [braid, *(button(_coat_front(height, 0.036)) for height in spread(0.99, 1.31, 6))]
     trim = [hem, *left, *(mirrored(shape) for shape in left)]
     return [
         part(body, CRIMSON, Material.CLOTH, trunk_binder),
@@ -144,24 +143,12 @@ def _coat_front(height: float, inset: float, grown: float = BRAID_RELIEF) -> Vec
     return open_point(COAT, height, open_inset(COAT, height, inset), grown)
 
 
-def _waistcoat() -> list[Part]:
-    buttons = [
-        part(_button((0.0, height, interpolated(WAISTCOAT, height)[1])), GILT, Material.GILT, trunk_binder)
-        for height in spread(0.922, 1.21, 7)
-    ]
-    return [part(trunk(WAISTCOAT, 34), PALE_GOLD, Material.SATIN, trunk_binder), *buttons]
-
-
-def _button(place: Vector) -> Shape:
-    return ellipsoid(place, (0.0075, 0.0075, 0.0045), 5, 8)
-
-
 def _arms() -> list[Part]:
     def cuff_paint(position: Vector) -> Colour:
         return GILT if abs(position[0]) < CUFF[1][0] + 0.014 else CRIMSON
 
     cuff_buttons = [
-        part(_button((side * x, SHOULDER_HEIGHT + 0.058, 0.0)), GILT, Material.GILT, prefix + "LowerArm")
+        part(button((side * x, SHOULDER_HEIGHT + 0.058, 0.0)), GILT, Material.GILT, prefix + "LowerArm")
         for x in (0.585, 0.61, 0.635)
         for prefix, side in (("left", 1.0), ("right", -1.0))
     ]
