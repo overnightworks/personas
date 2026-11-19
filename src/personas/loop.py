@@ -176,6 +176,7 @@ class AgentLoop:
             self._report,
             self._report_pause,
             self._report_tools_left_out,
+            self._report_lines_missing,
             self._remembering,
         )
         self._turn_states = TurnStates(self._use_current_token, self._report, app.call_seconds)
@@ -525,6 +526,11 @@ class AgentLoop:
 
     def _report_tools_left_out(self, app: AppTarget, count: int) -> None:
         self._boundaries.report(StateChange(Event.TOOLS_LEFT_OUT, self._agent.client_id, app.mcp_url, tool_count=count))
+
+    def _report_lines_missing(self, lines: int) -> None:
+        self._boundaries.report(
+            StateChange(Event.SPEAK_LINE_MISSING, self._agent.client_id, self._app.mcp_url, lines=lines)
+        )
 
     async def _react(self, failure: CallFailure) -> None:
         match reaction_to(failure, already_renewed=self._renewed_after_401):
