@@ -1,8 +1,0 @@
-claim_id = "c5f1e65c9db74c9284652081f8cf31dc"
-agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
-role = "builder"
-base = "7b6ee24adae7f79264454a7dd5976485bf4f855c"
-branch = "claude/issue-333-the-ownership-process-test-of-a-pause-af"
-scope = ["tests/support", "tests/test_ownership_processes.py"]
-opened_commit = "91737eaad450611dd43ce49dc830de75ba7f9422"
-whole_reason = "one flaky process test and the support code it waits through"
