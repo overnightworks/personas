@@ -4,6 +4,7 @@ the other takes it over when its holder is killed, stopped or loses its lock con
 from __future__ import annotations
 
 import time
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
@@ -13,11 +14,13 @@ from personas.config import OwnershipTimings
 from tests.support.call import ADDRESSED, PERSON, PLACE_ID
 from tests.support.gateway import BUDGET_SPENT, say, says
 from tests.support.pods import SECOND_AGENT, Pods, Runner, serving_pods, until
-from tests.support.postgres import answered_turns_kept, lock_holders, terminate_backend
+from tests.support.postgres import answered_turns_kept, lock_holders, terminate_backend, turns_kept
 from tests.support.standings import AGENT_SUBJECT, active
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+    from personas.entries import KeptTurns
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 
@@ -35,8 +38,6 @@ AN_ACT = "Ada plays the queen."
 STALE_GENERATION = "generation_stale"
 REFUSALS_BEFORE_A_LONG_PAUSE = 4
 """Turns refused for a spent budget in a row until the pause outlasts a takeover: it doubles from one second."""
-EARLY_LOG_SECONDS = 0.5
-"""How much later than the pause began its line may reach the test."""
 
 
 @pytest.fixture
@@ -310,16 +311,22 @@ async def test_a_pause_the_killed_holder_left_holds_the_turn_on_the_pod_that_tak
     await until(lambda: pods.app.window_reads(PLACE_ID) > 0, "the holder read the place")
     pods.app.speak(PLACE_ID, PERSON, "Ada", ADDRESSED)
     await until(
-        lambda: len(holder.lines("turns.paused", AGENT)) == REFUSALS_BEFORE_A_LONG_PAUSE, "the holder paused long"
+        lambda: holds_a_long_pause_with_the_turn_due(turns_kept(pods.database, AGENT)),
+        "the holder kept its long pause with the turn due",
     )
+    paused_until = turns_kept(pods.database, AGENT).paused_until
 
     await holder.kill()
     await until(
         lambda: pods.gateway.arrivals > REFUSALS_BEFORE_A_LONG_PAUSE, "the pod that took over asked for the turn"
     )
-    requested_at = time.monotonic()
+    requested_at = datetime.now(UTC)
     await pods.app.said_count(1)
 
-    paused_at, paused = holder.lines("turns.paused", AGENT)[-1]
-    assert requested_at >= paused_at + paused["pause_ms"] / 1000 - EARLY_LOG_SECONDS
+    assert paused_until is not None
+    assert requested_at >= paused_until
     assert (pods.calls_of("first", "say"), pods.calls_of("second", "say")) == (0, 1)
+
+
+def holds_a_long_pause_with_the_turn_due(kept: KeptTurns) -> bool:
+    return kept.unanswered == REFUSALS_BEFORE_A_LONG_PAUSE and kept.paused_until is not None and bool(kept.due)
