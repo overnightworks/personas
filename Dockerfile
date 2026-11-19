@@ -45,4 +45,7 @@ COPY src/characters ./characters
 # A pod's runAsNonRoot can verify only a numeric user; 1001 is personas' uid.
 USER 1001
 
+ARG SERVICE_VERSION
+ENV SERVICE_VERSION=$SERVICE_VERSION
+
 CMD ["personas"]
