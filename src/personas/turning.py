@@ -361,7 +361,7 @@ class Turning:
             turn=Turn(system=system, messages=[TurnMessage(role=TurnRole.USER, text=each) for each in told]),
             roles=setup.persona.roles,
             tools=held.declarations,
-            model=self._agent.hold_model or setup.persona.model if admitted.held else setup.persona.model,
+            model=(self._agent.hold_model if admitted.held else None) or setup.persona.model,
             max_duration_seconds=setup.persona.max_duration_seconds,
             max_tool_calls=held.max_tool_calls,
             one_call_per_reply=admitted.aloud,
