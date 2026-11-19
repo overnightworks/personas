@@ -546,8 +546,9 @@ async def open_mcp_session(
         # connection becomes its failure and a defect stays a defect. The loop picks what decides.
         from_body = list(leaves_of(raised_in_body)) if raised_in_body else []
         found = list(leaves_of(error))
-        # A close that failed or was cut can replace what the body raised; the body's leaves stay.
-        found = [*(own for own in from_body if all(own is not leaf for leaf in found)), *found]
+        # A close that failed or was cut can replace what the body raised; the body's leaves stay, ahead of what the
+        # close met, so that of equal ranks a call's own failure tells how the session failed, not an answer it cut.
+        found = [*from_body, *(leaf for leaf in found if all(leaf is not own for own in from_body))]
         from_body_ids = {id(own) for own in from_body}
         if cancelled_in_body and all(isinstance(leaf, LATE_ANSWER_ERRORS) for leaf in found):
             raise asyncio.CancelledError from None

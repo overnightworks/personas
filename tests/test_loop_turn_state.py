@@ -27,6 +27,7 @@ from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
 from tests.support.hopin import CALL, LIMIT_SECONDS, READ, SAY_TOOL
+from tests.support.logs import lines_of
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, paused
 from tests.support.transport import opener_whose_request_raises
@@ -323,7 +324,9 @@ async def test_a_blip_that_recovers_on_its_first_retry_states_nothing(runner, re
     assert statements(runner) == [*earlier, THINKING, ended(None)]
 
 
-async def test_a_blip_while_a_turns_end_is_answered_backs_off_and_states_no_unavailable(runner):
+async def test_a_blip_while_a_turns_end_is_answered_backs_off_told_by_the_reads_answer_and_states_no_unavailable(
+    runner, caplog
+):
     """TURNS-44, LOG-9: the answer to the statement beside the failed read does not tell how the read failed."""
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
@@ -339,6 +342,8 @@ async def test_a_blip_while_a_turns_end_is_answered_backs_off_and_states_no_unav
 
     reported = {event for event, _ in runner.reports.reported(started=False)}
     assert (Event.BACKOFF in reported, Event.SUSPENDED in reported) == (True, False)
+    (backed_off,) = lines_of(caplog.records, "loop.backed_off")
+    assert (backed_off.get("status"), backed_off.get("mcp_method")) == (HTTPStatus.SERVICE_UNAVAILABLE, READ)
     assert UNAVAILABLE not in statements(runner)
 
 
