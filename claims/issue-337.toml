@@ -3,6 +3,6 @@ agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
 role = "builder"
 base = "3d419be0df40adbc2307800557eb0ba7637dac11"
 branch = "claude/issue-337-the-turn-state-statements-and-backoff-li"
-scope = ["docs/log.md", "docs/turns.md", "src/personas/decision.py", "src/personas/loop.py", "src/personas/turn_states.py", "tests/test_loop_held.py", "tests/test_loop_turn_state.py"]
+scope = ["docs/log.md", "docs/turns.md", "quality/baseline.toml", "src/personas/decision.py", "src/personas/loop.py", "src/personas/reporting.py", "src/personas/turn_states.py", "tests/test_loop.py", "tests/test_loop_held.py", "tests/test_loop_lifecycle.py", "tests/test_loop_turn_state.py"]
 opened_commit = "ccd8a754503bd49707948c7ba44d747eeaf0f868"
 whole_reason = "one sweep of the follow-ups #327's lane left in the same statements and backoff reports"
