@@ -7,7 +7,6 @@ import asyncio
 import json
 import secrets
 from dataclasses import replace
-from typing import TYPE_CHECKING
 
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
@@ -62,13 +61,7 @@ from tests.support.hopin import LIMIT_SECONDS, LIST_TOOLS, LISTEN, PLAY_TOOL, SA
 from tests.support.logs import formatted, lines_of
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-    from datetime import datetime
-
-    from personas.entries import KeptLine, WindowRead
-    from personas.recall import LineSearch
+from tests.support.store import ScriptedStore
 
 pytestmark = pytest.mark.anyio
 
@@ -76,56 +69,6 @@ OUTAGE_EVENTS = {Event.BACKOFF, Event.SUSPENDED}
 SHORT_STREAM_SECONDS = 0.5
 """The runner's deadline on a listen; the scripted app ends each listen once it has pulsed, so only a held write
 reaches it."""
-
-
-class ScriptedStore:
-    """Keeps what it is handed, or fails with the failure it is told to, or waits for a release first; it answers a
-    search with the lines it is told to give, or fails with the failure it is told to."""
-
-    def __init__(self) -> None:
-        self.kept: list[WindowRead] = []
-        self.failure: StoreUnavailable | None = None
-        self.searches: list[LineSearch] = []
-        self.found: tuple[KeptLine, ...] = ()
-        self.search_failure: Exception | None = None
-        self.on_search_failure: Callable[[], None] = lambda: None
-        self.waiting = asyncio.Event()
-        self.release: asyncio.Event | None = None
-        self.attempts = 0
-        self._attempted = asyncio.Event()
-
-    async def until_waiting(self) -> None:
-        async with asyncio.timeout(LIMIT_SECONDS):
-            await self.waiting.wait()
-
-    async def until_attempts(self, count: int) -> None:
-        async with asyncio.timeout(LIMIT_SECONDS):
-            while self.attempts < count:
-                self._attempted.clear()
-                await self._attempted.wait()
-
-    async def keep(self, read: WindowRead) -> None:
-        self.attempts += 1
-        self._attempted.set()
-        if self.release is not None:
-            self.waiting.set()
-            await self.release.wait()
-        if self.failure is not None:
-            raise self.failure
-        self.kept.append(read)
-
-    async def search(self, search: LineSearch) -> tuple[KeptLine, ...]:
-        self.searches.append(search)
-        if self.search_failure is not None:
-            self.on_search_failure()
-            raise self.search_failure
-        return self.found
-
-    async def erase_before(self, first_read_before: datetime) -> int:
-        raise AssertionError("a test about the loop swept")
-
-    def seqs_kept(self) -> list[int]:
-        return [line.seq for read in self.kept for line in read.window.entries]
 
 
 async def test_a_store_that_is_down_is_reported_once_and_costs_no_answer_and_the_lines_are_kept_when_it_is_back(runner):

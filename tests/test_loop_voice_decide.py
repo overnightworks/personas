@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import TYPE_CHECKING
 
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
@@ -24,33 +23,11 @@ from tests.support.call import ADDRESSED, PLACE_ID, say_in_the_call
 from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
 from tests.support.gateway import BUDGET_SPENT, say
 from tests.support.hopin import CALL, SAY_TOOL
+from tests.support.store import ScriptedStore
 from tests.support.voice import TWO_SENTENCES, a_voice_call, gated, holding_sentence_ends, sentences_spoken
 from tests.support.wire import refuses_with_a_server_error
 
-if TYPE_CHECKING:
-    from datetime import datetime
-
-    from personas.entries import KeptLine, WindowRead
-    from personas.recall import LineSearch
-
 pytestmark = pytest.mark.anyio
-
-
-class WatchedLines:
-    """A store of lines that keeps none and finds none, and counts the searches."""
-
-    def __init__(self) -> None:
-        self.searches = 0
-
-    async def keep(self, read: WindowRead) -> None:
-        return None
-
-    async def search(self, search: LineSearch) -> tuple[KeptLine, ...]:
-        self.searches += 1
-        return ()
-
-    async def erase_before(self, first_read_before: datetime) -> int:
-        return 0
 
 
 HOLD_ID = "hold-1"
@@ -218,7 +195,7 @@ async def test_a_stop_whose_call_failed_is_sent_again_by_a_later_read_and_decide
 
 async def test_a_turn_told_a_hold_answers_the_lookup_that_it_decides_first_and_spends_no_lookup(runner):
     """TURNS-31."""
-    store = WatchedLines()
+    store = ScriptedStore()
     runner.remember_in(store)
     await a_voice_call(
         runner,
@@ -234,7 +211,7 @@ async def test_a_turn_told_a_hold_answers_the_lookup_that_it_decides_first_and_s
     lookup, other = runner.gateway.tool_results(3)
     assert lookup.startswith("Error")
     assert lookup == other
-    assert store.searches == 0
+    assert store.searches == []
 
 
 async def test_a_hold_joins_the_lines_already_due_into_one_written_turn_that_is_offered_both_decisions(runner):
