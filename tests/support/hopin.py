@@ -474,10 +474,7 @@ class FakeApp(AppVoice):
         bearer = headers.get("authorization", "").removeprefix("Bearer ")
         self.presented.add(bearer)
         self.traceparents.append((method, headers.get("traceparent")))
-        if method == CALL and (document.get("params") or {}).get("name") == SPEAK_TOOL:
-            self.speak_bearers.append(bearer)
-        if method == LIST_TOOLS:
-            self.list_bearers.append(bearer)
+        self._note_bearer(method, document, bearer)
         noting = self._noting_acknowledgements(send)
         reply = Reply(Rpc(document.get("id", 0), method, document.get("params") or {}), noting, receive)
         if bearer not in self.bearers:
@@ -501,6 +498,13 @@ class FakeApp(AppVoice):
         else:
             scope[_SUBJECT_KEY] = self.bearers[bearer]
             await self._front(scope, _replayed(body, receive), noting)
+
+    def _note_bearer(self, method: str, document: dict[str, Any], bearer: str) -> None:
+        """The token a ``speak`` call or a tool listing came with."""
+        if method == CALL and (document.get("params") or {}).get("name") == SPEAK_TOOL:
+            self.speak_bearers.append(bearer)
+        if method == LIST_TOOLS:
+            self.list_bearers.append(bearer)
 
     def _fails_the_window_read(self, document: dict[str, Any]) -> bool:
         place = place_ref_from_window_uri((document.get("params") or {}).get("uri", ""))
