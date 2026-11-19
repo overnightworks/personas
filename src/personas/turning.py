@@ -459,7 +459,8 @@ class Turning:
             pass
         if self._mind.hold_decided_id(self._at(admitted.place)) != hold.id:
             self._cut_speech(voiced, hearing)
-            await self._end_hold(voiced.admitted.place, voiced.record, hold.id, HoldOutcome.UNDECIDED)
+            if await self._end_hold(voiced.admitted.place, voiced.record, hold.id, HoldOutcome.UNDECIDED) is not None:
+                self._report_told_hold_dropped(voiced)
 
     async def _answer_round(
         self, voiced: _Voiced, hearing: _Hearing, hold: Held, name: str, _principal: Principal, _arguments: JsonObject
@@ -475,6 +476,8 @@ class Turning:
         ended = await self._end_hold(voiced.admitted.place, voiced.record, hold.id, outcome)
         if ended is None:
             return ToolOutcome(_APP_FAILED_TEXT, is_error=True)
+        if outcome is HoldOutcome.STOPPED:
+            self._report_told_hold_dropped(voiced)
         return ToolOutcome(_GONE_TEXT if ended is HoldOutcome.GONE else told, is_error=False)
 
     @staticmethod
@@ -485,6 +488,13 @@ class Turning:
         told = told_stop(voiced.speaking.cut(), None if waiting is None else waiting.name)
         hearing.cancel()
         return told
+
+    def _report_told_hold_dropped(self, voiced: _Voiced) -> None:
+        """A round for a newer hold cut the speech before the turn decided the hold it was told, which the app may have
+        ended already: the older id gets its line."""
+        told = voiced.held.told
+        if told is not None and told.dropped():
+            self._report(Event.HOLD_DECIDED, HoldOutcome.UNDECIDED.value, None, None)
 
     async def _end_hold(
         self, place: PlaceRef, record: TaskRecord, hold_id: str, outcome: HoldOutcome

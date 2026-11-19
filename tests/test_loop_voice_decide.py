@@ -166,6 +166,28 @@ async def test_a_turn_that_ends_without_a_decision_drops_what_waited_and_the_nex
     assert runner.gateway.arrivals == arrivals
 
 
+@pytest.mark.parametrize(
+    ("reply", "outcome"),
+    [
+        pytest.param(deciding(STOP_SPEAKING_TOOL, "hold-2"), "stopped", id="stopped"),
+        pytest.param(completion("[silent]"), "undecided", id="undecided"),
+    ],
+)
+async def test_a_round_for_a_newer_hold_that_stops_him_or_ends_undecided_logs_the_older_hold_the_turn_was_told(
+    runner, reply, outcome
+):
+    """TURNS-31, LOG-17."""
+    await a_voice_call(runner, reply)
+    runner.gateway.pause_request(1, "Never said. No", "r this.")
+
+    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
+    await runner.gateway.until_requested(1)
+    runner.app.hold(PLACE_ID, "hold-2", ("Bob", "no, stop"))
+
+    assert await decided(runner, 2) == [outcome, "undecided"]
+    assert sentences_spoken(runner) == []
+
+
 async def test_a_stop_the_app_refuses_because_no_such_hold_stands_ends_the_hold_as_gone_and_is_not_sent_again(runner):
     """LOG-17."""
     await a_voice_call(runner, completion("[silent]"))
