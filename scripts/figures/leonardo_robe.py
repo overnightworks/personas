@@ -7,8 +7,6 @@ from typing import TYPE_CHECKING
 
 from figures.figure_body import (
     ACROSS,
-    AHEAD,
-    TRUNK_POWER,
     arm_binder,
     arm_tube,
     band,
@@ -18,10 +16,11 @@ from figures.figure_body import (
     trunk,
     trunk_binder,
 )
+from figures.figure_gown import Pleats, gown, gown_ring
 from figures.figure_head import NECK_BINDER
 from figures.figure_parts import Colour, Material, Part, part
 from figures.figure_skeleton import EYE_HEIGHT, SHOULDER_HEIGHT
-from figures.figure_surfaces import interpolated, loft, oval, patch, rippled, smoothstep, spread
+from figures.figure_surfaces import interpolated, loft, oval, patch, spread
 
 if TYPE_CHECKING:
     from figures.figure_head import Face
@@ -49,11 +48,7 @@ GOWN = (
     (1.462, (0.066, 0.058, 0.076)),
 )
 GOWN_RINGS = 40
-GOWN_COLUMNS = 84
-PLEATS = 14.0
-PLEAT_DEPTH = 0.05
-PLEATS_START = 1.05
-PLEATS_FULL = 0.25
+PLEATS = Pleats(count=14.0, depth=0.05, start=1.05, full=0.25)
 TRIM_RELIEF = 0.003
 HEM_BAND = 0.035
 BELT = (1.03, 1.072)
@@ -100,8 +95,8 @@ def leonardo_clothes(face: Face) -> list[Part]:
 
 def _gown() -> list[Part]:
     """The gown, with a dark band around its hem and another down its front."""
-    hem, top = GOWN[0][0], GOWN[-1][0]
-    body = loft([_gown_ring(height, 0.0) for height in spread(hem, top, GOWN_RINGS)])
+    hem = GOWN[0][0]
+    body = gown(GOWN, GOWN_RINGS, PLEATS)
     hem_band = patch([_gown_ring(height, TRIM_RELIEF) for height in (hem - 0.002, hem + HEM_BAND)], wrap=True)
     front_band = patch([_front_band_row(height) for height in spread(hem, COLLAR[0], GOWN_RINGS)])
     return [
@@ -111,11 +106,7 @@ def _gown() -> list[Part]:
 
 
 def _gown_ring(height: float, grown: float) -> list[Vector]:
-    """The gown at a height: an oval that falls into pleats below the belt, deepest towards the hem."""
-    centre = (0.0, height, 0.0)
-    radii = [radius + grown for radius in interpolated(GOWN, height)]
-    ring = oval(centre, ACROSS, AHEAD, radii, GOWN_COLUMNS, TRUNK_POWER)
-    return rippled(ring, centre, PLEATS, PLEAT_DEPTH * smoothstep(PLEATS_START, PLEATS_FULL, height))
+    return gown_ring(GOWN, height, grown, PLEATS)
 
 
 def _front_band_row(height: float) -> list[Vector]:
