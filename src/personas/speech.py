@@ -46,7 +46,7 @@ NO_SPEECH: Final = SpeechRecord()
 
 def speech_sent(record: SpeechRecord) -> SpeechRecord:
     """A request to ``speak`` counts from its send."""
-    return replace(record, in_flight=record.in_flight + 1)
+    return SpeechRecord(record.in_flight + 1, record.credit, record.saying, record.hold, record.decided)
 
 
 def speech_answered(record: SpeechRecord, sentence: str, *, spoken: bool) -> SpeechRecord:
@@ -54,22 +54,23 @@ def speech_answered(record: SpeechRecord, sentence: str, *, spoken: bool) -> Spe
     that plays."""
     in_flight = record.in_flight - 1
     if spoken:
-        return replace(record, in_flight=in_flight, credit=record.credit + 1, saying=sentence)
-    return replace(record, in_flight=in_flight, credit=max(record.credit, 0) if in_flight == 0 else record.credit)
+        return SpeechRecord(in_flight, record.credit + 1, sentence, record.hold, record.decided)
+    credit = max(record.credit, 0) if in_flight == 0 else record.credit
+    return SpeechRecord(in_flight, credit, record.saying, record.hold, record.decided)
 
 
 def speech_line_entered(record: SpeechRecord) -> SpeechRecord:
     """His own spoken line entered at the place: it is credited while a request is in flight or a line is still owed,
     and ignored otherwise."""
     if record.in_flight > 0 or record.credit > 0:
-        return replace(record, credit=record.credit - 1)
+        return SpeechRecord(record.in_flight, record.credit - 1, record.saying, record.hold, record.decided)
     return record
 
 
 def speech_ended(record: SpeechRecord) -> SpeechRecord:
     """The turn that sent ended: its requests in flight and what it still owes are dropped, and the sentence it was in
     stays only while a hold stands, for the turn that decides it."""
-    return replace(record, in_flight=0, credit=0, saying=record.saying if record.hold is not None else None)
+    return SpeechRecord(0, 0, record.saying if record.hold is not None else None, record.hold, record.decided)
 
 
 class Telling(StrEnum):
@@ -119,8 +120,9 @@ def hold_stated(window: PlaceWindow, seen: Held | None) -> Held | None:
 def hold_read(record: SpeechRecord, window: PlaceWindow) -> SpeechRecord:
     """The record once the window is read: the hold it states, none when that is the one decided last."""
     if window.interrupted is not None and window.interrupted.id == record.decided:
-        return replace(record, hold=None)
-    return replace(record, hold=hold_stated(window, record.hold))
+        return SpeechRecord(record.in_flight, record.credit, record.saying, None, record.decided)
+    hold = hold_stated(window, record.hold)
+    return SpeechRecord(record.in_flight, record.credit, record.saying, hold, record.decided)
 
 
 def hold_untold(record: SpeechRecord) -> Held | None:
@@ -132,7 +134,8 @@ def hold_untold(record: SpeechRecord) -> Held | None:
 def hold_marked_told(record: SpeechRecord) -> SpeechRecord:
     """A turn is told the hold that stands."""
     assert record.hold is not None  # noqa: S101 - a turn is told only a hold that stands
-    return replace(record, hold=replace(record.hold, telling=Telling.TELLING))
+    hold = replace(record.hold, telling=Telling.TELLING)
+    return SpeechRecord(record.in_flight, record.credit, record.saying, hold, record.decided)
 
 
 def hold_turn_ended(record: SpeechRecord) -> SpeechRecord:
@@ -140,12 +143,13 @@ def hold_turn_ended(record: SpeechRecord) -> SpeechRecord:
     held = record.hold
     if held is None or held.telling is not Telling.TELLING:
         return record
-    return replace(record, hold=replace(held, telling=Telling.UNDECIDED))
+    undecided = replace(held, telling=Telling.UNDECIDED)
+    return SpeechRecord(record.in_flight, record.credit, record.saying, undecided, record.decided)
 
 
 def hold_decided(record: SpeechRecord, hold_id: str) -> SpeechRecord:
     """The hold ended with a decision: it stands no more and is never decided again."""
-    return replace(record, hold=None, decided=hold_id)
+    return SpeechRecord(record.in_flight, record.credit, record.saying, None, hold_id)
 
 
 def hold_tellable(held: Held) -> bool:
