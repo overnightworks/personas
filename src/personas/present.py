@@ -40,7 +40,6 @@ if TYPE_CHECKING:
     from agents.member import PlaceRef
 
 
-
 def _revision_key(view: ViewSeen) -> tuple[str, PlaceRef, int]:
     return view.app, view.place, view.view.revision
 
