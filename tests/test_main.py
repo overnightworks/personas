@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+import anyio
 import httpx2
 import pytest
 from agents.backend.gateway import GatewayBackend
@@ -71,6 +72,28 @@ def test_every_line_the_entry_point_configures_is_one_json_object_of_the_runner_
 
     line = json.loads(capsys.readouterr().out)
     assert (line["service"], line["event"], line["agent_id"]) == ("personas", "loop.started", "mozart")
+
+
+@pytest.mark.parametrize(
+    ("error", "level"),
+    [
+        pytest.param(anyio.ClosedResourceError(), "info", id="closed stream"),
+        pytest.param(anyio.BrokenResourceError(), "info", id="broken stream"),
+        pytest.param(ValueError("not json"), "error", id="a real parse failure"),
+    ],
+)
+def test_the_mcp_clients_error_for_a_closed_stream_is_written_at_info_and_any_other_stays_at_error(
+    restored_logging, capsys: pytest.CaptureFixture[str], error, level
+):
+    """LOG-1."""
+    configure_logging()
+
+    try:
+        raise error
+    except Exception:
+        logging.getLogger("mcp.client.streamable_http").exception("Error parsing SSE message")
+
+    assert json.loads(capsys.readouterr().out)["level"] == level
 
 
 @pytest.mark.parametrize("arguments", [[], ["migrate"], ["memory", "list"]], ids=["runner", "migrate", "memory"])
