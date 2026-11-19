@@ -3,6 +3,6 @@ agent = "Claude 60cb1003-217f-4619-a2df-698706444488"
 role = "builder"
 base = "0c58ba99b99a4eaa18f3e76511f38f077cc992b0"
 branch = "claude/issue-339-the-loop-s-log-lines-say-what-it-did-acr"
-scope = ["docs/log.md", "docs/turns.md", "src/personas/loop.py", "src/personas/reporting.py", "tests/test_loop_lifecycle.py", "tests/test_loop_turn_state.py"]
+scope = ["docs/log.md", "docs/turns.md", "src/personas/loop.py", "src/personas/main.py", "src/personas/reporting.py", "tests/test_loop_lifecycle.py", "tests/test_loop_turn_state.py", "tests/test_main.py"]
 opened_commit = "8c036b02f4757c4c23c02b745bd71f131847f6af"
 whole_reason = "four log-accuracy gaps in the same loop and reports, found by one explorative test"
