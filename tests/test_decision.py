@@ -975,7 +975,7 @@ def test_how_a_request_ended_decides_the_outcome_of_the_act_it_made(ended, cance
         ),
     ],
 )
-def test_how_a_speak_request_ended_decides_the_outcome_of_thespeech_sentence_itspeech_sent(ended, cancelling, expected):
+def test_how_a_speak_request_ended_decides_the_outcome_of_the_sentence_it_sent(ended, cancelling, expected):
     assert speech_outcome(ended, cancelling=cancelling) == expected
 
 
@@ -1002,7 +1002,7 @@ def test_what_is_left_of_a_turns_longest_duration_is_never_below_zero(now, remai
     [(0, True), (1, True), (2, False), (3, False)],
     ids=["nothing owed", "the one playing is owed", "one playing and one before it not yet entered", "more"],
 )
-def test_the_nextspeech_sentence_goes_out_while_at_most_the_one_playing_is_owed_a_line(owed, may_send):
+def test_the_next_sentence_goes_out_while_at_most_the_one_playing_is_owed_a_line(owed, may_send):
     assert may_send_next(owed) is may_send
 
 
