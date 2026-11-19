@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Final, Literal, NoReturn
 
 from logline import unit_trace
 
+from personas.admission import Admitted
 from personas.decision import (
     NETWORK_FAILURE_CODE,
     NO_TURNS_CODE,
@@ -77,7 +78,7 @@ from personas.task_record import (
 )
 from personas.tokens import facts_of
 from personas.turn_states import TurnStates
-from personas.turning import Admitted, Turning, TurnSetup
+from personas.turning import Turning, TurnSetup
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import aclosing
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, Final
 
@@ -68,9 +68,8 @@ from personas.turn_sessions import TurnSessions
 from personas.voice import Speaking
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterable
+    from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
     from contextlib import AbstractAsyncContextManager
-    from datetime import datetime
 
     from agents.agent_file import AgentDefinition
     from agents.backend import AgentBackend, TurnEvent
@@ -78,16 +77,15 @@ if TYPE_CHECKING:
     from agents.turn import FailureCode, JsonObject, Principal
     from logline import StepTimer
 
+    from personas.admission import Admitted
     from personas.app_session import AppSession, SessionOpener
     from personas.clock import Clock
     from personas.config import AgentCredentials, AppTarget
-    from personas.entries import History, Occasion
     from personas.mind import Mind
-    from personas.present import Present
     from personas.recall import LookupBounds
     from personas.remembering import Remembering
     from personas.task_record import TaskRecord
-    from personas.tokens import TokenFacts, TokenSource
+    from personas.tokens import TokenSource
 
 # The backend a turn runs on, which it closes when the turn ends.
 type BackendFactory = Callable[[Iterable[HandTool]], AbstractAsyncContextManager[AgentBackend]]
@@ -141,30 +139,6 @@ class _Voiced:
     speaking: Speaking
     record: TaskRecord
     inbox: HoldInbox
-
-
-@dataclass(frozen=True)
-class Admitted:
-    """A turn decided on, with the facts it was decided from: the token's, what woke it, what its agent had taken in,
-    the wall time it was admitted at, whether its text is spoken and the other apps whose tools it holds."""
-
-    facts: TokenFacts
-    place: PlaceRef
-    occasion: Occasion
-    present: Present = field(repr=False)
-    at: datetime
-    aloud: bool
-    apps: frozenset[str]
-    held: Held | None = None
-    """The hold the turn is told first, which the mind marked as told when the turn was claimed."""
-
-    @property
-    def history(self) -> History:
-        return self.present.history
-
-    def groups(self) -> Coroutine[None, None, frozenset[str]]:
-        """The library's GroupSource wants an awaitable; the groups are already known."""
-        return asyncio.sleep(0, self.facts.groups)
 
 
 class Turning:
