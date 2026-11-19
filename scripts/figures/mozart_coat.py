@@ -24,6 +24,7 @@ from figures.figure_body import (
     shoes,
     trunk,
     trunk_binder,
+    waistcoat,
 )
 from figures.figure_head import NECK_BINDER
 from figures.figure_parts import Colour, Material, Part, part
@@ -102,7 +103,7 @@ STOCK = ((1.425, (0.060, 0.052, 0.065)), (1.45, (0.062, 0.054, 0.067)), (1.484, 
 def mozart_clothes(face: Face) -> list[Part]:
     return [
         *_coat(),
-        *_waistcoat(),
+        *waistcoat(WAISTCOAT, PALE_GOLD, GILT, (0.922, 1.21, 7)),
         *_arms(),
         *_jabot(),
         part(trunk(STOCK, 4), LACE, Material.CLOTH, NECK_BINDER),
@@ -136,14 +137,6 @@ def _coat() -> list[Part]:
 def _coat_front(height: float, inset: float, grown: float = BRAID_RELIEF) -> Vector:
     """A place on the coat's left front where its trim lies, `inset` back from the edge."""
     return open_point(COAT, height, open_inset(COAT, height, inset), grown)
-
-
-def _waistcoat() -> list[Part]:
-    buttons = [
-        part(button((0.0, height, interpolated(WAISTCOAT, height)[1])), GILT, Material.GILT, trunk_binder)
-        for height in spread(0.922, 1.21, 7)
-    ]
-    return [part(trunk(WAISTCOAT, 34), PALE_GOLD, Material.SATIN, trunk_binder), *buttons]
 
 
 def _arms() -> list[Part]:

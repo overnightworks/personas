@@ -115,6 +115,16 @@ def trunk(course: Sequence[Key], rings: int) -> Shape:
     return loft([_trunk_ring(course, height, 0.0) for height in spread(course[0][0], course[-1][0], rings)])
 
 
+def waistcoat(course: Sequence[Key], cloth: Colour, metal: Colour, buttons: tuple[float, float, int]) -> list[Part]:
+    """A satin waistcoat over the course with a row of gilt buttons down its front, given as (low, high, count)."""
+    low, high, count = buttons
+    row = [
+        part(button((0.0, height, interpolated(course, height)[1])), metal, Material.GILT, trunk_binder)
+        for height in spread(low, high, count)
+    ]
+    return [part(trunk(course, 34), cloth, Material.SATIN, trunk_binder), *row]
+
+
 def open_rows(course: Sequence[Key], rings: int, columns: int, grown: float = 0.0) -> list[list[Vector]]:
     """Rows around the trunk from the bottom up that stay open down the front; the course gives the (half width, front,
     back) radii and the angle from the middle at which the edges part, by height, and `grown` moves the rows outward."""

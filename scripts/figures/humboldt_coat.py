@@ -11,7 +11,6 @@ from figures.figure_body import (
     arm_binder,
     arm_tube,
     both_sides,
-    button,
     hands,
     leg_binder,
     leg_tube,
@@ -19,11 +18,12 @@ from figures.figure_body import (
     shoes,
     trunk,
     trunk_binder,
+    waistcoat,
 )
 from figures.figure_head import NECK_BINDER
 from figures.figure_parts import Material, Part, part
 from figures.figure_shapes import ellipsoid
-from figures.figure_surfaces import interpolated, shell, spread
+from figures.figure_surfaces import interpolated, shell
 
 if TYPE_CHECKING:
     from figures.figure_head import Face
@@ -93,7 +93,7 @@ KNOT = (0.0, 1.462, 0.058)
 def humboldt_clothes(face: Face) -> list[Part]:
     return [
         *_coat(),
-        *_waistcoat(),
+        *waistcoat(WAISTCOAT, CREAM, BRASS, (0.97, 1.21, 6)),
         *both_sides(arm_tube(SLEEVE, 28), NAVY, Material.CLOTH, arm_binder),
         part(trunk(CRAVAT, 4), LINEN, Material.CLOTH, NECK_BINDER),
         part(_knot(), LINEN, Material.CLOTH, NECK_BINDER),
@@ -111,14 +111,6 @@ def _coat() -> list[Part]:
         open_rows(COLLAR, COLLAR_RINGS, COLLAR_COLUMNS, -COLLAR_THICKNESS),
     )
     return [part(body, NAVY, Material.CLOTH, trunk_binder), part(collar, NAVY, Material.CLOTH, NECK_BINDER)]
-
-
-def _waistcoat() -> list[Part]:
-    buttons = [
-        part(button((0.0, height, interpolated(WAISTCOAT, height)[1])), BRASS, Material.GILT, trunk_binder)
-        for height in spread(0.97, 1.21, 6)
-    ]
-    return [part(trunk(WAISTCOAT, 34), CREAM, Material.SATIN, trunk_binder), *buttons]
 
 
 def _knot() -> Shape:
