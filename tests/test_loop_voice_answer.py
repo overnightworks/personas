@@ -7,11 +7,13 @@ from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.member import STOP_SPEAKING_TOOL, SpeakRefusal, SpeakRefused
 from agents.tools import ToolOutcome
 
+from personas.failures import leaves_of
 from personas.reporting import Event
 from personas.speech import DropReason
 from tests.support.call import PLACE_ID
 from tests.support.history import settled
 from tests.support.hopin import CALL
+from tests.support.transport import opener_whose_request_raises
 from tests.support.voice import (
     FIRST,
     HOLD_ID,
@@ -20,6 +22,7 @@ from tests.support.voice import (
     a_voice_call,
     calling_while_held,
     deciding,
+    ended_by,
     held_in_the_first_sentence,
     sentences_spoken,
 )
@@ -242,3 +245,14 @@ async def test_a_refused_first_answer_sentence_beside_his_parked_run_asks_the_ap
     assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
     assert len(runner.reports.codes_of(Event.HELD_APP_FAILED)) == 1
     assert runner.reports.codes_of(Event.HOLD_DECIDED) == []
+
+
+async def test_a_defect_in_the_request_of_the_first_answer_sentence_ends_the_runner_loud(runner):
+    """TURNS-27."""
+    defect = ValueError("a defect")
+    runner.open_session = opener_whose_request_raises("speak", defect, after=2)
+    await answered_in_the_round(runner, completion(ANSWER))
+
+    ended = await ended_by(runner.task)
+
+    assert list(leaves_of(ended)) == [defect]

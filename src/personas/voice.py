@@ -150,8 +150,9 @@ class Answering:
         self._report_dropped(DropReason.REPLACED, dropped)
         self._tally.sentence_released()
         answer = await self._speak(first, hold.id)
-        if (outcome := speech_outcome(answer, cancelling=False)) is not None:
-            self._mind.take((SaidAloud(self._app.mcp_url, self._place, first, outcome, self._clock.wall()),))
+        outcome = speech_outcome(answer, cancelling=False)
+        assert outcome is not None  # noqa: S101 - an answer, a refusal or a call failure each end with an outcome
+        self._mind.take((SaidAloud(self._app.mcp_url, self._place, first, outcome, self._clock.wall()),))
         if isinstance(answer, Spoken | Written):
             if isinstance(answer, Spoken):
                 self._mind.speech_started(self._at, first)
