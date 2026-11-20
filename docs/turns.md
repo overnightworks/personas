@@ -99,7 +99,7 @@ An entry has its app and the time he took it (`at`), and is one of:
   ends the loop's session, and a turn running on it, into the loop's reaction. (TURNS-27)
 - The persona's `maxDurationSeconds` bounds the turn and each sentence it released: a turn past it ends
   `limit_exceeded`; a sentence still unsent past it is dropped and logged, except while a hold stands, and a
-  continue gives it the deciding turn's bound; a request not answered by it is given up. (TURNS-28)
+  continue gives it the deciding turn's bound. (TURNS-28)
 - A later spoken turn's first sentence at the place drops the earlier turn's unsent sentences, which is
   logged as `speech.dropped`; the sentence that plays and the one already sent stay, and the new one queues
   behind them. A silent or written turn keeps them. (TURNS-45)
