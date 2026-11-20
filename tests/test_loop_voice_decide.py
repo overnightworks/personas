@@ -188,6 +188,21 @@ async def test_a_round_for_a_newer_hold_that_stops_him_or_ends_undecided_logs_th
     assert sentences_spoken(runner) == []
 
 
+async def test_a_round_for_a_newer_hold_logs_no_line_for_the_older_hold_the_turn_already_decided(runner):
+    """TURNS-31, LOG-17."""
+    await a_voice_call(runner, deciding(CONTINUE_SPEAKING_TOOL), deciding(STOP_SPEAKING_TOOL, "hold-2"))
+    resumed = runner.gateway.pause_request(2, "Still ", "thinking.")
+
+    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
+    await runner.gateway.until_requested(2)
+    runner.app.hold(PLACE_ID, "hold-2", ("Bob", "no, stop"))
+    assert await decided(runner, 2) == ["continued", "stopped"]
+    resumed.release()
+    await runner.reports.until_a_turn_completed()
+
+    assert runner.reports.codes_of(Event.HOLD_DECIDED) == ["continued", "stopped"]
+
+
 async def test_a_stop_the_app_refuses_because_no_such_hold_stands_ends_the_hold_as_gone_and_is_not_sent_again(runner):
     """LOG-17."""
     await a_voice_call(runner, completion("[silent]"))
