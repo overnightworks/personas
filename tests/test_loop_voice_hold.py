@@ -154,8 +154,10 @@ async def test_a_round_that_makes_no_decision_stops_him_with_the_id_and_says_not
 
 
 async def test_a_round_that_makes_no_decision_whose_stop_the_app_cannot_take_reports_no_decision(runner):
-    await held_in_the_first_sentence(runner, completion(TWO_SENTENCES), completion("[silent]"))
+    deciding_round = await calling_while_held(runner, completion("[silent]"), hold_round=True)
+    await runner.gateway.until_requested(3)
     runner.app.script(CALL, refuses_with_a_server_error)
+    deciding_round.set()
 
     await runner.reports.until(Event.HELD_APP_FAILED)
 
@@ -168,9 +170,9 @@ async def test_a_decision_for_a_hold_already_decided_starts_no_round_and_a_new_h
         runner,
         completion("First sentence. Second sentence. Third sentence."),
         deciding(CONTINUE_SPEAKING_TOOL),
-        completion(),
+        completion("[silent]"),
         deciding(CONTINUE_SPEAKING_TOOL, "hold-2"),
-        completion(),
+        completion("[silent]"),
     )
     await decided(runner)
     arrivals = runner.gateway.arrivals
@@ -385,7 +387,7 @@ async def test_a_decision_the_app_could_not_take_is_told_to_him_as_not_made_and_
     assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
 
 
-async def test_a_call_of_his_that_is_no_decision_and_a_second_decision_are_refused_in_the_round(runner):
+async def test_a_turn_told_the_hold_refuses_a_call_of_his_that_is_no_decision_and_a_second_decision(runner):
     replies = [
         tool_round(say("early", PLACE_ID)),
         deciding(CONTINUE_SPEAKING_TOOL),
@@ -404,6 +406,67 @@ async def test_a_call_of_his_that_is_no_decision_and_a_second_decision_are_refus
     assert [result.startswith("Error") for result in results] == [True, False, True]
     assert runner.app.hold_calls == [(CONTINUE_SPEAKING_TOOL, HOLD_ID)]
     assert runner.app.said == []
+
+
+async def test_a_round_refuses_a_call_of_his_that_is_no_decision_and_a_second_decision(runner):
+    deciding_round = await calling_while_held(
+        runner,
+        tool_round(say("early", PLACE_ID)),
+        deciding(CONTINUE_SPEAKING_TOOL),
+        deciding(STOP_SPEAKING_TOOL),
+        completion("[silent]"),
+        completion("[silent]"),
+        hold_round=True,
+    )
+    deciding_round.set()
+
+    assert await decided(runner) == ["continued"]
+    await runner.reports.until_a_turn_completed()
+
+    (number,) = runner.gateway.rounds()
+    results = runner.gateway.tool_results(number + 3)
+    assert [result.startswith("Error") for result in results] == [True, False, True]
+    assert runner.app.hold_calls == [(CONTINUE_SPEAKING_TOOL, HOLD_ID)]
+    assert "early" not in said_texts(runner)
+
+
+async def test_a_decision_the_app_could_not_take_in_the_round_is_told_to_him_as_not_made_and_he_decides_again(runner):
+    deciding_round = await calling_while_held(
+        runner,
+        deciding(CONTINUE_SPEAKING_TOOL),
+        deciding(STOP_SPEAKING_TOOL),
+        completion("[silent]"),
+        completion("[silent]"),
+        hold_round=True,
+    )
+    runner.app.script(CALL, refuses_with_a_server_error)
+    deciding_round.set()
+
+    assert await decided(runner) == ["stopped"]
+
+    (number,) = runner.gateway.rounds()
+    (failed,) = runner.gateway.tool_results(number + 1)
+    assert failed.startswith("Error")
+    assert runner.reports.codes_of(Event.HELD_APP_FAILED) == [status_code(HTTPStatus.INTERNAL_SERVER_ERROR)]
+    assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
+
+
+async def test_a_decision_of_the_round_whose_call_fails_beside_a_defect_ends_the_runner_loud_with_both(
+    runner, monkeypatch
+):
+    monkeypatch.setattr(
+        app_session, "streamable_http_client", transport_closing_with_late_answers(echo=RuntimeError, only_close=1)
+    )
+    deciding_round = await calling_while_held(runner, deciding(CONTINUE_SPEAKING_TOOL), hold_round=True)
+    runner.app.script(CALL, cuts)
+    deciding_round.set()
+
+    assert runner.task is not None
+    async with asyncio.timeout(LIMIT_SECONDS):
+        (ended,) = await asyncio.gather(runner.task, return_exceptions=True)
+
+    assert sorted(type(leaf).__name__ for leaf in leaves_of(ended)) == [RuntimeError.__name__, Unreachable.__name__]
+    assert runner.reports.codes_of(Event.HOLD_DECIDED) == []
 
 
 async def test_a_decision_whose_call_fails_beside_a_defect_ends_the_runner_loud_with_both(runner, monkeypatch):
@@ -437,6 +500,19 @@ async def test_a_decision_whose_call_fails_beside_a_speak_that_fails_ends_the_ru
 
     assert sorted(type(leaf).__name__ for leaf in leaves_of(ended)) == [BrokenResourceError.__name__, KeyError.__name__]
     assert runner.reports.codes_of(Event.HOLD_DECIDED) == []
+
+
+async def test_a_relayed_call_that_fails_beside_a_decision_that_fails_ends_the_runner_loud_with_both(runner):
+    defects = {"continue_speaking": (BrokenResourceError(), 0), "invoke": (KeyError("call"), 6)}
+    runner.open_session = opener_whose_requests_raise_together(defects)
+    await a_voice_call(runner, tool_round(say("before", PLACE_ID), content=FIRST), deciding(CONTINUE_SPEAKING_TOOL))
+    say_in_the_call(runner, ADDRESSED, spoken=True)
+    await runner.gateway.until_answered(1)
+    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
+
+    ended = await ended_by(runner.task)
+
+    assert sorted(type(leaf).__name__ for leaf in leaves_of(ended)) == [BrokenResourceError.__name__, KeyError.__name__]
 
 
 async def test_a_call_made_while_a_hold_stands_ends_the_turn_limit_exceeded_at_its_deadline_and_is_never_sent(runner):

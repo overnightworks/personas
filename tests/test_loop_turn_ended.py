@@ -98,18 +98,31 @@ async def test_a_turn_whose_relayed_call_failed_ends_failed_with_a_closed_reason
     assert (line["outcome"], line["reason"], record.levelname) == ("failed", NETWORK_FAILURE_CODE, "ERROR")
 
 
-async def test_a_turn_whose_place_left_ends_cancelled_without_a_reason(runner, caplog):
+async def test_a_turn_whose_place_left_before_its_reply_ended_ends_cancelled_without_a_reason(runner, caplog):
     """LOG-28."""
-    sleeps = holding_sentence_ends(runner)
     await a_voice_call(runner, completion(TWO_SENTENCES))
+    runner.gateway.pause_request(1, "First sentence. Second sen", "tence.")
     say_in_the_call(runner, ADDRESSED, spoken=True)
-    await sleeps.until_began(1)
+    await runner.gateway.until_requested(1)
 
     runner.app.stand(SUBJECT)
     await runner.reports.until_a_turn_ended()
 
     line = the_turn_ended_line(caplog)
-    assert (runner.reports.turn_endings, line["sentence_count"], "reason" in line) == ([CANCELLED_TURN], 2, False)
+    assert (runner.reports.turn_endings, "reason" in line) == ([CANCELLED_TURN], False)
+
+
+async def test_a_turn_whose_reply_ended_ends_ok_with_the_sentences_it_released_though_none_was_answered(runner, caplog):
+    """TURNS-25, LOG-28."""
+    sleeps = holding_sentence_ends(runner)
+    await a_voice_call(runner, completion(TWO_SENTENCES))
+    say_in_the_call(runner, ADDRESSED, spoken=True)
+    await sleeps.until_began(1)
+
+    await runner.reports.until_a_turn_ended()
+
+    line = the_turn_ended_line(caplog)
+    assert (runner.reports.turn_endings, line["sentence_count"], "reason" in line) == ([COMPLETED_TURN], 2, False)
 
 
 async def test_a_turn_the_runner_cancelled_ends_cancelled_though_the_loop_did_not_ask_for_it(runner):

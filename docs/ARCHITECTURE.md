@@ -52,12 +52,18 @@ flowchart LR
   loop waits to retry or he stops.
 - **The mind** (`mind.py`) holds one agent's present in memory: his history, the answered turns it tells,
   his due places, his pause, one turn at a time across all his apps, and per place a speech record, in
-  memory only: the requests in flight, the sentence that plays, the hold that stands there with what was said over
-  him and whether a turn was told it, and the id of the hold decided last. `voice.py` writes it and it outlives the
-  turn that sent.
+  memory only: the request in flight, the sentences released and not yet sent, each with its turn's time bound, the
+  sentence that plays, the hold that stands there with what was said over him and whether a turn was told it, and
+  the id of the hold decided last. A turn's `Speaking` (`voice.py`) releases its sentences into it; the record
+  outlives the turn.
 - **A turn** (`turning.py`) runs on its loop's session at its own app, lists the tools of its apps, sends the
-  gateway the persona and the told messages, and relays each call; `voice.py` speaks an aloud turn, `turn_bound.py` bounds the turn's
-  waits, `holds.py` decides a hold, `held_tools.py` and `turn_sessions.py` reach the other apps a turn holds.
+  gateway the persona and the told messages, and relays each call; it ends when the backend's events end, not
+  when its sentences have played. `voice.py` reads an aloud turn's reply into sentences, `turn_bound.py` bounds the
+  turn's waits and the sentences it released, `holds.py` decides a hold, `held_tools.py` and `turn_sessions.py`
+  reach the other apps a turn holds.
+- **A sender** (`voice.py`) is a task of the loop's serving group at each place where a turn spoke, on the loop's
+  session: it sends the record's unsent sentences to `speak`, one request at a time, also after the turn, and
+  nothing while a hold stands. The loop cancels and awaits it before the session closes.
 - **Decisions** (`entries` <- `recall` <- `speech` <- `decision` <- `present` <- `due`) are pure: no process, network or
   clock. `config.py` alone owns the TOML's fields and refusals.
 - **The stores** (`memory.py`, its migrations in `src/personas/migrations`) are the history store, always,

@@ -26,6 +26,7 @@ from personas.entries import (
 )
 from personas.mind import Mind
 from personas.present import turn_messages
+from personas.speech import Answered
 
 READ_AT = datetime(2026, 11, 11, 20, 0, tzinfo=UTC)
 CALL = Visit("https://app.test/mcp", PlaceRef(kind="call", id="room-7"), "generation-1")
@@ -69,28 +70,6 @@ def test_a_history_read_earlier_does_not_change_when_more_lines_are_taken():
     mind.take((said(CALL, 2, "second"),))
 
     assert [line.text for line in before.entries] == ["first"]
-
-
-def test_a_take_sets_the_event_read_before_it_and_the_next_take_sets_a_new_one():
-    mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
-    first = mind.next_take()
-
-    mind.take((said(CALL, 1, "first"),))
-    second = mind.next_take()
-
-    assert first.is_set() is True
-    assert second.is_set() is False
-    assert second is not first
-
-
-def test_taking_nothing_leaves_the_event_read_before_unset():
-    mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
-    waiting = mind.next_take()
-
-    mind.take(())
-
-    assert waiting.is_set() is False
-    assert mind.next_take() is waiting
 
 
 def test_the_views_he_read_join_his_lines_in_the_order_read_and_a_revision_he_holds_adds_nothing():
@@ -390,12 +369,23 @@ def playing_at(mind: Mind, at: AppPlace) -> bool:
     return mind.speech_saying(at) is not None
 
 
+def one_sentence_sent(mind: Mind, at: AppPlace) -> None:
+    """The sender at the place sent a sentence, which stays in flight."""
+    mind.sentences_released(at, ("One.",), 100.0, replacing=False)
+    sentence, _ = mind.sentence_to_send(at, 0.0)
+    assert sentence is not None
+
+
+def one_sentence_playing(mind: Mind, at: AppPlace) -> None:
+    one_sentence_sent(mind, at)
+    mind.speech_answered(at, Answered.SPOKEN)
+
+
 def test_his_own_spoken_line_at_a_place_ends_the_sentence_that_plays_there_and_at_no_other_place():
     mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
     here, there = AppPlace(CALL.app, CALL.place), AppPlace(OTHER_CALL.app, OTHER_CALL.place)
     for at in (here, there):
-        mind.speech_sent(at)
-        mind.speech_answered(at, "One.", spoken=True)
+        one_sentence_playing(mind, at)
 
     mind.take((an_own_spoken_line(CALL, 1),))
 
@@ -405,19 +395,17 @@ def test_his_own_spoken_line_at_a_place_ends_the_sentence_that_plays_there_and_a
 def test_his_own_spoken_line_ends_the_sentence_that_plays_when_the_history_bound_drops_it_at_once():
     mind = Mind(1, 1, BUDGET_PAUSE_CAP_SECONDS)
     at = AppPlace(CALL.app, CALL.place)
-    mind.speech_sent(at)
-    mind.speech_answered(at, "One.", spoken=True)
+    one_sentence_playing(mind, at)
 
     mind.take((an_own_spoken_line(CALL, 1),))
 
     assert not playing_at(mind, at)
 
 
-def test_the_end_of_the_sending_turn_keeps_the_sentence_that_plays_until_his_own_line_enters():
+def test_the_end_of_the_sender_keeps_the_sentence_that_plays_until_his_own_line_enters():
     mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
     at = AppPlace(CALL.app, CALL.place)
-    mind.speech_sent(at)
-    mind.speech_answered(at, "One.", spoken=True)
+    one_sentence_playing(mind, at)
 
     mind.speech_ended(at)
 
@@ -438,9 +426,30 @@ def test_the_end_of_the_sending_turn_keeps_the_sentence_that_plays_until_his_own
 def test_what_enters_that_is_not_his_own_spoken_line_at_the_place_leaves_the_sentence_playing(line):
     mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
     at = AppPlace(CALL.app, CALL.place)
-    mind.speech_sent(at)
-    mind.speech_answered(at, "One.", spoken=True)
+    one_sentence_playing(mind, at)
 
     mind.take((line,))
 
     assert mind.speech_saying(at) == "One."
+
+
+def test_a_sentence_answered_as_spoken_after_his_own_line_for_it_entered_does_not_play():
+    mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
+    at = AppPlace(CALL.app, CALL.place)
+    one_sentence_sent(mind, at)
+
+    mind.take((an_own_spoken_line(CALL, 1),))
+    mind.speech_answered(at, Answered.SPOKEN)
+
+    assert not playing_at(mind, at)
+
+
+def test_a_change_of_the_speech_record_wakes_the_sender_of_its_place_only_and_not_the_minds_own_change():
+    mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
+    here, there = AppPlace(CALL.app, CALL.place), AppPlace(OTHER_CALL.app, OTHER_CALL.place)
+    waiting_here, waiting_there = mind.speech_wake(here), mind.speech_wake(there)
+    mind.changed().clear()
+
+    mind.sentences_released(here, ("One.",), 100.0, replacing=False)
+
+    assert (waiting_here.is_set(), waiting_there.is_set(), mind.changed().is_set()) == (True, False, False)

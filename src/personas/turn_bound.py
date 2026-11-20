@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from agents.backend import TurnStopKind, TurnStopped
 from agents.turn import FailureCode
 
-from personas.decision import past_deadline, remaining_seconds
+from personas.decision import remaining_seconds
 
 if TYPE_CHECKING:
     from personas.clock import Clock
@@ -29,12 +29,9 @@ class TurnBound:
     def seconds_left(self) -> float:
         return remaining_seconds(self._clock.now(), self._started, self._max_duration_seconds)
 
-    def past(self) -> bool:
-        return past_deadline(self._clock.now(), self._started, self._max_duration_seconds)
-
-    def stop_if_past(self) -> None:
-        if self.past():
-            raise TurnStopped(TurnStopKind.FAILED, FailureCode.LIMIT_EXCEEDED)
+    def ends_at(self) -> float:
+        """When the turn's longest duration ends, on the clock's monotonic scale."""
+        return self._started + self._max_duration_seconds
 
     def deadline(self) -> asyncio.Task[None]:
         """The task that ends when the turn's duration has passed, made once for the whole turn."""

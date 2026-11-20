@@ -39,7 +39,8 @@ events and their fields. A test cites each rule by its ID at the start of its do
 | `turn_wait.ended`, `claim_write.ended`, `session_open.ended`, `tool_list.ended`, `turn_setup.ended` | each step of a turn | `duration_ms`, `outcome`; `reason` and `error_type` of a failed `session_open`, `tool_list` or `turn_setup` (`session_open` is a session the turn opens to another app, since the turn's own app is served on the loop's session; a place's own app that does not list its tools within its `call_seconds` fails the `tool_list` step and the turn goes on without them; `turn_wait` ends when the turn starts and `claim_write` only waits for the store's writer, so neither fails); `wait_reason` on `turn_wait.ended` (LOG-13) |
 | `token_request.ended` | each token request | `duration_ms`, `outcome`; `reason` and `error_type` of a failed request (LOG-14) |
 | `turns.paused` | a turn without an answer pauses his turns | `reason` (the turn's code, `budget_spent` among them), `pause_ms` (LOG-15) |
-| `speak.refused` | the app refused a sentence | `reason` (the app's code) (LOG-16) |
+| `speak.refused` | the app refused a sentence, which drops the unsent ones at its place; his own stop's refusal of a request it cut is not logged | `reason` (the app's code) (LOG-16) |
+| `speech.dropped` | sentences were dropped unsent, once per drop | `reason`: `replaced` (a later spoken turn's first sentence), `limit_exceeded` (unsent at its bound, or a request not answered by it), `stopped` (a hold's stop or undecided end, a runner stop) or `failed` (its turn ended without an answer, a `speak` failed as a call, the session ended); `sentence_count` (LOG-36) |
 | `hold.decided` | once per hold id | `reason`: `continued`, `stopped`, `undecided`, or `gone` when the app refused the decision because no such hold stood (LOG-17) |
 | `tools.left_out` | an app lost tool names to an earlier app, once per session | `tool_count`, never a name (LOG-18) |
 | `held_app.failed`, `tools_only_app.failed` | a call to another app failed | `status`, `mcp_method`, `reason` (LOG-19) |
@@ -75,11 +76,12 @@ follow it. (LOG-33)
 
 ## `turn.ended`
 
-- `duration_ms` from the turn's start, and an `outcome`: `ok` for an answer, `refused` by the gateway,
+- `duration_ms` from the turn's start to its last model round's end (its sentences' sending is no part of
+  it), and an `outcome`: `ok` for an answer, `refused` by the gateway,
   `failed` at level error, `cancelled`. `refused` and `failed` carry a `reason`: the gateway's code, the
   reason of the failed call, `defect`, `limit_exceeded` or `no_final_event`. (LOG-28)
-- `sentence_count` (sent to `speak`, refused and cut ones included), `first_output_ms` (absent when none
-  was sent), `silent_count` (rounds that opened with `[silent]`) and `tool_call_count`. (LOG-29)
+- `sentence_count` (released by the turn's reply, whether sent or not), `first_output_ms` (absent when none
+  was released), `silent_count` (rounds that opened with `[silent]`) and `tool_call_count`. (LOG-29)
 - Of a turn that sent a model request, its input bytes: `tools_bytes`, `told_bytes`, `results_bytes` and
   `images_bytes` (decoded picture bytes, apart from `results_bytes`). (LOG-30)
 - Of a turn that got the final answer, when the gateway reported them for every round, the sums

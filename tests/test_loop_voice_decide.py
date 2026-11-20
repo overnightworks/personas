@@ -12,21 +12,23 @@ from agents.member import (
     STOP_SPEAKING_TOOL,
     ContinueSpeakingRefusal,
     ContinueSpeakingRefused,
+    PartialSpeech,
     StopSpeakingRefusal,
     StopSpeakingRefused,
     VoiceState,
 )
 from agents.tools import ToolOutcome
-from agents.turn import FailureCode
 
 from personas.recall import RECALL_TOOL
 from personas.reporting import Event
+from personas.speech import DropReason
 from tests.support.call import ADDRESSED, PLACE_ID, say_in_the_call
 from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
 from tests.support.gateway import BUDGET_SPENT, say
+from tests.support.history import settled
 from tests.support.hopin import CALL, SAY_TOOL
 from tests.support.store import ScriptedStore
-from tests.support.voice import TWO_SENTENCES, a_voice_call, gated, holding_sentence_ends, sentences_spoken
+from tests.support.voice import TWO_SENTENCES, a_voice_call, holding_sentence_ends, sentences_spoken
 from tests.support.wire import refuses_with_a_server_error
 
 pytestmark = pytest.mark.anyio
@@ -67,7 +69,7 @@ async def test_a_hold_with_words_where_no_turn_of_his_speaks_makes_his_turn_due_
 
     runner.app.hold(PLACE_ID, HOLD_ID, SAID)
     assert await decided(runner) == [outcome]
-    await runner.reports.until_a_turn_completed()
+    await runner.app.spoken_count(2)
 
     assert runner.app.hold_calls == [(tool, HOLD_ID)]
     (number,) = runner.gateway.rounds()
@@ -126,21 +128,42 @@ async def test_his_sentences_wait_unsent_and_every_other_call_is_answered_decidi
     """TURNS-31."""
     replies = [
         tool_round(say("early", PLACE_ID), content=TWO_SENTENCES),
-        deciding(STOP_SPEAKING_TOOL),
         deciding(CONTINUE_SPEAKING_TOOL),
+        deciding(STOP_SPEAKING_TOOL),
         completion("[silent]"),
     ]
     await a_voice_call(runner, *replies)
 
     runner.app.hold(PLACE_ID, HOLD_ID, SAID)
+    await runner.app.spoken_count(2)
     await runner.reports.until_a_turn_completed()
 
     results = runner.gateway.tool_results(4)
     assert [each.startswith("Error") for each in results] == [True, False, True]
     assert SAY_TOOL not in runner.app.calls
-    assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
-    assert calls_of_voice(runner) == [STOP_SPEAKING_TOOL, SPEAK_TOOL, SPEAK_TOOL]
+    assert runner.app.hold_calls == [(CONTINUE_SPEAKING_TOOL, HOLD_ID)]
+    assert calls_of_voice(runner) == [CONTINUE_SPEAKING_TOOL, SPEAK_TOOL, SPEAK_TOOL]
     assert sentences_spoken(runner) == [FIRST, SECOND]
+
+
+async def test_a_stop_decided_by_the_turn_told_the_hold_drops_the_sentences_it_released_before_and_logs_them(runner):
+    """TURNS-31."""
+    replies = [
+        tool_round(say("early", PLACE_ID), content=TWO_SENTENCES),
+        deciding(STOP_SPEAKING_TOOL),
+        completion("[silent]"),
+    ]
+    await a_voice_call(runner, *replies)
+
+    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
+    await runner.reports.until(Event.SPEECH_DROPPED)
+    await runner.reports.until_a_turn_completed()
+
+    assert runner.reports.codes_of(Event.SPEECH_DROPPED) == [DropReason.STOPPED.value]
+    assert [each.sentences for each in runner.reports.changes_of(Event.SPEECH_DROPPED)] == [2]
+    assert calls_of_voice(runner) == [STOP_SPEAKING_TOOL]
+    assert sentences_spoken(runner) == []
+    assert Event.SPEAK_REFUSED not in [event for event, _ in runner.reports.reported()]
 
 
 @pytest.mark.parametrize(
@@ -162,6 +185,37 @@ async def test_a_turn_that_ends_without_a_decision_drops_what_waited_and_the_nex
     assert runner.reports.codes_of(Event.HOLD_DECIDED) == ["undecided"]
     assert sentences_spoken(runner) == []
     assert runner.gateway.arrivals == arrivals
+
+
+@pytest.mark.parametrize(
+    ("reply", "dropped"),
+    [
+        pytest.param(completion("[silent]"), 1, id="silent"),
+        pytest.param(completion("Let me think."), 2, id="text only"),
+    ],
+)
+async def test_a_turn_told_a_hold_that_ends_undecided_drops_the_rest_of_an_ended_turn_and_the_stop_sends_none(
+    runner, reply, dropped
+):
+    """TURNS-31, LOG-17."""
+    await a_voice_call(runner, completion(TWO_SENTENCES), reply)
+    answer = runner.app.hold_next_speak()
+    say_in_the_call(runner, ADDRESSED, spoken=True)
+    await runner.app.until_called(1)
+    runner.app.hold(PLACE_ID, HOLD_ID, ("Ada", ""))
+    await window_read_after(runner)
+    answer.set()
+    await runner.reports.until_a_turn_completed()
+    runner.app.end_record(PLACE_ID)
+    assert await decided(runner) == ["undecided"]
+
+    await runner.reports.until(Event.SPEECH_DROPPED)
+    await window_read_after(runner)
+
+    assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
+    assert runner.reports.codes_of(Event.SPEECH_DROPPED) == [DropReason.STOPPED.value]
+    assert [each.sentences for each in runner.reports.changes_of(Event.SPEECH_DROPPED)] == [dropped]
+    assert sentences_spoken(runner) == [FIRST]
 
 
 @pytest.mark.parametrize(
@@ -343,16 +397,48 @@ async def test_a_decision_the_app_could_not_take_is_told_to_him_as_not_made_and_
     assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
 
 
-async def test_a_turn_still_waiting_for_its_decision_at_its_deadline_ends_limit_exceeded_with_nothing_said(runner):
-    sleeps = gated(runner)
-    await a_voice_call(runner, completion("Never said. Nor this."))
-    runner.gateway.pause_request(1, "Never said. No", "r this.")
+async def test_a_sentence_answered_as_held_stays_first_among_the_unsent_unlogged_until_his_decision(runner):
+    """TURNS-27."""
+    await a_voice_call(runner, deciding(CONTINUE_SPEAKING_TOOL), completion("[silent]"))
+    reply = runner.gateway.pause_request(1, "One", ". Two.")
+    say_in_the_call(runner, ADDRESSED, spoken=True)
+    await runner.gateway.until_requested(1)
+    runner.app.holds[PLACE_ID] = (HOLD_ID, (PartialSpeech(name=SAID[0], text=SAID[1]),))
+    reply.release()
+    await runner.reports.until_a_turn_completed()
+    await settled(runner.app)
 
+    assert runner.app.spoken == []
     runner.app.hold(PLACE_ID, HOLD_ID, SAID)
-    await sleeps.until_began(1)
-    runner.clock.time += PERSONA_MAX_DURATION_SECONDS
-    sleeps.release.set()
-    await runner.reports.until(Event.PAUSED)
+    assert await decided(runner) == ["continued"]
+    await runner.app.spoken_count(2)
 
-    assert (Event.PAUSED, FailureCode.LIMIT_EXCEEDED.value) in runner.reports.reported()
-    assert sentences_spoken(runner) == []
+    assert sentences_spoken(runner) == ["One.", "Two."]
+    assert Event.SPEAK_REFUSED not in [event for event, _ in runner.reports.reported()]
+    assert runner.gateway.hold_told(2)["unsaid"] == ["One.", "Two."]
+
+
+async def test_sentences_past_their_bound_wait_at_a_hold_and_a_continue_gives_them_the_deciding_turns_bound(runner):
+    """TURNS-28, TURNS-31."""
+    holding_sentence_ends(runner)
+    third = "Third sentence."
+    await a_voice_call(
+        runner, completion(f"{TWO_SENTENCES} {third}"), deciding(CONTINUE_SPEAKING_TOOL), completion("[silent]")
+    )
+    deciding_turn = runner.gateway.hold_request(2)
+    say_in_the_call(runner, ADDRESSED, spoken=True)
+    await runner.app.until_called(2)
+    runner.clock.time += PERSONA_MAX_DURATION_SECONDS
+    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
+    await runner.gateway.until_requested(2)
+    runner.app.end_sentence()
+    await runner.app.spoken_count(2)
+    await settled(runner.app)
+    assert Event.SPEECH_DROPPED not in [event for event, _ in runner.reports.reported()]
+
+    deciding_turn.set()
+    assert await decided(runner) == ["continued"]
+    await runner.app.spoken_count(3)
+
+    assert sentences_spoken(runner) == [FIRST, SECOND, third]
+    assert Event.SPEECH_DROPPED not in [event for event, _ in runner.reports.reported()]

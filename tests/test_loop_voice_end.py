@@ -15,9 +15,10 @@ from agents.turn import FailureCode
 from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE, status_code
 from personas.failures import INVALID_ANSWER_CODE, leaves_of
 from personas.reporting import Event
+from personas.speech import DropReason
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, pulses_the_window_once, say_in_the_call
 from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
-from tests.support.fakes import CANCELLED_TURN, failed_turn
+from tests.support.fakes import COMPLETED_TURN, failed_turn
 from tests.support.gateway import Gateway, speaks_and_says
 from tests.support.hopin import CALL, LISTEN, READ, SAY_TOOL
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
@@ -35,30 +36,6 @@ from tests.support.voice import (
 from tests.support.wire import cuts
 
 pytestmark = pytest.mark.anyio
-
-
-@pytest.mark.parametrize(
-    "leaves",
-    [lambda runner: runner.app.stand(SUBJECT), lambda runner: runner.app.stand(SUBJECT, paused(PLACE_ID))],
-    ids=["removed", "paused"],
-)
-async def test_a_place_removed_or_paused_while_a_sentence_waits_cancels_the_turn_and_its_wait_and_no_more_is_spoken(
-    runner, leaves
-):
-    sleeps = holding_sentence_ends(runner)
-    await a_voice_call(runner, completion(TWO_SENTENCES))
-    say_in_the_call(runner, ADDRESSED, spoken=True)
-    await sleeps.until_began(1)
-
-    leaves(runner)
-    await sleeps.until_cancelled()
-    await runner.reports.until_a_turn_ended()
-
-    assert sentences_spoken(runner) == ["First sentence."]
-    await runner.reports.until_a_turn_ended()
-    assert runner.reports.reported() == [(Event.STARTED, None)]
-    assert runner.reports.turn_endings == [CANCELLED_TURN]
-    assert not runner.task.done()
 
 
 async def test_a_restart_in_a_call_answers_nothing_that_was_said_before_it(runner):
@@ -105,7 +82,7 @@ async def test_a_stream_the_app_ends_at_its_bound_while_he_speaks_lets_the_turn_
     assert runner.reports.reported() == [(Event.STARTED, None)]
 
 
-async def test_a_lifecycle_connection_lost_while_a_sentence_is_sent_cancels_the_turn_and_enters_the_sentence_unanswered(
+async def test_a_lifecycle_connection_lost_while_a_sentence_is_sent_ends_the_sender_and_enters_the_sentence_unanswered(
     runner,
 ):
     await a_voice_call(runner, completion(TWO_SENTENCES), completion("Later."))
@@ -140,17 +117,27 @@ async def test_a_lifecycle_connection_lost_while_a_sentence_is_sent_cancels_the_
                 or setattr(app, "refused_tool", SPEAK_TOOL)
             ),
             lambda app: setattr(app, "refuse_with", None),
-            [(Event.STARTED, None), (Event.BACKOFF, status_code(503)), (Event.RESUMED, None)],
+            [
+                (Event.STARTED, None),
+                (Event.SPEECH_DROPPED, DropReason.FAILED.value),
+                (Event.BACKOFF, status_code(503)),
+                (Event.RESUMED, None),
+            ],
         ),
         (
             lambda app: app.speak_outcomes.append(ToolOutcome("not a spoken record", is_error=False)),
             lambda app: None,
-            [(Event.STARTED, None), (Event.SUSPENDED, INVALID_ANSWER_CODE), (Event.RESUMED, None)],
+            [
+                (Event.STARTED, None),
+                (Event.SPEECH_DROPPED, DropReason.FAILED.value),
+                (Event.SUSPENDED, INVALID_ANSWER_CODE),
+                (Event.RESUMED, None),
+            ],
         ),
     ],
     ids=["a call that fails", "an answer that is no Spoken"],
 )
-async def test_a_speak_that_fails_as_a_call_or_answers_no_spoken_ends_the_turn_into_the_reaction_and_a_new_turn_speaks(
+async def test_a_speak_that_fails_as_a_call_or_answers_no_spoken_ends_the_session_into_the_reaction_and_next_speaks(
     runner, break_speak, mend_speak, events
 ):
     """TURNS-27."""
@@ -158,7 +145,7 @@ async def test_a_speak_that_fails_as_a_call_or_answers_no_spoken_ends_the_turn_i
     sleeps = gated(runner)
     break_speak(runner.app)
     say_in_the_call(runner, ADDRESSED)
-    await runner.reports.until(events[1][0])
+    await runner.reports.until(events[2][0])
     await sleeps.until_began(1)
 
     assert runner.app.spoken == []
@@ -171,6 +158,10 @@ async def test_a_speak_that_fails_as_a_call_or_answers_no_spoken_ends_the_turn_i
 
     assert sentences_spoken(runner) == ["Later."]
     assert runner.reports.reported() == events
+    (failed,) = runner.reports.changes_of(Event.SPEECH_DROPPED)
+    assert failed.sentences == 1
+    (sent,) = runner.gateway.turns()[1].told("speech")
+    assert (sent["text"], sent["outcome"]) == ("First sentence.", {"answered": False, "code": events[2][1]})
     assert not runner.task.done()
 
 
@@ -222,6 +213,7 @@ async def test_a_gateway_that_stops_the_turn_while_a_sentence_is_sent_and_one_is
     assert runner.reports.reported() == [
         (Event.STARTED, None),
         (Event.PAUSED, FailureCode.PROVIDER_ERROR.value),
+        (Event.SPEECH_DROPPED, DropReason.FAILED.value),
     ]
     assert runner.reports.turn_endings == [failed_turn(FailureCode.PROVIDER_ERROR)]
     (sent,) = runner.gateway.turns()[1].told("speech")
@@ -270,63 +262,68 @@ async def sentences_playing_with_the_next_open(runner, sent):
     await anyio.wait_all_tasks_blocked()
 
 
-async def test_a_turn_past_its_deadline_when_his_line_entered_sends_no_sentence_and_ends_limit_exceeded_once(
-    runner,
-):
+async def test_a_sentence_unsent_at_its_bound_is_dropped_and_logged_and_the_turn_that_released_it_ended_ok(runner):
     """TURNS-28."""
-    sleeps = holding_sentence_ends(runner)
+    holding_sentence_ends(runner)
     sent = SENT_BEFORE_THE_DEADLINE
     await a_voice_call(runner, completion(THREE_SENTENCES), completion("Later."))
     say_in_the_call(runner, ADDRESSED)
     await sentences_playing_with_the_next_open(runner, sent)
     runner.clock.time += PERSONA_MAX_DURATION_SECONDS
     runner.app.end_sentence()
-    await runner.reports.until(Event.PAUSED)
-    await sleeps.until_began(2)
-    sleeps.let_through()
+    await runner.reports.until(Event.SPEECH_DROPPED)
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.gateway.until_turns(2)
 
     assert sentences_spoken(runner) == sent
-    await runner.reports.until_a_turn_ended()
-    assert runner.reports.reported() == [
-        (Event.STARTED, None),
-        (Event.PAUSED, FailureCode.LIMIT_EXCEEDED.value),
-    ]
-    assert runner.reports.turn_endings == [failed_turn(FailureCode.LIMIT_EXCEEDED)]
-    assert [each["text"] for each in runner.gateway.turns()[1].told("speech")] == sentences_spoken(runner)
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.SPEECH_DROPPED, DropReason.LIMIT_EXCEEDED.value)]
+    (dropped,) = runner.reports.changes_of(Event.SPEECH_DROPPED)
+    assert dropped.sentences == 1
+    assert runner.reports.turn_endings[0] == COMPLETED_TURN
+    assert [each["text"] for each in runner.gateway.turns()[1].told("speech")] == sent
     assert not runner.task.done()
 
 
-async def test_an_answer_that_never_arrives_ends_the_turn_limit_exceeded_once_with_no_defect_and_no_more_speech(
-    runner,
-):
+async def test_a_request_not_answered_at_its_bound_is_given_up_and_the_rest_dropped_in_one_line(runner):
+    """TURNS-28."""
     sleeps = holding_sentence_ends(runner)
     sent = SENT_BEFORE_THE_DEADLINE
     await a_voice_call(runner, completion(THREE_SENTENCES), completion("Later."))
     say_in_the_call(runner, ADDRESSED)
     await sentences_playing_with_the_next_open(runner, sent)
 
-    assert sleeps.began == [PERSONA_MAX_DURATION_SECONDS]
+    assert set(sleeps.began) == {PERSONA_MAX_DURATION_SECONDS}
     runner.clock.time += PERSONA_MAX_DURATION_SECONDS
     sleeps.release.set()
-    await runner.reports.until(Event.PAUSED)
+    await runner.reports.until(Event.SPEECH_DROPPED)
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.gateway.until_turns(2)
 
     assert sentences_spoken(runner) == sent[:1]
-    await runner.reports.until_a_turn_ended()
-    assert runner.reports.reported() == [
-        (Event.STARTED, None),
-        (Event.PAUSED, FailureCode.LIMIT_EXCEEDED.value),
-    ]
-    assert runner.reports.turn_endings == [failed_turn(FailureCode.LIMIT_EXCEEDED)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.SPEECH_DROPPED, DropReason.LIMIT_EXCEEDED.value)]
+    (dropped,) = runner.reports.changes_of(Event.SPEECH_DROPPED)
+    assert dropped.sentences == 2  # the open request and the one unsent
+    assert runner.reports.turn_endings[0] == COMPLETED_TURN
     told = runner.gateway.turns()[1].told("speech")
     assert [(each["text"], each["outcome"]) for each in told] == [
         (sent[0], {"answered": True}),
         *[(text, {"answered": False, "code": FailureCode.LIMIT_EXCEEDED.value}) for text in sent[1:]],
     ]
     assert not runner.task.done()
+
+
+async def test_a_runner_stopped_while_sentences_wait_sends_nothing_more_and_logs_them_dropped_stopped(runner):
+    holding_sentence_ends(runner)
+    await a_voice_call(runner, completion(THREE_SENTENCES))
+    say_in_the_call(runner, ADDRESSED)
+    await sentences_playing_with_the_next_open(runner, SENT_BEFORE_THE_DEADLINE)
+
+    runner.task.cancel()
+    await ended_by(runner.task)
+
+    assert sentences_spoken(runner) == SENT_BEFORE_THE_DEADLINE[:1]
+    assert runner.reports.codes_of(Event.SPEECH_DROPPED) == [DropReason.STOPPED.value]
+    assert [each.sentences for each in runner.reports.changes_of(Event.SPEECH_DROPPED)] == [1]
 
 
 @pytest.fixture
@@ -344,25 +341,25 @@ async def test_a_defect_in_speaks_request_ends_the_runner_loud(runner, speak_def
     ended = await ended_by(runner.task)
 
     assert list(leaves_of(ended)) == [speak_defect]
-    assert runner.reports.reported() == [(Event.STARTED, None)]
+    assert runner.reports.reported() == [(Event.STARTED, None), (Event.SPEECH_DROPPED, DropReason.FAILED.value)]
 
 
-async def test_a_place_left_while_a_turns_speak_is_in_flight_ends_the_turn_cancelled_and_the_next_read_works(runner):
+async def test_a_place_left_while_a_sentences_speak_is_in_flight_leaves_the_turn_ended_and_the_next_read_works(runner):
     await a_turn_whose_speak_is_in_flight(runner)
+    await runner.reports.until_a_turn_ended()
 
     runner.app.stand(SUBJECT)
-    await runner.reports.until_a_turn_ended()
     later_read = runner.app.hold_next_read()
     runner.app.stand(SUBJECT, active(PLACE_ID))
     await runner.app.until_read_held()
 
-    assert runner.reports.turn_endings == [CANCELLED_TURN]
+    assert runner.reports.turn_endings == [COMPLETED_TURN]
     assert runner.reports.reported() == [(Event.STARTED, None)]
     assert not runner.task.done()
     later_read.set()
 
 
-async def test_a_speak_the_app_cuts_ends_the_turn_into_the_reaction(runner):
+async def test_a_speak_the_app_cuts_ends_the_session_into_the_reaction(runner):
     runner.give_voice()
     runner.gateway = Gateway(completion(TWO_SENTENCES))
     runner.app.script(CALL, cuts)
@@ -377,6 +374,7 @@ async def test_a_speak_the_app_cuts_ends_the_turn_into_the_reaction(runner):
 
     assert runner.reports.reported() == [
         (Event.STARTED, None),
+        (Event.SPEECH_DROPPED, DropReason.FAILED.value),
         (Event.BACKOFF, NETWORK_FAILURE_CODE),
         (Event.RESUMED, None),
     ]

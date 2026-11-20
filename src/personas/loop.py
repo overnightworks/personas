@@ -79,6 +79,7 @@ from personas.task_record import (
 from personas.tokens import facts_of
 from personas.turn_states import TurnStates
 from personas.turning import Turning, TurnSetup
+from personas.voice import Sender
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
@@ -93,6 +94,7 @@ if TYPE_CHECKING:
     from personas.entries import KeptTurns
     from personas.ownership import Owned, Ownership
     from personas.readiness import ReadyMarker
+    from personas.speech import DropReason
     from personas.tokens import TokenSource
     from personas.turning import BackendFactory
 
@@ -135,20 +137,20 @@ class ActiveTurn:
 class AgentLoop:
     """Keeps one stream of changes open for one agent in one app, accepts what it is invited to and answers.
 
-    A refusal by the realm or the app suspends the loop: it makes no further call until its next
-    retry, and resumes once a read answers again. A network failure, a lost stream or a 5xx backs off,
-    logged once until a read answers. In an app that binds tools, the lines of the agent's call places are read too,
-    while any turn of his runs, and every new line and every view read goes into the agent's history. A line that is
-    not his own and a view that waits for him make a turn due in the agent's mind, and after each read the loop starts
-    the turn of the place that has waited longest when it is in this app; at most one turn of the agent runs across all
-    his loops, and the turn's own-app listing, relayed calls and speak run on this loop's session, so a failure of
-    them goes into the one reaction of the loop. The turn also holds the tools of the tools-only apps and of the other
-    apps where the agent holds an active place when it is admitted, which the loops of those apps record in his mind:
-    each request to one runs in a session of its own under the token for its own scope, and its failure never reaches
-    the reaction. Each call the
-    turn relays, to this app or another, enters the agent's history when its request ends. In an app
-    that declares ``speak``, for an agent whose entry has a voice table, a turn at a call place is spoken: its text
-    is said sentence by sentence through ``speak``.
+    A refusal by the realm or the app suspends the loop: it makes no further call until its next retry, and resumes once
+    a read answers again. A network failure, a lost stream or a 5xx backs off, logged once until a read answers. In an
+    app that binds tools, the lines of the agent's call places are read too, while any turn of his runs, and every new
+    line and every view read goes into the agent's history. A line that is not his own and a view that waits for him
+    make a turn due in the agent's mind, and after each read the loop starts the turn of the place that has waited
+    longest when it is in this app; at most one turn of the agent runs across all his loops, and the turn's own-app
+    listing, relayed calls and speak run on this loop's session, so a failure of them goes into the one reaction of the
+    loop. The turn also holds the tools of the tools-only apps and of the other apps where the agent holds an active
+    place when it is admitted, which the loops of those apps record in his mind: each request to one runs in a session
+    of its own under the token for its own scope, and its failure never reaches the reaction. Each call the turn relays,
+    to this app or another, enters the agent's history when its request ends. In an app that declares ``speak``, for an
+    agent whose entry has a voice table, a turn at a call place is spoken: the sentences of its text are released into
+    the mind's record, and the place's sender, a task of this loop's serving group on its session, says them one by one
+    through ``speak``, also after the turn.
     """
 
     def __init__(
@@ -177,6 +179,7 @@ class AgentLoop:
             self._report,
             self._report_pause,
             self._report_tools_left_out,
+            self._report_dropped,
             self._remembering,
         )
         self._turn_states = TurnStates(self._use_current_token, self._report, app.call_seconds)
@@ -189,6 +192,7 @@ class AgentLoop:
         self._standings: tuple[Standing, ...] = ()
         self._turned_revisions: dict[PlaceRef, int] = {}
         self._turn: ActiveTurn | None = None
+        self._senders: dict[PlaceRef, asyncio.Task[None]] = {}
         self._pause_wake: asyncio.Task[None] | None = None
         self._turn_ended = mind.wake_event()
         self._voice_app = False
@@ -227,6 +231,7 @@ class AgentLoop:
                             await self._reconcile(session, turns)
             finally:
                 await self._end_turn_before_session()
+                await self._end_senders()
                 self._turn_states.session_ended(session)
 
     async def _end_turn_before_session(self) -> None:
@@ -236,6 +241,26 @@ class AgentLoop:
         if turn is not None and not turn.task.done():
             turn.task.cancel()
             await asyncio.wait({turn.task})
+
+    async def _end_senders(self) -> None:
+        """The places' senders end cancelled while their session is open, so no request meets a closed connection."""
+        senders, self._senders = tuple(self._senders.values()), {}
+        for sender in senders:
+            sender.cancel()
+        if senders:
+            await asyncio.wait(senders)
+
+    def _sender_at(self, turns: asyncio.TaskGroup, session: AppSession, place: PlaceRef) -> None:
+        if place not in self._senders:
+            args = (
+                session,
+                self._app.mcp_url,
+                place,
+                self._boundaries.clock,
+                partial(self._use_current_token, session),
+            )
+            sender = Sender(*args, self._report, self._report_dropped, self._mind)
+            self._senders[place] = turns.create_task(sender.run())
 
     async def _is_voice_app(self, session: AppSession) -> bool:
         """Whether the turns at this app's call places are spoken, decided once for the lifecycle session."""
@@ -426,6 +451,8 @@ class AgentLoop:
         aloud = speaks_aloud(self._voice_app, occasion, self._mind.checkpoint(at))
         apps = self._mind.held_apps(self._app.mcp_url)
         held = self._mind.hold_to_tell(at)
+        if aloud:
+            self._sender_at(turns, session, at.place)
         admitted = Admitted(
             facts, at.place, occasion, self._mind.present, self._boundaries.clock.wall(), aloud, apps, held
         )
@@ -524,6 +551,10 @@ class AgentLoop:
             )
         )
 
+    def _report_dropped(self, reason: DropReason, count: int) -> None:
+        if count:
+            self._report(Event.SPEECH_DROPPED, reason.value, sentence_count=count)
+
     def _report_tools_left_out(self, app: AppTarget, count: int) -> None:
         self._boundaries.report(StateChange(Event.TOOLS_LEFT_OUT, self._agent.client_id, app.mcp_url, tool_count=count))
 
@@ -615,6 +646,7 @@ class AgentLoop:
         *,
         place_kind: str | None = None,
         model: str | None = None,
+        sentence_count: int | None = None,
     ) -> None:
         self._boundaries.report(
             StateChange(
@@ -625,6 +657,7 @@ class AgentLoop:
                 place_kind=place_kind,
                 model=model,
                 failure=failure,
+                sentences=sentence_count,
             )
         )
 

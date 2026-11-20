@@ -70,7 +70,6 @@ from personas.decision import (
     left_out_for,
     lends_tools,
     offered_declarations,
-    past_deadline,
     perceive,
     reaction_to,
     remaining_seconds,
@@ -965,15 +964,6 @@ def test_how_a_request_ended_decides_the_outcome_of_the_act_it_made(ended, cance
 )
 def test_how_a_speak_request_ended_decides_the_outcome_of_the_sentence_it_sent(ended, cancelling, expected):
     assert speech_outcome(ended, cancelling=cancelling) == expected
-
-
-@pytest.mark.parametrize(
-    ("started", "now", "past"),
-    [(1000.0, 1000.0, False), (1000.0, 1029.9, False), (1000.0, 1030.0, True), (1000.0, 1100.0, True)],
-    ids=["at the start", "just before the bound", "at the bound", "long past it"],
-)
-def test_a_turn_is_past_its_deadline_once_its_longest_duration_has_gone_by(started, now, past):
-    assert past_deadline(now, started, 30) is past
 
 
 @pytest.mark.parametrize(

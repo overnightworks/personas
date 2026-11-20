@@ -411,11 +411,6 @@ def remaining_seconds(now: float, started: float, max_duration_seconds: float) -
     return max(0.0, max_duration_seconds - (now - started))
 
 
-def past_deadline(now: float, started: float, max_duration_seconds: float) -> bool:
-    """Whether a turn that started at ``started`` has used its longest duration at ``now``."""
-    return remaining_seconds(now, started, max_duration_seconds) <= 0.0
-
-
 def is_defect(leaf: BaseException) -> bool:
     """Whether a leaf is a defect: any leaf that is no failure of a call."""
     return not isinstance(leaf, CallFailure)

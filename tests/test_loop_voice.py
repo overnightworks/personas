@@ -141,6 +141,7 @@ async def test_the_next_turn_is_told_each_sentence_and_his_line_for_it_in_order_
     await runner.app.spoken_count(2)
     runner.app.end_sentence(cut=True)
     await runner.reports.until_a_turn_completed()
+    await settled(runner.app)
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.gateway.until_turns(2)
 
@@ -172,10 +173,11 @@ async def test_a_turn_that_speaks_a_sentence_and_calls_say_does_both(runner):
     assert runner.app.said == [(SUBJECT, PLACE_ID, "Written second.")]
 
 
-async def test_the_next_turn_is_told_a_sentence_a_call_and_a_sentence_in_the_order_the_app_answered_them(runner):
+async def test_the_next_turn_is_told_a_sentence_a_call_and_a_sentence_in_the_order_the_app_received_them(runner):
     await a_voice_call(runner, *speaks_and_says(PLACE_ID, "Before.", "Written.", after="After."), completion("done"))
     say_in_the_call(runner, ADDRESSED)
     await runner.app.spoken_count(2)
+    await settled(runner.app)
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.gateway.until_turns(2)
 
@@ -258,7 +260,9 @@ async def test_a_table_turn_of_a_voice_call_is_not_told_aloud_and_its_text_is_no
 
 
 @pytest.mark.parametrize(
-    "refusal", [refusal for refusal in SpeakRefusal if refusal is not SpeakRefusal.STOPPED], ids=lambda each: each.value
+    "refusal",
+    [refusal for refusal in SpeakRefusal if refusal not in {SpeakRefusal.STOPPED, SpeakRefusal.HELD}],
+    ids=lambda each: each.value,
 )
 async def test_a_refused_sentence_ends_the_turns_speech_but_not_the_turn_and_the_next_turn_is_told_the_refusal(
     runner, refusal
@@ -334,6 +338,7 @@ async def test_a_sentence_the_app_wrote_to_the_place_instead_is_told_as_written_
     runner.app.written_speaks = 1
     say_in_the_call(runner, ADDRESSED)
     await runner.app.spoken_count(2)
+    await settled(runner.app)
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.gateway.until_turns(2)
 
@@ -350,15 +355,14 @@ async def test_a_sentence_the_app_wrote_to_the_place_instead_is_told_as_written_
     ]
 
 
-async def test_a_line_said_while_he_speaks_is_not_in_the_running_turn_and_is_told_to_the_next_one(runner):
-    sleeps = holding_sentence_ends(runner)
+async def test_a_line_said_while_his_sentence_plays_is_not_in_the_turn_that_released_it_and_is_told_to_the_next_one(
+    runner,
+):
+    holding_sentence_ends(runner)
     await a_voice_call(runner, completion(ANSWER), completion("Second answer."))
     say_in_the_call(runner, ADDRESSED)
-    await sleeps.until_began(1)
+    await runner.app.spoken_count(1)
     await said_and_taken(runner.app, PLACE_ID, REMARK, name=SPEAKER)
-
-    assert runner.gateway.arrivals == 1
-    runner.app.end_sentence()
     await runner.gateway.until_turns(2)
 
     first, second = runner.gateway.turns()
@@ -407,21 +411,6 @@ async def test_his_line_for_the_playing_sentence_that_the_bound_cuts_while_the_n
     assert runner.reports.reported() == [(Event.STARTED, None)]
 
 
-async def test_a_line_that_enters_before_the_answer_of_its_speak_still_lets_the_turn_end(runner):
-    answer = runner.app.hold_next_speak()
-    await a_voice_call(runner, completion(ANSWER))
-    say_in_the_call(runner, ADDRESSED)
-    await runner.app.until_called(1)
-    runner.app.speak(PLACE_ID, SUBJECT, "Mozart", ANSWER, spoken=True)
-    await settled(runner.app)
-    answer.set()
-
-    await runner.reports.until_a_turn_completed()
-
-    assert sentences_spoken(runner) == [ANSWER]
-    assert runner.reports.reported() == [(Event.STARTED, None)]
-
-
 async def test_a_sentence_dropped_by_a_stop_yields_no_line_and_the_turn_does_not_wait_for_one(runner):
     holding_sentence_ends(runner)
     await a_voice_call(runner, completion(TWO_SENTENCES))
@@ -454,7 +443,7 @@ async def test_a_stop_while_a_sentence_plays_cuts_it_and_stops_the_next_and_none
     say_in_the_call(runner, ADDRESSED, spoken=True)
     await runner.app.until_called(2)
     runner.app.stop_speaking()
-    await runner.reports.until_a_turn_completed()
+    await runner.reports.until(Event.SPEAK_REFUSED)
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.gateway.until_turns(2)
 

@@ -88,16 +88,21 @@ An entry has its app and the time he took it (`at`), and is one of:
   is told `"aloud": true`. Where the place's last window states his voice unavailable (`voice_state`) the
   turn is written instead. (TURNS-24)
 - The text is spoken sentence by sentence through `speak`, at most one sentence ahead of the one playing,
-  a fixed rule: one request is open at a time and the app answers it when its sentence starts to play. The
-  app appends his own spoken line for each sentence as it ends, whole or cut. A call goes out at once, also
-  while his sentences play or wait; the turn ends once the app has taken its last sentence. (TURNS-25)
+  a fixed rule, by his place's sender also after the turn, which ends once its last model round has
+  returned. The app appends his own spoken line for each sentence as it ends, whole or cut. A call goes out
+  at once, also while his sentences play or wait. (TURNS-25)
 - A round that opens with `[silent]` says nothing; a final round with no text and no call is a provider
   error, so the characters end a silent turn with `[silent]`. (TURNS-26)
-- A refused sentence (`stopped` included) ends the turn's speech, is logged as `speak.refused`, and the turn
-  goes on. A sentence the app wrote instead is entered as written. A `speak` that fails as a call ends the
-  turn. (TURNS-27)
-- The persona's `maxDurationSeconds` bounds the turn with its speech and a call's wait at a hold: past it
-  nothing more goes out and the turn ends with the reason `limit_exceeded`. (TURNS-28)
+- A refused sentence (`stopped` included) drops every unsent sentence at the place, is logged as
+  `speak.refused`, and the turn goes on; a sentence answered as held stays first among the unsent and waits
+  for his decision. A sentence the app wrote instead is entered as written. A `speak` that fails as a call
+  ends the loop's session, and a turn running on it, into the loop's reaction. (TURNS-27)
+- The persona's `maxDurationSeconds` bounds the turn and each sentence it released: a turn past it ends
+  `limit_exceeded`; a sentence still unsent past it is dropped and logged, except while a hold stands, and a
+  continue gives it the deciding turn's bound. (TURNS-28)
+- A later spoken turn's first sentence at the place drops the earlier turn's unsent sentences, which is
+  logged as `speech.dropped`; the sentence that plays and the one already sent stay, and the new one queues
+  behind them. A silent or written turn keeps them. (TURNS-45)
 
 ## Holds
 
@@ -108,8 +113,9 @@ An entry has its app and the time he took it (`at`), and is one of:
   Otherwise, once words were said over him or their record is gone, the hold makes the place due for its lines,
   and that turn is told the hold first. A round or turn told a hold runs on `hold_model` when set. (TURNS-30)
 - He calls `continue_speaking(id)` to go on or `stop_speaking(id)` to drop the rest: no unsent sentence is
-  spoken and a waiting call is never sent. A turn told a hold says nothing and sends no other call until he
-  decided. After a stop its sentences play at once, after a continue behind the rest. A round or turn that ends
+  spoken and a waiting call is never sent. His unsaid sentences include an ended turn's still waiting at the
+  place. A turn told a hold sends no other call until he decided and drops no sentence by speaking: after a
+  stop its sentences play at once, after a continue they follow the rest. A round or turn that ends
   without a decision stops him, and what waited is dropped unsaid. Each id is logged once as `hold.decided`.
   A call made while a hold stands at the place where the turn speaks waits for his decision; a call already
   sent runs to its answer. (TURNS-31)
