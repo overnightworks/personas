@@ -72,13 +72,16 @@ ARM = (
 )
 # The short sleeve, puffed below the shoulder and closing onto the arm at both ends.
 SLEEVE = (
-    (0.130, (0.041, 0.041)),
+    (0.125, (0.048, 0.048)),
+    (0.140, (0.053, 0.053)),
     (0.150, (0.056, 0.056)),
     (0.190, (0.060, 0.058)),
     (0.235, (0.056, 0.054)),
     (0.262, (0.047, 0.047)),
     (0.272, (0.039, 0.039)),
 )
+# Rings along the arm and the sleeve over it, enough that the sleeve's edge on the shoulder runs smooth.
+ARM_RINGS = 28
 OPEN_DRESS = tuple((height, (*radii, 0.0)) for height, radii in DRESS)
 SKIN_TRUNK = tuple(
     (height, tuple(radius - SKIN_INSET for radius in radii)) for height, radii in DRESS if height >= SKIN_TOP
@@ -93,8 +96,8 @@ def lovelace_clothes(face: Face) -> list[Part]:
             _cloth(_trim_low, _trim_high, TRIM_ROWS, TRIM_STANDING, TRIM_WIDTH / 3), TRIM, Material.CLOTH, trunk_binder
         ),
         part(trunk(SKIN_TRUNK, 14), face.skin, Material.SKIN, trunk_binder),
-        *both_sides(arm_tube(ARM, 20), face.skin, Material.SKIN, arm_binder),
-        *both_sides(arm_tube(SLEEVE, 14), PLUM, Material.CLOTH, arm_binder),
+        *both_sides(arm_tube(ARM, ARM_RINGS), face.skin, Material.SKIN, arm_binder),
+        *both_sides(arm_tube(SLEEVE, ARM_RINGS), PLUM, Material.CLOTH, arm_binder),
         *shoes(LEATHER),
         *hands(face.skin),
     ]
