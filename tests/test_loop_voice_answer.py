@@ -164,7 +164,7 @@ async def test_a_turn_told_a_hold_whose_first_answer_sentence_failed_without_an_
 
 
 async def test_a_round_beside_his_parked_run_that_replies_with_text_cuts_the_run_and_answers_instead(runner):
-    """TURNS-27, TURNS-31, LOG-17, LOG-36."""
+    """TURNS-27, TURNS-31, LOG-17."""
     deciding_round = await calling_while_held(runner, completion(ANSWER), hold_round=True)
     await runner.gateway.until_requested(3)
     deciding_round.set()
