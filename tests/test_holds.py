@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import anyio
+import pytest
 from agents.member import Interrupted, PlaceWindow
 
 from personas.holds import HoldInbox
 from personas.speech import Held, Telling
 from tests.support.standings import GENERATION
+
+pytestmark = pytest.mark.anyio
 
 HOLD_ID = "hold-1"
 
@@ -34,3 +38,17 @@ def test_a_window_that_states_a_newer_hold_after_the_decision_holds_him_again():
 
     assert inbox.hold is not None
     assert inbox.hold.id == "hold-2"
+
+
+async def test_calls_answered_waits_while_one_of_two_calls_is_still_on_its_way():
+    inbox = HoldInbox(_standing(HOLD_ID))
+
+    with inbox.sending():
+        with inbox.sending():
+            pass
+        with anyio.move_on_after(0) as still_waiting:
+            await inbox.calls_answered()
+        assert still_waiting.cancelled_caught
+
+    with anyio.fail_after(1):
+        await inbox.calls_answered()
