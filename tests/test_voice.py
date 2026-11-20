@@ -33,6 +33,18 @@ def a_line(*, own: bool, spoken: bool, place: PlaceRef = PLACE) -> KeptLine:
     return KeptLine(Visit(APP, place, "g1"), 1, READ_AT, "Mozart", "message", "x", own, spoken, False, act=False)
 
 
+class GatedClock(FakeClock):
+    """A fake clock whose sleeps wait until ``sleeps_end`` is set, then take their time off the clock."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.sleeps_end = asyncio.Event()
+
+    async def sleep(self, seconds: float) -> None:
+        await self.sleeps_end.wait()
+        self.time += seconds
+
+
 class Scenario:
     """A turn's speech and the sender of its place over one mind: the turn releases the text it is given, the sender
     sends it to a ``speak`` that takes ``speak_seconds`` and answers as started unless ``answers_lost`` is set, then,
@@ -56,7 +68,7 @@ class Scenario:
         self._speak_seconds = speak_seconds
         self._line_follows = line_follows
         self._renewal_seconds = renewal_seconds
-        self.clock = FakeClock()
+        self.clock = GatedClock()
         self.mind = Mind(10_000, 10_000, DEFAULT_BUDGET_PAUSE_CAP_SECONDS)
         self.tally = start_turn_tally(AGENT, APP)
         self.sent: list[str] = []
@@ -65,8 +77,6 @@ class Scenario:
         self.renewal_gate = asyncio.Event()
         self.renewal_started = asyncio.Event()
         self.bound = TurnBound(self.clock, BOUND_SECONDS)
-        self.sleeps_end = asyncio.Event()
-        self.clock.sleep = self._sleep  # type: ignore[method-assign]
         self.speaking = Speaking(
             APP,
             PLACE,
@@ -98,11 +108,6 @@ class Scenario:
 
     def his_spoken_line_enters(self) -> None:
         self.mind.take((a_line(own=True, spoken=True),))
-
-    async def _sleep(self, seconds: float) -> None:
-        """The clock's sleeps wait until ``sleeps_end`` is set, then take their time off the clock."""
-        await self.sleeps_end.wait()
-        self.clock.time += seconds
 
     async def _renew(self) -> None:
         self.renewal_started.set()
@@ -256,7 +261,7 @@ async def test_a_request_not_answered_by_its_bound_enters_once_as_unanswered_and
     scenario = Scenario("One.", answers_lost=True)
 
     sending = await scenario.sending()
-    scenario.sleeps_end.set()
+    scenario.clock.sleeps_end.set()
     await asyncio.sleep(0)
     await anyio.wait_all_tasks_blocked()
 
