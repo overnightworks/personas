@@ -46,7 +46,7 @@ from personas.decision import (
     view_turn_due,
     waking_line,
 )
-from personas.due import left_standing, resumed_turns
+from personas.due import left_standing, lines_of_a_hold, resumed_turns
 from personas.entries import Lines, Occasion, ViewSeen, Visit, Waiting, WindowRead, taken_lines
 from personas.failures import (
     CallFailure,
@@ -395,7 +395,7 @@ class AgentLoop:
             self._take_lines(place, window, read_at, began, serves_view=place in serving_view)
             if await self._turning.hold(session, place, window):
                 at = AppPlace(self._app.mcp_url, place)
-                self._report_fell_due(at, Lines(window.generation, frozenset(), missed=False), DueOccasion.HOLD, began)
+                self._report_fell_due(at, lines_of_a_hold(window.generation), DueOccasion.HOLD, began)
             await self._remembering.keep(WindowRead(self._agent.client_id, self._app.mcp_url, place, window, read_at))
         return lost
 
