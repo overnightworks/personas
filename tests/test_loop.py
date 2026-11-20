@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 import pytest
 from agents.backend import TurnStopKind, TurnStopped
@@ -412,8 +412,8 @@ class TurnAndLifecycle(ScriptedSessions):
     """One loop whose turn and lifecycle both wait for one release and then fail in the same step.
 
     The lifecycle joins at its first read and reads the standing again, which starts a turn on an addressed line,
-    and waits at its third read. The turn waits at its listing on the loop's session. A second session, after a
-    reaction, waits at its first read.
+    and waits at its third read for the turn's end, which cuts that wait short. The turn waits at its listing on the
+    loop's session. A second session, after a reaction, waits at its first read.
     """
 
     def __init__(self, files, lifecycle_failure: Exception, turn_failure: Exception) -> None:
@@ -441,13 +441,9 @@ class TurnAndLifecycle(ScriptedSessions):
             await self.turn_waiting.wait()
             self.lifecycle_waiting.set()
             await self.release.wait()
-            # The turn's failure reaches the group before the wait ends and cancels it; the lifecycle ends in the
-            # same step either way.
-            try:
+            with suppress(asyncio.CancelledError):
                 await self.reports.until_a_turn_ended()
-            finally:
-                ending = self._ending_the_lifecycle()
-            return ending
+            return self._ending_the_lifecycle()
         if self._reads > 3:
             self.reopened.set()
             await asyncio.Event().wait()
@@ -468,8 +464,8 @@ class TurnAndLifecycle(ScriptedSessions):
 async def test_a_lifecycle_and_a_turn_failing_together_give_one_reaction_and_a_refusal_wins(
     files, lifecycle_failure, turn_failure
 ):
-    together = TurnAndLifecycle(files, lifecycle_failure, turn_failure)
     with configured("personas"):
+        together = TurnAndLifecycle(files, lifecycle_failure, turn_failure)
         together.reports.attach_to(logging.getLogger())
         task = asyncio.create_task(together.loop.run())
         try:
@@ -491,8 +487,8 @@ async def test_a_lifecycle_and_a_turn_failing_together_give_one_reaction_and_a_r
 
 async def test_a_failure_of_a_call_and_a_defect_together_give_no_reaction_and_every_leaf_ends_the_runner(files):
     failure, defect = Unreachable("down"), ValueError("a defect")
-    together = TurnAndLifecycle(files, failure, defect)
     with configured("personas"):
+        together = TurnAndLifecycle(files, failure, defect)
         together.reports.attach_to(logging.getLogger())
         task = asyncio.create_task(together.loop.run())
         async with asyncio.timeout(10):
