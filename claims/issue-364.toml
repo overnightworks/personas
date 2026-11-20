@@ -1,8 +1,0 @@
-claim_id = "66a89daaea82416686488148351944cd"
-agent = "Claude d32028b7-a7a0-48ff-8c29-65b317313c7d"
-role = "builder"
-base = "5e68b47b75e35248ece160170311bb92135ece61"
-branch = "claude/issue-364-the-four-new-figures-lose-the-rough-spot"
-scope = ["scripts/figures", "src/characters"]
-opened_commit = "b28a565815c6e2159e52cff5ed3506a7d0830783"
-whole_reason = "the rough spots of four wardrobes, which one look at their renders proves together"
