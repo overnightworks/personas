@@ -196,3 +196,33 @@ async def test_text_then_a_decision_call_in_the_round_beside_his_parked_run_is_a
     assert runner.app.hold_calls == []
     assert [text for text, hold in runner.app.speaks_naming_holds if hold] == [ANSWER_FIRST]
     assert [text for *_, text in runner.app.said] == ["before"]
+
+
+@pytest.mark.parametrize("written", [False, True], ids=["spoken", "written"])
+async def test_the_first_answer_sentence_enters_the_history_and_is_the_sentence_that_plays_only_when_spoken(
+    runner, written
+):
+    """TURNS-27, TURNS-30, LOG-17."""
+    await a_voice_call(runner, completion(ANSWER), completion("[silent]"))
+    runner.app.written_speaks = int(written)
+    answering = runner.app.hold_next_speak()
+    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
+    await runner.app.until_called(1)
+    runner.app.hold(PLACE_ID, "hold-2", ("Bob", "no, stop"))
+    await settled(runner.app)
+    answering.set()
+
+    assert await decided(runner, 2) == ["answered", "undecided"]
+    await runner.reports.until_a_turn_completed(count=2)
+
+    told = runner.gateway.hold_told(2)
+    assert told["in_sentence"] == (None if written else ANSWER_FIRST)
+    assert told["unsaid"] == [ANSWER_REST]
+    outcome = {"answered": True, **({"written": True} if written else {})}
+    said = [
+        (each["text"], each["outcome"])
+        for line in runner.gateway.heard_in(2)
+        for each in line.get("entries", [])
+        if each["entry"] == "speech"
+    ]
+    assert said == [(ANSWER_FIRST, outcome)]
