@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from enum import StrEnum
-from typing import TYPE_CHECKING, Final, cast
+from typing import TYPE_CHECKING, Final, NamedTuple, cast
 
 from agents.member import ContinueSpeakingRefusal, SpeakRefusal, Spoken, StopSpeakingRefusal, Written
 
@@ -61,7 +61,7 @@ class DropReason(StrEnum):
 @dataclass(frozen=True)
 class SpeechRecord:
     """What he holds of his speech at one place: the request in flight, the sentences released and not yet sent, the
-    sentence that plays, the hold that stands there and the id of the last hold decided there. All of it outlives the
+    sentence that plays, the hold that stands there and the key of the last hold decided there. All of it outlives the
     turn that released the sentences. ``held_unread`` says the app answered a sentence as held and no read of the window
     has stated the hold since."""
 
@@ -69,7 +69,7 @@ class SpeechRecord:
     unsent: tuple[Sentence, ...] = ()
     saying: str | None = None
     hold: Held | None = None
-    decided: str | None = None
+    decided: HoldKey | None = None
     held_unread: bool = False
 
 
@@ -186,15 +186,28 @@ class Telling(StrEnum):
     UNDECIDED = "undecided"
 
 
+class HoldKey(NamedTuple):
+    """A hold is told apart by its id and the window generation that stated it: the app numbers holds per window
+    generation, so an id comes again in a new one."""
+
+    generation: str
+    id: str
+
+
 @dataclass(frozen=True)
 class Held:
-    """A hold as the window states it: its id and what people said over him, which stays what the last read that had
-    a record said once the record is gone, and whether a turn was told it."""
+    """A hold as the window states it: its id and window generation and what people said over him, which stays what
+    the last read that had a record said once the record is gone, and whether a turn was told it."""
 
     id: str
+    generation: str
     speech: tuple[PartialSpeech, ...]
     record_gone: bool
     telling: Telling = Telling.NOT_TOLD
+
+    @property
+    def key(self) -> HoldKey:
+        return HoldKey(self.generation, self.id)
 
 
 class HoldOutcome(StrEnum):
@@ -223,10 +236,11 @@ def hold_stated(window: PlaceWindow, seen: Held | None) -> Held | None:
     if hold is None:
         return None
     talked_over = window.talked_over
-    same = seen is not None and seen.id == hold.id
+    same = seen is not None and seen.key == HoldKey(window.generation, hold.id)
     kept = seen.speech if seen is not None and same else ()
     return Held(
         hold.id,
+        window.generation,
         kept if talked_over is None else talked_over.speech,
         record_gone=talked_over is None,
         telling=seen.telling if seen is not None and same else Telling.NOT_TOLD,
@@ -235,7 +249,7 @@ def hold_stated(window: PlaceWindow, seen: Held | None) -> Held | None:
 
 def hold_read(record: SpeechRecord, window: PlaceWindow) -> SpeechRecord:
     """The record once the window is read: the hold it states, none when that is the one decided last."""
-    if window.interrupted is not None and window.interrupted.id == record.decided:
+    if window.interrupted is not None and HoldKey(window.generation, window.interrupted.id) == record.decided:
         return _revised(record, hold=None, held_unread=False)
     return _revised(record, hold=hold_stated(window, record.hold), held_unread=False)
 
@@ -260,9 +274,14 @@ def hold_turn_ended(record: SpeechRecord) -> SpeechRecord:
     return _revised(record, hold=replace(held, telling=Telling.UNDECIDED))
 
 
-def hold_decided(record: SpeechRecord, hold_id: str) -> SpeechRecord:
-    """The hold ended with a decision: it stands no more and is never decided again."""
-    return _revised(record, hold=None, decided=hold_id, held_unread=False)
+def hold_decided(record: SpeechRecord, key: HoldKey) -> SpeechRecord:
+    """The hold ended with a decision: it stands no more and is never decided again in its window generation."""
+    return _revised(record, hold=None, decided=key, held_unread=False)
+
+
+def hold_forgotten(record: SpeechRecord) -> SpeechRecord:
+    """The place left the standing: the hold decided there is forgotten, and the rest of the record stays."""
+    return _revised(record, decided=None)
 
 
 def hold_tellable(held: Held) -> bool:

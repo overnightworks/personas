@@ -6,12 +6,14 @@ from agents.member import Interrupted, PartialSpeech, PlaceWindow, SpeakRefusal,
 from personas.speech import (
     Answered,
     Held,
+    HoldKey,
     Request,
     Sentence,
     SpeechRecord,
     Telling,
     answered_as,
     hold_decided,
+    hold_forgotten,
     hold_marked_told,
     hold_read,
     hold_stated,
@@ -70,8 +72,10 @@ def test_the_sentences_a_turn_releases_are_added_to_the_unsent_ones_or_replace_t
         pytest.param(SpeechRecord(unsent=(ONE, TWO)), 100.0, None, 2, id="at its bound a sentence is dropped"),
         pytest.param(SpeechRecord(unsent=(ONE,), in_flight=Request(TWO)), 0.0, None, 0, id="one request is open"),
         pytest.param(SpeechRecord(unsent=(ONE,), held_unread=True), 0.0, None, 0, id="a held answer waits for a read"),
-        pytest.param(SpeechRecord(unsent=(ONE,), hold=Held("h", (), True)), 0.0, None, 0, id="a hold stands"),
-        pytest.param(SpeechRecord(unsent=(ONE,), hold=Held("h", (), True)), 100.0, None, 0, id="a hold keeps them"),
+        pytest.param(SpeechRecord(unsent=(ONE,), hold=Held("h", "g", (), True)), 0.0, None, 0, id="a hold stands"),
+        pytest.param(
+            SpeechRecord(unsent=(ONE,), hold=Held("h", "g", (), True)), 100.0, None, 0, id="a hold keeps them"
+        ),
         pytest.param(SpeechRecord(unsent=(ONE,), saying="Plays."), 0.0, ONE, 0, id="the one that plays does not wait"),
         pytest.param(SpeechRecord(), 0.0, None, 0, id="nothing unsent"),
     ],
@@ -175,9 +179,17 @@ ADA_STARTED = (PartialSpeech(name="Ada", text=""),)
     ("window", "seen", "stated"),
     [
         (_window(interrupted=None, speech=ADA_SAYS), None, None),
-        (_window(interrupted="h1", speech=ADA_SAYS), None, Held("h1", ADA_SAYS, record_gone=False)),
-        (_window(interrupted="h1", speech=None), Held("h1", ADA_SAYS, record_gone=False), Held("h1", ADA_SAYS, True)),
-        (_window(interrupted="h2", speech=None), Held("h1", ADA_SAYS, record_gone=False), Held("h2", (), True)),
+        (_window(interrupted="h1", speech=ADA_SAYS), None, Held("h1", "g", ADA_SAYS, record_gone=False)),
+        (
+            _window(interrupted="h1", speech=None),
+            Held("h1", "g", ADA_SAYS, record_gone=False),
+            Held("h1", "g", ADA_SAYS, True),
+        ),
+        (
+            _window(interrupted="h2", speech=None),
+            Held("h1", "g", ADA_SAYS, record_gone=False),
+            Held("h2", "g", (), True),
+        ),
     ],
     ids=["not held", "held", "record gone keeps the words of the same hold", "record gone of a new hold has none"],
 )
@@ -188,10 +200,10 @@ def test_a_window_states_the_hold_with_what_was_said_over_him(window, seen, stat
 @pytest.mark.parametrize(
     ("held", "tellable"),
     [
-        (Held("h", ADA_STARTED, record_gone=False), False),
-        (Held("h", ADA_SAYS, record_gone=False), True),
-        (Held("h", ADA_STARTED, record_gone=True), True),
-        (Held("h", (), record_gone=True), True),
+        (Held("h", "g", ADA_STARTED, record_gone=False), False),
+        (Held("h", "g", ADA_SAYS, record_gone=False), True),
+        (Held("h", "g", ADA_STARTED, record_gone=True), True),
+        (Held("h", "g", (), record_gone=True), True),
     ],
     ids=["a person started and said no words", "words", "record gone", "record gone, no one said anything"],
 )
@@ -221,10 +233,10 @@ def test_the_words_said_over_him_that_were_not_told_are_each_partial_with_words_
 
 
 def _held(telling: Telling = Telling.NOT_TOLD) -> Held:
-    return Held("h1", ADA_SAYS, record_gone=False, telling=telling)
+    return Held("h1", "g", ADA_SAYS, record_gone=False, telling=telling)
 
 
-def _record_with(held: Held | None, *, decided: str | None = None) -> SpeechRecord:
+def _record_with(held: Held | None, *, decided: HoldKey | None = None) -> SpeechRecord:
     return SpeechRecord(saying="One.", hold=held, decided=decided)
 
 
@@ -232,7 +244,7 @@ def test_the_hold_a_window_states_stands_in_the_record_unless_it_is_the_one_deci
     stating = _window(interrupted="h1", speech=ADA_SAYS)
 
     assert hold_read(SpeechRecord(), stating).hold == _held()
-    assert hold_read(_record_with(None, decided="h1"), stating).hold is None
+    assert hold_read(_record_with(None, decided=HoldKey("g", "h1")), stating).hold is None
     assert hold_read(_record_with(_held()), _window(interrupted=None, speech=None)).hold is None
 
 
@@ -245,8 +257,16 @@ def test_a_read_of_the_same_hold_keeps_what_a_turn_was_told_of_it():
 def test_only_a_hold_that_may_be_told_and_that_no_turn_was_told_is_to_be_told():
     assert hold_untold(_record_with(_held())) == _held()
     assert hold_untold(_record_with(_held(Telling.TELLING))) is None
-    assert hold_untold(_record_with(Held("h1", ADA_STARTED, record_gone=False))) is None
+    assert hold_untold(_record_with(Held("h1", "g", ADA_STARTED, record_gone=False))) is None
     assert hold_untold(SpeechRecord()) is None
+
+
+def test_a_hold_id_decided_in_an_earlier_window_generation_is_a_new_hold_and_a_place_that_left_forgets_it():
+    decided = _record_with(None, decided=HoldKey("g", "h1"))
+    later = PlaceWindow(generation="g2", starts_at=1, entries=(), interrupted=Interrupted(id="h1"))
+
+    assert hold_read(decided, later).hold == Held("h1", "g2", (), record_gone=True)
+    assert hold_forgotten(decided) == SpeechRecord(saying="One.")
 
 
 def test_a_hold_the_turn_that_was_told_it_did_not_decide_stays_undecided_and_a_decided_one_stands_no_more():
@@ -255,7 +275,7 @@ def test_a_hold_the_turn_that_was_told_it_did_not_decide_stays_undecided_and_a_d
     assert hold_turn_ended(told).hold == _held(Telling.UNDECIDED)
     assert hold_turn_ended(_record_with(_held())).hold == _held()
     assert hold_turn_ended(SpeechRecord()) == SpeechRecord()
-    assert hold_decided(told, "h1") == SpeechRecord(saying="One.", hold=None, decided="h1")
+    assert hold_decided(told, HoldKey("g", "h1")) == SpeechRecord(saying="One.", hold=None, decided=HoldKey("g", "h1"))
 
 
 def test_the_end_of_the_sender_drops_the_unsent_sentences_and_keeps_the_sentence_that_plays_and_the_hold():

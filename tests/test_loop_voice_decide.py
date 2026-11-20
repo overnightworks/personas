@@ -308,6 +308,20 @@ async def test_a_stop_whose_call_failed_is_sent_again_by_a_later_read_and_decide
     assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
 
 
+async def test_a_hold_id_that_comes_again_in_a_new_window_generation_is_a_new_hold_that_is_decided(runner):
+    """TURNS-31, LOG-17."""
+    await a_voice_call(runner, completion("[silent]"), completion("[silent]"))
+    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
+    assert await decided(runner) == ["undecided"]
+
+    runner.app.join(PLACE_ID)
+    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
+
+    assert await decided(runner, 2) == ["undecided", "undecided"]
+    assert [each.hold_id for each in runner.reports.changes_of(Event.HOLD_DECIDED)] == [HOLD_ID, HOLD_ID]
+    assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID), (STOP_SPEAKING_TOOL, HOLD_ID)]
+
+
 async def test_a_turn_told_a_hold_answers_the_lookup_that_it_decides_first_and_spends_no_lookup(runner):
     """TURNS-31."""
     store = ScriptedStore()
