@@ -12,7 +12,7 @@ from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import SweepClock
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
-from tests.support.history import OTHER_CALL_ID, REMARK, SPEAKER, TABLE, at_table, said_and_taken, settled
+from tests.support.history import OTHER_CALL_ID, REMARK, SPEAKER, TABLE, at_table, said_and_taken, settled, shows
 from tests.support.hopin import a_traceparent, trace_id_of
 from tests.support.logs import written_by_the_runner
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
@@ -134,14 +134,38 @@ async def a_turn_without_an_answer_makes_its_place_due_again(runner, other):
     return 1
 
 
+async def a_view_that_awaits_him_is_read_again_while_its_place_is_due(runner, other):
+    """His turn at the call waits for the model while a view revision that awaits him makes the table due; the view is
+    read again, moved but not to another revision. The places that fell due: the call and the table."""
+    runner.gateway = Gateway(completion("done"), completion("done"))
+    running = runner.gateway.hold_request(1)
+    runner.app.stand(SUBJECT, active(PLACE_ID), active(TABLE.id, TABLE.kind, serves_view=True))
+    runner.start()
+    await runner.app.until_window_read(PLACE_ID)
+    say_in_the_call(runner, REMARK)
+    await runner.gateway.until_requested(1)
+    await shows(runner.app, 1, awaits_you=True)
+    await shows(runner.app, 1, awaits_you=True)
+    running.set()
+    await runner.gateway.until_turns(2)
+    await runner.reports.until_a_turn_ended(count=2)
+    return 2
+
+
 @pytest.mark.parametrize(
     "arranged",
     [
         a_second_line_joins_the_place_that_is_due,
         a_marked_line_of_another_agent_is_taken,
         a_turn_without_an_answer_makes_its_place_due_again,
+        a_view_that_awaits_him_is_read_again_while_its_place_is_due,
     ],
-    ids=["a second line joins a due place", "a marked line", "a turn due again after one without an answer"],
+    ids=[
+        "a second line joins a due place",
+        "a marked line",
+        "a turn due again after one without an answer",
+        "a view that awaits him read again while its place is due",
+    ],
 )
 async def test_a_pass_that_makes_no_place_newly_due_writes_no_event(runner, other, written, arranged):
     """LOG-37."""
