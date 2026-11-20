@@ -17,7 +17,9 @@ if TYPE_CHECKING:
 WIMPLE_WHITE: Colour = (240, 236, 226)
 VEIL_BLACK: Colour = (20, 19, 22)
 BODY = 0.006
-ROWS = 96
+# Rows of each shell; the wimple has more, for the edge that frames the face.
+WIMPLE_ROWS = 64
+VEIL_ROWS = 64
 OPEN = math.radians
 # Level above the eye line, then the wimple's half width, front depth, back depth and how far from the middle its front
 # edges part. Below the chin it is closed and falls to the chest over the habit; from the chin to the forehead band it
@@ -80,6 +82,6 @@ VEIL = (
 
 def hildegard_headdress() -> list[Part]:
     return [
-        part(cap_shell(course, BODY, 0.0, 0.0, ROWS), colour, Material.CLOTH, NECK_BINDER)
-        for course, colour in ((WIMPLE, WIMPLE_WHITE), (VEIL, VEIL_BLACK))
+        part(cap_shell(course, BODY, 0.0, 0.0, rows), colour, Material.CLOTH, NECK_BINDER)
+        for course, colour, rows in ((WIMPLE, WIMPLE_WHITE, WIMPLE_ROWS), (VEIL, VEIL_BLACK, VEIL_ROWS))
     ]
