@@ -1,0 +1,8 @@
+claim_id = "07c65465fdfe47f3ba2f102296290493"
+agent = "Claude d32028b7-a7a0-48ff-8c29-65b317313c7d"
+role = "builder"
+base = "aaf7aa7327a11959d2399694b5df4812be7b2d25"
+branch = "claude/issue-380-short-line-carries-a-style"
+scope = ["docs/ARCHITECTURE.md", "docs/turns.md", "src/personas/app_session.py", "src/personas/held_tools.py", "src/personas/holds.py", "src/personas/turning.py", "src/personas/voice.py", "tests"]
+opened_commit = "32d020105571af8e08edaa164d59a2a5d151ba6f"
+whole_reason = "one decision, a voice style on his short line, preceded by the whole move of the hold round into holds.py that gives turning.py room and lets the told decision take the turn's Answering at construction"
