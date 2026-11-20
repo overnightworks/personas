@@ -59,8 +59,9 @@ flowchart LR
 - **A turn** (`turning.py`) runs on its loop's session at its own app, lists the tools of its apps, sends the
   gateway the persona and the told messages, and relays each call; it ends when the backend's events end, not
   when its sentences have played. `voice.py` reads an aloud turn's reply into sentences, `turn_bound.py` bounds the
-  turn's waits and the sentences it released, `holds.py` decides a hold (the round beside the parked run, the decision of a turn told it and the end of the hold in the app), `held_tools.py` and `turn_sessions.py`
-  reach the other apps a turn holds. His text while a hold is undecided answers it: `voice.py` sends the first
+  turn's waits and the sentences it released, `holds.py` decides a hold (the round beside the parked run, the
+  decision of a turn told it and the end of the hold in the app), `held_tools.py` and `turn_sessions.py` reach the
+  other apps a turn holds. His text while a hold is undecided answers it: `voice.py` sends the first
   sentence to `speak` naming the hold, on a session of its own, and puts the rest into the record.
 - **A sender** (`voice.py`) is a task of the loop's serving group at each place where a turn spoke, on the loop's
   session: it sends the record's unsent sentences to `speak`, one request at a time, also after the turn, and

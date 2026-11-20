@@ -88,9 +88,9 @@ class AppVoice(AppPlaces):
     hold_calls: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
     """The tool and the hold id of each ``continue_speaking`` and ``stop_speaking`` that arrived."""
     speaks_naming_holds: list[tuple[str, str | None]] = field(default_factory=list[tuple[str, str | None]])
+    """The text and the hold id (none when it names none) of each ``speak`` that arrived."""
     speak_styles: list[str | None] = field(default_factory=list[str | None])
     """The style of each ``speak``, in the order of ``speaks_naming_holds``."""
-    """The text and the hold id (none when it names none) of each ``speak`` that arrived."""
     hold_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
     """The answer to each next ``continue_speaking`` or ``stop_speaking`` as it arrives, in order."""
 

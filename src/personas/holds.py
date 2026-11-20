@@ -1,4 +1,4 @@
-"""What a spoken turn hears of a hold of his while it speaks, and the two tools a round decides the hold with."""
+"""What a spoken turn hears of a hold of his while it speaks: the round, its two tools, the told decision, the end."""
 
 from __future__ import annotations
 

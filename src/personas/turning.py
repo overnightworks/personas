@@ -333,17 +333,7 @@ class Turning:
                 lambda hold: self._holds.end_hold(place, record, hold, HoldOutcome.UNDECIDED, bound),
             )
         held = self._hold_tools(session, record, admitted, bound, lists, inbox, deciding, answering)
-        system = f"{setup.persona.prompt}\n\n{REPLY_RULES}" if admitted.aloud else setup.persona.prompt
-        request = TurnRequest(
-            agent=setup.persona.name,
-            turn=Turn(system=system, messages=[TurnMessage(role=TurnRole.USER, text=each) for each in told]),
-            roles=setup.persona.roles,
-            tools=held.declarations,
-            model=(self._agent.hold_model if admitted.held else None) or setup.persona.model,
-            max_duration_seconds=setup.persona.max_duration_seconds,
-            max_tool_calls=held.max_tool_calls,
-            one_call_per_reply=admitted.aloud,
-        )
+        request = self._request_of(setup, admitted, told, held)
         sizing.request_built(held.declarations, told)
         person = TurnPerson(admitted.facts.principal, TURN_ROLE, admitted.groups)
         async with (
@@ -362,6 +352,19 @@ class Turning:
             tally.answered = True
             tally.usage = None if final is None else final.usage
             self._mind.answered(turn)
+
+    def _request_of(self, setup: TurnSetup, admitted: Admitted, told: tuple[str, ...], held: HeldTools) -> TurnRequest:
+        system = f"{setup.persona.prompt}\n\n{REPLY_RULES}" if admitted.aloud else setup.persona.prompt
+        return TurnRequest(
+            agent=setup.persona.name,
+            turn=Turn(system=system, messages=[TurnMessage(role=TurnRole.USER, text=each) for each in told]),
+            roles=setup.persona.roles,
+            tools=held.declarations,
+            model=(self._agent.hold_model if admitted.held else None) or setup.persona.model,
+            max_duration_seconds=setup.persona.max_duration_seconds,
+            max_tool_calls=held.max_tool_calls,
+            one_call_per_reply=admitted.aloud,
+        )
 
     async def _speak_along(
         self, voiced: Voiced, events: AsyncIterator[TurnEvent], tally: TurnTally
