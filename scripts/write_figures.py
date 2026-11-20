@@ -9,13 +9,13 @@ from typing import TYPE_CHECKING
 from figures.humanoid_figure import Wardrobe, build_figure
 from figures.persona_rooms import LEONARDO as LEONARDO_ROOM
 from figures.persona_rooms import MOZART as MOZART_ROOM
-from figures.persona_wardrobes import CURIE, HUMBOLDT, LEONARDO, MOZART
+from figures.persona_wardrobes import CURIE, HUMBOLDT, LEONARDO, LOVELACE, MOZART
 from figures.room_glb import Room, build_room
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-WARDROBES: tuple[Wardrobe, ...] = (MOZART, LEONARDO, HUMBOLDT, CURIE)
+WARDROBES: tuple[Wardrobe, ...] = (MOZART, LEONARDO, HUMBOLDT, CURIE, LOVELACE)
 ROOMS: tuple[Room, ...] = (MOZART_ROOM, LEONARDO_ROOM)
 
 
