@@ -7,7 +7,6 @@ import math
 from typing import TYPE_CHECKING
 
 from figures.figure_body import (
-    SEAT,
     arm_binder,
     arm_tube,
     both_sides,
@@ -85,6 +84,14 @@ TROUSERS = (
     (0.90, (0.050, 0.068, 0.0)),
     (0.97, (0.040, 0.060, 0.0)),
 )
+# The seat that joins the trousers' legs under the waistcoat's hem, as for `figure_body.SEAT`, lying further back at the
+# front so that it stays inside the waistcoat and does not show between the thighs.
+SEAT = (
+    (0.80, (0.030, 0.008, 0.040)),
+    (0.81, (0.050, 0.016, 0.066)),
+    (0.86, (0.110, 0.034, 0.092)),
+    (0.94, (0.140, 0.080, 0.106)),
+)
 # Height, then the cravat's half width, front depth and back depth there, with its knot at the front.
 CRAVAT = ((1.425, (0.060, 0.052, 0.065)), (1.46, (0.062, 0.055, 0.067)), (1.50, (0.059, 0.053, 0.065)))
 KNOT = (0.0, 1.462, 0.058)
@@ -97,7 +104,7 @@ def humboldt_clothes(face: Face) -> list[Part]:
         *both_sides(arm_tube(SLEEVE, 28), NAVY, Material.CLOTH, arm_binder),
         part(trunk(CRAVAT, 4), LINEN, Material.CLOTH, NECK_BINDER),
         part(_knot(), LINEN, Material.CLOTH, NECK_BINDER),
-        part(trunk(SEAT, 8), FAWN, Material.CLOTH, trunk_binder),
+        part(trunk(SEAT, 16), FAWN, Material.CLOTH, trunk_binder),
         *both_sides(leg_tube(TROUSERS, 30), FAWN, Material.CLOTH, leg_binder),
         *shoes(BLACK),
         *hands(face.skin),
