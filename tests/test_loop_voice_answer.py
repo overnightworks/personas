@@ -226,3 +226,19 @@ async def test_the_first_answer_sentence_enters_the_history_and_is_the_sentence_
         if each["entry"] == "speech"
     ]
     assert said == [(ANSWER_FIRST, outcome)]
+
+
+async def test_a_refused_first_answer_sentence_beside_his_parked_run_asks_the_app_to_stop_him_once(runner):
+    """TURNS-27, LOG-17."""
+    deciding_round = await calling_while_held(runner, completion(ANSWER), hold_round=True)
+    runner.app.speak_outcomes.append(refusing(SpeakRefusal.TOO_LONG))
+    runner.app.hold_outcomes.append(ToolOutcome("the app failed", is_error=True))
+    await runner.gateway.until_requested(3)
+    deciding_round.set()
+
+    await runner.reports.until(Event.HELD_APP_FAILED)
+    await runner.reports.until_a_turn_completed()
+
+    assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
+    assert len(runner.reports.codes_of(Event.HELD_APP_FAILED)) == 1
+    assert runner.reports.codes_of(Event.HOLD_DECIDED) == []
