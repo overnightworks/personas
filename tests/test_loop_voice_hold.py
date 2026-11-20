@@ -10,6 +10,7 @@ from http import HTTPStatus
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.member import CONTINUE_SPEAKING_TOOL, SPEAK_TOOL, STOP_SPEAKING_TOOL, VoiceState
+from agents.tools import ToolOutcome
 from agents.turn import FailureCode
 from anyio import BrokenResourceError
 
@@ -212,6 +213,21 @@ async def test_a_call_made_while_a_hold_stands_waits_and_goes_out_after_a_contin
 
     assert [tool for tool in runner.app.calls if tool != SPEAK_TOOL] == [SAY_TOOL, CONTINUE_SPEAKING_TOOL, SAY_TOOL]
     assert said_texts(runner) == ["before", "waits"]
+
+
+async def test_a_call_made_while_a_hold_stands_goes_out_once_he_continues_though_the_window_still_states_the_hold(
+    runner,
+):
+    """TURNS-31."""
+    runner.app.hold_outcomes.append(ToolOutcome(json.dumps({"continued": True}), is_error=False))
+    await calling_while_held(runner, deciding(CONTINUE_SPEAKING_TOOL), completion(), completion())
+
+    await decided(runner)
+    await runner.app.said_count(2)
+
+    assert PLACE_ID in runner.app.holds
+    assert said_texts(runner) == ["before", "waits"]
+    assert FailureCode.LIMIT_EXCEEDED.value not in [code for _, code in runner.reports.reported() if code]
 
 
 async def test_words_said_over_him_after_a_round_was_told_the_hold_are_told_once_at_his_waiting_call(runner):

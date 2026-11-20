@@ -95,25 +95,32 @@ class HoldInbox:
         self._calls_answered.set()
         self._closed = False
         self._changed = asyncio.Event()
+        self._freed = asyncio.Event()
+        """Beside ``_changed`` because each of the two waits clears the event it waits on, which would swallow the
+        other's wake-up."""
+
+    def _wake(self) -> None:
+        self._changed.set()
+        self._freed.set()
 
     def hear(self, window: PlaceWindow) -> None:
         stated = hold_stated(window, self.hold)
         self.hold = None if stated is not None and stated.id == self._decided else stated
         self._said = () if window.talked_over is None else window.talked_over.speech
-        self._changed.set()
+        self._wake()
 
     def decided(self, hold_id: str) -> None:
         """The hold ``hold_id`` was decided: it stands no more, whatever a window read before the decision says."""
         self._decided = hold_id
         if self.hold is not None and self.hold.id == hold_id:
             self.hold = None
-        self._changed.set()
+        self._wake()
 
     async def until_none_stands(self, bound: TurnBound) -> None:
         """Returns once no hold stands; the turn's deadline ends the turn first when it passes before."""
         while self.hold is not None and not self._closed:
-            self._changed.clear()
-            await bound.first_of(self._changed, bound.deadline())
+            self._freed.clear()
+            await bound.first_of(self._freed, bound.deadline())
             bound.stop_if_deadline_done()
 
     @contextmanager
@@ -143,7 +150,7 @@ class HoldInbox:
 
     def close(self) -> None:
         self._closed = True
-        self._changed.set()
+        self._wake()
 
     @property
     def undecided(self) -> Held | None:
