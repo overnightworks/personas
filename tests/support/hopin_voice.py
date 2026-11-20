@@ -88,6 +88,8 @@ class AppVoice(AppPlaces):
     hold_calls: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
     """The tool and the hold id of each ``continue_speaking`` and ``stop_speaking`` that arrived."""
     speaks_naming_holds: list[tuple[str, str | None]] = field(default_factory=list[tuple[str, str | None]])
+    speak_styles: list[str | None] = field(default_factory=list[str | None])
+    """The style of each ``speak``, in the order of ``speaks_naming_holds``."""
     """The text and the hold id (none when it names none) of each ``speak`` that arrived."""
     hold_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
     """The answer to each next ``continue_speaking`` or ``stop_speaking`` as it arrives, in order."""
@@ -133,6 +135,7 @@ class AppVoice(AppPlaces):
         not stand is refused ``not_interrupted``."""
         taken = SpeakArguments.model_validate(arguments)
         self.speaks_naming_holds.append((taken.text, taken.interrupted))
+        self.speak_styles.append(taken.style)
         if taken.interrupted is None and taken.place.id in self.holds:
             return ToolOutcome(SpeakRefused(refused=SpeakRefusal.HELD).model_dump_json(), is_error=True)
         if taken.interrupted is not None and self.holds.get(taken.place.id, ("", None))[0] != taken.interrupted:

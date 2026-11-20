@@ -90,6 +90,7 @@ if TYPE_CHECKING:
     from personas.remembering import Remembering
     from personas.task_record import TaskRecord
     from personas.tokens import TokenSource
+    from personas.voice import Answering
 
 # The backend a turn runs on, which it closes when the turn ends.
 type BackendFactory = Callable[[Iterable[HandTool]], AbstractAsyncContextManager[AgentBackend]]
@@ -316,7 +317,22 @@ class Turning:
         lists: tuple[Declared, ...],
     ) -> None:
         raise_if_cancelled()
-        held = self._hold_tools(session, record, admitted, bound, lists)
+        deciding = None if admitted.held is None else TurnHold(admitted.held)
+        inbox = self._inbox_of(admitted) if admitted.aloud else None
+        place = admitted.place
+        speaking, answering = (None, None)
+        if inbox is not None:
+            speaking, answering = self._voicing.speaking(
+                place,
+                record,
+                tally,
+                bound,
+                inbox,
+                deciding,
+                partial(self._holds.hold_decided, place),
+                lambda hold: self._holds.end_hold(place, record, hold, HoldOutcome.UNDECIDED, bound),
+            )
+        held = self._hold_tools(session, record, admitted, bound, lists, inbox, deciding, answering)
         system = f"{setup.persona.prompt}\n\n{REPLY_RULES}" if admitted.aloud else setup.persona.prompt
         request = TurnRequest(
             agent=setup.persona.name,
@@ -336,21 +352,8 @@ class Turning:
         ):
             hand_off.end()
             cut = False
-            if admitted.aloud and held.inbox is not None:
-                place = admitted.place
-                speaking, answering = self._voicing.speaking(
-                    place,
-                    record,
-                    tally,
-                    bound,
-                    held.inbox,
-                    held.told,
-                    partial(self._holds.hold_decided, place),
-                    lambda hold: self._holds.end_hold(place, record, hold, HoldOutcome.UNDECIDED, bound),
-                )
-                if held.told is not None:
-                    held.told.say_line = partial(answering.line_decided, held.told.held)
-                voiced = Voiced(setup, admitted, turn, request, held, speaking, answering, record, held.inbox, bound)
+            if inbox is not None and speaking is not None and answering is not None:
+                voiced = Voiced(setup, admitted, turn, request, held, speaking, answering, record, inbox, bound)
                 final = await self._speak_along(voiced, events, tally)
                 cut = speaking.was_cut
             else:
@@ -416,7 +419,15 @@ class Turning:
         return False
 
     def _hold_tools(
-        self, session: AppSession, record: TaskRecord, admitted: Admitted, bound: TurnBound, lists: tuple[Declared, ...]
+        self,
+        session: AppSession,
+        record: TaskRecord,
+        admitted: Admitted,
+        bound: TurnBound,
+        lists: tuple[Declared, ...],
+        inbox: HoldInbox | None,
+        deciding: TurnHold | None,
+        answering: Answering | None,
     ) -> HeldTools:
         """The lookup when the configuration has a memory, then the tools of the place's app, of each app named in the
         admission and of each tools-only app the realm grants and that answers, in the configuration's order, each app
@@ -426,8 +437,6 @@ class Turning:
         none when it lists none. Another app whose listing fails, and the place's own app when it does not answer within
         its call time, is left out and reported, and the turn holds the rest.
         """
-        deciding = None if admitted.held is None else TurnHold(admitted.held)
-        inbox = self._inbox_of(admitted) if admitted.aloud else None
         hold = HoldBack(admitted.history, inbox, deciding)
         tools: list[HandTool] = []
         bounds: list[int] = []
@@ -448,7 +457,10 @@ class Turning:
                 bounds.append(calls.bound)
         if deciding is not None:
             tools.extend(
-                HandTool(each, partial(self._holds.decide_told, admitted.place, record, deciding, bound, each.name))
+                HandTool(
+                    each,
+                    partial(self._holds.decide_told, admitted.place, record, deciding, answering, bound, each.name),
+                )
                 for each in DECISION_DECLARATIONS
             )
             bounds.append(DECISION_CALLS)

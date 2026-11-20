@@ -31,7 +31,7 @@ from personas.speech import (
 from personas.task_record import RelayFailed
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Generator
+    from collections.abc import Generator
 
     from agents.agent_file import TurnRequest
     from agents.member import PartialSpeech, PlaceRef, PlaceWindow
@@ -51,6 +51,7 @@ if TYPE_CHECKING:
 
 DECISION_CALLS: Final = 1
 LINE_ARGUMENT: Final = "line"
+STYLE_ARGUMENT: Final = "style"
 _NO_SPEECH_FOR_LINE_TEXT: Final = "this turn does not speak: continue_speaking without a line"
 APP_FAILED_TEXT: Final = "the app did not answer"
 CONTINUED_TEXT: Final = '{"continued": true}'
@@ -70,7 +71,15 @@ _SHORT_LINE: Final = {
             "One short line to say at once. The sentence you were held in is cut, not said again, and your next "
             "sentences follow the line."
         ),
-    }
+    },
+    STYLE_ARGUMENT: {
+        "type": "string",
+        "minLength": 1,
+        "description": (
+            "How the line sounds, in a few words, such as `louder and angrier`. Only with `line`; your next "
+            "sentences follow without it."
+        ),
+    },
 }
 DECISION_DECLARATIONS: Final = tuple(
     ToolDeclaration(
@@ -108,14 +117,6 @@ class TurnHold:
     def __init__(self, held: Held) -> None:
         self.held = held
         self.outcome: HoldOutcome | None = None
-        self.say_line: Callable[[object], Awaitable[ToolOutcome]] | None = None
-        """His short line before he goes on, set once the turn's speech exists."""
-
-    async def line_said(self, line: object) -> ToolOutcome:
-        """His ``continue_speaking`` with a ``line``: refused in a turn that does not speak."""
-        if self.say_line is None:
-            return ToolOutcome(_NO_SPEECH_FOR_LINE_TEXT, is_error=True)
-        return await self.say_line(line)
 
     @property
     def pending(self) -> bool:
@@ -133,6 +134,11 @@ class TurnHold:
             return False
         self.outcome = HoldOutcome.UNDECIDED
         return True
+
+
+def carries_line(arguments: JsonObject) -> bool:
+    """Whether a ``continue_speaking`` names a short line or a style, which `Answering.line_decided` then judges."""
+    return LINE_ARGUMENT in arguments or STYLE_ARGUMENT in arguments
 
 
 def deciding_first(told: TurnHold | None) -> bool:
@@ -367,8 +373,8 @@ class HoldDeciding:
             return ToolOutcome(DECIDING_FIRST_TEXT, is_error=True)
         if self._mind.hold_decided_key(self._at(voiced.admitted.place)) == hold.key:
             return ToolOutcome(DECIDED_TEXT, is_error=True)
-        if outcome is HoldOutcome.CONTINUED and LINE_ARGUMENT in arguments:
-            return await voiced.answering.line_decided(hold, arguments[LINE_ARGUMENT])
+        if outcome is HoldOutcome.CONTINUED and carries_line(arguments):
+            return await voiced.answering.line_decided(hold, arguments)
         told = CONTINUED_TEXT if outcome is HoldOutcome.CONTINUED else await self._cut_speech(voiced, hearing)
         ended = await self.end_hold(voiced.admitted.place, voiced.record, hold, outcome, voiced.bound)
         if ended is None:
@@ -445,6 +451,7 @@ class HoldDeciding:
         place: PlaceRef,
         record: TaskRecord,
         deciding: TurnHold,
+        answering: Answering | None,
         bound: TurnBound,
         name: str,
         _principal: Principal,
@@ -454,8 +461,10 @@ class HoldDeciding:
         outcome = HoldOutcome.CONTINUED if name == CONTINUE_SPEAKING_TOOL else HoldOutcome.STOPPED
         if not deciding.pending:
             return ToolOutcome(DECIDED_TEXT, is_error=True)
-        if outcome is HoldOutcome.CONTINUED and LINE_ARGUMENT in arguments:
-            return await deciding.line_said(arguments[LINE_ARGUMENT])
+        if outcome is HoldOutcome.CONTINUED and carries_line(arguments):
+            if answering is None:
+                return ToolOutcome(_NO_SPEECH_FOR_LINE_TEXT, is_error=True)
+            return await answering.line_decided(deciding.held, arguments)
         deciding.outcome = outcome
         unsaid = self._mind.speech_unsaid(self._at(place))
         ended = await self.end_hold(place, record, deciding.held, outcome, bound)

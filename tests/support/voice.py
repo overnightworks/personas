@@ -181,10 +181,14 @@ async def refused_ends_the_hold_as_the_app_says(
     outcome: str,
     stops: list[tuple[str, str]],
     unsent: str,
+    *,
+    taken_before: int = 2,
+    cut: str | None = SECOND,
 ) -> None:
-    """The app refuses the third speak: the hold ends as its refusal says and the ``unsent`` sentence is never sent.
-    ``arrange`` sets up the held turn."""
-    runner.app.speak_outcomes.extend([None, None, refusing(refusal)])
+    """The app refuses the speak after ``taken_before`` taken ones: the hold ends as its refusal says, the ``unsent``
+    sentence is never sent and the sentence his stop ``cut`` is sent once, never put back. ``arrange`` sets up the held
+    turn."""
+    runner.app.speak_outcomes.extend([*[None] * taken_before, refusing(refusal)])
     await arrange()
 
     assert await decided(runner) == [outcome]
@@ -192,4 +196,7 @@ async def refused_ends_the_hold_as_the_app_says(
 
     assert runner.app.hold_calls == stops
     assert runner.reports.codes_of(Event.SPEAK_REFUSED) == [refusal.value]
-    assert [text for text, _ in runner.app.speaks_naming_holds if text == unsent] == []
+    sent = [text for text, _ in runner.app.speaks_naming_holds]
+    assert unsent not in sent
+    if cut is not None:
+        assert sent.count(cut) == 1

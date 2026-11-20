@@ -171,8 +171,8 @@ class _AroundSession:
         if around is None:
             return real
 
-        async def wrapped(*arguments: object) -> object:
-            return await around(lambda: real(*arguments))
+        async def wrapped(*arguments: object, **named: object) -> object:
+            return await around(lambda: real(*arguments, **named))
 
         return wrapped
 

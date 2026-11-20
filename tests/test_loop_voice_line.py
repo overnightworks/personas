@@ -21,7 +21,6 @@ from tests.support.voice import (
     decided,
     held_in_the_first_sentence,
     refused_ends_the_hold_as_the_app_says,
-    refusing,
     sentences_spoken,
 )
 
@@ -39,12 +38,26 @@ def continuing_hold(hold_id: str):
     return continuing({}, hold_id)
 
 
+STYLE = "louder and angrier"
+
+ARRANGEMENTS = pytest.mark.parametrize("told", [False, True], ids=["round", "told"])
+
+
+async def held_deciding(runner, told: bool, arguments: dict[str, object], then: str = f"{FIRST} {SECOND}"):
+    """A hold decided with ``continue_speaking``: in the round beside his parked run, a turn whose first sentence plays,
+    whose second waits at the app and whose third is unsent, held by the app; or a turn told the hold at its start,
+    which says ``then`` once the call is answered."""
+    if told:
+        await a_voice_call(runner, continuing(arguments), completion(then))
+        runner.app.hold(PLACE_ID, HOLD_ID, SAID)
+    else:
+        await held_in_the_first_sentence(
+            runner, completion(THREE_SENTENCES), continuing(arguments), completion("[silent]")
+        )
+
+
 async def held_with_a_line(runner, line: object = LINE):
-    """A turn whose first sentence plays, whose second waits at the app and whose third is unsent, held by the app; the
-    round that follows calls ``continue_speaking`` with the line."""
-    await held_in_the_first_sentence(
-        runner, completion(THREE_SENTENCES), continuing({"line": line}), completion("[silent]")
-    )
+    await held_deciding(runner, False, {"line": line})
 
 
 async def test_a_short_line_is_said_at_once_and_his_unsent_sentences_follow_plain(runner):
@@ -69,23 +82,69 @@ async def test_a_short_line_is_said_at_once_and_his_unsent_sentences_follow_plai
     assert Event.SPEAK_REFUSED not in [event for event, _ in runner.reports.reported()]
 
 
+async def test_a_styled_short_line_reaches_speak_with_its_style_and_his_unsent_sentences_follow_plain(runner):
+    """TURNS-46."""
+    await held_deciding(runner, False, {"line": LINE, "style": STYLE})
+
+    assert await decided(runner) == ["short_line"]
+    runner.app.end_sentence()
+    await runner.app.spoken_count(3)
+    runner.app.end_sentence()
+    await runner.app.spoken_count(4)
+
+    assert runner.app.speaks_naming_holds[2] == (LINE, HOLD_ID)
+    assert runner.app.speak_styles == [None, None, STYLE, None, None]
+
+
+@ARRANGEMENTS
 @REFUSALS
 async def test_a_short_line_the_app_refused_sends_no_further_sentence_and_ends_the_hold_as_the_app_says(
-    runner, refusal, outcome, stops
+    runner, told, refusal, outcome, stops
 ):
-    """TURNS-30, LOG-17."""
+    """TURNS-30, TURNS-46, LOG-17."""
     await refused_ends_the_hold_as_the_app_says(
-        runner, lambda: held_with_a_line(runner), refusal, outcome, stops, unsent=THIRD
+        runner,
+        lambda: held_deciding(runner, told, {"line": LINE}),
+        refusal,
+        outcome,
+        stops,
+        unsent=FIRST if told else THIRD,
+        taken_before=0 if told else 2,
+        cut=None if told else SECOND,
     )
 
 
-async def test_a_line_that_is_no_string_decides_nothing(runner):
-    """TURNS-30."""
-    await held_with_a_line(runner, line=7)
+@ARRANGEMENTS
+async def test_a_style_the_app_refused_sends_no_further_sentence_stops_him_and_ends_the_hold_undecided(runner, told):
+    """TURNS-46, LOG-17."""
+    await refused_ends_the_hold_as_the_app_says(
+        runner,
+        lambda: held_deciding(runner, told, {"line": LINE, "style": STYLE}),
+        SpeakRefusal.STYLE_UNAVAILABLE,
+        "undecided",
+        [(STOP_SPEAKING_TOOL, HOLD_ID)],
+        unsent=FIRST if told else THIRD,
+        taken_before=0 if told else 2,
+        cut=None if told else SECOND,
+    )
 
-    await runner.reports.until(Event.HOLD_DECIDED)
 
-    assert runner.reports.codes_of(Event.HOLD_DECIDED) == ["undecided"]
+@ARRANGEMENTS
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        pytest.param({"line": 7}, id="line is no string"),
+        pytest.param({"line": ""}, id="line is empty"),
+        pytest.param({"line": LINE, "style": ""}, id="style is empty"),
+        pytest.param({"line": LINE, "style": 7}, id="style is no string"),
+        pytest.param({"style": STYLE}, id="style without a line"),
+    ],
+)
+async def test_a_line_or_style_that_is_no_non_empty_string_decides_nothing(runner, told, arguments):
+    """TURNS-46."""
+    await held_deciding(runner, told, arguments, then="[silent]")
+
+    assert await decided(runner) == ["undecided"]
     assert all(hold is None for _, hold in runner.app.speaks_naming_holds)
 
 
@@ -100,6 +159,17 @@ async def test_a_turn_told_a_hold_says_the_short_line_and_its_sentences_follow_i
 
     assert runner.app.speaks_naming_holds == [(LINE, HOLD_ID), (FIRST, None), (SECOND, None)]
     assert runner.app.hold_calls == []
+
+
+async def test_a_turn_told_a_hold_says_the_styled_line_and_its_sentences_follow_plain(runner):
+    """TURNS-46."""
+    await held_deciding(runner, True, {"line": LINE, "style": STYLE})
+
+    assert await decided(runner) == ["short_line"]
+    await runner.app.spoken_count(3)
+
+    assert runner.app.speaks_naming_holds[0] == (LINE, HOLD_ID)
+    assert runner.app.speak_styles == [STYLE, None, None]
 
 
 async def test_the_short_line_beside_his_parked_run_leaves_the_run_to_go_on(runner):
@@ -133,27 +203,6 @@ async def test_a_new_hold_beside_the_short_line_starts_one_more_round_while_his_
 
     assert (await decided(runner, 2))[1] == "continued"
     assert runner.gateway.hold_told(5)["id"] == "hold-2"
-
-
-async def test_a_turn_told_a_hold_refuses_a_non_string_line_and_decides_nothing(runner):
-    """TURNS-46."""
-    await a_voice_call(runner, continuing({"line": 7}), completion("[silent]"))
-
-    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
-
-    assert await decided(runner) == ["undecided"]
-    assert all(hold is None for _, hold in runner.app.speaks_naming_holds)
-
-
-async def test_a_turn_told_a_hold_whose_short_line_the_app_refused_stops_him_and_ends_the_hold_undecided(runner):
-    """TURNS-46, LOG-17."""
-    runner.app.speak_outcomes.append(refusing(SpeakRefusal.TOO_LONG))
-    await a_voice_call(runner, continuing({"line": LINE}), completion(f"{FIRST} {SECOND}"))
-
-    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
-
-    assert await decided(runner) == ["undecided"]
-    assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
 
 
 async def test_a_line_in_a_turn_that_does_not_speak_is_refused_and_the_hold_stays_undecided(runner):
