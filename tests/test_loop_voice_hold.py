@@ -26,10 +26,13 @@ from tests.support.history import settled
 from tests.support.hopin import CALL, LIMIT_SECONDS, SAY_TOOL
 from tests.support.transport import opener_whose_requests_raise_together, transport_closing_with_late_answers
 from tests.support.voice import (
+    FIRST,
     HOLD_ID,
     SAID,
+    SECOND,
     TWO_SENTENCES,
     a_voice_call,
+    calling_while_held,
     deciding,
     ended_by,
     held_in_the_first_sentence,
@@ -39,29 +42,6 @@ from tests.support.voice import (
 from tests.support.wire import cuts, refuses_with_a_server_error
 
 pytestmark = pytest.mark.anyio
-
-FIRST, SECOND = TWO_SENTENCES.split(". ")[0] + ".", TWO_SENTENCES.split(". ")[1]
-
-
-async def calling_while_held(runner, *after_the_hold, hold_round: bool = False, words: bool = True):
-    """A spoken turn whose first round writes a sentence and calls ``say`` while it plays, whose second round, held back
-    until a hold without words stands at the app, calls ``say`` again; people then talk over him. With ``hold_round``
-    the round that decides the hold waits for the returned event; with no ``words`` nobody talks over him."""
-    holding_sentence_ends(runner)
-    first, second = tool_round(say("before", PLACE_ID), content=FIRST), tool_round(say("waits", PLACE_ID))
-    await a_voice_call(runner, first, second, *after_the_hold)
-    second_round = runner.gateway.hold_request(2)
-    say_in_the_call(runner, ADDRESSED, spoken=True)
-    await runner.app.said_count(1)
-    await runner.app.spoken_count(1)
-    runner.app.hold(PLACE_ID, HOLD_ID, ("Ada", ""))
-    await settled(runner.app)
-    deciding_round = runner.gateway.hold_request(3) if hold_round else None
-    second_round.set()
-    await runner.gateway.until_answered(2)
-    if words:
-        runner.app.talk_over(PLACE_ID, SAID)
-    return deciding_round
 
 
 def said_texts(runner) -> list[str]:

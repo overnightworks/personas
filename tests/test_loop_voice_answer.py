@@ -13,9 +13,12 @@ from tests.support.call import PLACE_ID
 from tests.support.history import settled
 from tests.support.hopin import CALL
 from tests.support.voice import (
+    FIRST,
     HOLD_ID,
     SAID,
+    SECOND,
     a_voice_call,
+    calling_while_held,
     deciding,
     held_in_the_first_sentence,
     sentences_spoken,
@@ -25,7 +28,6 @@ from tests.support.wire import refuses_with_a_server_error
 pytestmark = pytest.mark.anyio
 
 THREE_SENTENCES = "First sentence. Second sentence. Third sentence."
-FIRST, SECOND = "First sentence.", "Second sentence."
 ANSWER_FIRST, ANSWER_REST = "I hear you.", "Go on."
 ANSWER = f"{ANSWER_FIRST} {ANSWER_REST}"
 
@@ -41,7 +43,7 @@ def refusing(refusal: SpeakRefusal) -> ToolOutcome:
 
 async def answered_in_the_round(runner, *replies):
     """A spoken turn whose first sentence plays, whose second waits for it at the app and whose third is unsent, held
-    by the app; the round beside it makes the first of the replies."""
+    by the app; the turn told the hold that follows it makes the first of the replies."""
     await held_in_the_first_sentence(runner, completion(THREE_SENTENCES), *replies)
 
 
@@ -159,3 +161,38 @@ async def test_a_turn_told_a_hold_whose_first_answer_sentence_failed_without_an_
     assert runner.reports.codes_of(Event.HELD_APP_FAILED) != []
     assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
     assert sentences_spoken(runner) == []
+
+
+async def test_a_round_beside_his_parked_run_that_replies_with_text_cuts_the_run_and_answers_instead(runner):
+    """TURNS-27, TURNS-31, LOG-17, LOG-36."""
+    deciding_round = await calling_while_held(runner, completion(ANSWER), hold_round=True)
+    await runner.gateway.until_requested(3)
+    deciding_round.set()
+
+    assert await decided(runner) == ["answered"]
+    runner.app.end_sentence()
+    await runner.app.spoken_count(3)
+
+    (number,) = runner.gateway.rounds()
+    assert runner.gateway.arrivals == number
+    assert runner.app.speaks_naming_holds == [(FIRST, None), (ANSWER_FIRST, HOLD_ID), (ANSWER_REST, None)]
+    assert [text for *_, text in runner.app.said] == ["before"]
+    assert runner.app.hold_calls == []
+
+
+async def test_text_then_a_decision_call_in_the_round_beside_his_parked_run_is_answered_decided(runner):
+    """TURNS-27, TURNS-31."""
+    stopping = tool_round(tool_call("stop-call", STOP_SPEAKING_TOOL, {"id": HOLD_ID}), content=ANSWER_FIRST)
+    deciding_round = await calling_while_held(runner, stopping, completion("[silent]"), hold_round=True)
+    await runner.gateway.until_requested(3)
+    deciding_round.set()
+
+    assert await decided(runner) == ["answered"]
+    await runner.reports.until_a_turn_completed()
+
+    (number,) = runner.gateway.rounds()
+    (result,) = runner.gateway.tool_results(number + 1)
+    assert "this hold is decided" in result
+    assert runner.app.hold_calls == []
+    assert [text for text, hold in runner.app.speaks_naming_holds if hold] == [ANSWER_FIRST]
+    assert [text for *_, text in runner.app.said] == ["before"]

@@ -8,8 +8,8 @@ from agents.backend.fake_gateway import completion, tool_call, tool_round
 
 from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
-from tests.support.gateway import Gateway
-from tests.support.history import at_table
+from tests.support.gateway import Gateway, say
+from tests.support.history import at_table, settled
 from tests.support.hopin import CALL, LIMIT_SECONDS
 from tests.support.standings import AGENT_SUBJECT, active
 from tests.support.wire import hangs_once_entered
@@ -17,6 +17,7 @@ from tests.support.wire import hangs_once_entered
 TWO_SENTENCES = "First sentence. Second sentence."
 HOLD_ID = "hold-1"
 SAID = ("Ada", "wait a moment")
+FIRST, SECOND = "First sentence.", "Second sentence."
 
 
 class HeldSleeps:
@@ -104,6 +105,27 @@ async def in_a_voice_call_and_at_a_table(runner, *replies):
     runner.app.stand(AGENT_SUBJECT, active(PLACE_ID), at_table())
     runner.start()
     await runner.app.until_window_read(PLACE_ID)
+
+
+async def calling_while_held(runner, *after_the_hold, hold_round: bool = False, words: bool = True):
+    """A spoken turn whose first round writes a sentence and calls ``say`` while it plays, whose second round, held back
+    until a hold without words stands at the app, calls ``say`` again; people then talk over him. With ``hold_round``
+    the round that decides the hold waits for the returned event; with no ``words`` nobody talks over him."""
+    holding_sentence_ends(runner)
+    first, second = tool_round(say("before", PLACE_ID), content=FIRST), tool_round(say("waits", PLACE_ID))
+    await a_voice_call(runner, first, second, *after_the_hold)
+    second_round = runner.gateway.hold_request(2)
+    say_in_the_call(runner, ADDRESSED, spoken=True)
+    await runner.app.said_count(1)
+    await runner.app.spoken_count(1)
+    runner.app.hold(PLACE_ID, HOLD_ID, ("Ada", ""))
+    await settled(runner.app)
+    deciding_round = runner.gateway.hold_request(3) if hold_round else None
+    second_round.set()
+    await runner.gateway.until_answered(2)
+    if words:
+        runner.app.talk_over(PLACE_ID, SAID)
+    return deciding_round
 
 
 def deciding(tool: str, hold_id: str = HOLD_ID):
