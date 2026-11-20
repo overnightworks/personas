@@ -1,8 +1,0 @@
-claim_id = "2b1d92ac29f0470fa447c690225d189a"
-agent = "Claude d21def74-68af-4c98-89a2-70bc45cbdd6a"
-role = "builder"
-base = "ea7c4103b19c1a0f149bc6eea4c7561f8a30d7f7"
-branch = "claude/issue-348-turn-ends-with-its-last-model-round"
-scope = [".aco/ahead-of-caller.toml", "docs/ARCHITECTURE.md", "docs/log.md", "docs/turns.md", "quality/baseline.toml", "src/personas/decision.py", "src/personas/held_tools.py", "src/personas/holds.py", "src/personas/loop.py", "src/personas/mind.py", "src/personas/reporting.py", "src/personas/speech.py", "src/personas/turn_bound.py", "src/personas/turning.py", "src/personas/voice.py", "tests"]
-opened_commit = "11f6e5a392683224e75c136bed4bd5d342cf69ee"
-whole_reason = "one sender beside the mind replaces the turn's own sending, with its loop proof and documents"
