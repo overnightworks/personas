@@ -32,10 +32,12 @@ from personas.speech import (
     Answered,
     DropReason,
     Held,
+    HoldKey,
     Request,
     Sentence,
     SpeechRecord,
     hold_decided,
+    hold_forgotten,
     hold_marked_told,
     hold_read,
     hold_turn_ended,
@@ -199,16 +201,16 @@ class Mind:
         """The turn told the hold at the place ended: a hold it did not decide stays undecided."""
         self._set_speech(at, hold_turn_ended(self._speech.get(at, NO_SPEECH)))
 
-    def hold_decided(self, at: AppPlace, hold_id: str) -> None:
-        """The hold ``hold_id`` at the place was decided: it stands no more and is not decided again."""
-        self._set_speech(at, hold_decided(self._speech.get(at, NO_SPEECH), hold_id))
+    def hold_decided(self, at: AppPlace, key: HoldKey) -> None:
+        """The hold ``key`` at the place was decided: it stands no more and is not decided again."""
+        self._set_speech(at, hold_decided(self._speech.get(at, NO_SPEECH), key))
 
     def speech_continued(self, at: AppPlace, bound: float) -> None:
         """His continue at the place: the unsent sentences have the deciding turn's ``bound``."""
         self._set_speech(at, speech_continued(self._speech.get(at, NO_SPEECH), bound))
 
-    def hold_decided_id(self, at: AppPlace) -> str | None:
-        """The id of the hold decided last at the place."""
+    def hold_decided_key(self, at: AppPlace) -> HoldKey | None:
+        """The key of the hold decided last at the place."""
         return self._speech.get(at, NO_SPEECH).decided
 
     def hold_standing(self, at: AppPlace) -> Held | None:
@@ -353,7 +355,10 @@ class Mind:
         self._change()
 
     def undue(self, leaving: Callable[[AppPlace], bool]) -> None:
-        """Drops the due places for which ``leaving`` holds; with no turn running a younger place may then go first."""
+        """Drops the due places for which ``leaving`` holds, and the hold decided at each place of the speech records;
+        with no turn running a younger place may then go first."""
+        for at in [each for each in self._speech if leaving(each)]:
+            self._set_speech(at, hold_forgotten(self._speech[at]))
         remaining = without_due(self._turns, leaving)
         dropped = len(remaining.due) < len(self._turns.due)
         self._turns = remaining

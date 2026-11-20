@@ -116,7 +116,7 @@ An entry has its app and the time he took it (`at`), and is one of:
   spoken and a waiting call is never sent. His unsaid sentences include an ended turn's still waiting at the
   place. A turn told a hold sends no other call until he decided and drops no sentence by speaking: after a
   stop its sentences play at once, after a continue they follow the rest. A round or turn that ends
-  without a decision stops him, and what waited is dropped unsaid. Each id is logged once as `hold.decided`.
+  without a decision stops him, and what waited is dropped unsaid. Each id of a window generation is logged once as `hold.decided`, with its `hold_id`.
   A call made while a hold stands at the place where the turn speaks waits for his decision; a call already
   sent runs to its answer. (TURNS-31)
 - After he went on, a call of his is not sent while people said words no round told him; its result says

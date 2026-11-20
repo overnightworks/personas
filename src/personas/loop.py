@@ -647,6 +647,7 @@ class AgentLoop:
         place_kind: str | None = None,
         model: str | None = None,
         sentence_count: int | None = None,
+        hold_id: str | None = None,
     ) -> None:
         self._boundaries.report(
             StateChange(
@@ -658,6 +659,7 @@ class AgentLoop:
                 model=model,
                 failure=failure,
                 sentences=sentence_count,
+                hold_id=hold_id,
             )
         )
 
@@ -666,8 +668,7 @@ async def _run_loop(loop: AgentLoop, agent_task: asyncio.Task[object]) -> None:
     """Runs a loop; one that ends cancelled while its agent's task is not being cancelled ends the runner loud.
 
     The agent task's own count says so: it is above zero when the ownership or the runner cancels it and while its
-    group aborts after a loop's loud end. A loop task's count is not read, a cancelled lifecycle session lowers it.
-    """
+    group aborts after a loop's loud end. A loop task's count is not read, a cancelled lifecycle session lowers it."""
     return await ending_loud_when_cancelled(loop.run(), partial(unrequested_unless_cancelling, agent_task))
 
 

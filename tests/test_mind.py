@@ -26,7 +26,7 @@ from personas.entries import (
 )
 from personas.mind import Mind
 from personas.present import turn_messages
-from personas.speech import Answered
+from personas.speech import Answered, HoldKey
 
 READ_AT = datetime(2026, 11, 11, 20, 0, tzinfo=UTC)
 CALL = Visit("https://app.test/mcp", PlaceRef(kind="call", id="room-7"), "generation-1")
@@ -453,3 +453,16 @@ def test_a_change_of_the_speech_record_wakes_the_sender_of_its_place_only_and_no
     mind.sentences_released(here, ("One.",), 100.0, replacing=False)
 
     assert (waiting_here.is_set(), waiting_there.is_set(), mind.changed().is_set()) == (True, False, False)
+
+
+def test_a_place_that_leaves_the_standing_forgets_its_decided_hold_and_keeps_the_request_in_flight():
+    mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
+    here, there = AppPlace(CALL.app, CALL.place), AppPlace(OTHER_CALL.app, OTHER_CALL.place)
+    for at in (here, there):
+        one_sentence_sent(mind, at)
+        mind.hold_decided(at, HoldKey(CALL.generation, "hold-1"))
+
+    mind.undue(lambda at: at == here)
+
+    assert (mind.hold_decided_key(here), mind.hold_decided_key(there)) == (None, HoldKey(CALL.generation, "hold-1"))
+    assert mind.speech_answered(here, Answered.SPOKEN).sentence.text == "One."
