@@ -439,20 +439,18 @@ class Turning:
             for each in voiced.held.tools
         )
         person = TurnPerson(admitted.facts.principal, TURN_ROLE, admitted.groups)
+        answered_instead = False
         try:
             async with voiced.setup.backend(tools) as backend, aclosing(backend.run(request, person)) as events:
-                await voiced.answering.hear_round(
-                    events, hold, partial(self._cut_speech, voiced, hearing, DropReason.REPLACED)
-                )
+                cut_parked_run = partial(self._cut_speech, voiced, hearing, DropReason.REPLACED)
+                answered_instead = await voiced.answering.hear_round(events, hold, cut_parked_run)
         except RelayFailed:
             raise
         except TurnStopped:
             pass
-        if self._mind.hold_decided_key(self._at(admitted.place)) != hold.key:
+        if not answered_instead and self._mind.hold_decided_key(self._at(admitted.place)) != hold.key:
             await self._cut_speech(voiced, hearing)
-            ended = await self._end_hold(
-                voiced.admitted.place, voiced.record, hold, HoldOutcome.UNDECIDED, voiced.bound
-            )
+            ended = await self._end_hold(admitted.place, voiced.record, hold, HoldOutcome.UNDECIDED, voiced.bound)
             if ended is not None:
                 self._report_told_hold_dropped(voiced)
 

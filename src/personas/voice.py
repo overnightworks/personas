@@ -117,10 +117,11 @@ class Answering:
 
     async def hear_round(
         self, events: AsyncIterator[TurnEvent], hold: Held, cut_parked_run: Callable[[], Awaitable[object]]
-    ) -> None:
+    ) -> bool:
         """Reads the events of the round that decides ``hold``: its first text while the hold is undecided answers
         instead, once the parked run is cut with its waiting call unsent, and the rest of that reply follows the
-        answer. Text of a later reply says nothing; the round's calls are answered as before."""
+        answer. Text of a later reply says nothing; the round's calls are answered as before. It tells whether
+        it tried to answer, which ended the hold or tried to, once."""
         reader = ReplyReader()
         answer: HoldOutcome | None = None
         tried = False
@@ -134,6 +135,7 @@ class Answering:
                 answer = await self.instead(hold, sentences)
             if isinstance(event, ToolCallEvent | FinalEvent):
                 answer = None
+        return tried
 
     async def instead_told(self, sentences: tuple[str, ...]) -> None:
         """The sentences answer the hold the turn was told instead; the hold is decided for the turn's calls."""
