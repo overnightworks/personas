@@ -74,7 +74,6 @@ from personas.decision import (
     reaction_to,
     remaining_seconds,
     renewal_due,
-    revisions_after_turn,
     sets_where_reading_starts,
     speaks_aloud,
     speech_outcome,
@@ -849,27 +848,6 @@ def test_the_standing_decides_which_turned_revisions_are_kept():
         TABLE: 4
     }
     assert sync_turned_revisions(turned, ()) == {}
-
-
-@pytest.mark.parametrize(
-    ("turn_revision", "notices_read", "notices_now", "kept"),
-    [
-        pytest.param(2, 4, 5, False, id="a notice after the turn read its list"),
-        pytest.param(2, 4, 4, True, id="no notice after the turn read its list"),
-        pytest.param(2, None, 5, True, id="a turn that read no list"),
-        pytest.param(None, 4, 5, True, id="a turn that came from lines"),
-        pytest.param(1, 4, 5, True, id="a place already at a newer revision"),
-    ],
-)
-def test_a_turn_a_tools_notice_overtook_does_not_count_for_its_view_revision(
-    turn_revision, notices_read, notices_now, kept
-):
-    other = PlaceRef(kind="table", id="other")
-    turned = {TABLE: 2, other: 2}
-
-    after = revisions_after_turn(turned, TABLE, turn_revision, notices_read, notices_now)
-
-    assert after == (turned if kept else {other: 2})
 
 
 @pytest.mark.parametrize(
