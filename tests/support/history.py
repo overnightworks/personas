@@ -276,8 +276,11 @@ class HistoriesHoldingTheAddressedLine(KeptHistories):
     release: asyncio.Event = field(default_factory=asyncio.Event)
 
     async def write(self, client_id: str, generation: int, delta: HistoryDelta | None, turns: KeptTurns) -> None:
-        entries = () if delta is None else delta.entries
-        if not self.reached.is_set() and any(isinstance(each, KeptLine) and each.text == ADDRESSED for each in entries):
+        if not self.reached.is_set() and delta is not None and ADDRESSED in _texts_of(delta):
             self.reached.set()
             await self.release.wait()
         await super().write(client_id, generation, delta, turns)
+
+
+def _texts_of(delta: HistoryDelta) -> set[str]:
+    return {each.text for each in delta.entries if isinstance(each, KeptLine)}
