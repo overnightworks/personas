@@ -455,6 +455,17 @@ def test_a_change_of_the_speech_record_wakes_the_sender_of_its_place_only_and_no
     assert (waiting_here.is_set(), waiting_there.is_set(), mind.changed().is_set()) == (True, False, False)
 
 
+def test_a_place_dropped_from_the_due_places_keeps_its_decided_hold():
+    mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
+    here = AppPlace(CALL.app, CALL.place)
+    mind.hold_decided(here, HoldKey(CALL.generation, "hold-1"))
+    mind.due(here, Waiting(1), NOW)
+
+    mind.undue(lambda at: at == here)
+
+    assert mind.hold_decided_key(here) == HoldKey(CALL.generation, "hold-1")
+
+
 def test_a_place_that_leaves_the_standing_forgets_its_decided_hold_and_keeps_the_request_in_flight():
     mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
     here, there = AppPlace(CALL.app, CALL.place), AppPlace(OTHER_CALL.app, OTHER_CALL.place)
@@ -462,7 +473,7 @@ def test_a_place_that_leaves_the_standing_forgets_its_decided_hold_and_keeps_the
         one_sentence_sent(mind, at)
         mind.hold_decided(at, HoldKey(CALL.generation, "hold-1"))
 
-    mind.undue(lambda at: at == here)
+    mind.left(lambda at: at == here)
 
     assert (mind.hold_decided_key(here), mind.hold_decided_key(there)) == (None, HoldKey(CALL.generation, "hold-1"))
     assert mind.speech_answered(here, Answered.SPOKEN).sentence.text == "One."

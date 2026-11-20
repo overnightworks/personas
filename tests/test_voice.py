@@ -84,6 +84,7 @@ class Scenario:
             self.mind,
             self.tally,
             lambda reason, count: self.report_dropped(reason, count),
+            told=None,
             replacing=False,
         )
         hear_whole(self.speaking, text)
@@ -179,7 +180,14 @@ def test_the_first_sentence_of_a_turn_told_no_hold_replaces_the_unsent_rest_of_t
     """TURNS-33."""
     scenario = Scenario("Old.")
     later = Speaking(
-        APP, PLACE, scenario.bound, scenario.mind, scenario.tally, scenario.report_dropped, replacing=replacing
+        APP,
+        PLACE,
+        scenario.bound,
+        scenario.mind,
+        scenario.tally,
+        scenario.report_dropped,
+        told=None,
+        replacing=replacing,
     )
 
     hear_whole(later, "New.")

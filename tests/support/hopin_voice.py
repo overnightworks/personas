@@ -87,6 +87,8 @@ class AppVoice(AppPlaces):
     """Each place where people still talk over a member whose hold a continue ended: what each has said so far."""
     hold_calls: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
     """The tool and the hold id of each ``continue_speaking`` and ``stop_speaking`` that arrived."""
+    speaks_naming_holds: list[tuple[str, str | None]] = field(default_factory=list[tuple[str, str | None]])
+    """The text and the hold id (none when it names none) of each ``speak`` that arrived."""
     hold_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
     """The answer to each next ``continue_speaking`` or ``stop_speaking`` as it arrives, in order."""
 
@@ -126,16 +128,25 @@ class AppVoice(AppPlaces):
 
     async def _speak(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
         """Takes a sentence, appends it as the member's own line and answers that it starts or that it was written; a
-        held member's sentence that names no hold is refused ``held`` and changes nothing."""
+        held member's sentence that names no hold is refused ``held`` and changes nothing. A sentence that names the
+        hold ends it, cuts the held line and answers the queued sentences stopped, and one that names a hold that does
+        not stand is refused ``not_interrupted``."""
         taken = SpeakArguments.model_validate(arguments)
+        self.speaks_naming_holds.append((taken.text, taken.interrupted))
         if taken.interrupted is None and taken.place.id in self.holds:
             return ToolOutcome(SpeakRefused(refused=SpeakRefusal.HELD).model_dump_json(), is_error=True)
+        if taken.interrupted is not None and self.holds.get(taken.place.id, ("", None))[0] != taken.interrupted:
+            return ToolOutcome(SpeakRefused(refused=SpeakRefusal.NOT_INTERRUPTED).model_dump_json(), is_error=True)
         self.content.add(taken.text)
         if (held := self.held_speak) is not None:
             self.held_speak = None
             await held.wait()
         if self.speak_outcomes and (scripted := self.speak_outcomes.pop(0)) is not None:
             return scripted
+        if taken.interrupted is not None:
+            self._ends_hold(taken.place.id, taken.interrupted, keep_record=True)
+            if self.playing:
+                self.stop_speaking()
         if self.sentence_ends_held and self.playing:
             turn = asyncio.get_running_loop().create_future()
             self.waiting_speaks.append(turn)

@@ -95,8 +95,9 @@ An entry has its app and the time he took it (`at`), and is one of:
   error, so the characters end a silent turn with `[silent]`. (TURNS-26)
 - A refused sentence (`stopped` included) drops every unsent sentence at the place, is logged as
   `speak.refused`, and the turn goes on; a sentence answered as held stays first among the unsent and waits
-  for his decision. A sentence the app wrote instead is entered as written. A `speak` that fails as a call
-  ends the loop's session, and a turn running on it, into the loop's reaction. (TURNS-27)
+  for his decision. A refusal as `stopped` of a request his own stop or answer cut is no refusal and drops
+  nothing. A sentence the app wrote instead is entered as written. A `speak` that fails as a call ends the
+  loop's session, and a turn running on it, into the loop's reaction. (TURNS-27)
 - The persona's `maxDurationSeconds` bounds the turn and each sentence it released: a turn past it ends
   `limit_exceeded`; a sentence still unsent past it is dropped and logged, except while a hold stands, and a
   continue gives it the deciding turn's bound. (TURNS-28)
@@ -114,11 +115,21 @@ An entry has its app and the time he took it (`at`), and is one of:
   and that turn is told the hold first. A round or turn told a hold runs on `hold_model` when set. (TURNS-30)
 - He calls `continue_speaking(id)` to go on or `stop_speaking(id)` to drop the rest: no unsent sentence is
   spoken and a waiting call is never sent. His unsaid sentences include an ended turn's still waiting at the
-  place. A turn told a hold sends no other call until he decided and drops no sentence by speaking: after a
-  stop its sentences play at once, after a continue they follow the rest. A round or turn that ends
-  without a decision stops him, and what waited is dropped unsaid. Each id of a window generation is logged once as `hold.decided`, with its `hold_id`.
-  A call made while a hold stands at the place where the turn speaks waits for his decision; a call already
-  sent runs to its answer. (TURNS-31)
+  place. A turn told a hold sends no other call until he decided: after a stop its sentences play at once,
+  after a continue they follow the rest. A round or turn that ends without a decision stops him, and what
+  waited is dropped unsaid. Each id of a window generation is logged once as `hold.decided`, with its
+  `hold_id`. A call made while a hold stands at the place where the turn speaks waits for his decision; a
+  call already sent runs to its answer.
+  Text in a reply while the hold he was told is undecided, in the round beside his parked run or in a turn told
+  the hold, answers it instead of either call: what he had not said is dropped, logged as `speech.dropped`
+  `replaced`, the parked run is cut with its waiting call unsent, and a decision call of the same reply is
+  answered that the hold is decided. The first sentence goes to `speak` naming the hold, in a session of its
+  own, and counts in the turn's tally; the rest of the reply joins the record once the app took it, and
+  his place's sender sends it plain, also after the turn. A first sentence the app refused or never answered
+  sends no further one and is logged; unless the app refused it as `not_interrupted` he is stopped with the
+  hold's id, and the hold ends `undecided`, or `gone` for that refusal. A new hold during his answer starts no
+  round and stands for his next turn; words said over him after it start no second decision. Text in a
+  round after his decision says nothing. (TURNS-31)
 - After he went on, a call of his is not sent while people said words no round told him; its result says
   so (`sent` false, `talked_over`). (TURNS-32)
 

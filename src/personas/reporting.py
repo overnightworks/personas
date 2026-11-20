@@ -100,6 +100,11 @@ class StateChange:
 type Reporter = Callable[[StateChange], None]
 
 
+def failure_event(app: AppTarget) -> Event:
+    """The event of a call to ``app`` that failed: the held app's or a tools-only app's."""
+    return Event.HELD_APP_FAILED if app.listens else Event.TOOLS_ONLY_APP_FAILED
+
+
 class LoopReport(Protocol):
     """The loop's report of one change of the agent at an app, which the turns call."""
 

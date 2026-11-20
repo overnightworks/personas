@@ -50,7 +50,7 @@ from personas.recall import (
     search_text,
     text_refused_text,
 )
-from personas.reporting import Event, LoopReport, TurnTally, step_timer, stepping
+from personas.reporting import Event, LoopReport, TurnTally, failure_event, step_timer, stepping
 from personas.sizing import Sizing
 from personas.speech import DropReason, Held, HoldOutcome, Telling, hold_ended_as
 from personas.task_record import (
@@ -60,10 +60,10 @@ from personas.task_record import (
     failure_held_by,
     failures_leaving_with,
 )
-from personas.tool_lists import Declared, ToolLists, failure_event
+from personas.tool_lists import Declared, ToolLists
 from personas.turn_bound import TurnBound
 from personas.turn_sessions import TurnSessions
-from personas.voice import DropReporter, Speaking
+from personas.voice import Answering, DropReporter, Speaking, Voicing
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterable
@@ -131,6 +131,7 @@ class _Voiced:
     request: TurnRequest
     held: HeldTools
     speaking: Speaking
+    answering: Answering
     record: TaskRecord
     inbox: HoldInbox
     bound: TurnBound
@@ -179,6 +180,7 @@ class Turning:
         self._report_pause = report_pause
         self._report_tools_left_out = report_tools_left_out
         self._report_dropped = report_dropped
+        self._voicing = Voicing(self._sessions, app, report, clock, mind, report_dropped)
         self._left_out_reported: set[str] = set()
         self._remembering = remembering
         self._listening: tuple[PlaceRef, HoldInbox] | None = None
@@ -353,16 +355,18 @@ class Turning:
             hand_off.end()
             cut = False
             if admitted.aloud and held.inbox is not None:
-                speaking = Speaking(
-                    self._app.mcp_url,
-                    admitted.place,
-                    bound,
-                    self._mind,
+                place = admitted.place
+                speaking, answering = self._voicing.speaking(
+                    place,
+                    record,
                     tally,
-                    self._report_dropped,
-                    replacing=held.told is None,
+                    bound,
+                    held.inbox,
+                    held.told,
+                    partial(self._hold_decided, place),
+                    lambda hold: self._end_hold(place, record, hold, HoldOutcome.UNDECIDED, bound),
                 )
-                voiced = _Voiced(setup, admitted, turn, request, held, speaking, record, held.inbox, bound)
+                voiced = _Voiced(setup, admitted, turn, request, held, speaking, answering, record, held.inbox, bound)
                 final = await self._speak_along(voiced, events, tally)
                 cut = speaking.was_cut
             else:
@@ -399,7 +403,8 @@ class Turning:
         held = voiced.held
         final = None
         async for event in events:
-            speaking.hear(event)
+            if answer := speaking.hear(event):
+                await voiced.answering.instead_told(answer)
             if isinstance(event, ToolCallEvent):
                 tally.tool_call_count += 1
                 voiced.inbox.waiting = event
@@ -453,12 +458,8 @@ class Turning:
         )
         told = (
             *turn_messages(admitted.facts.name, self._mind.present, current),
-            told_hold(
-                hold.id,
-                hold.speech,
-                self._mind.speech_saying(self._at(admitted.place)),
-                self._mind.speech_unsaid(self._at(admitted.place)),
-                None if inbox.waiting is None else (inbox.waiting.name, inbox.waiting.input),
+            self._told_standing(
+                admitted, hold, None if inbox.waiting is None else (inbox.waiting.name, inbox.waiting.input)
             ),
         )
         request = voiced.request.model_copy(
@@ -476,19 +477,18 @@ class Turning:
             for each in voiced.held.tools
         )
         person = TurnPerson(admitted.facts.principal, TURN_ROLE, admitted.groups)
+        answered_instead = False
         try:
             async with voiced.setup.backend(tools) as backend, aclosing(backend.run(request, person)) as events:
-                async for _ in events:
-                    continue
+                cut_parked_run = partial(self._cut_speech, voiced, hearing, DropReason.REPLACED)
+                answered_instead = await voiced.answering.hear_round(events, hold, cut_parked_run)
         except RelayFailed:
             raise
         except TurnStopped:
             pass
-        if self._mind.hold_decided_key(self._at(admitted.place)) != hold.key:
+        if not answered_instead and self._mind.hold_decided_key(self._at(admitted.place)) != hold.key:
             await self._cut_speech(voiced, hearing)
-            ended = await self._end_hold(
-                voiced.admitted.place, voiced.record, hold, HoldOutcome.UNDECIDED, voiced.bound
-            )
+            ended = await self._end_hold(admitted.place, voiced.record, hold, HoldOutcome.UNDECIDED, voiced.bound)
             if ended is not None:
                 self._report_told_hold_dropped(voiced)
 
@@ -510,22 +510,22 @@ class Turning:
             self._report_told_hold_dropped(voiced)
         return ToolOutcome(_GONE_TEXT if ended is HoldOutcome.GONE else told, is_error=False)
 
-    async def _cut_speech(self, voiced: _Voiced, hearing: _Hearing) -> str:
+    async def _cut_speech(self, voiced: _Voiced, hearing: _Hearing, reason: DropReason = DropReason.STOPPED) -> str:
         """His stop at once: no unsent sentence is sent and the parked reply is dropped with its waiting call, unsent; a
         call already sent runs to its answer, which enters his history, before the reply is dropped. The result tells
         what was left unsaid."""
         waiting = voiced.inbox.waiting
         voiced.speaking.cut()
-        told = told_stop(self._stop_speech(voiced.admitted.place), None if waiting is None else waiting.name)
+        told = told_stop(self._stop_speech(voiced.admitted.place, reason), None if waiting is None else waiting.name)
         await voiced.inbox.calls_answered()
         hearing.cancel()
         return told
 
-    def _stop_speech(self, place: PlaceRef) -> tuple[str, ...]:
+    def _stop_speech(self, place: PlaceRef, reason: DropReason = DropReason.STOPPED) -> tuple[str, ...]:
         """The unsent sentences at the place drop; the sentences not said yet, which a request in flight may still
         answer."""
         unsaid, dropped = self._mind.speech_stopped(self._at(place))
-        self._report_dropped(DropReason.STOPPED, dropped)
+        self._report_dropped(reason, dropped)
         return unsaid
 
     def _report_told_hold_dropped(self, voiced: _Voiced) -> None:
@@ -567,11 +567,11 @@ class Turning:
         self._hold_decided(place, hold, ended)
         return ended
 
-    def _told_standing(self, admitted: Admitted, held: Held) -> str:
-        """The telling of the hold a turn starts with: what was said over him, the sentence he was in, which is
-        unknown when another pod sent it, and his unsaid sentences."""
+    def _told_standing(self, admitted: Admitted, held: Held, waiting: tuple[str, JsonObject] | None = None) -> str:
+        """The telling of the hold: what was said over him, the sentence he was in, which is unknown when another pod
+        sent it, his unsaid sentences and the call of his that waits."""
         at = self._at(admitted.place)
-        return told_hold(held.id, held.speech, self._mind.speech_saying(at), self._mind.speech_unsaid(at), None)
+        return told_hold(held.id, held.speech, self._mind.speech_saying(at), self._mind.speech_unsaid(at), waiting)
 
     async def _decide_told(
         self,

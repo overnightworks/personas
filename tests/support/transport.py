@@ -199,20 +199,23 @@ def opener_whose_request_raises(
     *,
     of_url: str | None = None,
     once: bool = False,
+    after: int = 0,
     arrived: asyncio.Event | None = None,
     when_cancelled: bool = False,
 ) -> SessionOpener:
     """A session opener of real sessions whose ``request``, an ``AppSession`` method, raises ``defect``.
 
-    With ``of_url`` only the sessions at that URL raise, and with ``once`` only the first such request does. With
-    ``when_cancelled`` the request waits, tells ``arrived`` and raises ``defect`` in place of the cancellation that
-    reaches it.
+    With ``of_url`` only the sessions at that URL raise, and with ``once`` only the first such request does. The
+    first ``after`` requests are real. With ``when_cancelled`` the request waits, tells ``arrived`` and raises
+    ``defect`` in place of the cancellation that reaches it.
     """
     raised = False
+    made = 0
 
     async def around(real: Callable[[], Awaitable[object]]) -> object:
-        nonlocal raised
-        if once and raised:
+        nonlocal raised, made
+        made += 1
+        if made <= after or (once and raised):
             return await real()
         raised = True
         if not when_cancelled:

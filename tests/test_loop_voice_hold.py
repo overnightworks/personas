@@ -8,7 +8,7 @@ from dataclasses import replace
 from http import HTTPStatus
 
 import pytest
-from agents.backend.fake_gateway import completion, tool_call, tool_round
+from agents.backend.fake_gateway import completion, tool_round
 from agents.member import CONTINUE_SPEAKING_TOOL, SPEAK_TOOL, STOP_SPEAKING_TOOL, VoiceState
 from agents.tools import ToolOutcome
 from agents.turn import FailureCode
@@ -25,48 +25,23 @@ from tests.support.gateway import BUDGET_SPENT, say, speaks_and_says
 from tests.support.history import settled
 from tests.support.hopin import CALL, LIMIT_SECONDS, SAY_TOOL
 from tests.support.transport import opener_whose_requests_raise_together, transport_closing_with_late_answers
-from tests.support.voice import TWO_SENTENCES, a_voice_call, ended_by, holding_sentence_ends, sentences_spoken
+from tests.support.voice import (
+    FIRST,
+    HOLD_ID,
+    SAID,
+    SECOND,
+    TWO_SENTENCES,
+    a_voice_call,
+    calling_while_held,
+    deciding,
+    ended_by,
+    held_in_the_first_sentence,
+    holding_sentence_ends,
+    sentences_spoken,
+)
 from tests.support.wire import cuts, refuses_with_a_server_error
 
 pytestmark = pytest.mark.anyio
-
-HOLD_ID = "hold-1"
-SAID = ("Ada", "wait a moment")
-FIRST, SECOND = TWO_SENTENCES.split(". ")[0] + ".", TWO_SENTENCES.split(". ")[1]
-
-
-def deciding(tool: str, hold_id: str = HOLD_ID):
-    return tool_round(tool_call(f"{tool}-{hold_id}", tool, {"id": hold_id}))
-
-
-async def held_in_the_first_sentence(runner, *replies, said=(SAID,), hold_id: str = HOLD_ID):
-    """A spoken turn whose first sentence plays and whose second waits for it, and the app then holds him."""
-    holding_sentence_ends(runner)
-    await a_voice_call(runner, *replies)
-    say_in_the_call(runner, ADDRESSED, spoken=True)
-    await runner.app.until_called(2)
-    runner.app.hold(PLACE_ID, hold_id, *said)
-
-
-async def calling_while_held(runner, *after_the_hold, hold_round: bool = False, words: bool = True):
-    """A spoken turn whose first round writes a sentence and calls ``say`` while it plays, whose second round, held back
-    until a hold without words stands at the app, calls ``say`` again; people then talk over him. With ``hold_round``
-    the round that decides the hold waits for the returned event; with no ``words`` nobody talks over him."""
-    holding_sentence_ends(runner)
-    first, second = tool_round(say("before", PLACE_ID), content=FIRST), tool_round(say("waits", PLACE_ID))
-    await a_voice_call(runner, first, second, *after_the_hold)
-    second_round = runner.gateway.hold_request(2)
-    say_in_the_call(runner, ADDRESSED, spoken=True)
-    await runner.app.said_count(1)
-    await runner.app.spoken_count(1)
-    runner.app.hold(PLACE_ID, HOLD_ID, ("Ada", ""))
-    await settled(runner.app)
-    deciding_round = runner.gateway.hold_request(3) if hold_round else None
-    second_round.set()
-    await runner.gateway.until_answered(2)
-    if words:
-        runner.app.talk_over(PLACE_ID, SAID)
-    return deciding_round
 
 
 def said_texts(runner) -> list[str]:
@@ -137,11 +112,7 @@ async def test_a_stop_drops_the_unsent_sentences_and_tells_him_what_was_left_uns
     assert Event.SPEAK_REFUSED not in [event for event, _ in runner.reports.reported()]
 
 
-@pytest.mark.parametrize(
-    "reply",
-    [completion("[silent]"), completion("Let me think."), BUDGET_SPENT],
-    ids=["silent", "text only", "failed round"],
-)
+@pytest.mark.parametrize("reply", [completion("[silent]"), BUDGET_SPENT], ids=["silent", "failed round"])
 async def test_a_round_that_makes_no_decision_stops_him_with_the_id_and_says_nothing(runner, reply):
     """TURNS-31."""
     await held_in_the_first_sentence(runner, completion(TWO_SENTENCES), reply)
@@ -285,7 +256,7 @@ async def test_a_call_made_while_a_hold_stands_is_never_sent_after_a_round_that_
 
 @pytest.mark.parametrize(
     "round_replies",
-    [[deciding(STOP_SPEAKING_TOOL), completion("done")], [completion("Let me think.")]],
+    [[deciding(STOP_SPEAKING_TOOL), completion("done")], [completion("[silent]")]],
     ids=["a stop", "no decision"],
 )
 async def test_a_call_already_sent_when_a_hold_cuts_the_speech_runs_to_its_answer_and_enters_with_it(

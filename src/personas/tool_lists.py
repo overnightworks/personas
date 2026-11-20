@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from personas.decision import failure_code, is_not_granted
 from personas.failures import CallFailure, CallTimedOut, within_call_time
-from personas.reporting import Event, step_timer, stepping
+from personas.reporting import Event, failure_event, step_timer, stepping
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -25,10 +25,6 @@ if TYPE_CHECKING:
     from personas.turn_sessions import TurnSessions
 
 type Declared = tuple[ToolDeclaration, ...] | None
-
-
-def failure_event(app: AppTarget) -> Event:
-    return Event.HELD_APP_FAILED if app.listens else Event.TOOLS_ONLY_APP_FAILED
 
 
 class ToolLists:
