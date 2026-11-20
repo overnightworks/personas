@@ -19,8 +19,8 @@ WIMPLE_WHITE: Colour = (240, 236, 226)
 VEIL_BLACK: Colour = (20, 19, 22)
 BODY = 0.006
 # Rows and columns of each shell; the wimple's are fine enough that its edge round the face and its band run smooth.
-WIMPLE_GRID = (120, 112)
-VEIL_GRID = (120, 64)
+WIMPLE_GRID = (88, 48)
+VEIL_GRID = (88, 30)
 OPEN = math.radians
 CLOSING_STEPS = 6
 

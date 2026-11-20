@@ -37,7 +37,7 @@ TUNIC = (
     (1.455, (0.066, 0.060, 0.078)),
     (1.47, (0.060, 0.056, 0.076)),
 )
-TUNIC_RINGS = 48
+TUNIC_RINGS = 36
 TUNIC_PLEATS = Pleats(count=18.0, depth=0.016, start=0.95, full=0.3)
 # The scapular is a panel over the tunic's front and one over its back, each this many columns either side of the
 # middle, standing this far off the cloth, from this height to this height.
