@@ -387,7 +387,7 @@ async def test_a_decision_the_app_could_not_take_is_told_to_him_as_not_made_and_
     assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
 
 
-async def test_a_call_of_his_that_is_no_decision_and_a_second_decision_are_refused_in_the_round(runner):
+async def test_a_turn_told_the_hold_refuses_a_call_of_his_that_is_no_decision_and_a_second_decision(runner):
     replies = [
         tool_round(say("early", PLACE_ID)),
         deciding(CONTINUE_SPEAKING_TOOL),
