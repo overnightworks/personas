@@ -358,13 +358,3 @@ def unstored_mind() -> Mind:
     mind = Mind(DEFAULT_HISTORY_BYTES, DEFAULT_HISTORY_KEEP_BYTES, DEFAULT_BUDGET_PAUSE_CAP_SECONDS)
     mind.written(sys.maxsize)
     return mind
-
-
-# The steps from an app answering a listing to the turn that awaits it reacting: the listing task, the group that lists
-# the apps side by side and the turn.
-STEPS_UNTIL_THE_TURN_HAS_ITS_LISTING = 5
-
-
-async def let_the_turn_have_its_listing() -> None:
-    for _ in range(STEPS_UNTIL_THE_TURN_HAS_ITS_LISTING):
-        await asyncio.sleep(0)
