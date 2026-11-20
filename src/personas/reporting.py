@@ -8,7 +8,7 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, Protocol
 from urllib.parse import urlsplit
 
 from anyio import BrokenResourceError, ClosedResourceError
@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     import httpx2
     from agents.turn import TurnUsage
 
+    from personas.config import AppTarget
     from personas.decision import TurnEnding
     from personas.entries import InputSizes
     from personas.failures import CallFailure
@@ -78,7 +79,7 @@ class StateChange:
     the agent's turns run on, when it has a persona. An invitation the loop leaves out says its place's kind and the
     reason as the code. A pause of his turns says its reason as the code and its wait in seconds. Tools left out for an
     earlier app's of the same name say how many. Sentences dropped unsent say how many and why, as the code. Lines
-    that never came say how many. A call that failed says its
+    that never came say how many. A hold decided says its id. A call that failed says its
     failure: the line holds its HTTP status, the MCP method that failed and a closed reason.
     """
 
@@ -93,9 +94,24 @@ class StateChange:
     tool_count: int | None = None
     failure: CallFailure | None = None
     sentences: int | None = None
+    hold_id: str | None = None
 
 
 type Reporter = Callable[[StateChange], None]
+
+
+class LoopReport(Protocol):
+    """The loop's report of one change of the agent at an app, which the turns call."""
+
+    def __call__(
+        self,
+        event: Event,
+        code: str | None = None,
+        app: AppTarget | None = None,
+        failure: CallFailure | None = None,
+        *,
+        hold_id: str | None = None,
+    ) -> None: ...
 
 
 _LINE_OF: Final = {
@@ -151,6 +167,8 @@ def _fields_of(change: StateChange) -> dict[str, str | int | float]:
         fields["sentence_count"] = change.sentences
     if change.model is not None:
         fields["model"] = change.model
+    if change.hold_id is not None:
+        fields["hold_id"] = change.hold_id
     return fields
 
 
