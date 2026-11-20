@@ -392,6 +392,12 @@ class ScriptedSessions:
     def use_token(self, token) -> None:
         pass
 
+    def kept_tools(self):
+        return None
+
+    def tools_notices(self) -> int:
+        return 0
+
     @asynccontextmanager
     async def changes(self):
         yield _Wakes(2)

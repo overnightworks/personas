@@ -43,7 +43,7 @@ from agents.tools import JsonObject, ToolDeclaration, ToolEffect, ToolImage, Too
 from agents.turn import TOOL_IMAGE_MEDIA_TYPE
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
-from mcp.client.subscriptions import Subscription, SubscriptionLost, listen
+from mcp.client.subscriptions import Subscription, SubscriptionLost, ToolsListChanged, listen
 from mcp.shared.exceptions import MCPError
 from mcp_types import (
     CONNECTION_CLOSED,
@@ -148,6 +148,18 @@ class AppSession(Protocol):
 
     async def declared_tools(self) -> tuple[ToolDeclaration, ...]:
         """The first page of the app's tools; raises ``StatusFailure``, ``Unreachable`` or ``UnusableAnswer``."""
+        ...
+
+    def kept_tools(self) -> tuple[ToolDeclaration, ...] | None:
+        """The list ``declared_tools`` kept, or ``None`` when there is none.
+
+        A list is kept while a stream that honoured the app's tools notice is open and no notice, acknowledgement or
+        stream end came after the listing started.
+        """
+        ...
+
+    def tools_notices(self) -> int:
+        """How many tools notices this session received."""
         ...
 
     async def invoke(self, name: str, arguments: JsonObject) -> ToolOutcome:
@@ -263,6 +275,13 @@ class _McpAppSession:
     session: ClientSession
     auth: _BearerAuth
     stream_seconds: float
+    _honoured: bool = False
+    """Whether the open stream was acknowledged with the tools notice honoured."""
+    _list_counter: int = 0
+    """Moves at each acknowledgement, each tools notice and each stream end; a listing that started before it moved is
+    not kept."""
+    _notices: int = 0
+    _kept: tuple[ToolDeclaration, ...] | None = None
 
     def use_token(self, token: Secret) -> None:
         self.auth.token = token
@@ -273,11 +292,15 @@ class _McpAppSession:
         deadline = asyncio.timeout(self.stream_seconds)
         raised_in_body: Exception | None = None
         try:
-            async with deadline, listen(self.session, resource_subscriptions=[STANDING_URI]) as subscription:
+            async with (
+                deadline,
+                listen(self.session, resource_subscriptions=[STANDING_URI], tools_list_changed=True) as subscription,
+            ):
                 if STANDING_URI not in (subscription.honored.resource_subscriptions or ()):
                     raise UnusableAnswer(LISTEN_NOT_HONORED_CODE)
+                self._move_list_counter(honoured=bool(subscription.honored.tools_list_changed))
                 try:
-                    yield _wakes_of(subscription, self.auth)
+                    yield _wakes_of(subscription, self.auth, self._tools_notice)
                 except Exception as error:
                     raised_in_body = error
                     raise
@@ -289,6 +312,23 @@ class _McpAppSession:
             if isinstance(error, TimeoutError) and deadline.expired():
                 raise Unreachable("the stream outlasted its deadline") from None
             raise _failure_of(error, self.auth.last_answer) from None
+        finally:
+            self._move_list_counter(honoured=False)
+
+    def _move_list_counter(self, *, honoured: bool) -> None:
+        self._honoured = honoured
+        self._list_counter += 1
+        self._kept = None
+
+    def _tools_notice(self) -> None:
+        self._notices += 1
+        self._move_list_counter(honoured=self._honoured)
+
+    def kept_tools(self) -> tuple[ToolDeclaration, ...] | None:
+        return self._kept
+
+    def tools_notices(self) -> int:
+        return self._notices
 
     async def read_standing(self) -> MemberStanding:
         return _record_of(MemberStanding, await self._asked(self._read(STANDING_URI)))
@@ -308,11 +348,15 @@ class _McpAppSession:
             return None
 
     async def declared_tools(self) -> tuple[ToolDeclaration, ...]:
+        started = self._list_counter
         listing = await self._asked(self.session.list_tools())
         try:
-            return tuple(_declaration_of(tool) for tool in listing.tools)
+            declared = tuple(_declaration_of(tool) for tool in listing.tools)
         except ValidationError:
             raise UnusableAnswer(INVALID_ANSWER_CODE) from None
+        if self._honoured and self._list_counter == started:
+            self._kept = declared
+        return declared
 
     async def accept(self, accept: Accept) -> Refusal | None:
         arguments = AcceptInvitationArguments(
@@ -385,10 +429,15 @@ class _McpAppSession:
             _CALL_ANSWER.reset(reset)
 
 
-async def _wakes_of(subscription: Subscription, auth: _BearerAuth) -> AsyncIterator[object]:
+async def _wakes_of(
+    subscription: Subscription, auth: _BearerAuth, on_tools_notice: Callable[[], None]
+) -> AsyncIterator[object]:
     try:
         async for wake in subscription:
-            yield wake
+            if isinstance(wake, ToolsListChanged):
+                on_tools_notice()
+            else:
+                yield wake
     except SubscriptionLost as lost:
         raise _failure_of(lost, auth.last_answer) from None
 

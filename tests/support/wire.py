@@ -83,10 +83,13 @@ class Reply:
     async def open_stream(self) -> None:
         await self._start(HTTPStatus.OK, EVENT_STREAM)
 
-    async def acknowledge(self, honored: list[str]) -> None:
+    async def acknowledge(self, honored: list[str], *, tools: bool = False) -> None:
         notification = SubscriptionsAcknowledgedNotification(
             params=SubscriptionsAcknowledgedNotificationParams(
-                notifications=SubscriptionFilter(resource_subscriptions=honored or None), _meta=self._meta
+                notifications=SubscriptionFilter(
+                    resource_subscriptions=honored or None, tools_list_changed=tools or None
+                ),
+                _meta=self._meta,
             )
         )
         await self.event(notification.model_dump(by_alias=True, mode="json", exclude_none=True) | {"jsonrpc": "2.0"})

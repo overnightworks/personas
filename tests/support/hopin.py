@@ -195,6 +195,11 @@ class FakeApp(AppVoice):
     turn_state_taken: asyncio.Condition = field(default_factory=asyncio.Condition)
     turn_state_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
     """The answer to each next statement as it arrives, in order, before the app judges it."""
+    announces_tools: bool = False
+    """Whether the front offers tools per member and tells a listener when the offer changes."""
+    withheld_tools: set[str] = field(default_factory=set[str])
+    """The declared tools the app does not offer now."""
+    held_offer: asyncio.Event | None = None
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -203,7 +208,26 @@ class FakeApp(AppVoice):
             resolve_person=lambda scope: Principal(iss=ISSUER, sub=scope[_SUBJECT_KEY]),
             resources=self,
             changes=self.changes,
+            offered_tools=self._offer if self.announces_tools else None,
         )
+
+    async def _offer(self, principal: Principal) -> set[str]:
+        """Every declared tool but the withheld ones; a listing waits while the offer is held."""
+        offered = {tool.declaration.name for tool in self._tools()} - self.withheld_tools
+        held, self.held_offer = self.held_offer, None
+        if held is not None:
+            await held.wait()
+        return offered
+
+    def hold_next_offer(self) -> asyncio.Event:
+        """The next time the app reads its offer, for a listing or a call, it answers once the event is set."""
+        self.held_offer = asyncio.Event()
+        return self.held_offer
+
+    async def change_offer(self, subject: str, *, withheld: set[str]) -> None:
+        """The offer changes, and the app tells the member's listeners once it is visible."""
+        self.withheld_tools = withheld
+        await self.changes.tools_changed(Principal(iss=ISSUER, sub=subject))
 
     def _tools(self) -> list[PersonTool]:
         tools = [

@@ -301,10 +301,19 @@ def restored_logging() -> Iterator[None]:
 
 
 @pytest.fixture
-async def runner(caplog: pytest.LogCaptureFixture, restored_logging: None, files: Files) -> AsyncIterator[Harness]:
+def announces_tools() -> bool:
+    """Whether the runner's app offers tools per member and tells its listeners when the offer changes; a module
+    overrides it."""
+    return False
+
+
+@pytest.fixture
+async def runner(
+    caplog: pytest.LogCaptureFixture, restored_logging: None, files: Files, announces_tools: bool
+) -> AsyncIterator[Harness]:
     """The runner's world; at its end no log line holds a secret, a token or the content of a tool."""
     configure_logging_into(caplog)
-    app = FakeApp()
+    app = FakeApp(announces_tools=announces_tools)
     async with app.serving() as app_url:
         harness = Harness(files, app, app_url)
         yield harness

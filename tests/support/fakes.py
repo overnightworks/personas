@@ -182,6 +182,12 @@ class FakeSession:
     def use_token(self, token: Secret) -> None:
         self.bearer = token
 
+    def kept_tools(self) -> None:
+        return None
+
+    def tools_notices(self) -> int:
+        return 0
+
     @property
     def opened(self) -> int:
         return len(self.opened_with)

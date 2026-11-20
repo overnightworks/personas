@@ -39,6 +39,7 @@ from personas.decision import (
     perceive,
     reaction_to,
     renewal_due,
+    revisions_after_turn,
     speaks_aloud,
     sync_turned_revisions,
     turn_ending,
@@ -128,6 +129,9 @@ class ActiveTurn:
     task: asyncio.Task[None]
     place: PlaceRef
     tally: TurnTally
+    record: TaskRecord
+    revision: int | None
+    """The view revision the turn was started for; none for a turn that came from lines."""
     cancel_requested: bool = False
 
 
@@ -521,12 +525,22 @@ class AgentLoop:
             wait.add(wait_reason=due.waited_on.value)
             wait.end()
             tally = start_turn_tally(self._agent.client_id, self._app.mcp_url)
-            task = turns.create_task(self._take_once_kept(claimed, session, setup, admitted, tally))
-            self._turn = ActiveTurn(task, place, tally)
-            task.add_done_callback(self._turn_over)
+            record = TaskRecord()
+            task = turns.create_task(self._take_once_kept(claimed, session, setup, admitted, record, tally))
+            occasion = admitted.occasion
+            self._turn = ActiveTurn(
+                task, place, tally, record, occasion.revision if isinstance(occasion, Waiting) else None
+            )
+            task.add_done_callback(partial(self._turn_over, session))
 
     async def _take_once_kept(
-        self, claimed: int, session: AppSession, setup: TurnSetup, admitted: Admitted, tally: TurnTally
+        self,
+        claimed: int,
+        session: AppSession,
+        setup: TurnSetup,
+        admitted: Admitted,
+        record: TaskRecord,
+        tally: TurnTally,
     ) -> None:
         """Takes the turn, which waits for its claim, the ``claimed``-th change of his mind, to be kept in the store
         and for its thinking to be answered before its first model request."""
@@ -534,7 +548,7 @@ class AgentLoop:
             session,
             setup,
             admitted,
-            TaskRecord(),
+            record,
             tally,
             partial(self._claim_kept_and_thinking, claimed, admitted.place),
         )
@@ -546,8 +560,9 @@ class AgentLoop:
         with stepping(step_timer("thinking.ended", self._agent.client_id, self._app.mcp_url)):
             await self._turn_states.turn_started(place)
 
-    def _turn_over(self, task: asyncio.Task[None]) -> None:
-        """The one writer of ``turn.ended``, whatever way the task ended."""
+    def _turn_over(self, session: AppSession, task: asyncio.Task[None]) -> None:
+        """The one writer of ``turn.ended``, whatever way the task ended. A view revision whose turn read its tool list
+        before a tools notice that came before the turn ended is not turned yet."""
         turn, self._turn = self._turn, None
         assert turn is not None  # noqa: S101 - the loop clears its turn only here and once per task
         cancelled = task.cancelled()
@@ -559,6 +574,9 @@ class AgentLoop:
             answered=tally.answered,
         )
         tally.end(ending)
+        self._turned_revisions = revisions_after_turn(
+            self._turned_revisions, turn.place, turn.revision, turn.record.tools_notices_read, session.tools_notices()
+        )
         self._turn_states.turn_ended(turn.place, ending)
         self._mind.hold_turn_ended(AppPlace(self._app.mcp_url, turn.place))
         if cancelled and not tally.answered and not turn.cancel_requested:

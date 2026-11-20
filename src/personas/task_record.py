@@ -71,9 +71,11 @@ async def ending_loud_when_cancelled[T](work: Awaitable[T], loud_end: Callable[[
 
 @dataclass
 class TaskRecord:
-    """What one running task holds of itself: the first defect a request of it met, whatever way it then ends."""
+    """What one running task holds of itself: the first defect a request of it met, whatever way it then ends, and how
+    many tools notices its app's session had received when it read its tool list."""
 
     defect: Exception | None = None
+    tools_notices_read: int | None = None
 
     def note(self, error: Exception) -> None:
         """Keeps the first defect among the leaves of an error the task's session body left with.
