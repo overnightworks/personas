@@ -620,10 +620,11 @@ def _take_after(window: PlaceWindow, last_seq: int) -> Perception:
 
 def waking_line(new: Sequence[PlaceEntry], *, serves_view: bool) -> PlaceEntry | None:
     """The newest of the lines taken at a place that makes a turn due, none when none does: at a place with a view none
-    does, since its view alone calls him; at any other place a line that is neither his own nor an act does."""
+    does, since its view alone calls him; at any other place a line that is neither his own, an act nor followed by
+    more of the same speaker's speech does."""
     if serves_view:
         return None
-    return next((line for line in reversed(new) if not (line.own or line.act)), None)
+    return next((line for line in reversed(new) if not (line.own or line.act or line.continues)), None)
 
 
 def offered_declarations(

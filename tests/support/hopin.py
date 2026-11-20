@@ -321,6 +321,7 @@ class FakeApp(AppVoice):
                 spoken=line.spoken,
                 cut=line.cut,
                 act=line.act,
+                continues=line.continues,
                 traceparent=line.traceparent,
             )
             for line in self.lines.get(place.id, [])
