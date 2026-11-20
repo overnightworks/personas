@@ -1,8 +1,0 @@
-claim_id = "af461d3c3ca1469186381f3e320572a2"
-agent = "Claude d32028b7-a7a0-48ff-8c29-65b317313c7d"
-role = "builder"
-base = "3e143015da1f3e6bb8ef2000dd1ab98b5c1df8b5"
-branch = "claude/issue-353-turn-lists-tools-beside-its-claim"
-scope = ["docs/ARCHITECTURE.md", "docs/log.md", "src/personas/loop.py", "src/personas/tool_lists.py", "src/personas/turning.py", "src/personas/write_through.py", "tests"]
-opened_commit = "757beb6205c4151441525a413488c102283ac724"
-whole_reason = "one gate, claim kept then thinking answered, moved from before the setup to before the first request, with the two owners it needs room from moved out whole"
