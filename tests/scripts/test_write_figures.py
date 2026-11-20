@@ -15,9 +15,11 @@ def test_the_writer_writes_one_file_per_persona(tmp_path):
     main([str(tmp_path / "characters")])
 
     assert sorted(path.name for path in (tmp_path / "characters").iterdir()) == [
+        "curie.vrm",
         "humboldt.vrm",
         "leonardo.room.glb",
         "leonardo.vrm",
+        "lovelace.vrm",
         "mozart.room.glb",
         "mozart.vrm",
     ]

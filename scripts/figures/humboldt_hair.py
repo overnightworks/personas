@@ -5,14 +5,10 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING
 
-from figures.figure_body import open_point
-from figures.figure_head import NECK_BINDER
-from figures.figure_parts import Colour, Material, Part, mixed, part
-from figures.figure_skeleton import EYE_HEIGHT
-from figures.figure_surfaces import shell, smoothstep, spread
+from figures.figure_hair import hair_cap, strands
 
 if TYPE_CHECKING:
-    from figures.figure_shapes import Vector
+    from figures.figure_parts import Part
 
 BROWN = (122, 104, 90)
 GREY = (160, 152, 144)
@@ -29,39 +25,13 @@ HAIR = (
     (0.118, (0.030, 0.034, 0.042, math.radians(0.0))),
     (0.130, (0.004, 0.004, 0.005, math.radians(0.0))),
 )
-HAIR_COURSE = tuple((EYE_HEIGHT + level, keys) for level, keys in HAIR)
-ROWS = 24
-COLUMNS = 48
-# The hair lies on the skull this far above the skin at its edge and stands out by up to TOUSLE more where it is tufted.
-BASE = 0.003
 BODY = 0.009
+# Tufts stand out from the skull by up to TOUSLE more.
 TOUSLE = 0.006
 TUFTS = 9.0
-# The height over which the hair thickens from its edge.
-EDGE = 0.03
+# Grey-brown hair with greyer strands.
+STRANDS = strands(BROWN, GREY, 0.3, 0.25, 30.0, 9.0)
 
 
 def humboldt_hair() -> list[Part]:
-    outer = [[_hair_point(level, column, BODY) for column in range(COLUMNS + 1)] for level in _levels()]
-    inner = [[_hair_point(level, column, 0.0) for column in range(COLUMNS + 1)] for level in _levels()]
-    return [part(shell(outer, inner), _strands, Material.HAIR, NECK_BINDER)]
-
-
-def _levels() -> list[float]:
-    return spread(HAIR[0][0], HAIR[-1][0], ROWS)
-
-
-def _hair_point(level: float, column: int, body: float) -> Vector:
-    """The hair at a level above the eye line and a column round the head; tufts stand out from the skull, more towards
-    the crown, and the hair is thinnest at its edge."""
-    height = EYE_HEIGHT + level
-    thickness = BASE + body * smoothstep(HAIR[0][0], HAIR[0][0] + EDGE, level)
-    tuft = 0.5 - 0.5 * math.cos(TUFTS * 2.0 * math.pi * column / COLUMNS + 7.0 * math.sin(23.0 * level))
-    lift = TOUSLE * tuft * smoothstep(-0.03, 0.08, level) if body else 0.0
-    return open_point(HAIR_COURSE, height, column / COLUMNS, thickness + lift)
-
-
-def _strands(position: Vector) -> Colour:
-    """Grey-brown hair with greyer strands that wander as they lie."""
-    x, height, z = position
-    return mixed(BROWN, GREY, 0.3 + 0.25 * math.cos(30.0 * math.atan2(x, z) + 9.0 * height))
+    return hair_cap(HAIR, STRANDS, BODY, TOUSLE, TUFTS)
