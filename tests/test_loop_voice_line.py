@@ -22,6 +22,7 @@ from tests.support.voice import (
     a_voice_call,
     calling_while_held,
     decided,
+    heard_after_the_second_hold,
     held_in_the_first_sentence,
     play_out,
     refused_ends_the_hold_as_the_app_says,
@@ -238,7 +239,7 @@ async def test_a_second_hold_after_the_short_line_is_decided_as_the_first(runner
     assert await decided(runner, 2) == ["short_line", outcome]
     before_the_line = [] if told else [FIRST]
     after_the_line = [FIRST, SECOND, THIRD] if told else [SECOND, THIRD]
-    heard = [*before_the_line, LINE, *(after_the_line if outcome == "continued" else [])]
+    heard = heard_after_the_second_hold(outcome, [*before_the_line, LINE], after_the_line)
     await play_out(runner, len(heard))
     await runner.reports.until_a_turn_completed()
 

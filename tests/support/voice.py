@@ -164,15 +164,33 @@ def sentences_spoken(runner) -> list[str]:
 THIRD = "Third sentence."
 THREE_SENTENCES = "First sentence. Second sentence. Third sentence."
 SECOND_HOLD = "hold-2"
+SECOND_LINE = "Yes, one moment."
+SECOND_ANSWER = "I hear you."
 SECOND_HOLD_DECISIONS = pytest.mark.parametrize(
     ("reply", "outcome"),
     [
         (deciding(CONTINUE_SPEAKING_TOOL, SECOND_HOLD), "continued"),
         (deciding(STOP_SPEAKING_TOOL, SECOND_HOLD), "stopped"),
         (completion("[silent]"), "undecided"),
+        (
+            tool_round(tool_call("line-hold-2", CONTINUE_SPEAKING_TOOL, {"id": SECOND_HOLD, "line": SECOND_LINE})),
+            "short_line",
+        ),
+        (completion(SECOND_ANSWER), "answered"),
     ],
-    ids=["go on", "stop", "no decision"],
+    ids=["go on", "stop", "no decision", "short line", "answer instead"],
 )
+
+
+def heard_after_the_second_hold(outcome: str | None, spoken: list[str], rest: list[str]) -> list[str]:
+    """What the app has played once the second hold is decided: what had played, and then what the decision lets
+    follow it, the rest of the turn unless he stops or answers instead."""
+    follows = {
+        "continued": rest,
+        "short_line": [SECOND_LINE, *rest],
+        "answered": [SECOND_ANSWER],
+    }
+    return [*spoken, *follows.get(outcome or "", [])]
 
 
 async def decided(runner, count: int = 1) -> list[str | None]:
