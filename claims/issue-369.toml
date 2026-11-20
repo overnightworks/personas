@@ -1,8 +1,0 @@
-claim_id = "b6d97bd1a1724e339d6dea1b42da60c1"
-agent = "Claude d32028b7-a7a0-48ff-8c29-65b317313c7d"
-role = "builder"
-base = "3e143015da1f3e6bb8ef2000dd1ab98b5c1df8b5"
-branch = "claude/issue-369-a-hold-id-is-decided-once-per-window-gen"
-scope = ["docs/log.md", "docs/turns.md", "src/personas/holds.py", "src/personas/loop.py", "src/personas/mind.py", "src/personas/reporting.py", "src/personas/speech.py", "src/personas/turning.py", "tests"]
-opened_commit = "d02802458851540370062fa647eb478c870b89c0"
-whole_reason = "one invariant, a hold id is decided once per place and window generation, held by the record, the hold inbox and the log line"
