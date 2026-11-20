@@ -130,3 +130,54 @@ async def test_a_turn_after_the_stream_ended_and_was_acknowledged_again_lists_ag
     await a_turn_at_the_call(runner, 2)
 
     assert listings_written(caplog) == 2
+
+
+async def test_a_listing_across_the_end_and_the_acknowledgement_of_a_stream_is_not_kept_and_the_next_turn_lists_again(
+    runner,
+):
+    """TURNS-18."""
+    line_said = asyncio.Event()
+    ends = asyncio.Event()
+    acknowledges = asyncio.Event()
+    second_line = asyncio.Event()
+    stays = asyncio.Event()
+
+    async def honours_the_tools_notice_until_it_ends(reply) -> None:
+        await reply.open_stream()
+        await reply.acknowledge([STANDING_URI], tools=True)
+        await line_said.wait()
+        await reply.pulse(place_window_uri(CALL_PLACE))
+        await ends.wait()
+        await reply.complete()
+
+    async def honours_the_tools_notice_once_let(reply) -> None:
+        await reply.open_stream()
+        await acknowledges.wait()
+        await reply.acknowledge([STANDING_URI], tools=True)
+        await reply.pulse(place_window_uri(CALL_PLACE))
+        await second_line.wait()
+        await reply.pulse(place_window_uri(CALL_PLACE))
+        await stays.wait()
+        await reply.complete()
+
+    runner.gateway = Gateway(completion("done"), completion("done"))
+    runner.app.script(LISTEN, honours_the_tools_notice_until_it_ends, honours_the_tools_notice_once_let)
+    await restarted_in_the_call(runner)
+    listing = runner.app.hold_next_offer()
+    say_in_the_call(runner, ADDRESSED)
+    line_said.set()
+    await runner.app.log.until(LIST_TOOLS)
+    ends.set()
+    await runner.app.log.until(LISTEN, 2)
+    reads = runner.app.window_reads(CALL_PLACE.id)
+    acknowledges.set()
+    await runner.app.until_window_read(CALL_PLACE.id, reads + 1)
+    listing.set()
+    await runner.reports.until_a_turn_completed()
+    listed = runner.app.log.count(LIST_TOOLS)
+    say_in_the_call(runner, f"{ADDRESSED} Number 2.")
+    second_line.set()
+    await runner.reports.until_a_turn_completed(count=2)
+    stays.set()
+
+    assert runner.app.log.count(LIST_TOOLS) == listed + 1
