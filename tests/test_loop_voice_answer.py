@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
-from agents.member import STOP_SPEAKING_TOOL, SpeakRefusal, SpeakRefused
+from agents.member import STOP_SPEAKING_TOOL, SpeakRefusal
 from agents.tools import ToolOutcome
 
 from personas.failures import leaves_of
@@ -17,31 +17,26 @@ from tests.support.transport import opener_whose_request_raises
 from tests.support.voice import (
     FIRST,
     HOLD_ID,
+    REFUSALS,
     SAID,
     SECOND,
+    THREE_SENTENCES,
     a_voice_call,
     calling_while_held,
+    decided,
     deciding,
     ended_by,
     held_in_the_first_sentence,
+    refused_ends_the_hold_as_the_app_says,
+    refusing,
     sentences_spoken,
 )
 from tests.support.wire import refuses_with_a_server_error
 
 pytestmark = pytest.mark.anyio
 
-THREE_SENTENCES = "First sentence. Second sentence. Third sentence."
 ANSWER_FIRST, ANSWER_REST = "I hear you.", "Go on."
 ANSWER = f"{ANSWER_FIRST} {ANSWER_REST}"
-
-
-async def decided(runner, count: int = 1) -> list[str | None]:
-    await runner.reports.until(Event.HOLD_DECIDED, count=count)
-    return runner.reports.codes_of(Event.HOLD_DECIDED)
-
-
-def refusing(refusal: SpeakRefusal) -> ToolOutcome:
-    return ToolOutcome(SpeakRefused(refused=refusal).model_dump_json(), is_error=True)
 
 
 async def answered_in_the_round(runner, *replies):
@@ -96,26 +91,14 @@ async def test_text_in_the_round_after_his_decision_says_nothing(runner):
     assert "Nothing to add." not in [text for text, _ in runner.app.speaks_naming_holds]
 
 
-@pytest.mark.parametrize(
-    ("refusal", "outcome", "stops"),
-    [
-        pytest.param(SpeakRefusal.TOO_LONG, "undecided", [(STOP_SPEAKING_TOOL, HOLD_ID)], id="refused"),
-        pytest.param(SpeakRefusal.NOT_INTERRUPTED, "gone", [], id="not interrupted"),
-    ],
-)
+@REFUSALS
 async def test_a_first_answer_sentence_the_app_refused_sends_no_further_one_and_ends_the_hold_as_the_app_says(
     runner, refusal, outcome, stops
 ):
     """TURNS-27, LOG-17."""
-    runner.app.speak_outcomes.extend([None, None, refusing(refusal)])
-    await answered_in_the_round(runner, completion(ANSWER))
-
-    assert await decided(runner) == [outcome]
-    await runner.reports.until_a_turn_completed()
-
-    assert runner.app.hold_calls == stops
-    assert runner.reports.codes_of(Event.SPEAK_REFUSED) == [refusal.value]
-    assert [text for text, _ in runner.app.speaks_naming_holds if text == ANSWER_REST] == []
+    await refused_ends_the_hold_as_the_app_says(
+        runner, lambda: answered_in_the_round(runner, completion(ANSWER)), refusal, outcome, stops, unsent=ANSWER_REST
+    )
 
 
 async def test_a_new_hold_during_his_answer_starts_no_round_and_is_told_to_his_next_turn(runner):

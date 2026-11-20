@@ -25,16 +25,18 @@ class Sentence:
 
 @dataclass(frozen=True)
 class Request:
-    """The request to ``speak`` that is open for a sentence, whether his own stop reached it and whether his own line
-    for it entered before its answer did."""
+    """The request to ``speak`` that is open for a sentence, whether his own stop reached it, whether his own line
+    for it entered before its answer did and, once a short line of his cut the hold, the bound the sentence keeps if the
+    app drops it."""
 
     sentence: Sentence
     cut: bool = False
     line_entered: bool = False
+    line_bound: float | None = None
 
     def cut_by_stop(self, refusal: SpeakRefusal) -> bool:
-        """Whether the refusal is the app's answer to his own stop, which is no news."""
-        return self.cut and refusal is SpeakRefusal.STOPPED
+        """Whether the refusal is the app's answer to his own stop or to his short line, which is no news."""
+        return (self.cut or self.line_bound is not None) and refusal is SpeakRefusal.STOPPED
 
 
 class Answered(StrEnum):
@@ -140,6 +142,8 @@ def speech_answered(record: SpeechRecord, answered: Answered) -> SpeechRecord:
             return _revised(ended, unsent=(request.sentence, *record.unsent), held_unread=True)
         case Answered.STOPPED if request.cut:
             return ended
+        case Answered.STOPPED if request.line_bound is not None:
+            return _revised(ended, unsent=(Sentence(request.sentence.text, request.line_bound), *record.unsent))
         case Answered.REFUSED | Answered.STOPPED:
             return _revised(ended, unsent=())
         case _:
@@ -167,6 +171,15 @@ def speech_stopped(record: SpeechRecord) -> tuple[SpeechRecord, int]:
     answer."""
     cut = None if record.in_flight is None else replace(record.in_flight, cut=True)
     return replace(record, in_flight=cut, unsent=()), len(record.unsent)
+
+
+def speech_line_said(record: SpeechRecord, bound: float) -> SpeechRecord:
+    """His short line before he goes on: the unsent sentences have the deciding turn's bound, and the sentence in flight
+    goes back first among them when the app drops it for the line."""
+    continued = speech_continued(record, bound)
+    if continued.in_flight is None:
+        return continued
+    return _revised(continued, in_flight=replace(continued.in_flight, line_bound=bound))
 
 
 def speech_started(record: SpeechRecord, text: str) -> SpeechRecord:
@@ -226,6 +239,7 @@ class HoldOutcome(StrEnum):
     """How a hold ended on the runner's side, as the one line per hold id reports it."""
 
     CONTINUED = "continued"
+    SHORT_LINE = "short_line"
     STOPPED = "stopped"
     ANSWERED = "answered"
     UNDECIDED = "undecided"
