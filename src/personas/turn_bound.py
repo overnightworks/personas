@@ -101,13 +101,16 @@ class TurnBound:
             if enough(owed.count) or (held_ends and owed.held is not None):
                 return owed
             self.stop_if_past()
-            await self.first_of(taken, self.deadline(), *self._lapse_of(owed.until))
+            ends = [self.deadline()]
+            if (lapse := self._lapse_of(owed.until)) is not None:
+                ends.append(lapse)
+            await self.first_of(taken, *ends)
 
-    def _lapse_of(self, until: float | None) -> tuple[asyncio.Task[None], ...]:
+    def _lapse_of(self, until: float | None) -> asyncio.Task[None] | None:
         """The sleep that ends when the turn that sent the lines is over, none when the turn's own bound comes first."""
         if until is None or until >= self.ends_at:
-            return ()
+            return None
         if self._lapse is not None:
             self._lapse.cancel()
         self._lapse = asyncio.create_task(self._clock.sleep(max(until - self._clock.now(), 0.0)))
-        return (self._lapse,)
+        return self._lapse
