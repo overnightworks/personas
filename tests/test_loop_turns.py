@@ -135,6 +135,30 @@ async def test_an_act_line_said_beside_a_line_in_one_read_gives_one_turn_woken_f
     assert [(each["seq"], each.get("act", False)) for each in turn.told("line")] == [(1, True), (2, False)]
 
 
+async def test_a_run_of_another_speakers_sentences_gives_one_turn_after_its_last(runner):
+    """TURNS-5."""
+    await restarted_in_the_call(runner)
+    await said_and_taken(runner.app, PLACE_ID, "First sentence.", spoken=True, continues=True)
+    await said_and_taken(runner.app, PLACE_ID, "Second sentence.", spoken=True, continues=True)
+    assert runner.gateway.openings() == []
+    say_in_the_call(runner, "Last sentence.", spoken=True)
+    await runner.gateway.until_turns(1, why="lines")
+
+    (turn,) = runner.gateway.openings()
+    assert turn.woke_seqs == [3]
+    assert [each["seq"] for each in turn.told("line")] == [1, 2, 3]
+
+
+async def test_a_person_line_read_together_with_marked_sentences_gives_a_turn(runner):
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, "First sentence.", name="Hildegard", author="agent-2", spoken=True, continues=True)
+    say_in_the_call(runner, "Hello everyone", author=PERSON)
+    await runner.gateway.until_turns(1, why="lines")
+
+    (turn,) = runner.gateway.openings()
+    assert turn.woke_seqs == [1, 2]
+
+
 async def test_a_turn_that_calls_nothing_says_nothing_reports_nothing_and_gives_no_further_turn(runner):
     await restarted_in_the_call(runner)
     say_in_the_call(runner, REMARK)

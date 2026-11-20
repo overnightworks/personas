@@ -193,10 +193,11 @@ async def said_and_taken(
     name: str = SPEAKER,
     spoken: bool = False,
     act: bool = False,
+    continues: bool = False,
     place_kind: str = "call",
 ) -> None:
     reads = app.window_reads(place_id, place_kind)
-    app.speak(place_id, author, name, text, spoken=spoken, act=act)
+    app.speak(place_id, author, name, text, spoken=spoken, act=act, continues=continues)
     await app.until_window_read(place_id, reads + 1, place_kind)
     await settled(app)
 

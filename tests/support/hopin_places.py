@@ -29,6 +29,7 @@ class Line:
     spoken: bool = False
     cut: bool = False
     act: bool = False
+    continues: bool = False
     traceparent: str | None = None
 
 
@@ -73,13 +74,14 @@ class AppPlaces:
         spoken: bool = False,
         cut: bool = False,
         act: bool = False,
+        continues: bool = False,
         traceparent: str | None = None,
     ) -> int:
         """Adds a line, entered in ``traceparent``, to a place and signals its window to every member standing there,
         once it is visible."""
         place_lines = self.lines.setdefault(place_id, [])
         seq = place_lines[-1].seq + 1 if place_lines else 1
-        place_lines.append(Line(seq, author, name, text, spoken, cut, act, traceparent))
+        place_lines.append(Line(seq, author, name, text, spoken, cut, act, continues, traceparent))
         del place_lines[:-WINDOW_LINES]
         self.content.add(text)
         self._signal_window(place_id)

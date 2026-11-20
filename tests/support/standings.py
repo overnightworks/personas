@@ -40,9 +40,18 @@ def paused(place_id: str, kind: str = "call", *, serves_view: bool = False) -> S
 
 
 def line(
-    seq: int, text: str, *, own: bool = False, spoken: bool = False, act: bool = False, name: str = "Ada"
+    seq: int,
+    text: str,
+    *,
+    own: bool = False,
+    spoken: bool = False,
+    act: bool = False,
+    continues: bool = False,
+    name: str = "Ada",
 ) -> PlaceEntry:
-    return PlaceEntry(seq=seq, kind="message", name=name, text=text, own=own, spoken=spoken, cut=False, act=act)
+    return PlaceEntry(
+        seq=seq, kind="message", name=name, text=text, own=own, spoken=spoken, cut=False, act=act, continues=continues
+    )
 
 
 def window_of(*lines: PlaceEntry, generation: str = GENERATION) -> PlaceWindow:
