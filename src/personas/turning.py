@@ -21,7 +21,6 @@ from personas.decision import (
     AppPlace,
     act_outcome,
     failure_code,
-    is_not_granted,
     offered_declarations,
     round_seconds,
     turn_call_bound,
@@ -35,11 +34,9 @@ from personas.entries import (
 )
 from personas.failures import (
     CallFailure,
-    CallTimedOut,
     leaves_of,
     raise_if_cancelled,
     task_is_being_cancelled,
-    within_call_time,
 )
 from personas.held_tools import Calls, HeldTools, HoldBack
 from personas.holds import DECISION_CALLS, DECISION_DECLARATIONS, HoldInbox, TurnHold, close_when_over
@@ -63,6 +60,7 @@ from personas.task_record import (
     failure_held_by,
     failures_leaving_with,
 )
+from personas.tool_lists import ToolLists, failure_event
 from personas.turn_bound import TurnBound
 from personas.turn_sessions import TurnSessions
 from personas.voice import DropReporter, Speaking
@@ -99,10 +97,6 @@ _DECIDING_FIRST_TEXT: Final = "a hold is decided first: call continue_speaking o
 _DECIDED_TEXT: Final = "this hold is decided"
 _CONTINUED_TEXT: Final = '{"continued": true}'
 _GONE_TEXT: Final = '{"gone": true}'
-
-
-def _failure_event(app: AppTarget) -> Event:
-    return Event.HELD_APP_FAILED if app.listens else Event.TOOLS_ONLY_APP_FAILED
 
 
 async def _final_event_of(events: AsyncIterator[TurnEvent], tally: TurnTally) -> FinalEvent | None:
@@ -175,6 +169,9 @@ class Turning:
         self._app = app
         self._apps = tuple((each, each.max_tool_calls) for each in apps if each.max_tool_calls is not None)
         self._sessions = TurnSessions(agent, tokens, open_session)
+        self._lists = ToolLists(
+            agent, app, tuple(each for each, _ in self._apps), self._sessions, mind, clock, use_current_token, report
+        )
         self._mind = mind
         self._clock = clock
         self._use_current_token = use_current_token
@@ -527,7 +524,7 @@ class Turning:
         except Exception as error:
             raise RelayFailed(error) from None
         if isinstance(answer, CallFailure):
-            self._report(_failure_event(self._app), failure_code(answer), self._app, answer)
+            self._report(failure_event(self._app), failure_code(answer), self._app, answer)
             return None
         ended = hold_ended_as(outcome, answer)
         self._hold_decided(place, hold_id, ended)
@@ -575,7 +572,7 @@ class Turning:
         none when it lists none. Another app whose listing fails, and the place's own app when it does not answer within
         its call time, is left out and reported, and the turn holds the rest.
         """
-        own = await self._list_own_tools(session)
+        listed = await self._lists.listed(session, admitted, record)
         deciding = None if admitted.held is None else TurnHold(admitted.held)
         inbox = self._inbox_of(admitted) if admitted.aloud else None
         hold = HoldBack(admitted.history, inbox, deciding)
@@ -586,11 +583,8 @@ class Turning:
         if lookup is not None:
             tools.append(HandTool(RECALL_DECLARATION, partial(self._look, lookup, Calls(lookup.calls), admitted, hold)))
             bounds.append(lookup.calls)
-        for app, max_calls in self._apps:
+        for (app, max_calls), declared in zip(self._apps, listed, strict=True):
             calls = Calls(max_calls)
-            declared = (
-                own if app.mcp_url == self._app.mcp_url else await self._declared_elsewhere(app, admitted, record)
-            )
             if declared is None:
                 continue
             offered, left_out = offered_declarations(declared, taken)
@@ -668,50 +662,6 @@ class Turning:
             return ToolOutcome(STORE_DID_NOT_ANSWER_TEXT, is_error=True)
         return ToolOutcome(lookup_result(found, lookup.result_bytes), is_error=False)
 
-    async def _declared_elsewhere(
-        self, app: AppTarget, admitted: Admitted, record: TaskRecord
-    ) -> tuple[ToolDeclaration, ...] | None:
-        """The tools another app lists for the turn, or ``None`` when the turn holds none of its: a listening app the
-        admission does not name, a tools-only app the realm holds back, or an app whose listing failed."""
-        if app.listens and app.mcp_url not in admitted.apps:
-            return None
-        if not app.listens and self._mind.holds_back(app.mcp_url, self._clock.now()):
-            return None
-        return await self._list_elsewhere(app, record)
-
-    async def _list_elsewhere(self, app: AppTarget, record: TaskRecord) -> tuple[ToolDeclaration, ...] | None:
-        """The tools another app lists, or ``None`` after the report of its failed listing."""
-        declared = await self._sessions.ask_elsewhere(app, partial(self._list_tools, app), record, opening=True)
-        if isinstance(declared, CallFailure):
-            if not app.listens and is_not_granted(declared):
-                if self._mind.refused(app.mcp_url, self._clock.now()):
-                    self._report(Event.SUSPENDED, failure_code(declared), app, declared)
-            else:
-                self._report(_failure_event(app), failure_code(declared), app, declared)
-            return None
-        if not app.listens and self._mind.granted(app.mcp_url):
-            self._report(Event.RESUMED, None, app, None)
-        return declared
-
-    async def _list_own_tools(self, session: AppSession) -> tuple[ToolDeclaration, ...] | None:
-        """The tools the place's app lists, or ``None`` when it did not answer within its call time; the step then
-        ends failed with its reason and the turn goes on."""
-        timer = step_timer("tool_list.ended", self._agent.client_id, self._app.mcp_url)
-        with stepping(timer):
-            try:
-                async with within_call_time(self._app.call_seconds):
-                    await self._use_current_token(session)
-                    return await session.declared_tools()
-            except CallTimedOut as failure:
-                timer.handled()
-                timer.fail(failure_code(failure))
-                timer.end()
-                return None
-
-    async def _list_tools(self, app: AppTarget, session: AppSession) -> tuple[ToolDeclaration, ...]:
-        with stepping(step_timer("tool_list.ended", self._agent.client_id, app.mcp_url), turn_goes_on=True):
-            return await session.declared_tools()
-
     async def _decided_apart(  # NOSONAR(S7503) HandToolHandler is async
         self, _principal: Principal, _arguments: JsonObject
     ) -> ToolOutcome:
@@ -771,7 +721,7 @@ class Turning:
             raise RelayFailed(error) from None
         if isinstance(answer, CallFailure):
             calls.close()
-            self._report(_failure_event(app), failure_code(answer), app, answer)
+            self._report(failure_event(app), failure_code(answer), app, answer)
             return ToolOutcome(_APP_FAILED_TEXT, is_error=True)
         return answer
 
