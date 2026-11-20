@@ -106,12 +106,8 @@ async def test_a_listing_a_notice_arrives_during_is_not_kept_and_the_next_turn_l
     assert runner.app.log.count(LIST_TOOLS) == listed + 1
 
 
-async def test_a_turn_after_the_stream_ended_and_was_acknowledged_again_lists_again(runner, caplog):
-    """TURNS-18."""
-    line_said = asyncio.Event()
-    ends = asyncio.Event()
-
-    async def honours_the_tools_notice_until_it_ends(reply) -> None:
+def honours_the_tools_notice_until_it_ends(line_said: asyncio.Event, ends: asyncio.Event):
+    async def script(reply) -> None:
         await reply.open_stream()
         await reply.acknowledge([STANDING_URI], tools=True)
         await line_said.wait()
@@ -119,8 +115,16 @@ async def test_a_turn_after_the_stream_ended_and_was_acknowledged_again_lists_ag
         await ends.wait()
         await reply.complete()
 
+    return script
+
+
+async def test_a_turn_after_the_stream_ended_and_was_acknowledged_again_lists_again(runner, caplog):
+    """TURNS-18."""
+    line_said = asyncio.Event()
+    ends = asyncio.Event()
+
     runner.gateway = Gateway(completion("done"), completion("done"))
-    runner.app.script(LISTEN, honours_the_tools_notice_until_it_ends)
+    runner.app.script(LISTEN, honours_the_tools_notice_until_it_ends(line_said, ends))
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
     line_said.set()
@@ -142,14 +146,6 @@ async def test_a_listing_across_the_end_and_the_acknowledgement_of_a_stream_is_n
     second_line = asyncio.Event()
     stays = asyncio.Event()
 
-    async def honours_the_tools_notice_until_it_ends(reply) -> None:
-        await reply.open_stream()
-        await reply.acknowledge([STANDING_URI], tools=True)
-        await line_said.wait()
-        await reply.pulse(place_window_uri(CALL_PLACE))
-        await ends.wait()
-        await reply.complete()
-
     async def honours_the_tools_notice_once_let(reply) -> None:
         await reply.open_stream()
         await acknowledges.wait()
@@ -161,7 +157,9 @@ async def test_a_listing_across_the_end_and_the_acknowledgement_of_a_stream_is_n
         await reply.complete()
 
     runner.gateway = Gateway(completion("done"), completion("done"))
-    runner.app.script(LISTEN, honours_the_tools_notice_until_it_ends, honours_the_tools_notice_once_let)
+    runner.app.script(
+        LISTEN, honours_the_tools_notice_until_it_ends(line_said, ends), honours_the_tools_notice_once_let
+    )
     await restarted_in_the_call(runner)
     listing = runner.app.hold_next_offer()
     say_in_the_call(runner, ADDRESSED)
