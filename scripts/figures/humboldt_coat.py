@@ -84,11 +84,10 @@ TROUSERS = (
     (0.90, (0.050, 0.068, 0.0)),
     (0.97, (0.040, 0.060, 0.0)),
 )
-# The seat that joins the trousers' legs under the waistcoat's hem, as for `figure_body.SEAT`, lying further back at the
-# front so that it stays inside the waistcoat and does not show between the thighs.
+# The seat that joins the trousers' legs inside the waistcoat, as for `figure_body.SEAT` but closed at the waistcoat's
+# hem, so that no front of it shows between the thighs below it.
 SEAT = (
-    (0.80, (0.030, 0.008, 0.040)),
-    (0.81, (0.050, 0.016, 0.066)),
+    (0.845, (0.092, 0.029, 0.084)),
     (0.86, (0.110, 0.034, 0.092)),
     (0.94, (0.140, 0.080, 0.106)),
 )
@@ -104,7 +103,7 @@ def humboldt_clothes(face: Face) -> list[Part]:
         *both_sides(arm_tube(SLEEVE, 28), NAVY, Material.CLOTH, arm_binder),
         part(trunk(CRAVAT, 4), LINEN, Material.CLOTH, NECK_BINDER),
         part(_knot(), LINEN, Material.CLOTH, NECK_BINDER),
-        part(trunk(SEAT, 16), FAWN, Material.CLOTH, trunk_binder),
+        part(trunk(SEAT, 8), FAWN, Material.CLOTH, trunk_binder),
         *both_sides(leg_tube(TROUSERS, 30), FAWN, Material.CLOTH, leg_binder),
         *shoes(BLACK),
         *hands(face.skin),
