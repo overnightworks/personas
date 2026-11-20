@@ -3,6 +3,6 @@ agent = "Claude d32028b7-a7a0-48ff-8c29-65b317313c7d"
 role = "builder"
 base = "d5dd907e771622ab0203a4b26b6ed925754ffa4c"
 branch = "claude/issue-347-own-app-tool-list-kept-per-stream"
-scope = ["docs/ARCHITECTURE.md", "docs/log.md", "docs/turns.md", "src/personas/app_session.py", "src/personas/decision.py", "src/personas/loop.py", "src/personas/turning.py", "tests"]
+scope = ["docs/ARCHITECTURE.md", "docs/log.md", "docs/turns.md", "quality/baseline.toml", "src/personas/app_session.py", "src/personas/decision.py", "src/personas/loop.py", "src/personas/task_record.py", "src/personas/tool_lists.py", "src/personas/turning.py", "tests"]
 opened_commit = "d6abb2b601daec2fcbaa0c8c079a27bd40daf7ac"
 whole_reason = "one kept list from the session through the turn, with its loop proof and documents"
