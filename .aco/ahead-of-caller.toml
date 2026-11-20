@@ -1,0 +1,4 @@
+[[code]]
+path = "src/personas/speech.py"
+item = "#348"
+reason = "SpeechRecord.in_flight with speech_sent has no reader until the place's sender decides on the requests in flight."

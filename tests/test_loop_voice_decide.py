@@ -59,7 +59,7 @@ def calls_of_voice(runner) -> list[str]:
 
 
 @pytest.mark.parametrize(("tool", "outcome"), DECISIONS)
-async def test_a_hold_with_words_where_nothing_is_owed_makes_his_turn_due_and_that_turn_decides_it(
+async def test_a_hold_with_words_where_no_turn_of_his_speaks_makes_his_turn_due_and_that_turn_decides_it(
     runner, tool, outcome
 ):
     """TURNS-30, TURNS-31, LOG-17."""
@@ -104,15 +104,13 @@ async def test_a_hold_without_words_makes_no_turn_due_until_it_has_words_or_its_
 async def test_a_hold_left_standing_when_his_speech_ends_is_decided_by_his_next_turn_who_is_told_the_sentence(runner):
     """TURNS-31."""
     holding_sentence_ends(runner)
-    await a_voice_call(runner, completion(TWO_SENTENCES), deciding(STOP_SPEAKING_TOOL), completion("[silent]"))
+    await a_voice_call(runner, completion(FIRST), deciding(STOP_SPEAKING_TOOL), completion("[silent]"))
+    answer = runner.app.hold_next_speak()
     say_in_the_call(runner, ADDRESSED, spoken=True)
-    await runner.app.until_called(2)
+    await runner.app.until_called(1)
     runner.app.hold(PLACE_ID, HOLD_ID, ("Ada", ""))
     await window_read_after(runner)
-    await runner.app.spoken_count(1)
-    runner.app.end_sentence()
-    await runner.app.spoken_count(2)
-    runner.app.end_sentence()
+    answer.set()
     await runner.reports.until_a_turn_completed()
     assert runner.app.hold_calls == []
 
@@ -120,7 +118,7 @@ async def test_a_hold_left_standing_when_his_speech_ends_is_decided_by_his_next_
 
     assert await decided(runner) == ["stopped"]
     (number,) = runner.gateway.rounds()
-    assert runner.gateway.hold_told(number)["in_sentence"] == SECOND
+    assert runner.gateway.hold_told(number)["in_sentence"] == FIRST
     assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
 
 

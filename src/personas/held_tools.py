@@ -1,8 +1,9 @@
-"""What a turn holds of the apps' tools, and what a call of it passes: its app's bound, the lines he still owes, and
-the hold-back of a call for news that arrived since the turn's admission."""
+"""What a turn holds of the apps' tools, and what a call of it passes: its app's bound and the hold-back of a call for
+news that arrived since the turn's admission."""
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -11,13 +12,14 @@ from personas.holds import deciding_first
 from personas.present import arrived_since
 
 if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
+
     from agents.member import PartialSpeech
     from agents.tools import HandTool, ToolDeclaration
 
     from personas.entries import History
     from personas.holds import HoldInbox, TurnHold
     from personas.present import Arrived
-    from personas.turn_bound import TurnBound
 
 
 @dataclass
@@ -45,7 +47,6 @@ class HoldBack:
 
     admitted: History = field(repr=False)
     inbox: HoldInbox | None
-    bound: TurnBound
     told: TurnHold | None = None
     spent: bool = False
 
@@ -60,6 +61,10 @@ class HoldBack:
         arrived = arrived_since(current, self.admitted)
         self.spent = arrived is not None
         return arrived
+
+    def sending(self) -> AbstractContextManager[None]:
+        """The call of the turn is on its way to its app until its answer."""
+        return nullcontext() if self.inbox is None else self.inbox.sending()
 
     def said_over_him(self) -> tuple[PartialSpeech, ...]:
         return () if self.inbox is None else self.inbox.untold()

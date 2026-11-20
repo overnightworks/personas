@@ -53,7 +53,6 @@ class Event(Enum):
     INVITATION_LEFT_OUT = auto()
     PAUSED = auto()
     SPEAK_REFUSED = auto()
-    SPEAK_LINE_MISSING = auto()
     HOLD_DECIDED = auto()
     TURN_STATE_FAILED = auto()
     TURN_STATE_LOST = auto()
@@ -106,7 +105,6 @@ _LINE_OF: Final = {
     Event.INVITATION_LEFT_OUT: (logging.INFO, "invitation.left_out"),
     Event.PAUSED: (logging.INFO, "turns.paused"),
     Event.SPEAK_REFUSED: (logging.INFO, "speak.refused"),
-    Event.SPEAK_LINE_MISSING: (logging.WARNING, "speak.line_missing"),
     Event.HOLD_DECIDED: (logging.INFO, "hold.decided"),
     Event.TURN_STATE_FAILED: (logging.WARNING, "turn_state.failed"),
     Event.TURN_STATE_LOST: (logging.INFO, "turn_state.lost"),

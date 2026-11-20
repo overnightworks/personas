@@ -9,7 +9,9 @@ from http import HTTPStatus
 
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
-from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL, VoiceState
+from agents.member import CONTINUE_SPEAKING_TOOL, SPEAK_TOOL, STOP_SPEAKING_TOOL, VoiceState
+from agents.tools import ToolOutcome
+from agents.turn import FailureCode
 from anyio import BrokenResourceError
 
 from personas import app_session
@@ -17,8 +19,10 @@ from personas.decision import status_code
 from personas.failures import Unreachable, leaves_of
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, PLACE_ID, say_in_the_call
-from tests.support.fakes import COMPLETED_TURN
-from tests.support.gateway import BUDGET_SPENT, say
+from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
+from tests.support.fakes import COMPLETED_TURN, failed_turn
+from tests.support.gateway import BUDGET_SPENT, say, speaks_and_says
+from tests.support.history import settled
 from tests.support.hopin import CALL, LIMIT_SECONDS, SAY_TOOL
 from tests.support.transport import opener_whose_requests_raise_together, transport_closing_with_late_answers
 from tests.support.voice import TWO_SENTENCES, a_voice_call, ended_by, holding_sentence_ends, sentences_spoken
@@ -42,6 +46,31 @@ async def held_in_the_first_sentence(runner, *replies, said=(SAID,), hold_id: st
     say_in_the_call(runner, ADDRESSED, spoken=True)
     await runner.app.until_called(2)
     runner.app.hold(PLACE_ID, hold_id, *said)
+
+
+async def calling_while_held(runner, *after_the_hold, hold_round: bool = False, words: bool = True):
+    """A spoken turn whose first round writes a sentence and calls ``say`` while it plays, whose second round, held back
+    until a hold without words stands at the app, calls ``say`` again; people then talk over him. With ``hold_round``
+    the round that decides the hold waits for the returned event; with no ``words`` nobody talks over him."""
+    holding_sentence_ends(runner)
+    first, second = tool_round(say("before", PLACE_ID), content=FIRST), tool_round(say("waits", PLACE_ID))
+    await a_voice_call(runner, first, second, *after_the_hold)
+    second_round = runner.gateway.hold_request(2)
+    say_in_the_call(runner, ADDRESSED, spoken=True)
+    await runner.app.said_count(1)
+    await runner.app.spoken_count(1)
+    runner.app.hold(PLACE_ID, HOLD_ID, ("Ada", ""))
+    await settled(runner.app)
+    deciding_round = runner.gateway.hold_request(3) if hold_round else None
+    second_round.set()
+    await runner.gateway.until_answered(2)
+    if words:
+        runner.app.talk_over(PLACE_ID, SAID)
+    return deciding_round
+
+
+def said_texts(runner) -> list[str]:
+    return [text for *_, text in runner.app.said]
 
 
 async def decided(runner, count: int = 1) -> list[str | None]:
@@ -131,7 +160,7 @@ async def test_a_round_that_makes_no_decision_whose_stop_the_app_cannot_take_rep
     await runner.reports.until(Event.HELD_APP_FAILED)
 
     assert runner.reports.codes_of(Event.HOLD_DECIDED) == []
-    assert runner.reports.reported(apps=True, started=False)[0].code == status_code(HTTPStatus.INTERNAL_SERVER_ERROR)
+    assert runner.reports.codes_of(Event.HELD_APP_FAILED) == [status_code(HTTPStatus.INTERNAL_SERVER_ERROR)]
 
 
 async def test_a_decision_for_a_hold_already_decided_starts_no_round_and_a_new_hold_starts_one(runner):
@@ -175,61 +204,115 @@ async def test_a_hold_without_words_starts_no_round_until_it_has_words_or_its_re
     ]
 
 
-async def test_a_call_waiting_on_his_speech_is_sent_after_a_continue(runner):
-    replies = [tool_round(say("written", PLACE_ID), content=TWO_SENTENCES), deciding(CONTINUE_SPEAKING_TOOL)]
-    await held_in_the_first_sentence(runner, *replies, completion(), completion())
+async def test_a_call_made_while_a_hold_stands_waits_and_goes_out_after_a_continue(runner):
+    """TURNS-31."""
+    await calling_while_held(runner, deciding(CONTINUE_SPEAKING_TOOL), completion(), completion())
 
     await decided(runner)
-    await runner.app.spoken_count(2)
-    assert runner.app.said == []
-    runner.app.end_sentence()
-    await runner.app.said_count(1)
+    await runner.app.said_count(2)
 
-    assert [text for *_, text in runner.app.said] == ["written"]
+    assert [tool for tool in runner.app.calls if tool != SPEAK_TOOL] == [SAY_TOOL, CONTINUE_SPEAKING_TOOL, SAY_TOOL]
+    assert said_texts(runner) == ["before", "waits"]
 
 
-async def test_words_said_over_him_after_a_continue_are_told_once_at_his_next_call_and_the_call_after_it_goes_out(
+async def test_a_call_made_while_a_hold_stands_goes_out_once_he_continues_though_the_window_still_states_the_hold(
     runner,
 ):
+    """TURNS-31."""
+    runner.app.hold_outcomes.append(ToolOutcome(json.dumps({"continued": True}), is_error=False))
+    await calling_while_held(runner, deciding(CONTINUE_SPEAKING_TOOL), completion(), completion())
+
+    await decided(runner)
+    await runner.app.said_count(2)
+
+    assert PLACE_ID in runner.app.holds
+    assert said_texts(runner) == ["before", "waits"]
+    assert FailureCode.LIMIT_EXCEEDED.value not in [code for _, code in runner.reports.reported() if code]
+
+
+async def test_words_said_over_him_after_a_round_was_told_the_hold_are_told_once_at_his_waiting_call(runner):
     """TURNS-32."""
     more = ("Ada", "wait a moment, please")
-    replies = [tool_round(say("first try", PLACE_ID), content=TWO_SENTENCES), deciding(CONTINUE_SPEAKING_TOOL)]
-    await held_in_the_first_sentence(
-        runner, *replies, completion(), tool_round(say("second try", PLACE_ID)), completion()
+    second_try = tool_round(say("second try", PLACE_ID))
+    deciding_round = await calling_while_held(
+        runner, deciding(CONTINUE_SPEAKING_TOOL), second_try, completion("done"), completion("done"), hold_round=True
     )
-    await decided(runner)
-    await runner.gateway.until_answered(3)
+    await runner.gateway.until_requested(3)
     runner.app.talk_over(PLACE_ID, more)
-    await window_read_after_the_hold(runner)
+    await settled(runner.app)
+    deciding_round.set()
+    await runner.app.said_count(2)
 
-    await runner.app.spoken_count(2)
-    runner.app.end_sentence()
-    await runner.app.said_count(1)
+    assert said_texts(runner) == ["before", "second try"]
+    held = {
+        text
+        for number in range(1, len(runner.gateway.requests) + 1)
+        for text in runner.gateway.held_result_texts(number)
+    }
+    assert [json.loads(each) for each in held] == [{"sent": False, "talked_over": [{"name": more[0], "text": more[1]}]}]
 
-    assert [text for *_, text in runner.app.said] == ["second try"]
-    assert [json.loads(each) for each in runner.gateway.tool_results(4)] == [
-        {"sent": False, "talked_over": [{"name": more[0], "text": more[1]}]}
-    ]
 
-
-async def test_a_call_waiting_on_his_speech_is_never_sent_after_a_stop_and_he_is_told_so(runner):
+async def test_a_call_made_while_a_hold_stands_is_never_sent_after_a_stop_and_he_is_told_so(runner):
     """TURNS-31."""
-    replies = [tool_round(say("written", PLACE_ID), content=TWO_SENTENCES), deciding(STOP_SPEAKING_TOOL)]
-    await held_in_the_first_sentence(runner, *replies, completion(), completion())
+    await calling_while_held(runner, deciding(STOP_SPEAKING_TOOL), completion())
 
     await decided(runner)
     await runner.reports.until_a_turn_ended()
 
     assert runner.reports.turn_endings == [COMPLETED_TURN]
-    assert runner.app.said == []
-    assert SAY_TOOL not in runner.app.calls
+    assert said_texts(runner) == ["before"]
     (number,) = runner.gateway.rounds()
     assert runner.gateway.hold_told(number)["call_waiting"] == {
         "tool": SAY_TOOL,
-        "arguments": {"place": PLACE_ID, "text": "written"},
+        "arguments": {"place": PLACE_ID, "text": "waits"},
     }
     (result,) = [json.loads(each) for each in runner.gateway.tool_results(number + 1)]
-    assert result == {"stopped": True, "unsaid": [SECOND], "call_dropped": SAY_TOOL}
+    assert result == {"stopped": True, "unsaid": [], "call_dropped": SAY_TOOL}
+
+
+async def test_a_call_made_while_a_hold_stands_is_never_sent_after_a_round_that_decides_nothing(runner):
+    """TURNS-31."""
+    await calling_while_held(runner, completion("[silent]"))
+
+    assert await decided(runner) == ["undecided"]
+    await runner.reports.until_a_turn_ended()
+
+    assert runner.reports.turn_endings == [COMPLETED_TURN]
+    assert said_texts(runner) == ["before"]
+
+
+@pytest.mark.parametrize(
+    "round_replies",
+    [[deciding(STOP_SPEAKING_TOOL), completion("done")], [completion("Let me think.")]],
+    ids=["a stop", "no decision"],
+)
+async def test_a_call_already_sent_when_a_hold_cuts_the_speech_runs_to_its_answer_and_enters_with_it(
+    runner, round_replies
+):
+    """TURNS-31."""
+    holding_sentence_ends(runner)
+    await a_voice_call(
+        runner,
+        tool_round(say("before", PLACE_ID), content=FIRST),
+        *round_replies,
+        completion("done"),
+        completion("done"),
+    )
+    answer = runner.app.hold_next_say()
+    say_in_the_call(runner, ADDRESSED, spoken=True)
+    await runner.app.until_called(2)
+    await runner.app.spoken_count(1)
+    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
+    await runner.gateway.until_answered(2)
+    answer.set()
+    await runner.reports.until_a_turn_ended()
+    say_in_the_call(runner, f"{ADDRESSED} Again.")
+    await runner.gateway.until_turns(2)
+
+    assert said_texts(runner) == ["before"]
+    (act,) = runner.gateway.turns()[1].told("act")
+    assert act["tool"] == SAY_TOOL
+    assert act["outcome"]["answered"] is True
 
 
 async def test_a_stop_while_his_reply_is_still_streaming_ends_the_turn_and_speaks_no_more(runner):
@@ -298,7 +381,7 @@ async def test_a_decision_the_app_could_not_take_is_told_to_him_as_not_made_and_
     (number,) = runner.gateway.rounds()
     (failed,) = runner.gateway.tool_results(number + 1)
     assert failed.startswith("Error")
-    assert runner.reports.reported(apps=True, started=False)[0].code == status_code(HTTPStatus.INTERNAL_SERVER_ERROR)
+    assert runner.reports.codes_of(Event.HELD_APP_FAILED) == [status_code(HTTPStatus.INTERNAL_SERVER_ERROR)]
     assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
 
 
@@ -354,3 +437,31 @@ async def test_a_decision_whose_call_fails_beside_a_speak_that_fails_ends_the_ru
 
     assert sorted(type(leaf).__name__ for leaf in leaves_of(ended)) == [BrokenResourceError.__name__, KeyError.__name__]
     assert runner.reports.codes_of(Event.HOLD_DECIDED) == []
+
+
+async def test_a_call_made_while_a_hold_stands_ends_the_turn_limit_exceeded_at_its_deadline_and_is_never_sent(runner):
+    """TURNS-28."""
+    await calling_while_held(runner, completion(), words=False)
+    runner.clock.time += PERSONA_MAX_DURATION_SECONDS
+    runner.sleeps.release.set()
+    await runner.reports.until(Event.PAUSED)
+    await runner.reports.until_a_turn_ended()
+
+    assert runner.reports.reported()[-1] == (Event.PAUSED, FailureCode.LIMIT_EXCEEDED.value)
+    assert runner.reports.turn_endings == [failed_turn(FailureCode.LIMIT_EXCEEDED)]
+    assert said_texts(runner) == ["before"]
+
+
+async def test_a_relayed_call_that_fails_beside_a_speak_that_fails_ends_the_runner_loud_with_both(runner):
+    speak_turns_behind_the_call = 5
+    defects = {
+        "invoke": (KeyError("call"), 0),
+        "speak": (BrokenResourceError(), speak_turns_behind_the_call),
+    }
+    runner.open_session = opener_whose_requests_raise_together(defects)
+    await a_voice_call(runner, *speaks_and_says(PLACE_ID, FIRST, "Written.", after="[silent]"))
+    say_in_the_call(runner, ADDRESSED, spoken=True)
+
+    ended = await ended_by(runner.task)
+
+    assert sorted(type(leaf).__name__ for leaf in leaves_of(ended)) == [BrokenResourceError.__name__, KeyError.__name__]
