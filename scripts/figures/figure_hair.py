@@ -35,18 +35,21 @@ def hair_cap(course: Sequence[Key], paint: Paint, body: float, tousle: float, tu
     return [part(cap_shell(course, body, tousle, tufts), paint, Material.HAIR, NECK_BINDER)]
 
 
-def cap_shell(course: Sequence[Key], body: float, tousle: float, tufts: float, rows: int = ROWS) -> Shape:
+def cap_shell(
+    course: Sequence[Key], body: float, tousle: float, tufts: float, rows: int = ROWS, columns: int = COLUMNS
+) -> Shape:
     """A shell over the skull. The course gives, by level above the eye line, its half width, front depth, back depth
     and how far from the middle its front edges part; `body` is how much it thickens from its edge, and tufts, as many
-    as `tufts` round the head, stand out from the skull by up to `tousle` more; it is lofted through `rows` levels."""
+    as `tufts` round the head, stand out from the skull by up to `tousle` more; it is lofted through `rows` levels and
+    `columns` steps from one front edge to the other."""
     heights = [(EYE_HEIGHT + level, keys) for level, keys in course]
     levels = spread(course[0][0], course[-1][0], rows)
     outer = [
-        [_hair_point(course, heights, level, column, body, tousle, tufts) for column in range(COLUMNS + 1)]
+        [_hair_point(course, heights, level, column, columns, (body, tousle, tufts)) for column in range(columns + 1)]
         for level in levels
     ]
     inner = [
-        [_hair_point(course, heights, level, column, 0.0, tousle, tufts) for column in range(COLUMNS + 1)]
+        [_hair_point(course, heights, level, column, columns, (0.0, tousle, tufts)) for column in range(columns + 1)]
         for level in levels
     ]
     return shell(outer, inner)
@@ -57,16 +60,16 @@ def _hair_point(
     heights: Sequence[Key],
     level: float,
     column: int,
-    body: float,
-    tousle: float,
-    tufts: float,
+    columns: int,
+    grain: tuple[float, float, float],
 ) -> Vector:
     """The hair at a level above the eye line and a column round the head; tufts stand out from the skull, more towards
-    the crown, and the hair is thinnest at its edge."""
+    the crown, and the hair is thinnest at its edge. `grain` is its body, tousle and tufts."""
+    body, tousle, tufts = grain
     thickness = BASE + body * smoothstep(course[0][0], course[0][0] + EDGE, level)
-    tuft = 0.5 - 0.5 * math.cos(tufts * 2.0 * math.pi * column / COLUMNS + 7.0 * math.sin(23.0 * level))
+    tuft = 0.5 - 0.5 * math.cos(tufts * 2.0 * math.pi * column / columns + 7.0 * math.sin(23.0 * level))
     lift = tousle * tuft * smoothstep(-0.03, 0.08, level) if body else 0.0
-    return open_point(heights, EYE_HEIGHT + level, column / COLUMNS, thickness + lift)
+    return open_point(heights, EYE_HEIGHT + level, column / columns, thickness + lift)
 
 
 def strands(
