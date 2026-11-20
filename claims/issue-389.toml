@@ -1,0 +1,7 @@
+claim_id = "e85a235c49d8424692bb0f29c098abdd"
+agent = "Claude d32028b7-a7a0-48ff-8c29-65b317313c7d"
+role = "builder"
+base = "ff66c72963e2767992e2e7a0f0c172aabae04df3"
+branch = "claude/issue-389-a-second-hold-decided-as-a-short-line-or"
+scope = ["tests/support/voice.py", "tests/test_loop_voice_hold.py", "tests/test_loop_voice_line.py"]
+opened_commit = "1d4cd7f6ab45c451292acf508699e8a739d60e73"
