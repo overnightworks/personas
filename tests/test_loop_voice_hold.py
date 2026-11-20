@@ -7,7 +7,6 @@ import json
 from dataclasses import replace
 from http import HTTPStatus
 
-import anyio
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL, VoiceState
@@ -340,19 +339,16 @@ async def test_a_decision_whose_call_fails_beside_a_defect_ends_the_runner_loud_
 
 
 async def test_a_decision_whose_call_fails_beside_a_speak_that_fails_ends_the_runner_loud_with_both(runner):
-    released = asyncio.Event()
     speak_turns_behind_the_decision = 5
     defects = {
-        "speak": (BrokenResourceError(), speak_turns_behind_the_decision),
         "continue_speaking": (KeyError("decision"), 0),
+        "speak": (BrokenResourceError(), speak_turns_behind_the_decision),
     }
-    runner.open_session = opener_whose_requests_raise_together(defects, released=released)
+    runner.open_session = opener_whose_requests_raise_together(defects)
     await a_voice_call(runner, completion(TWO_SENTENCES), deciding(CONTINUE_SPEAKING_TOOL))
     say_in_the_call(runner, ADDRESSED, spoken=True)
     await runner.gateway.until_requested(1)
     runner.app.hold(PLACE_ID, HOLD_ID, SAID)
-    await anyio.wait_all_tasks_blocked()
-    released.set()
 
     ended = await ended_by(runner.task)
 

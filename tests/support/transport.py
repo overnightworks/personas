@@ -228,25 +228,31 @@ def opener_whose_request_raises(
     return _opener_around(request, around, of_url=of_url)
 
 
-def opener_whose_requests_raise_together(
-    defects: dict[str, tuple[Exception, int]], *, released: asyncio.Event
-) -> SessionOpener:
-    """A session opener of real sessions whose named requests wait for ``released`` and then each raise its defect.
+def opener_whose_requests_raise_together(defects: dict[str, tuple[Exception, int]]) -> SessionOpener:
+    """A session opener of real sessions whose named requests each raise their defect once all of them are in flight.
 
-    A request raises after as many turns of the loop as its number says, so that a scenario can let one failure
-    leave its task group while the other is still on its way.
+    The requests raise in the order of ``defects``, each after as many turns of the loop as its number says since the
+    one before it raised, so that a scenario can let one failure leave its task group while the other is still on its
+    way, however late each call arrives.
     """
+    in_flight = {request: asyncio.Event() for request in defects}
+    raised = {request: asyncio.Event() for request in defects}
+    before = dict(zip(defects, [None, *defects], strict=False))
 
-    def raising(defect: Exception, loop_turns: int) -> _Around:
+    def raising(request: str, defect: Exception, loop_turns: int) -> _Around:
         async def around(_real: Callable[[], Awaitable[object]]) -> object:
-            await released.wait()
+            in_flight[request].set()
+            await asyncio.gather(*(each.wait() for each in in_flight.values()))
+            if (earlier := before[request]) is not None:
+                await raised[earlier].wait()
             for _ in range(loop_turns):
                 await asyncio.sleep(0)
+            raised[request].set()
             raise defect
 
         return around
 
-    return _opener_arounds({request: raising(*each) for request, each in defects.items()}, of_url=None)
+    return _opener_arounds({request: raising(request, *each) for request, each in defects.items()}, of_url=None)
 
 
 def transport_whose_session_loses_a_child(
