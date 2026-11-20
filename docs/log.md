@@ -36,7 +36,7 @@ events and their fields. A test cites each rule by its ID at the start of its do
 | `invitation.accepted`, `invitation.refused` | an accept answered | `reason` for a refusal (LOG-10) |
 | `invitation.left_out` | an invitation the agent cannot take turns at | `place_kind`, `reason` `no_turns` (LOG-11) |
 | `turn.ended` | every turn, however it ends | see below (LOG-12) |
-| `turn_wait.ended`, `claim_write.ended`, `session_open.ended`, `tool_list.ended`, `turn_setup.ended` | each step of a turn | `duration_ms`, `outcome`; `reason` and `error_type` of a failed `session_open`, `tool_list` or `turn_setup` (`session_open` is a session the turn opens to another app, since the turn's own app is served on the loop's session; a place's own app that does not list its tools within its `call_seconds` fails the `tool_list` step and the turn goes on without them; `turn_wait` ends when the turn starts and `claim_write` only waits for the store's writer, so neither fails); `wait_reason` on `turn_wait.ended` (LOG-13) |
+| `turn_wait.ended`, `claim_write.ended`, `thinking.ended`, `session_open.ended`, `tool_list.ended`, `turn_setup.ended` | each step of a turn | `duration_ms`, `outcome`; `reason` and `error_type` of a failed `session_open`, `tool_list` or `turn_setup` (`session_open` is a session the turn opens to another app, since the turn's own app is served on the loop's session; a place's own app that does not list its tools within its `call_seconds` fails the `tool_list` step and the turn goes on without them; `turn_wait` ends when the turn starts and `claim_write` only waits for the store's writer, so neither fails; `thinking` is the statement that the turn is thinking, answered by the app; `turn_setup` is what the turn still waited for after its thinking was answered); `wait_reason` on `turn_wait.ended` (LOG-13) |
 | `token_request.ended` | each token request | `duration_ms`, `outcome`; `reason` and `error_type` of a failed request (LOG-14) |
 | `turns.paused` | a turn without an answer pauses his turns | `reason` (the turn's code, `budget_spent` among them), `pause_ms` (LOG-15) |
 | `speak.refused` | the app refused a sentence, which drops the unsent ones at its place; his own stop's or answer's refusal of a request it cut is not logged | `reason` (the app's code) (LOG-16) |
@@ -71,8 +71,10 @@ start at once. It is the first reason, not the longest: a loop reads it only whe
 so what holds the place between two tries is not measured. A join keeps the reason; a place a pod resumes
 starts with none. (LOG-32)
 
-A `claim_write.ended` runs from the turn's start until the store keeps its claim; the turn's other steps
-follow it. (LOG-33)
+A `claim_write.ended` runs from the turn's start until the store keeps its claim. `turn_wait`, `claim_write`,
+`thinking` and `turn_setup` run in sequence and add up to the time from due to the model request. `tool_list`
+and `session_open` may run beside `claim_write` and `thinking`: their overlap is read from each line's time
+minus its duration. (LOG-33)
 
 ## `turn.ended`
 

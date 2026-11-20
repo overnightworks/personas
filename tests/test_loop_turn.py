@@ -219,18 +219,14 @@ async def test_two_turns_in_a_row_open_no_session_besides_the_loops(runner):
 async def test_a_turn_lists_the_tools_of_its_app_with_the_token_the_loop_holds_when_it_lists(runner):
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
+    issued, listed = len(runner.realm.issued), len(runner.app.list_bearers)
 
-    async def passes_renewal_due(reply):
-        runner.clock.time += LIFETIME_SECONDS
-        await reply.result(ListToolsResult(tools=[]))
-
-    runner.app.script(LIST_TOOLS, passes_renewal_due)
+    runner.clock.time += LIFETIME_SECONDS
     say_in_the_call(runner, ADDRESSED)
     await runner.app.said_count(1)
 
-    *earlier, last = runner.app.list_bearers
-    assert last not in earlier
-    assert last == runner.realm.issued[-1]
+    assert len(runner.realm.issued) > issued
+    assert set(runner.app.list_bearers[listed:]) == {runner.realm.issued[-1]}
 
 
 async def a_turn_ended_short(runner, code):
@@ -438,8 +434,8 @@ async def test_a_turn_whose_listing_fails_before_the_model_is_asked_leads_to_one
 ):
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
-    # The loop's session lists the tools first, to check the answer of the turn's thinking.
-    runner.app.script(LIST_TOOLS, lists_nothing, fails)
+    # The turn lists first; the loop's session then lists the tools to check the answer of the turn's thinking.
+    runner.app.script(LIST_TOOLS, fails, lists_nothing)
     say_in_the_call(runner, ADDRESSED)
     await runner.app.log.until(LISTEN, 2)
     await runner.app.log.until(READ, 3)

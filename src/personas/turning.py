@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import aclosing
+from contextlib import aclosing, asynccontextmanager
 from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, Final
@@ -21,7 +21,6 @@ from personas.decision import (
     AppPlace,
     act_outcome,
     failure_code,
-    is_not_granted,
     offered_declarations,
     round_seconds,
     turn_call_bound,
@@ -35,11 +34,9 @@ from personas.entries import (
 )
 from personas.failures import (
     CallFailure,
-    CallTimedOut,
     leaves_of,
     raise_if_cancelled,
     task_is_being_cancelled,
-    within_call_time,
 )
 from personas.held_tools import Calls, HeldTools, HoldBack
 from personas.holds import DECISION_CALLS, DECISION_DECLARATIONS, HoldInbox, TurnHold, close_when_over
@@ -53,7 +50,7 @@ from personas.recall import (
     search_text,
     text_refused_text,
 )
-from personas.reporting import Event, LoopReport, TurnTally, failure_event, step_timer, stepping
+from personas.reporting import Event, LoopReport, TurnTally, step_timer, stepping
 from personas.sizing import Sizing
 from personas.speech import DropReason, Held, HoldOutcome, Telling, hold_ended_as
 from personas.task_record import (
@@ -63,12 +60,13 @@ from personas.task_record import (
     failure_held_by,
     failures_leaving_with,
 )
+from personas.tool_lists import Declared, ToolLists, failure_event
 from personas.turn_bound import TurnBound
 from personas.turn_sessions import TurnSessions
 from personas.voice import Answering, DropReporter, Speaking, Voicing
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+    from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterable
     from contextlib import AbstractAsyncContextManager
 
     from agents.agent_file import AgentDefinition
@@ -172,6 +170,9 @@ class Turning:
         self._app = app
         self._apps = tuple((each, each.max_tool_calls) for each in apps if each.max_tool_calls is not None)
         self._sessions = TurnSessions(agent, tokens, open_session)
+        self._lists = ToolLists(
+            agent, app, tuple(each for each, _ in self._apps), self._sessions, mind, clock, use_current_token, report
+        )
         self._mind = mind
         self._clock = clock
         self._use_current_token = use_current_token
@@ -186,9 +187,16 @@ class Turning:
         self._aloud_at: PlaceRef | None = None
 
     async def take(
-        self, session: AppSession, setup: TurnSetup, admitted: Admitted, record: TaskRecord, tally: TurnTally
+        self,
+        session: AppSession,
+        setup: TurnSetup,
+        admitted: Admitted,
+        record: TaskRecord,
+        tally: TurnTally,
+        gate: Callable[[], Awaitable[None]],
     ) -> None:
-        """Runs one turn; whatever way it ends, a defect a request of it met ends the runner loud.
+        """Runs one turn once its ``gate`` is passed; whatever way it ends, a defect a request of it met ends the
+        runner loud. The turn lists the tools of its apps beside the gate, since a listing is a read.
 
         A session whose close cuts a request short can lose the defect from what leaves, so the turn's record
         joins it. A cancelled turn ends as the cancellation unless a defect was met or nobody cancelled it.
@@ -196,7 +204,7 @@ class Turning:
         self._aloud_at = admitted.place if admitted.aloud else None
         try:
             await ending_loud_when_cancelled(
-                ending_with_recorded_defect(self._judge_turn(session, setup, admitted, record, tally), record),
+                ending_with_recorded_defect(self._judge_turn(session, setup, admitted, record, tally, gate), record),
                 record.loud_end,
             )
         finally:
@@ -205,11 +213,36 @@ class Turning:
                 at = self._at(admitted.place)
                 self._report_dropped(self._mind.drop_reason_at_end(), self._mind.unsent_dropped(at))
 
+    @asynccontextmanager
+    async def _listing_beside(
+        self, session: AppSession, admitted: Admitted, record: TaskRecord
+    ) -> AsyncGenerator[asyncio.Task[tuple[Declared, ...]]]:
+        """Lists the tools of the apps in a task beside the block, which awaits it where it needs what they listed.
+
+        The listing is a task of its own, not in a group with the gate, so a listing that fails never cuts the gate
+        and its failure ends the turn after the thinking. A turn that ends before it awaited the listing cancels it,
+        and a defect the listing met joins the turn's record.
+        """
+        listing = asyncio.create_task(self._lists.listed(session, admitted, record))
+        try:
+            yield listing
+        finally:
+            listing.cancel()
+            await asyncio.wait((listing,))
+            if not listing.cancelled() and isinstance(error := listing.exception(), Exception):
+                record.note(error)
+
     def _at(self, place: PlaceRef) -> AppPlace:
         return AppPlace(self._app.mcp_url, place)
 
     async def _judge_turn(
-        self, session: AppSession, setup: TurnSetup, admitted: Admitted, record: TaskRecord, tally: TurnTally
+        self,
+        session: AppSession,
+        setup: TurnSetup,
+        admitted: Admitted,
+        record: TaskRecord,
+        tally: TurnTally,
+        gate: Callable[[], Awaitable[None]],
     ) -> None:
         """Runs one turn over the loop's session.
 
@@ -218,7 +251,7 @@ class Turning:
         """
         sizing = Sizing()
         try:
-            await self._run_turn(session, setup, admitted, record, sizing, tally)
+            await self._run_turn(session, setup, admitted, record, sizing, tally, gate)
         except Exception as error:
             raise_if_cancelled()
             leaves = list(leaves_of(error))
@@ -258,29 +291,33 @@ class Turning:
         record: TaskRecord,
         sizing: Sizing,
         tally: TurnTally,
+        gate: Callable[[], Awaitable[None]],
     ) -> None:
-        with stepping(step_timer("turn_setup.ended", self._agent.client_id, self._app.mcp_url)) as hand_off:
-            turn = TurnTold(
-                admitted.at,
-                self._app.mcp_url,
-                admitted.place,
-                admitted.occasion,
-                aloud=admitted.aloud,
-                through=admitted.history.taken,
-            )
-            told = turn_messages(admitted.facts.name, admitted.present, turn)
-            if admitted.held is not None:
-                told = (*told, self._told_standing(admitted, admitted.held))
-            bound = TurnBound(self._clock, setup.persona.max_duration_seconds)
-            try:
-                await self._run_session_body(
-                    setup, admitted, turn, told, session, record, sizing, tally, hand_off, bound
+        async with self._listing_beside(session, admitted, record) as listing:
+            await gate()
+            with stepping(step_timer("turn_setup.ended", self._agent.client_id, self._app.mcp_url)) as hand_off:
+                lists = await listing
+                turn = TurnTold(
+                    admitted.at,
+                    self._app.mcp_url,
+                    admitted.place,
+                    admitted.occasion,
+                    aloud=admitted.aloud,
+                    through=admitted.history.taken,
                 )
-            except Exception as error:
-                record.note(error)
-                raise
-            finally:
-                bound.close()
+                told = turn_messages(admitted.facts.name, admitted.present, turn)
+                if admitted.held is not None:
+                    told = (*told, self._told_standing(admitted, admitted.held))
+                bound = TurnBound(self._clock, setup.persona.max_duration_seconds)
+                try:
+                    await self._run_session_body(
+                        setup, admitted, turn, told, session, record, sizing, tally, hand_off, bound, lists
+                    )
+                except Exception as error:
+                    record.note(error)
+                    raise
+                finally:
+                    bound.close()
 
     async def _run_session_body(
         self,
@@ -294,9 +331,10 @@ class Turning:
         tally: TurnTally,
         hand_off: StepTimer,
         bound: TurnBound,
+        lists: tuple[Declared, ...],
     ) -> None:
         raise_if_cancelled()
-        held = await self._hold_tools(session, record, admitted, bound)
+        held = self._hold_tools(session, record, admitted, bound, lists)
         system = f"{setup.persona.prompt}\n\n{REPLY_RULES}" if admitted.aloud else setup.persona.prompt
         request = TurnRequest(
             agent=setup.persona.name,
@@ -560,8 +598,8 @@ class Turning:
         told = _CONTINUED_TEXT if outcome is HoldOutcome.CONTINUED else told_stop(unsaid, None)
         return ToolOutcome(told, is_error=False)
 
-    async def _hold_tools(
-        self, session: AppSession, record: TaskRecord, admitted: Admitted, bound: TurnBound
+    def _hold_tools(
+        self, session: AppSession, record: TaskRecord, admitted: Admitted, bound: TurnBound, lists: tuple[Declared, ...]
     ) -> HeldTools:
         """The lookup when the configuration has a memory, then the tools of the place's app, of each app named in the
         admission and of each tools-only app the realm grants and that answers, in the configuration's order, each app
@@ -571,7 +609,6 @@ class Turning:
         none when it lists none. Another app whose listing fails, and the place's own app when it does not answer within
         its call time, is left out and reported, and the turn holds the rest.
         """
-        own = await self._list_own_tools(session)
         deciding = None if admitted.held is None else TurnHold(admitted.held)
         inbox = self._inbox_of(admitted) if admitted.aloud else None
         hold = HoldBack(admitted.history, inbox, deciding)
@@ -582,11 +619,8 @@ class Turning:
         if lookup is not None:
             tools.append(HandTool(RECALL_DECLARATION, partial(self._look, lookup, Calls(lookup.calls), admitted, hold)))
             bounds.append(lookup.calls)
-        for app, max_calls in self._apps:
+        for (app, max_calls), declared in zip(self._apps, lists, strict=True):
             calls = Calls(max_calls)
-            declared = (
-                own if app.mcp_url == self._app.mcp_url else await self._declared_elsewhere(app, admitted, record)
-            )
             if declared is None:
                 continue
             offered, left_out = offered_declarations(declared, taken)
@@ -663,50 +697,6 @@ class Turning:
         if found is None:
             return ToolOutcome(STORE_DID_NOT_ANSWER_TEXT, is_error=True)
         return ToolOutcome(lookup_result(found, lookup.result_bytes), is_error=False)
-
-    async def _declared_elsewhere(
-        self, app: AppTarget, admitted: Admitted, record: TaskRecord
-    ) -> tuple[ToolDeclaration, ...] | None:
-        """The tools another app lists for the turn, or ``None`` when the turn holds none of its: a listening app the
-        admission does not name, a tools-only app the realm holds back, or an app whose listing failed."""
-        if app.listens and app.mcp_url not in admitted.apps:
-            return None
-        if not app.listens and self._mind.holds_back(app.mcp_url, self._clock.now()):
-            return None
-        return await self._list_elsewhere(app, record)
-
-    async def _list_elsewhere(self, app: AppTarget, record: TaskRecord) -> tuple[ToolDeclaration, ...] | None:
-        """The tools another app lists, or ``None`` after the report of its failed listing."""
-        declared = await self._sessions.ask_elsewhere(app, partial(self._list_tools, app), record, opening=True)
-        if isinstance(declared, CallFailure):
-            if not app.listens and is_not_granted(declared):
-                if self._mind.refused(app.mcp_url, self._clock.now()):
-                    self._report(Event.SUSPENDED, failure_code(declared), app, declared)
-            else:
-                self._report(failure_event(app), failure_code(declared), app, declared)
-            return None
-        if not app.listens and self._mind.granted(app.mcp_url):
-            self._report(Event.RESUMED, None, app, None)
-        return declared
-
-    async def _list_own_tools(self, session: AppSession) -> tuple[ToolDeclaration, ...] | None:
-        """The tools the place's app lists, or ``None`` when it did not answer within its call time; the step then
-        ends failed with its reason and the turn goes on."""
-        timer = step_timer("tool_list.ended", self._agent.client_id, self._app.mcp_url)
-        with stepping(timer):
-            try:
-                async with within_call_time(self._app.call_seconds):
-                    await self._use_current_token(session)
-                    return await session.declared_tools()
-            except CallTimedOut as failure:
-                timer.handled()
-                timer.fail(failure_code(failure))
-                timer.end()
-                return None
-
-    async def _list_tools(self, app: AppTarget, session: AppSession) -> tuple[ToolDeclaration, ...]:
-        with stepping(step_timer("tool_list.ended", self._agent.client_id, app.mcp_url), turn_goes_on=True):
-            return await session.declared_tools()
 
     async def _decided_apart(  # NOSONAR(S7503) HandToolHandler is async
         self, _principal: Principal, _arguments: JsonObject

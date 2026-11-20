@@ -147,14 +147,17 @@ async def test_every_line_a_turn_writes_shares_its_trace_and_no_line_outside_it_
 
     lines = written_by_the_runner(written)
     in_the_turn = [line for line in lines if line["trace_id"] is not None]
-    assert [line["event"] for line in in_the_turn] == [
+    # The listing runs beside the claim's write and the thinking statement, so its line stands among theirs.
+    events = [line["event"] for line in in_the_turn]
+    assert [event for event in events if event != "tool_list.ended"] == [
         "turn_wait.ended",
         "claim_write.ended",
-        "tool_list.ended",
+        "thinking.ended",
         "turn_setup.ended",
         "turns.paused",
         "turn.ended",
     ]
+    assert events.count("tool_list.ended") == 1
     assert len({line["trace_id"] for line in in_the_turn}) == 1
     assert {line["event"] for line in lines} > {"loop.started", "turn.ended"}
     assert {line["trace_id"] for line in lines if line not in in_the_turn} == {None}
