@@ -1,8 +1,0 @@
-claim_id = "92cdbde3397545868a75db4ca981a4bb"
-agent = "Claude d21def74-68af-4c98-89a2-70bc45cbdd6a"
-role = "builder"
-base = "3b2f09035ca3d79712c713860ee3f7a128957426"
-branch = "claude/issue-360-lovelace-figure"
-scope = ["scripts/figures", "scripts/write_figures.py", "src/characters", "tests/scripts/test_write_figures.py"]
-opened_commit = "114d677f596fe2f7d813cc687ab349c0fd930c67"
-whole_reason = "one persona's figure from the shared generator, proven by the shared check and a render"
