@@ -42,13 +42,19 @@ def test_a_window_that_states_a_newer_hold_after_the_decision_holds_him_again():
 
 async def test_calls_answered_waits_while_one_of_two_calls_is_still_on_its_way():
     inbox = HoldInbox(_standing(HOLD_ID))
+    answered = False
 
-    with inbox.sending():
-        with inbox.sending():
-            pass
-        with anyio.move_on_after(0) as still_waiting:
-            await inbox.calls_answered()
-        assert still_waiting.cancelled_caught
-
-    with anyio.fail_after(1):
+    async def wait_for_answers() -> None:
+        nonlocal answered
         await inbox.calls_answered()
+        answered = True
+
+    async with anyio.create_task_group() as tasks:
+        with inbox.sending():
+            with inbox.sending():
+                pass
+            tasks.start_soon(wait_for_answers)
+            await anyio.wait_all_tasks_blocked()
+            assert not answered
+        await anyio.wait_all_tasks_blocked()
+        assert answered
