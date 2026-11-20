@@ -3,6 +3,6 @@ agent = "Claude d32028b7-a7a0-48ff-8c29-65b317313c7d"
 role = "builder"
 base = "4f22cf16a5b0062184d9b28967400414f73dfb9e"
 branch = "claude/issue-271-talked-over-his-decision-can-be-an-answe"
-scope = ["docs/ARCHITECTURE.md", "docs/log.md", "docs/turns.md", "src/personas/app_session.py", "src/personas/entries.py", "src/personas/holds.py", "src/personas/loop.py", "src/personas/mind.py", "src/personas/reporting.py", "src/personas/speech.py", "src/personas/turning.py", "src/personas/voice.py", "tests"]
+scope = ["docs/ARCHITECTURE.md", "docs/log.md", "docs/turns.md", "src/personas/app_session.py", "src/personas/entries.py", "src/personas/holds.py", "src/personas/loop.py", "src/personas/mind.py", "src/personas/reporting.py", "src/personas/speech.py", "src/personas/tool_lists.py", "src/personas/turning.py", "src/personas/voice.py", "tests"]
 opened_commit = "3905582e6a1cec0b4e6a87dfc631382b92845b30"
 whole_reason = "one behaviour, his answer instead at a hold: the record's rule that drops the rest, its first sentence on a one-off session and the rest through the place's Sender"
