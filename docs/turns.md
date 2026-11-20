@@ -142,8 +142,9 @@ An entry has its app and the time he took it (`at`), and is one of:
   is said, so none is cut. After the line a new hold is a new hold, as after a continue: it starts one more round
   in the same turn. (TURNS-46)
 - Every further hold in one spoken turn, after a go on or a short line, is
-  decided as the first, in a round or turn told that hold: a decision does what it did for the first, and no
-  decision drops what waited and he says nothing. This holds as well in a turn told the hold. (TURNS-47)
+  decided as the first: a decision does what it did for the first, and no decision drops what waited and he says
+  nothing. The rule covers a hold decided by a round beside the running turn and, in a turn told the first hold, a
+  second hold decided by a round beside that turn. (TURNS-47)
 - After he went on, a call of his is not sent while people said words no round told him; its result says
   so (`sent` false, `talked_over`). (TURNS-32)
 

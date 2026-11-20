@@ -15,11 +15,13 @@ from tests.support.voice import (
     REFUSALS,
     SAID,
     SECOND,
+    SECOND_HOLD,
+    SECOND_HOLD_DECISIONS,
+    THIRD,
     THREE_SENTENCES,
     a_voice_call,
     calling_while_held,
     decided,
-    deciding,
     held_in_the_first_sentence,
     play_out,
     refused_ends_the_hold_as_the_app_says,
@@ -28,7 +30,6 @@ from tests.support.voice import (
 
 pytestmark = pytest.mark.anyio
 
-THIRD = "Third sentence."
 LINE = "Right, one moment."
 
 
@@ -225,18 +226,7 @@ async def test_a_line_in_a_turn_that_does_not_speak_is_refused_and_the_hold_stay
     assert runner.app.speaks_naming_holds == []
 
 
-SECOND_HOLD = "hold-2"
-
-
-@pytest.mark.parametrize(
-    ("reply", "outcome"),
-    [
-        (deciding(CONTINUE_SPEAKING_TOOL, SECOND_HOLD), "continued"),
-        (deciding(STOP_SPEAKING_TOOL, SECOND_HOLD), "stopped"),
-        (completion("[silent]"), "undecided"),
-    ],
-    ids=["go on", "stop", "no decision"],
-)
+@SECOND_HOLD_DECISIONS
 @ARRANGEMENTS
 async def test_a_second_hold_after_the_short_line_is_decided_as_the_first(runner, told, reply, outcome):
     """TURNS-47."""
