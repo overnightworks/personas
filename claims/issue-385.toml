@@ -1,8 +1,0 @@
-claim_id = "3d5c751ad11f4cc5bcf9e4c5f6f7f46b"
-agent = "Claude d32028b7-a7a0-48ff-8c29-65b317313c7d"
-role = "builder"
-base = "358e2dfdbb0e9258cb1de5df3597b7d2336b3baf"
-branch = "claude/issue-385-the-character-files-say-how-each-charact"
-scope = ["src/characters", "tests"]
-opened_commit = "0a16cac03dcae64fe1eff77dee99ffca9dd3617b"
-whole_reason = "one paragraph in each of the six character files plus the test that the instructions carry them"
