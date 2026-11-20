@@ -38,6 +38,7 @@ from tests.support.voice import (
     calling_while_held,
     deciding,
     ended_by,
+    heard_after_the_second_hold,
     held_in_the_first_sentence,
     holding_sentence_ends,
     play_out,
@@ -171,7 +172,7 @@ async def test_a_second_hold_in_one_spoken_turn_after_he_went_on_is_decided_as_t
 
     runner.app.hold(PLACE_ID, SECOND_HOLD, ("Bob", "no, wait"))
     assert await decided(runner, 2) == ["continued", outcome]
-    heard = [FIRST, SECOND, THIRD] if outcome == "continued" else [FIRST, SECOND]
+    heard = heard_after_the_second_hold(outcome, [FIRST, SECOND], [THIRD])
     await play_out(runner, len(heard))
     await runner.reports.until_a_turn_completed()
 
@@ -196,7 +197,7 @@ async def test_a_second_hold_in_a_turn_told_the_hold_is_decided_as_the_first(run
 
     runner.app.hold(PLACE_ID, SECOND_HOLD, ("Bob", "no, wait"))
     assert await decided(runner, 2) == ["continued", outcome]
-    heard = [FIRST, SECOND, THIRD] if outcome == "continued" else [FIRST]
+    heard = heard_after_the_second_hold(outcome, [FIRST], [SECOND, THIRD])
     await play_out(runner, len(heard))
     await runner.reports.until_a_turn_completed()
 
