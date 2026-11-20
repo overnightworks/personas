@@ -30,6 +30,9 @@ from tests.support.voice import (
     HOLD_ID,
     SAID,
     SECOND,
+    SECOND_HOLD,
+    SECOND_HOLD_DECISIONS,
+    THIRD,
     TWO_SENTENCES,
     a_voice_call,
     calling_while_held,
@@ -37,6 +40,7 @@ from tests.support.voice import (
     ended_by,
     held_in_the_first_sentence,
     holding_sentence_ends,
+    play_out,
     sentences_spoken,
 )
 from tests.support.wire import cuts, refuses_with_a_server_error
@@ -136,13 +140,11 @@ async def test_a_round_that_makes_no_decision_whose_stop_the_app_cannot_take_rep
     assert runner.reports.codes_of(Event.HELD_APP_FAILED) == [status_code(HTTPStatus.INTERNAL_SERVER_ERROR)]
 
 
-async def test_a_decision_for_a_hold_already_decided_starts_no_round_and_a_new_hold_starts_one(runner):
+async def test_a_decision_for_a_hold_already_decided_starts_no_round(runner):
     await held_in_the_first_sentence(
         runner,
         completion("First sentence. Second sentence. Third sentence."),
         deciding(CONTINUE_SPEAKING_TOOL),
-        completion("[silent]"),
-        deciding(CONTINUE_SPEAKING_TOOL, "hold-2"),
         completion("[silent]"),
     )
     await decided(runner)
@@ -152,9 +154,53 @@ async def test_a_decision_for_a_hold_already_decided_starts_no_round_and_a_new_h
     await window_read_after_the_hold(runner)
     assert runner.gateway.arrivals == arrivals
 
-    runner.app.hold(PLACE_ID, "hold-2", SAID)
-    assert await decided(runner, 2) == ["continued", "continued"]
+
+@SECOND_HOLD_DECISIONS
+async def test_a_second_hold_in_one_spoken_turn_after_he_went_on_is_decided_as_the_first(runner, reply, outcome):
+    """TURNS-47."""
+    await held_in_the_first_sentence(
+        runner,
+        completion("First sentence. Second sentence. Third sentence."),
+        deciding(CONTINUE_SPEAKING_TOOL),
+        completion("[silent]"),
+        reply,
+        completion("[silent]"),
+    )
+    assert await decided(runner) == ["continued"]
+    await runner.app.spoken_count(2)
+
+    runner.app.hold(PLACE_ID, SECOND_HOLD, ("Bob", "no, wait"))
+    assert await decided(runner, 2) == ["continued", outcome]
+    heard = [FIRST, SECOND, THIRD] if outcome == "continued" else [FIRST, SECOND]
+    await play_out(runner, len(heard))
+    await runner.reports.until_a_turn_completed()
+
+    assert sentences_spoken(runner) == heard
     assert len(runner.gateway.rounds()) == 2
+
+
+@SECOND_HOLD_DECISIONS
+async def test_a_second_hold_in_a_turn_told_the_hold_is_decided_as_the_first(runner, reply, outcome):
+    """TURNS-47."""
+    holding_sentence_ends(runner)
+    await a_voice_call(
+        runner,
+        deciding(CONTINUE_SPEAKING_TOOL),
+        completion("First sentence. Second sentence. Third sentence."),
+        reply,
+        completion("[silent]"),
+    )
+    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
+    assert await decided(runner) == ["continued"]
+    await runner.app.spoken_count(1)
+
+    runner.app.hold(PLACE_ID, SECOND_HOLD, ("Bob", "no, wait"))
+    assert await decided(runner, 2) == ["continued", outcome]
+    heard = [FIRST, SECOND, THIRD] if outcome == "continued" else [FIRST]
+    await play_out(runner, len(heard))
+    await runner.reports.until_a_turn_completed()
+
+    assert sentences_spoken(runner) == heard
 
 
 @pytest.mark.parametrize("arrival", ["words", "record gone"])

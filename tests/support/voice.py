@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
-from agents.member import STOP_SPEAKING_TOOL, SpeakRefusal, SpeakRefused
+from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL, SpeakRefusal, SpeakRefused
 from agents.tools import ToolOutcome
 
 from personas.reporting import Event
@@ -149,11 +149,30 @@ async def held_in_the_first_sentence(runner, *replies, said=(SAID,), hold_id: st
     runner.app.hold(PLACE_ID, hold_id, *said)
 
 
+async def play_out(runner, count: int) -> None:
+    """Each of the first ``count`` sentences that plays ends."""
+    for spoken in range(1, count + 1):
+        await runner.app.spoken_count(spoken)
+        if runner.app.playing:
+            runner.app.end_sentence()
+
+
 def sentences_spoken(runner) -> list[str]:
     return [text for _, _, text in runner.app.spoken]
 
 
+THIRD = "Third sentence."
 THREE_SENTENCES = "First sentence. Second sentence. Third sentence."
+SECOND_HOLD = "hold-2"
+SECOND_HOLD_DECISIONS = pytest.mark.parametrize(
+    ("reply", "outcome"),
+    [
+        (deciding(CONTINUE_SPEAKING_TOOL, SECOND_HOLD), "continued"),
+        (deciding(STOP_SPEAKING_TOOL, SECOND_HOLD), "stopped"),
+        (completion("[silent]"), "undecided"),
+    ],
+    ids=["go on", "stop", "no decision"],
+)
 
 
 async def decided(runner, count: int = 1) -> list[str | None]:
