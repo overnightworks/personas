@@ -198,8 +198,8 @@ once and retried.
 
 - An event-loop stall longer than `grace_seconds` can let two pods speak for one agent.
 - A connection that goes silent frees its locks only after the server's TCP keepalive: liveness, not safety.
-- Every line heard costs a model call; two agents in one call can keep each other talking, bounded only by
-  the gateway's budget.
+- Every line heard costs a model call, except a spoken line the app marked as followed by more of the same
+  speaker's speech; two agents in one call can keep each other talking, bounded only by the gateway's budget.
 - People are told apart by display name only.
 - Files over the size limit, functions over the complexity limit and near-identical pairs stand as debt in
   `quality/baseline.toml`, which quality holds from growing.

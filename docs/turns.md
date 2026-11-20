@@ -21,8 +21,8 @@ seat, its lease or its client.
 
 ## When a turn is due
 
-- Every line by someone else gives one turn, unless the app marked it as an act or it was said at a place
-  with a view. His own lines give none. (TURNS-5)
+- Every line by someone else gives one turn, unless the app marked it as an act or as followed by more of the
+  same speaker's speech, or it was said at a place with a view. His own lines give none. (TURNS-5)
 - One turn runs at a time across all his apps. What arrives meanwhile enters his history at once; each place
   with something for him gets one turn after it, the place that waited longest first, told all that arrived. (TURNS-6)
 - A view that waits for him at a revision no turn was started for gives one turn, however that turn ends.
