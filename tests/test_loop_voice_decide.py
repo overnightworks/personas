@@ -124,10 +124,10 @@ async def test_a_hold_left_standing_when_his_speech_ends_is_decided_by_his_next_
     assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
 
 
-async def test_his_sentences_wait_unsent_and_every_other_call_is_answered_deciding_first_until_he_decides(runner):
+async def test_every_other_call_of_a_turn_told_a_hold_is_answered_deciding_first_until_he_decides(runner):
     """TURNS-31."""
     replies = [
-        tool_round(say("early", PLACE_ID), content=TWO_SENTENCES),
+        tool_round(say("early", PLACE_ID)),
         deciding(CONTINUE_SPEAKING_TOOL),
         deciding(STOP_SPEAKING_TOOL),
         completion("[silent]"),
@@ -135,42 +135,15 @@ async def test_his_sentences_wait_unsent_and_every_other_call_is_answered_decidi
     await a_voice_call(runner, *replies)
 
     runner.app.hold(PLACE_ID, HOLD_ID, SAID)
-    await runner.app.spoken_count(2)
     await runner.reports.until_a_turn_completed()
 
     results = runner.gateway.tool_results(4)
     assert [each.startswith("Error") for each in results] == [True, False, True]
     assert SAY_TOOL not in runner.app.calls
     assert runner.app.hold_calls == [(CONTINUE_SPEAKING_TOOL, HOLD_ID)]
-    assert calls_of_voice(runner) == [CONTINUE_SPEAKING_TOOL, SPEAK_TOOL, SPEAK_TOOL]
-    assert sentences_spoken(runner) == [FIRST, SECOND]
 
 
-async def test_a_stop_decided_by_the_turn_told_the_hold_drops_the_sentences_it_released_before_and_logs_them(runner):
-    """TURNS-31."""
-    replies = [
-        tool_round(say("early", PLACE_ID), content=TWO_SENTENCES),
-        deciding(STOP_SPEAKING_TOOL),
-        completion("[silent]"),
-    ]
-    await a_voice_call(runner, *replies)
-
-    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
-    await runner.reports.until(Event.SPEECH_DROPPED)
-    await runner.reports.until_a_turn_completed()
-
-    assert runner.reports.codes_of(Event.SPEECH_DROPPED) == [DropReason.STOPPED.value]
-    assert [each.sentences for each in runner.reports.changes_of(Event.SPEECH_DROPPED)] == [2]
-    assert calls_of_voice(runner) == [STOP_SPEAKING_TOOL]
-    assert sentences_spoken(runner) == []
-    assert Event.SPEAK_REFUSED not in [event for event, _ in runner.reports.reported()]
-
-
-@pytest.mark.parametrize(
-    "reply",
-    [completion("[silent]"), completion("Let me think."), BUDGET_SPENT],
-    ids=["silent", "text only", "failed turn"],
-)
+@pytest.mark.parametrize("reply", [completion("[silent]"), BUDGET_SPENT], ids=["silent", "failed turn"])
 async def test_a_turn_that_ends_without_a_decision_drops_what_waited_and_the_next_read_stops_him_once(runner, reply):
     """TURNS-31, LOG-17."""
     await a_voice_call(runner, reply)
@@ -187,18 +160,9 @@ async def test_a_turn_that_ends_without_a_decision_drops_what_waited_and_the_nex
     assert runner.gateway.arrivals == arrivals
 
 
-@pytest.mark.parametrize(
-    ("reply", "dropped"),
-    [
-        pytest.param(completion("[silent]"), 1, id="silent"),
-        pytest.param(completion("Let me think."), 2, id="text only"),
-    ],
-)
-async def test_a_turn_told_a_hold_that_ends_undecided_drops_the_rest_of_an_ended_turn_and_the_stop_sends_none(
-    runner, reply, dropped
-):
+async def test_a_turn_told_a_hold_that_ends_undecided_drops_the_rest_of_an_ended_turn_and_the_stop_sends_none(runner):
     """TURNS-31, LOG-17."""
-    await a_voice_call(runner, completion(TWO_SENTENCES), reply)
+    await a_voice_call(runner, completion(TWO_SENTENCES), completion("[silent]"))
     answer = runner.app.hold_next_speak()
     say_in_the_call(runner, ADDRESSED, spoken=True)
     await runner.app.until_called(1)
@@ -214,7 +178,7 @@ async def test_a_turn_told_a_hold_that_ends_undecided_drops_the_rest_of_an_ended
 
     assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
     assert runner.reports.codes_of(Event.SPEECH_DROPPED) == [DropReason.STOPPED.value]
-    assert [each.sentences for each in runner.reports.changes_of(Event.SPEECH_DROPPED)] == [dropped]
+    assert [each.sentences for each in runner.reports.changes_of(Event.SPEECH_DROPPED)] == [1]
     assert sentences_spoken(runner) == [FIRST]
 
 
@@ -230,7 +194,7 @@ async def test_a_round_for_a_newer_hold_that_stops_him_or_ends_undecided_logs_th
 ):
     """TURNS-31, LOG-17."""
     await a_voice_call(runner, reply)
-    runner.gateway.pause_request(1, "Never said. No", "r this.")
+    runner.gateway.pause_request(1, "[sil", "ent]")
 
     runner.app.hold(PLACE_ID, HOLD_ID, SAID)
     await runner.gateway.until_requested(1)

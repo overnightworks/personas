@@ -125,10 +125,10 @@ class AppSession(Protocol):
         """
         ...
 
-    async def speak(self, place: PlaceRef, sentence: str) -> SpeakAnswer | SpeakRefusal:
+    async def speak(self, place: PlaceRef, sentence: str, interrupted: str | None = None) -> SpeakAnswer | SpeakRefusal:
         """That the sentence starts to play, that the app wrote it at the place instead, or why it does not speak it;
-        raises ``StatusFailure``, ``Unreachable`` or ``UnusableAnswer``, the last for an answer that is none of
-        these."""
+        ``interrupted`` names the hold the sentence answers instead of the held rest; raises ``StatusFailure``,
+        ``Unreachable`` or ``UnusableAnswer``, the last for an answer that is none of these."""
         ...
 
     async def continue_speaking(self, place: PlaceRef, interrupted: str) -> ContinueSpeakingRefusal | None:
@@ -322,10 +322,13 @@ class _McpAppSession:
         result = await self._called(ACCEPT_INVITATION_TOOL, arguments)
         return _refusal_of(_text_of(result)) if result.is_error else None
 
-    async def speak(self, place: PlaceRef, sentence: str) -> SpeakAnswer | SpeakRefusal:
+    async def speak(self, place: PlaceRef, sentence: str, interrupted: str | None = None) -> SpeakAnswer | SpeakRefusal:
         # The arguments are the wire shape of ``SpeakArguments``, built unvalidated: a refusal of a sentence is
         # the app's, and a validation error would carry the sentence.
-        result = await self._called(SPEAK_TOOL, {"place": place.model_dump(mode="json"), "text": sentence})
+        arguments: JsonObject = {"place": place.model_dump(mode="json"), "text": sentence}
+        if interrupted is not None:
+            arguments["interrupted"] = interrupted
+        result = await self._called(SPEAK_TOOL, arguments)
         return _answer_of(result)
 
     async def continue_speaking(self, place: PlaceRef, interrupted: str) -> ContinueSpeakingRefusal | None:

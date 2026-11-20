@@ -267,6 +267,22 @@ async def test_a_speak_sends_the_place_and_the_sentence_and_gives_that_it_starts
     assert app.spoken == [(SUBJECT, place.id, sentence)]
 
 
+async def test_a_speak_naming_a_hold_that_stands_is_sent_with_the_hold_and_ends_it(app, bearer, place):
+    app.hold(place.id, "hold-1", ("Ada", "wait"))
+
+    async with opened(app, bearer) as session:
+        answer = await session.speak(place, "A sentence.", "hold-1")
+
+    assert answer == Spoken(spoken=True)
+    assert app.speaks_naming_holds == [("A sentence.", "hold-1")]
+    assert place.id not in app.holds
+
+
+async def test_a_speak_naming_a_hold_that_does_not_stand_is_refused_not_interrupted(app, bearer, place):
+    async with opened(app, bearer) as session:
+        assert await session.speak(place, "A sentence.", "hold-1") is SpeakRefusal.NOT_INTERRUPTED
+
+
 async def test_a_speak_the_app_answers_as_written_to_the_place_instead_is_told_as_written(app, bearer, place):
     app.written_speaks = 1
 

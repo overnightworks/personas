@@ -318,7 +318,7 @@ class AgentLoop:
         self._standings = standing.standings
         self._turned_revisions = sync_turned_revisions(self._turned_revisions, standing.standings)
         self._turn_states.sync_seats(standing.standings)
-        self._mind.undue(left_standing(self._app.mcp_url, standing.standings))
+        self._mind.left(left_standing(self._app.mcp_url, standing.standings))
         self._mind.stand_at(
             self._app.mcp_url, holds=lends_tools(self._app.max_tool_calls is not None, standing.standings)
         )

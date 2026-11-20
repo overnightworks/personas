@@ -48,6 +48,7 @@ from personas.speech import (
     speech_continued,
     speech_ended,
     speech_line_entered,
+    speech_started,
     speech_stopped,
     speech_unsaid,
     unsent_dropped,
@@ -209,6 +210,10 @@ class Mind:
         """His continue at the place: the unsent sentences have the deciding turn's ``bound``."""
         self._set_speech(at, speech_continued(self._speech.get(at, NO_SPEECH), bound))
 
+    def speech_started(self, at: AppPlace, text: str) -> None:
+        """The sentence that answered his hold at the place plays now."""
+        self._set_speech(at, speech_started(self._speech.get(at, NO_SPEECH), text))
+
     def hold_decided_key(self, at: AppPlace) -> HoldKey | None:
         """The key of the hold decided last at the place."""
         return self._speech.get(at, NO_SPEECH).decided
@@ -354,11 +359,15 @@ class Mind:
         self._turns = due_again(self._turns, at, occasion, since)
         self._change()
 
-    def undue(self, leaving: Callable[[AppPlace], bool]) -> None:
-        """Drops the due places for which ``leaving`` holds, and the hold decided at each place of the speech records;
-        with no turn running a younger place may then go first."""
+    def left(self, leaving: Callable[[AppPlace], bool]) -> None:
+        """The places for which ``leaving`` holds left the standing: the hold decided at each is forgotten, and the
+        place is no longer due."""
         for at in [each for each in self._speech if leaving(each)]:
             self._set_speech(at, hold_forgotten(self._speech[at]))
+        self.undue(leaving)
+
+    def undue(self, leaving: Callable[[AppPlace], bool]) -> None:
+        """Drops the due places for which ``leaving`` holds; with no turn running a younger place may then go first."""
         remaining = without_due(self._turns, leaving)
         dropped = len(remaining.due) < len(self._turns.due)
         self._turns = remaining

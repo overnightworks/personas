@@ -20,10 +20,14 @@ if TYPE_CHECKING:
     from personas.turn_bound import TurnBound
 
 DECISION_CALLS: Final = 1
+_ANSWER_INSTEAD: Final = (
+    " Or reply with text instead, which answers the hold: the text is what you say now, and everything you had not "
+    "yet said is dropped."
+)
 DECISION_DECLARATIONS: Final = tuple(
     ToolDeclaration(
         name=name,
-        description=description,
+        description=description + _ANSWER_INSTEAD,
         parameters={
             "type": "object",
             "properties": {"id": {"type": "string", "description": "The id of the hold you were told."}},
@@ -53,6 +57,11 @@ class TurnHold:
     @property
     def pending(self) -> bool:
         return self.outcome is None
+
+    @property
+    def silenced(self) -> bool:
+        """His answer instead of this hold failed: the rest of its reply is dropped."""
+        return self.outcome in {HoldOutcome.UNDECIDED, HoldOutcome.GONE}
 
     def dropped(self) -> bool:
         """The turn's speech was cut before he decided this hold: it counts as undecided, once. Whether it was still
@@ -84,6 +93,7 @@ class HoldInbox:
         self._said: tuple[PartialSpeech, ...] = () if standing is None else standing.speech
         self._taken: HoldKey | None = standing.key if told and standing is not None else None
         self._decided: HoldKey | None = None
+        self._answering = False
         self._calls_sent = 0
         self._calls_answered = asyncio.Event()
         self._calls_answered.set()
@@ -101,6 +111,12 @@ class HoldInbox:
         stated = hold_stated(window, self.hold)
         self.hold = None if stated is not None and stated.key == self._decided else stated
         self._said = () if window.talked_over is None else window.talked_over.speech
+        self._wake()
+
+    def answering(self) -> None:
+        """His answer instead of a hold is on its way: no round decides a hold from now on; one that stands is
+        left for his next turn."""
+        self._answering = True
         self._wake()
 
     def decided(self, key: HoldKey) -> None:
@@ -151,7 +167,7 @@ class HoldInbox:
         return self.hold if self.hold is not None and self.hold.key != self._taken else None
 
     async def next_hold(self) -> Held | None:
-        while not self._closed:
+        while not self._closed and not self._answering:
             hold = self.undecided
             if hold is not None and hold_tellable(hold):
                 self._taken = hold.key

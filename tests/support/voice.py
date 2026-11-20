@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from agents.backend.fake_gateway import completion
+from agents.backend.fake_gateway import completion, tool_call, tool_round
 
 from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
@@ -15,6 +15,8 @@ from tests.support.standings import AGENT_SUBJECT, active
 from tests.support.wire import hangs_once_entered
 
 TWO_SENTENCES = "First sentence. Second sentence."
+HOLD_ID = "hold-1"
+SAID = ("Ada", "wait a moment")
 
 
 class HeldSleeps:
@@ -102,6 +104,19 @@ async def in_a_voice_call_and_at_a_table(runner, *replies):
     runner.app.stand(AGENT_SUBJECT, active(PLACE_ID), at_table())
     runner.start()
     await runner.app.until_window_read(PLACE_ID)
+
+
+def deciding(tool: str, hold_id: str = HOLD_ID):
+    return tool_round(tool_call(f"{tool}-{hold_id}", tool, {"id": hold_id}))
+
+
+async def held_in_the_first_sentence(runner, *replies, said=(SAID,), hold_id: str = HOLD_ID):
+    """A spoken turn whose first sentence plays and whose second waits for it, and the app then holds him."""
+    holding_sentence_ends(runner)
+    await a_voice_call(runner, *replies)
+    say_in_the_call(runner, ADDRESSED, spoken=True)
+    await runner.app.until_called(2)
+    runner.app.hold(PLACE_ID, hold_id, *said)
 
 
 def sentences_spoken(runner) -> list[str]:

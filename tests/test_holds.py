@@ -50,6 +50,14 @@ def test_a_window_of_a_new_generation_that_states_the_decided_id_holds_him_again
     assert inbox.hold.key == HoldKey("generation-2", HOLD_ID)
 
 
+async def test_no_round_is_told_a_hold_once_his_answer_is_on_its_way():
+    inbox = HoldInbox(_standing(HOLD_ID))
+    inbox.answering()
+
+    assert await inbox.next_hold() is None
+    assert inbox.undecided is not None
+
+
 async def test_calls_answered_waits_while_one_of_two_calls_is_still_on_its_way():
     inbox = HoldInbox(_standing(HOLD_ID))
     answered = False

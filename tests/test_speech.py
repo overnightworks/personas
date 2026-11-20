@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from agents.member import Interrupted, PartialSpeech, PlaceWindow, SpeakRefusal, Spoken, TalkedOver, Written
 
@@ -26,6 +28,7 @@ from personas.speech import (
     speech_continued,
     speech_ended,
     speech_line_entered,
+    speech_started,
     speech_stopped,
     speech_unsaid,
     unsent_dropped,
@@ -41,7 +44,8 @@ ONE, TWO, THREE = Sentence("One.", 100.0), Sentence("Two.", 100.0), Sentence("Th
         (Spoken(spoken=True), Answered.SPOKEN),
         (Written(written=True), Answered.WRITTEN),
         (SpeakRefusal.HELD, Answered.HELD),
-        (SpeakRefusal.STOPPED, Answered.REFUSED),
+        (SpeakRefusal.STOPPED, Answered.STOPPED),
+        (SpeakRefusal.NOT_INTERRUPTED, Answered.REFUSED),
         (ValueError("a failure"), Answered.UNANSWERED),
         (None, Answered.UNANSWERED),
     ],
@@ -97,6 +101,7 @@ def test_the_next_sentence_goes_out_unless_a_request_is_open_or_a_hold_stands_an
         pytest.param(Answered.UNANSWERED, None, (TWO,), False, id="unanswered plays nothing"),
         pytest.param(Answered.HELD, None, (ONE, TWO), True, id="held goes back first among the unsent"),
         pytest.param(Answered.REFUSED, None, (), False, id="any other refusal drops the unsent ones"),
+        pytest.param(Answered.STOPPED, None, (), False, id="a stopped he did not cause drops the unsent ones"),
     ],
 )
 def test_the_answer_to_the_open_request_decides_what_plays_and_what_stays_unsent(answered, saying, unsent, held_unread):
@@ -105,6 +110,17 @@ def test_the_answer_to_the_open_request_decides_what_plays_and_what_stays_unsent
     after = speech_answered(record, answered)
 
     assert (after.in_flight, after.saying, after.unsent, after.held_unread) == (None, saying, unsent, held_unread)
+
+
+def test_a_stopped_the_app_answers_to_a_request_his_own_stop_or_answer_cut_leaves_the_unsent_sentences():
+    cut, _ = speech_stopped(SpeechRecord(in_flight=Request(ONE)))
+    answered = speech_answered(replace(cut, unsent=(TWO,)), Answered.STOPPED)
+
+    assert (answered.in_flight, answered.unsent) == (None, (TWO,))
+
+
+def test_the_sentence_that_answered_his_hold_is_the_one_that_plays():
+    assert speech_started(SpeechRecord(saying="Old."), "New.").saying == "New."
 
 
 def test_a_sentence_answered_as_spoken_whose_line_entered_already_does_not_play():
@@ -261,11 +277,16 @@ def test_only_a_hold_that_may_be_told_and_that_no_turn_was_told_is_to_be_told():
     assert hold_untold(SpeechRecord()) is None
 
 
-def test_a_hold_id_decided_in_an_earlier_window_generation_is_a_new_hold_and_a_place_that_left_forgets_it():
+def test_a_hold_id_decided_in_an_earlier_window_generation_is_a_new_hold():
     decided = _record_with(None, decided=HoldKey("g", "h1"))
     later = PlaceWindow(generation="g2", starts_at=1, entries=(), interrupted=Interrupted(id="h1"))
 
     assert hold_read(decided, later).hold == Held("h1", "g2", (), record_gone=True)
+
+
+def test_a_place_that_left_forgets_the_hold_it_decided():
+    decided = _record_with(None, decided=HoldKey("g", "h1"))
+
     assert hold_forgotten(decided) == SpeechRecord(saying="One.")
 
 

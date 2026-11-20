@@ -43,8 +43,10 @@ class Answered(StrEnum):
     SPOKEN = "spoken"
     WRITTEN = "written"
     HELD = "held"
+    STOPPED = "stopped"
+    """The app dropped a queued sentence for his own stop or for the answer that replaced it."""
     REFUSED = "refused"
-    """Any refusal but held."""
+    """Any refusal but held and stopped."""
     UNANSWERED = "unanswered"
     """The request failed, was cut or was given up."""
 
@@ -81,6 +83,9 @@ def _revised(record: SpeechRecord, **changes: object) -> SpeechRecord:
     return cast("SpeechRecord", replace(record, **changes))  # pyright: ignore[reportUnnecessaryCast]
 
 
+_REFUSALS_ANSWERED: Final = {SpeakRefusal.HELD: Answered.HELD, SpeakRefusal.STOPPED: Answered.STOPPED}
+
+
 def answered_as(ended: object) -> Answered:
     """How a request ended, from its answer or from the error or cancellation it ended with."""
     if isinstance(ended, Spoken):
@@ -88,7 +93,7 @@ def answered_as(ended: object) -> Answered:
     if isinstance(ended, Written):
         return Answered.WRITTEN
     if isinstance(ended, SpeakRefusal):
-        return Answered.HELD if ended is SpeakRefusal.HELD else Answered.REFUSED
+        return _REFUSALS_ANSWERED.get(ended, Answered.REFUSED)
     return Answered.UNANSWERED
 
 
@@ -133,7 +138,9 @@ def speech_answered(record: SpeechRecord, answered: Answered) -> SpeechRecord:
             return ended if request.line_entered else _revised(ended, saying=request.sentence.text)
         case Answered.HELD:
             return _revised(ended, unsent=(request.sentence, *record.unsent), held_unread=True)
-        case Answered.REFUSED:
+        case Answered.STOPPED if request.cut:
+            return ended
+        case Answered.REFUSED | Answered.STOPPED:
             return _revised(ended, unsent=())
         case _:
             return ended
@@ -160,6 +167,11 @@ def speech_stopped(record: SpeechRecord) -> tuple[SpeechRecord, int]:
     answer."""
     cut = None if record.in_flight is None else replace(record.in_flight, cut=True)
     return replace(record, in_flight=cut, unsent=()), len(record.unsent)
+
+
+def speech_started(record: SpeechRecord, text: str) -> SpeechRecord:
+    """The sentence that answered his hold plays now."""
+    return _revised(record, saying=text)
 
 
 def speech_continued(record: SpeechRecord, bound: float) -> SpeechRecord:
@@ -215,6 +227,7 @@ class HoldOutcome(StrEnum):
 
     CONTINUED = "continued"
     STOPPED = "stopped"
+    ANSWERED = "answered"
     UNDECIDED = "undecided"
     GONE = "gone"
     """The hold no longer stood at the app, so the decision changed nothing there."""
