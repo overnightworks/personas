@@ -17,7 +17,6 @@ from personas.decision import AppPlace, speech_outcome
 from personas.entries import SaidAloud
 from personas.failures import task_is_being_cancelled
 from personas.reporting import Event
-from personas.speech import may_send_next
 from personas.task_record import RelayFailed
 
 if TYPE_CHECKING:
@@ -34,19 +33,15 @@ if TYPE_CHECKING:
 
 
 class Speaking:
-    """One spoken turn's speech: the sentences its reply releases, sent to ``speak`` in order, the next one as soon as
-    the one before it is answered as spoken, so that the app renders it while that one plays.
-
-    The app answers a sentence when its turn to play comes, so at most one request is open. Each sentence answered as
-    spoken owes one line of his own, whole or cut, in the mind's history, and a sentence goes out only while at most the
-    one playing is still owed. The turn hands every event to ``hear`` and runs ``play`` beside its events. A tool call
-    waits until every owed line has entered, also once a refusal ended the speech; the speech itself ends at the
-    answer of its last sentence, and the line of that sentence enters after the turn, which owes it in the mind's
-    record. A request is sent and a line awaited only before the turn's bound: a request or line that has not come by
-    then ends the turn as ``limit_exceeded``. Each sentence sent enters the agent's history as a ``SaidAloud`` however
-    its request ends. A refusal, a stop included, ends the speech and is reported; the turn goes on without it. The
-    turn's tally counts each sentence sent and each silent round. His own stop (``cut``) is no refusal and is not
-    reported.
+    """One spoken turn's speech: the sentences its reply releases, sent to ``speak`` in order, one request open at a
+    time. The app answers a request when its sentence starts to play, so the next sentence goes out while the one
+    before plays and he is never more than one sentence ahead. A tool call is not held for it. Each sentence answered
+    as spoken gets his own line from the app, whole or cut, which enters the history when the sentence ends. The turn
+    hands every event to ``hear`` and runs ``play`` beside its events. The speech ends at the answer of its last
+    sentence. A request is sent only before the turn's bound: a request not answered by then ends the turn as
+    ``limit_exceeded``. Each sentence sent enters the agent's history as a ``SaidAloud`` however its request ends. A
+    refusal, a stop included, ends the speech and is reported; the turn goes on without it. The turn's tally counts each
+    sentence sent and each silent round. His own stop (``cut``) is no refusal and is not reported.
 
     A turn told a hold hands ``released``: no sentence is sent until it is set, which a decision does, and his own stop
     or a failed turn does too, so that the sentences waiting end unsent.
@@ -121,22 +116,11 @@ class Speaking:
         if self._released is not None:
             self._released.set()
 
-    async def spoken(self) -> None:
-        """Returns once every sentence heard so far is answered and every line owed for them has entered; a turn past
-        its bound by then ends."""
-        await self._queue.join()
-        await self._bound.until_lines(lambda owed: owed == 0, self._at)
-        self._bound.stop_if_past()
-
     async def play(self) -> None:
-        """Speaks the queued sentences in order until the queue ends, which is at the answer of the last one; the line
-        of that sentence is not awaited."""
+        """Speaks the queued sentences in order until the queue ends, which is at the answer of the last one."""
         while (sentence := await self._queue.get()) is not None:
-            try:
-                if not self._silenced:
-                    await self._speak(sentence)
-            finally:
-                self._queue.task_done()
+            if not self._silenced:
+                await self._speak(sentence)
 
     async def _until_released(self) -> None:
         """Returns once the hold the turn was told is decided or the speech is silenced; the turn's deadline ends the
@@ -155,7 +139,6 @@ class Speaking:
     async def _speak(self, sentence: str) -> None:
         self._bound.stop_if_past()
         await self._until_released()
-        await self._bound.until_lines(may_send_next, self._at)
         try:
             outcome = await self._entered_as_said(sentence)
         except TurnStopped:
@@ -211,7 +194,7 @@ class Speaking:
             if self._silenced or self._bound.past():
                 return None
             self._tally.sentence_sent()
-            self._mind.speech_sent(self._at, self._bound.ends_at)
+            self._mind.speech_sent(self._at)
             sent = True
             answer = await self._answered_before_the_deadline(self._session.speak(self._place, sentence))
             ended = answer

@@ -108,7 +108,7 @@ async def test_a_stream_the_app_ends_at_its_bound_while_he_speaks_lets_the_turn_
 async def test_a_lifecycle_connection_lost_while_a_sentence_is_sent_cancels_the_turn_and_enters_the_sentence_unanswered(
     runner,
 ):
-    await a_voice_call(runner, *speaks_and_says(PLACE_ID, TWO_SENTENCES, "Written.", after="Later."))
+    await a_voice_call(runner, completion(TWO_SENTENCES), completion("Later."))
     sleeps = gated(runner)
     answer = runner.app.hold_next_speak()
     say_in_the_call(runner, ADDRESSED)
@@ -125,7 +125,6 @@ async def test_a_lifecycle_connection_lost_while_a_sentence_is_sent_cancels_the_
     await runner.gateway.until_turns(2)
     answer.set()
 
-    assert runner.app.said == []
     assert runner.gateway.arrivals == 2
     (sent,) = runner.gateway.turns()[1].told("speech")
     assert (sent["text"], sent["outcome"]) == ("First sentence.", {"answered": False, "code": TURN_CANCELLED_CODE})
@@ -155,7 +154,7 @@ async def test_a_speak_that_fails_as_a_call_or_answers_no_spoken_ends_the_turn_i
     runner, break_speak, mend_speak, events
 ):
     """TURNS-27."""
-    await a_voice_call(runner, *speaks_and_says(PLACE_ID, TWO_SENTENCES, "Written.", after="Later."))
+    await a_voice_call(runner, completion(TWO_SENTENCES), completion("Later."))
     sleeps = gated(runner)
     break_speak(runner.app)
     say_in_the_call(runner, ADDRESSED)
@@ -171,7 +170,6 @@ async def test_a_speak_that_fails_as_a_call_or_answers_no_spoken_ends_the_turn_i
     await runner.app.spoken_count(1)
 
     assert sentences_spoken(runner) == ["Later."]
-    assert runner.app.said == []
     assert runner.reports.reported() == events
     assert not runner.task.done()
 
@@ -260,16 +258,8 @@ async def test_a_gateway_that_stops_the_turn_while_a_sentence_is_open_waits_for_
     ]
 
 
-AFTER_THE_FIRST_SENTENCE = [
-    pytest.param(speaks_and_says(PLACE_ID, ANSWER, "Written."), [ANSWER], id="a call waits on the only sentence"),
-    pytest.param(
-        speaks_and_says(PLACE_ID, TWO_SENTENCES, "Written."),
-        ["First sentence.", "Second sentence."],
-        id="a call waits on two sentences",
-    ),
-    pytest.param([completion("One. Two. Three.")], ["One.", "Two."], id="the speech after the final event"),
-]
-"""Each reply with the sentences sent before the deadline: the first is answered as spoken and the next one is open."""
+THREE_SENTENCES, SENT_BEFORE_THE_DEADLINE = "One. Two. Three.", ["One.", "Two."]
+"""The reply and the sentences sent before the deadline: the first is answered as spoken and the next one is open."""
 
 
 async def sentences_playing_with_the_next_open(runner, sent):
@@ -280,13 +270,13 @@ async def sentences_playing_with_the_next_open(runner, sent):
     await anyio.wait_all_tasks_blocked()
 
 
-@pytest.mark.parametrize(("replies", "sent"), AFTER_THE_FIRST_SENTENCE)
-async def test_a_turn_past_its_deadline_when_his_line_entered_sends_no_call_or_sentence_and_ends_limit_exceeded_once(
-    runner, replies, sent
+async def test_a_turn_past_its_deadline_when_his_line_entered_sends_no_sentence_and_ends_limit_exceeded_once(
+    runner,
 ):
     """TURNS-28."""
     sleeps = holding_sentence_ends(runner)
-    await a_voice_call(runner, *replies, completion("Later."))
+    sent = SENT_BEFORE_THE_DEADLINE
+    await a_voice_call(runner, completion(THREE_SENTENCES), completion("Later."))
     say_in_the_call(runner, ADDRESSED)
     await sentences_playing_with_the_next_open(runner, sent)
     runner.clock.time += PERSONA_MAX_DURATION_SECONDS
@@ -298,7 +288,6 @@ async def test_a_turn_past_its_deadline_when_his_line_entered_sends_no_call_or_s
     await runner.gateway.until_turns(2)
 
     assert sentences_spoken(runner) == sent
-    assert runner.app.said == []
     await runner.reports.until_a_turn_ended()
     assert runner.reports.reported() == [
         (Event.STARTED, None),
@@ -309,12 +298,12 @@ async def test_a_turn_past_its_deadline_when_his_line_entered_sends_no_call_or_s
     assert not runner.task.done()
 
 
-@pytest.mark.parametrize(("replies", "sent"), AFTER_THE_FIRST_SENTENCE)
-async def test_a_line_or_answer_that_never_arrives_ends_the_turn_limit_exceeded_once_with_no_defect_and_no_more_speech(
-    runner, replies, sent
+async def test_an_answer_that_never_arrives_ends_the_turn_limit_exceeded_once_with_no_defect_and_no_more_speech(
+    runner,
 ):
     sleeps = holding_sentence_ends(runner)
-    await a_voice_call(runner, *replies, completion("Later."))
+    sent = SENT_BEFORE_THE_DEADLINE
+    await a_voice_call(runner, completion(THREE_SENTENCES), completion("Later."))
     say_in_the_call(runner, ADDRESSED)
     await sentences_playing_with_the_next_open(runner, sent)
 
@@ -326,7 +315,6 @@ async def test_a_line_or_answer_that_never_arrives_ends_the_turn_limit_exceeded_
     await runner.gateway.until_turns(2)
 
     assert sentences_spoken(runner) == sent[:1]
-    assert runner.app.said == []
     await runner.reports.until_a_turn_ended()
     assert runner.reports.reported() == [
         (Event.STARTED, None),

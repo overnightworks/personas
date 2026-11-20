@@ -58,7 +58,6 @@ def of(event: Event, code: str | None = None, **fields: object) -> StateChange:
             id="paused",
         ),
         pytest.param(of(Event.SPEAK_REFUSED, "busy"), "speak.refused", {"reason": "busy"}, id="speak refused"),
-        pytest.param(of(Event.SPEAK_LINE_MISSING, lines=2), "speak.line_missing", {"line_count": 2}, id="line missing"),
         pytest.param(of(Event.STORE_FAILED, "store_timeout"), "store.failed", {"reason": "store_timeout"}, id="store"),
         pytest.param(of(Event.STORE_RESUMED), "store.resumed", {}, id="store resumed"),
         pytest.param(
@@ -88,7 +87,7 @@ def of(event: Event, code: str | None = None, **fields: object) -> StateChange:
     ],
 )
 def test_a_change_is_one_literal_event_with_ids_the_host_of_the_app_and_closed_codes(written, change, event, fields):
-    """LOG-2, LOG-6, LOG-7, LOG-8, LOG-9, LOG-10, LOG-11, LOG-15, LOG-16, LOG-19, LOG-20, LOG-36."""
+    """LOG-2, LOG-6, LOG-7, LOG-8, LOG-9, LOG-10, LOG-11, LOG-15, LOG-16, LOG-19, LOG-20."""
     line = written(change)
 
     assert line["event"] == event

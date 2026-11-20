@@ -35,6 +35,7 @@ pytestmark = pytest.mark.anyio
 QUIET_PLACE_ID = "room-8"
 SECOND_AGENT, SECOND_SUBJECT, SECOND_NAME = "agent-bach", "agent-subject-2", "Bach"
 SPEAK = "speak"
+WRITTEN = "Written."
 
 
 @pytest.fixture
@@ -160,35 +161,34 @@ async def test_a_turn_that_calls_say_and_writes_no_text_writes_the_line_and_spea
     assert runner.app.spoken == []
 
 
-async def test_a_turn_that_speaks_a_sentence_and_calls_say_does_both_in_the_order_it_wrote_them(runner):
-    await a_voice_call(runner, *speaks_and_says(PLACE_ID, "Spoken first.", "Written second."))
+async def test_a_turn_that_speaks_a_sentence_and_calls_say_does_both(runner):
+    await a_voice_call(runner, *speaks_and_says(PLACE_ID, "Spoken first.", "Written second.", after="[silent]"))
     say_in_the_call(runner, ADDRESSED)
     await runner.app.said_count(1)
+    await runner.app.spoken_count(1)
 
-    assert runner.app.calls == [SPEAK, SAY_TOOL]
+    assert sorted(runner.app.calls) == sorted([SPEAK, SAY_TOOL])
     assert sentences_spoken(runner) == ["Spoken first."]
     assert runner.app.said == [(SUBJECT, PLACE_ID, "Written second.")]
 
 
-async def test_a_sentence_a_call_and_a_sentence_go_out_in_that_order_and_the_next_turn_is_told_each_as_it_happened(
-    runner,
-):
+async def test_the_next_turn_is_told_a_sentence_a_call_and_a_sentence_in_the_order_the_app_answered_them(runner):
     await a_voice_call(runner, *speaks_and_says(PLACE_ID, "Before.", "Written.", after="After."), completion("done"))
     say_in_the_call(runner, ADDRESSED)
     await runner.app.spoken_count(2)
     say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.gateway.until_turns(2)
 
-    assert runner.app.calls == [SPEAK, SAY_TOOL, SPEAK]
+    assert sorted(runner.app.calls) == sorted([SPEAK, SPEAK, SAY_TOOL])
     assert runner.gateway.tool_results(2) == ["said"]
-    told = runner.gateway.turns()[1].told("speech", "act")
-    assert runner.gateway.turns()[1].told_own("speech", "act") == told
-    assert [(each["entry"], each.get("text") or each["tool"]) for each in told] == [
-        ("speech", "Before."),
-        ("act", SAY_TOOL),
-        ("speech", "After."),
-    ]
+    sentences = iter(("Before.", "After."))
+    in_order = [("act", SAY_TOOL) if tool == SAY_TOOL else ("speech", next(sentences)) for tool in runner.app.calls]
+    second = runner.gateway.turns()[1]
+    told = second.told("speech", "act")
+    assert second.told_own("speech", "act") == told
+    assert [(each["entry"], each.get("text") or each["tool"]) for each in told] == in_order
     assert [each["outcome"]["answered"] for each in told] == [True, True, True]
+    assert [each["text"] for each in second.told("line") if each["own"] and each["spoken"]] == ["Before.", "After."]
 
 
 @pytest.mark.parametrize(
@@ -366,24 +366,21 @@ async def test_a_line_said_while_he_speaks_is_not_in_the_running_turn_and_is_tol
     assert REMARK in [each["text"] for each in second.own["entries"]]
 
 
-async def test_a_call_reaches_the_app_only_after_the_sentence_before_it_was_answered_and_his_line_for_it_entered(
-    runner,
-):
+async def test_a_call_reaches_the_app_while_his_sentence_plays_and_the_next_rounds_sentence_follows_one_ahead(runner):
     """TURNS-25."""
     holding_sentence_ends(runner)
-    await a_voice_call(runner, *speaks_and_says(PLACE_ID, ANSWER, "Written."))
-    answer = runner.app.hold_next_speak()
-    say_in_the_call(runner, ADDRESSED)
-    await runner.app.until_called(1)
-    answer.set()
-    await runner.app.spoken_count(1)
-
-    assert runner.app.calls == [SPEAK]
-    runner.app.end_sentence()
+    await a_voice_call(runner, *speaks_and_says(PLACE_ID, "First sentence.", WRITTEN, after="Second sentence."))
+    say_in_the_call(runner, ADDRESSED, spoken=True)
     await runner.app.said_count(1)
+    await runner.app.until_called(3)
 
-    assert runner.app.calls == [SPEAK, SAY_TOOL]
-    assert runner.app.most_in_flight == 1
+    assert runner.app.said == [(SUBJECT, PLACE_ID, WRITTEN)]
+    assert (sentences_spoken(runner), len(runner.app.playing)) == (["First sentence."], 1)
+    assert runner.app.calls.count(SPEAK) == 2
+    runner.app.end_sentence()
+    await runner.app.spoken_count(2)
+
+    assert sentences_spoken(runner) == ["First sentence.", "Second sentence."]
 
 
 async def test_his_line_for_the_playing_sentence_that_the_bound_cuts_while_the_next_speak_is_open_is_not_awaited(
@@ -436,24 +433,17 @@ async def test_a_sentence_dropped_by_a_stop_yields_no_line_and_the_turn_does_not
     assert runner.reports.reported()[:2] == [(Event.STARTED, None), (Event.SPEAK_REFUSED, SpeakRefusal.STOPPED.value)]
 
 
-async def test_a_sentence_refused_while_the_one_before_plays_holds_the_call_after_it_until_that_ones_line_entered(
-    runner,
-):
+async def test_a_sentence_refused_while_the_one_before_plays_does_not_hold_the_call_after_it(runner):
     holding_sentence_ends(runner)
-    await a_voice_call(runner, *speaks_and_says(PLACE_ID, TWO_SENTENCES, "Written."))
+    await a_voice_call(runner, *speaks_and_says(PLACE_ID, TWO_SENTENCES, WRITTEN, after="[silent]"))
     runner.app.speak_outcomes.extend([None, refusing(SpeakRefusal.NOT_ACTIVE)])
     say_in_the_call(runner, ADDRESSED)
     await runner.reports.until(Event.SPEAK_REFUSED)
-
-    assert sentences_spoken(runner) == ["First sentence."]
-    runner.app.end_sentence()
     await runner.app.said_count(1)
 
-    assert runner.app.calls == [SPEAK, SPEAK, SAY_TOOL]
-    assert [(each.text, each.spoken) for each in runner.app.lines[PLACE_ID] if each.author == SUBJECT] == [
-        ("First sentence.", True),
-        ("Written.", False),
-    ]
+    assert sentences_spoken(runner) == ["First sentence."]
+    assert runner.app.said == [(SUBJECT, PLACE_ID, WRITTEN)]
+    assert len(runner.app.playing) == 1
 
 
 async def test_a_stop_while_a_sentence_plays_leaves_its_cut_line_awaited_and_the_next_stopped_and_none_sent(
@@ -532,27 +522,25 @@ async def test_a_window_that_lost_older_lines_makes_a_turn_told_it_missed_lines(
     assert second.missed is True
 
 
-async def test_a_line_heard_while_he_speaks_holds_the_call_after_the_sentence_once_and_the_model_is_told_the_line(
-    runner,
-):
-    sleeps = holding_sentence_ends(runner)
-    written = {"place": PLACE_ID, "text": "Written."}
+async def test_a_line_heard_before_his_first_call_holds_that_call_once_and_the_model_is_told_the_line(runner):
+    written = {"place": PLACE_ID, "text": WRITTEN}
     first, again = tool_call("call-0", SAY_TOOL, written), tool_call("call-1", SAY_TOOL, written)
     await a_voice_call(runner, tool_round(first, content=ANSWER), tool_round(again), completion("done"))
+    first_round = runner.gateway.hold_request(1)
     say_in_the_call(runner, ADDRESSED)
-    await sleeps.until_began(1)
+    await runner.gateway.until_requested(1)
     await said_and_taken(runner.app, PLACE_ID, "Anyone there?", spoken=True)
-    runner.app.end_sentence()
+    first_round.set()
     await runner.app.said_count(1)
+    await runner.app.spoken_count(1)
     await runner.gateway.until_answered(3)
 
-    (held,) = (json.loads(each) for each in runner.gateway.tool_results(3) if each.startswith('{"sent": false'))
+    (held,) = (json.loads(each) for each in runner.gateway.tool_results(2) if each.startswith('{"sent": false'))
     arrived = held["arrived"]["entries"]
     assert [(each["text"], each["spoken"]) for each in arrived if each["entry"] == "line" and not each["own"]] == [
         ("Anyone there?", True)
     ]
-    assert [each["text"] for each in arrived if each["entry"] == "speech"] == [ANSWER]
-    assert runner.app.said == [(SUBJECT, PLACE_ID, "Written.")]
+    assert runner.app.said == [(SUBJECT, PLACE_ID, WRITTEN)]
     assert sentences_spoken(runner) == [ANSWER]
 
 

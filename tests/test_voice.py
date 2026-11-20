@@ -50,7 +50,7 @@ def test_a_speaking_shows_no_sentence_in_its_repr():
         APP,
         PLACE,
         clock,
-        TurnBound(clock, 30, mind, lambda lines: None),
+        TurnBound(clock, 30),
         renewed,
         lambda event, code: None,
         mind,
@@ -95,13 +95,12 @@ class SpeakingScenario:
         self._speak_seconds = speak_seconds
         self._line_follows = line_follows
         self.while_speaking: Callable[[], object] | None = None
-        self.missing: list[int] = []
         self.speaking = Speaking(
             self,
             APP,
             PLACE,
             self.clock,
-            TurnBound(self.clock, DEADLINE_SECONDS, self.mind, self.missing.append),
+            TurnBound(self.clock, DEADLINE_SECONDS),
             self._renew,
             lambda event, code: self.reported.append((event, code)),
             self.mind,
@@ -138,7 +137,7 @@ class SpeakingScenario:
         return self.answer
 
 
-async def test_the_speech_ends_at_the_answer_of_its_last_sentence_whose_line_stays_owed_without_a_wait_or_a_report():
+async def test_the_speech_ends_at_the_answer_of_its_last_sentence_whose_line_has_not_entered_without_a_report():
     """TURNS-25."""
     scenario = SpeakingScenario("One.", line_follows=False, speak_seconds=10)
     scenario.renewal_gate.set()
@@ -147,51 +146,7 @@ async def test_the_speech_ends_at_the_answer_of_its_last_sentence_whose_line_sta
     await scenario.speaking.play()
 
     assert scenario.reported == []
-    assert scenario.mind.lines_owed(scenario.clock.now(), scenario.clock.now() + 1, AppPlace(APP, PLACE)).count == 1
-
-
-async def test_what_enters_that_is_not_his_own_spoken_line_at_the_place_does_not_end_the_wait_for_a_call():
-    scenario = SpeakingScenario("One.", line_follows=False, speak_seconds=10, ends=False)
-    scenario.renewal_gate.set()
-    sleeps = HeldSleeps(scenario)
-    playing = asyncio.create_task(scenario.speaking.play())
-    waiting = asyncio.create_task(scenario.speaking.spoken())
-    await anyio.wait_all_tasks_blocked()
-
-    for other in (
-        a_line(own=False, spoken=True),
-        a_line(own=True, spoken=False),
-        a_line(own=True, spoken=True, place=PlaceRef(kind="call", id="room-9")),
-    ):
-        scenario.mind.take((other,))
-        await anyio.wait_all_tasks_blocked()
-    assert waiting.done() is False
-    assert sleeps.began == [DEADLINE_SECONDS]
-
-    scenario.his_spoken_line_enters()
-    await waiting
-    scenario.speaking.end()
-    await playing
-
-
-async def test_a_deadline_that_passes_in_the_step_his_line_enters_in_ends_the_turn():
-    scenario = SpeakingScenario("One. Two.", line_follows=False, ends=False)
-    scenario.renewal_gate.set()
-    HeldSleeps(scenario)
-    playing = asyncio.create_task(scenario.speaking.play())
-    waiting = asyncio.create_task(scenario.speaking.spoken())
-    await anyio.wait_all_tasks_blocked()
-
-    scenario.clock.time += DEADLINE_SECONDS
-    scenario.his_spoken_line_enters()
-    scenario.his_spoken_line_enters()
-
-    with pytest.raises(TurnStopped) as stopped:
-        await waiting
-    assert stopped.value.code is FailureCode.LIMIT_EXCEEDED
-    assert scenario.sent == ["One.", "Two."]
-    scenario.speaking.end()
-    await playing
+    assert scenario.mind.speech_saying(AppPlace(APP, PLACE)) == "One."
 
 
 async def test_a_sentence_answered_after_the_deadline_ends_the_turn_at_once_without_a_wait_though_his_line_entered():
@@ -242,22 +197,6 @@ async def test_sentences_the_app_wrote_instead_of_voicing_are_each_sent_and_ente
 
     assert scenario.sent == ["One.", "Two.", "Three."]
     assert len(scenario.entered) == 3
-
-
-async def test_a_refusal_ends_the_speech_but_a_call_still_waits_for_the_line_of_the_sentence_playing():
-    scenario = SpeakingScenario("One. Two.", line_follows=False, second_answer=SpeakRefusal.STOPPED, ends=False)
-    scenario.renewal_gate.set()
-    HeldSleeps(scenario)
-    playing = asyncio.create_task(scenario.speaking.play())
-    waiting = asyncio.create_task(scenario.speaking.spoken())
-    await anyio.wait_all_tasks_blocked()
-
-    assert scenario.sent == ["One.", "Two."]
-    assert not waiting.done()
-    scenario.his_spoken_line_enters()
-    await waiting
-    scenario.speaking.end()
-    await playing
 
 
 async def test_every_sentence_sent_is_counted_the_refused_one_included_and_a_sentence_after_the_refusal_is_not():

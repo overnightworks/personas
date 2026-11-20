@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Final
 
 from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL
@@ -11,8 +12,12 @@ from agents.tools import ToolDeclaration, ToolEffect
 from personas.speech import Held, HoldOutcome, hold_stated, hold_tellable, untold_words
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
     from agents.member import PartialSpeech, PlaceWindow
     from agents.turn_events import ToolCallEvent
+
+    from personas.turn_bound import TurnBound
 
 DECISION_CALLS: Final = 1
 DECISION_DECLARATIONS: Final = tuple(
@@ -75,8 +80,8 @@ async def close_when_over(inbox: HoldInbox, *speech: asyncio.Task[object]) -> No
 
 
 class HoldInbox:
-    """What the window says of him while a spoken turn runs: the hold that stands, the call that waits, and what people
-    say over him, with what a round told him of it."""
+    """What the window says of him while a spoken turn runs: the hold that stands, the call that waits for it or is on
+    its way to its app, and what people say over him, with what a round told him of it."""
 
     def __init__(self, standing: Held | None = None, *, told: bool = False) -> None:
         self.hold = standing
@@ -84,13 +89,48 @@ class HoldInbox:
         self.told: tuple[PartialSpeech, ...] | None = standing.speech if told and standing is not None else None
         self._said: tuple[PartialSpeech, ...] = () if standing is None else standing.speech
         self._taken: str | None = standing.id if told and standing is not None else None
+        self._decided: str | None = None
+        self._calls_sent = 0
+        self._calls_answered = asyncio.Event()
+        self._calls_answered.set()
         self._closed = False
         self._changed = asyncio.Event()
 
     def hear(self, window: PlaceWindow) -> None:
-        self.hold = hold_stated(window, self.hold)
+        stated = hold_stated(window, self.hold)
+        self.hold = None if stated is not None and stated.id == self._decided else stated
         self._said = () if window.talked_over is None else window.talked_over.speech
         self._changed.set()
+
+    def decided(self, hold_id: str) -> None:
+        """The hold ``hold_id`` was decided: it stands no more, whatever a window read before the decision says."""
+        self._decided = hold_id
+        if self.hold is not None and self.hold.id == hold_id:
+            self.hold = None
+        self._changed.set()
+
+    async def until_none_stands(self, bound: TurnBound) -> None:
+        """Returns once no hold stands; the turn's deadline ends the turn first when it passes before."""
+        while self.hold is not None and not self._closed:
+            self._changed.clear()
+            await bound.first_of(self._changed, bound.deadline())
+            bound.stop_if_deadline_done()
+
+    @contextmanager
+    def sending(self) -> Generator[None]:
+        """A call of the turn is on its way to its app, until its answer has entered his history."""
+        self._calls_sent += 1
+        self._calls_answered.clear()
+        try:
+            yield
+        finally:
+            self._calls_sent -= 1
+            if not self._calls_sent:
+                self._calls_answered.set()
+
+    async def calls_answered(self) -> None:
+        """Returns once no call of the turn is on its way to its app."""
+        await self._calls_answered.wait()
 
     def untold(self) -> tuple[PartialSpeech, ...]:
         """What people said over him since a round told him of it, once; nothing before a round has."""

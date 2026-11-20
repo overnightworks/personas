@@ -1,8 +1,8 @@
-"""What he still owes of his speech at one place and the hold that stands there; with no process, network or clock."""
+"""What he holds of his speech at one place and the hold that stands there; with no process, network or clock."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
@@ -13,163 +13,39 @@ if TYPE_CHECKING:
 
     from agents.member import PartialSpeech, PlaceWindow
 
-SENTENCES_AHEAD: Final = 1
-"""How many sentences he sends ahead of the one playing: the wire answers a sentence at its turn, in the order sent."""
-
-
-def may_send_next(owed: int) -> bool:
-    """Whether his next sentence may go to ``speak`` while ``owed`` own spoken lines, one per sentence answered as
-    spoken, have not entered: the wire holds a sentence back until the one before it ends, so only the sentence playing
-    may still owe its line."""
-    return owed <= SENTENCES_AHEAD
-
 
 @dataclass(frozen=True)
 class SpeechRecord:
-    """What he still owes of his speech at one place: the requests in flight, the lines still owed, one per sentence
-    answered as spoken, the sentence that plays and, per line, the time by which the turn that sent its sentence is
-    over. A line credited
-    before the answer of its request leaves the count below zero until that answer. It also holds the hold that stands
-    at the place and the id of the last hold decided there. All of it outlives the turn that sent."""
+    """What he holds of his speech at one place: the requests in flight, the sentence that plays, the hold that stands
+    there and the id of the last hold decided there. All of it outlives the turn that sent."""
 
     in_flight: int = 0
-    credit: int = 0
     saying: str | None = None
     hold: Held | None = None
     decided: str | None = None
-    sending: tuple[float, ...] = ()
-    bounds: tuple[float, ...] = ()
-
-    @property
-    def bound(self) -> float | None:
-        """The time by which the turn that sent the oldest owed line is over."""
-        return self.bounds[0] if self.bounds else None
-
-    @property
-    def owed(self) -> int:
-        """The own spoken lines that sentences answered as spoken have not yet brought into the history."""
-        return max(self.credit, 0)
 
 
 NO_SPEECH: Final = SpeechRecord()
 
 
-@dataclass(frozen=True)
-class OwedLines:
-    """What a waiter finds of the lines he still owes where it looks: how many, the hold that stands over one of them,
-    the earliest time at which the turn that sent one is over, and how many lines it dropped because that time had
-    passed."""
-
-    count: int = 0
-    held: Held | None = None
-    until: float | None = None
-    dropped: int = 0
-
-
-def _settled(record: SpeechRecord) -> SpeechRecord:
-    """With no request in flight the count is not below zero, and a time bound is kept only for a line still owed."""
-    if record.in_flight > 0:
-        return record
-    credit = max(record.credit, 0)
-    return SpeechRecord(
-        record.in_flight, credit, record.saying, record.hold, record.decided, (), record.bounds[:credit]
-    )
-
-
-def speech_sent(record: SpeechRecord, bound: float) -> SpeechRecord:
-    """A request to ``speak`` counts from its send; the turn that sends it is over by ``bound``."""
-    sending = (*record.sending, bound)
-    return SpeechRecord(
-        record.in_flight + 1, record.credit, record.saying, record.hold, record.decided, sending, record.bounds
-    )
+def speech_sent(record: SpeechRecord) -> SpeechRecord:
+    """A request to ``speak`` counts from its send."""
+    return replace(record, in_flight=record.in_flight + 1)
 
 
 def speech_answered(record: SpeechRecord, sentence: str, *, spoken: bool) -> SpeechRecord:
-    """A request ended: it stops counting on any answer other than ``Spoken``, which owes a line and is the sentence
-    that plays."""
-    sent, *sending = record.sending
-    in_flight = record.in_flight - 1
-    if spoken:
-        bounds = (*record.bounds, sent) if record.credit >= 0 else record.bounds
-        spoken_record = SpeechRecord(
-            in_flight, record.credit + 1, sentence, record.hold, record.decided, tuple(sending), bounds
-        )
-        return _settled(spoken_record)
-    unspoken = SpeechRecord(
-        in_flight, record.credit, record.saying, record.hold, record.decided, tuple(sending), record.bounds
-    )
-    return _settled(unspoken)
+    """A request ended: it stops counting, and a sentence answered as ``Spoken`` is the one that plays."""
+    return replace(record, in_flight=record.in_flight - 1, saying=sentence if spoken else record.saying)
 
 
 def speech_line_entered(record: SpeechRecord) -> SpeechRecord:
-    """His own spoken line entered at the place: it is credited while a request is in flight or a line is still owed,
-    and ignored otherwise."""
-    if record.in_flight > 0 or record.credit > 0:
-        entered = SpeechRecord(
-            record.in_flight,
-            record.credit - 1,
-            record.saying,
-            record.hold,
-            record.decided,
-            record.sending,
-            record.bounds[1:],
-        )
-        return _settled(entered)
-    return record
+    """His own spoken line entered at the place: the sentence that played has ended."""
+    return replace(record, saying=None)
 
 
 def speech_ended(record: SpeechRecord) -> SpeechRecord:
-    """The turn that sent ended: its requests in flight are gone, and the lines it still owes stay for whoever waits on
-    them, with the sentence that plays; with nothing owed and no hold the sentence is forgotten."""
-    ended = _settled(
-        SpeechRecord(0, record.credit, record.saying, record.hold, record.decided, record.sending, record.bounds)
-    )
-    if ended.hold is not None or ended.owed:
-        return ended
-    return SpeechRecord(ended.in_flight, ended.credit, None, ended.hold, ended.decided, ended.sending, ended.bounds)
-
-
-def _lapsed_lines(record: SpeechRecord, now: float, by: float) -> int:
-    """How many of the oldest lines owed have a sending turn that was over before ``by`` and is at ``now``."""
-    if record.hold is not None:
-        return 0
-    lapsed = 0
-    for bound in record.bounds:
-        if bound > now or bound >= by:
-            break
-        lapsed += 1
-    return lapsed
-
-
-def speech_lapsed(record: SpeechRecord, now: float, by: float) -> bool:
-    """Whether a line owed at the place will not come, for a waiter whose own turn is over by ``by``: the turn that
-    sent its sentence was over before that and at ``now``, and no hold stands, since a held sentence's line enters only
-    once it is decided. The lines of a turn over at the waiter's own bound are left to that turn's end."""
-    return _lapsed_lines(record, now, by) > 0
-
-
-def speech_dropped(record: SpeechRecord, now: float, by: float) -> SpeechRecord:
-    """The lines whose sending turn is over are given up."""
-    lapsed = _lapsed_lines(record, now, by)
-    kept = SpeechRecord(
-        record.in_flight,
-        record.credit - lapsed,
-        record.saying,
-        record.hold,
-        record.decided,
-        record.sending,
-        record.bounds[lapsed:],
-    )
-    return _settled(kept)
-
-
-def lines_owed(records: Iterable[SpeechRecord], dropped: int = 0) -> OwedLines:
-    """What the records owe together: the lines, the first hold standing over a sentence that owes one, and the earliest
-    bound of the sentences that owe one without a hold."""
-    owing = [each for each in records if each.owed]
-    bounds = [each.bound for each in owing if each.hold is None and each.bound is not None]
-    held = next((each.hold for each in owing if each.hold is not None), None)
-    return OwedLines(sum(each.owed for each in owing), held, min(bounds, default=None), dropped)
+    """The turn that sent ended: its requests in flight are gone; the sentence that plays and the hold stay."""
+    return replace(record, in_flight=0)
 
 
 class Telling(StrEnum):
@@ -230,13 +106,8 @@ def hold_stated(window: PlaceWindow, seen: Held | None) -> Held | None:
 def hold_read(record: SpeechRecord, window: PlaceWindow) -> SpeechRecord:
     """The record once the window is read: the hold it states, none when that is the one decided last."""
     if window.interrupted is not None and window.interrupted.id == record.decided:
-        return SpeechRecord(
-            record.in_flight, record.credit, record.saying, None, record.decided, record.sending, record.bounds
-        )
-    hold = hold_stated(window, record.hold)
-    return SpeechRecord(
-        record.in_flight, record.credit, record.saying, hold, record.decided, record.sending, record.bounds
-    )
+        return replace(record, hold=None)
+    return replace(record, hold=hold_stated(window, record.hold))
 
 
 def hold_untold(record: SpeechRecord) -> Held | None:
@@ -248,11 +119,7 @@ def hold_untold(record: SpeechRecord) -> Held | None:
 def hold_marked_told(record: SpeechRecord) -> SpeechRecord:
     """A turn is told the hold that stands."""
     assert record.hold is not None  # noqa: S101 - a turn is told only a hold that stands
-    held = record.hold
-    hold = Held(held.id, held.speech, held.record_gone, Telling.TELLING)
-    return SpeechRecord(
-        record.in_flight, record.credit, record.saying, hold, record.decided, record.sending, record.bounds
-    )
+    return replace(record, hold=replace(record.hold, telling=Telling.TELLING))
 
 
 def hold_turn_ended(record: SpeechRecord) -> SpeechRecord:
@@ -260,17 +127,12 @@ def hold_turn_ended(record: SpeechRecord) -> SpeechRecord:
     held = record.hold
     if held is None or held.telling is not Telling.TELLING:
         return record
-    undecided = Held(held.id, held.speech, held.record_gone, Telling.UNDECIDED)
-    return SpeechRecord(
-        record.in_flight, record.credit, record.saying, undecided, record.decided, record.sending, record.bounds
-    )
+    return replace(record, hold=replace(held, telling=Telling.UNDECIDED))
 
 
-def hold_decided(record: SpeechRecord, hold_id: str, bound: float) -> SpeechRecord:
-    """The hold ended with a decision: it stands no more and is never decided again, and its sentence's line, which
-    enters only now, is owed over by ``bound``."""
-    bounds = (bound, *record.bounds[1:]) if record.bounds else record.bounds
-    return SpeechRecord(record.in_flight, record.credit, record.saying, None, hold_id, record.sending, bounds)
+def hold_decided(record: SpeechRecord, hold_id: str) -> SpeechRecord:
+    """The hold ended with a decision: it stands no more and is never decided again."""
+    return replace(record, hold=None, decided=hold_id)
 
 
 def hold_tellable(held: Held) -> bool:

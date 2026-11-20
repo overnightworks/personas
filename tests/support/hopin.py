@@ -175,6 +175,7 @@ class FakeApp(AppVoice):
     """The most calls that were being answered at once."""
     said: list[tuple[str, str, str]] = field(default_factory=list[tuple[str, str, str]])
     said_added: asyncio.Event = field(default_factory=asyncio.Event)
+    held_say: asyncio.Event | None = None
     held_window_read: asyncio.Event | None = None
     window_read_held: asyncio.Event = field(default_factory=asyncio.Event)
     log: RequestLog = field(default_factory=RequestLog)
@@ -241,6 +242,11 @@ class FakeApp(AppVoice):
     def kept_out_of_logs(self) -> set[str]:
         """Every bearer this app let in or was shown, and every piece of content it served or took."""
         return {*self.presented, *self.content} - {""}
+
+    def hold_next_say(self) -> asyncio.Event:
+        """The next call of the line tool that arrives is answered once the returned event is set."""
+        self.held_say = asyncio.Event()
+        return self.held_say
 
     def hold_next_read(self) -> asyncio.Event:
         """The next read takes its snapshot, tells ``read_held`` and answers once the returned event is set."""
@@ -333,6 +339,9 @@ class FakeApp(AppVoice):
         if self.say_outcomes:
             return self.served(self.say_outcomes.pop(0))
         place_id, text = str(arguments["place"]), str(arguments["text"])
+        if (held := self.held_say) is not None:
+            self.held_say = None
+            await held.wait()
         self.said.append((request.principal.sub, place_id, text))
         self.said_added.set()
         self.speak(place_id, request.principal.sub, ACCEPTED_NAME, text)

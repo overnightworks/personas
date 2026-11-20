@@ -386,87 +386,61 @@ def an_own_spoken_line(visit: Visit, seq: int) -> KeptLine:
     return KeptLine(visit, seq, READ_AT, "Mozart", "message", "x", own=True, spoken=True, cut=False, act=False)
 
 
-SENT_BY = 100.0
-"""The time by which the turn that sends in these tests is over."""
+def playing_at(mind: Mind, at: AppPlace) -> bool:
+    return mind.speech_saying(at) is not None
 
 
-def owed_at(mind: Mind, at: AppPlace) -> int:
-    """The lines owed at the place for a waiter that is over later than the sending turn, long before its bound."""
-    return mind.lines_owed(0.0, SENT_BY + 1, at).count
-
-
-def test_his_own_spoken_line_at_a_place_brings_in_the_sentence_owed_there_and_no_other_place():
+def test_his_own_spoken_line_at_a_place_ends_the_sentence_that_plays_there_and_at_no_other_place():
     mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
     here, there = AppPlace(CALL.app, CALL.place), AppPlace(OTHER_CALL.app, OTHER_CALL.place)
     for at in (here, there):
-        mind.speech_sent(at, SENT_BY)
+        mind.speech_sent(at)
         mind.speech_answered(at, "One.", spoken=True)
 
     mind.take((an_own_spoken_line(CALL, 1),))
 
-    assert (owed_at(mind, here), owed_at(mind, there)) == (0, 1)
-    assert mind.lines_owed(0.0, SENT_BY + 1).count == 1
-    assert mind.speech_saying(there) == "One."
+    assert (playing_at(mind, here), mind.speech_saying(there)) == (False, "One.")
 
 
-def test_his_own_spoken_line_is_credited_when_the_history_bound_drops_it_at_once():
+def test_his_own_spoken_line_ends_the_sentence_that_plays_when_the_history_bound_drops_it_at_once():
     mind = Mind(1, 1, BUDGET_PAUSE_CAP_SECONDS)
     at = AppPlace(CALL.app, CALL.place)
-    mind.speech_sent(at, SENT_BY)
+    mind.speech_sent(at)
     mind.speech_answered(at, "One.", spoken=True)
 
     mind.take((an_own_spoken_line(CALL, 1),))
 
-    assert owed_at(mind, at) == 0
+    assert not playing_at(mind, at)
 
 
-def test_a_line_that_enters_before_the_answer_of_its_request_leaves_nothing_owed():
+def test_the_end_of_the_sending_turn_keeps_the_sentence_that_plays_until_his_own_line_enters():
     mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
     at = AppPlace(CALL.app, CALL.place)
-    mind.speech_sent(at, SENT_BY)
-
-    mind.take((an_own_spoken_line(CALL, 1),))
+    mind.speech_sent(at)
     mind.speech_answered(at, "One.", spoken=True)
-
-    assert owed_at(mind, at) == 0
-
-
-def test_the_end_of_the_sending_turn_keeps_the_lines_it_owes_and_the_sentence_that_plays():
-    mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
-    at = AppPlace(CALL.app, CALL.place)
-    mind.speech_sent(at, SENT_BY)
-    mind.speech_answered(at, "One.", spoken=True)
-    mind.speech_sent(at, SENT_BY)
 
     mind.speech_ended(at)
 
-    assert (owed_at(mind, at), mind.speech_saying(at)) == (1, "One.")
+    assert mind.speech_saying(at) == "One."
     mind.take((an_own_spoken_line(CALL, 1),))
-    assert owed_at(mind, at) == 0
+    assert not playing_at(mind, at)
 
 
-def test_a_waiter_that_finds_the_sending_turns_bound_passed_drops_the_lines_owed_once_and_counts_them():
+@pytest.mark.parametrize(
+    "line",
+    [
+        KeptLine(CALL, 1, READ_AT, "Ada", "message", "x", own=False, spoken=True, cut=False, act=False),
+        KeptLine(CALL, 1, READ_AT, "Mozart", "message", "x", own=True, spoken=False, cut=False, act=False),
+        KeptLine(OTHER_CALL, 1, READ_AT, "Mozart", "message", "x", own=True, spoken=True, cut=False, act=False),
+    ],
+    ids=["another's line", "his written line", "his spoken line at another place"],
+)
+def test_what_enters_that_is_not_his_own_spoken_line_at_the_place_leaves_the_sentence_playing(line):
     mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
     at = AppPlace(CALL.app, CALL.place)
-    mind.speech_sent(at, SENT_BY)
-    mind.speech_answered(at, "One.", spoken=True)
-    mind.speech_ended(at)
-
-    early = mind.lines_owed(SENT_BY - 1, SENT_BY + 1, at)
-    late = mind.lines_owed(SENT_BY, SENT_BY + 1, at)
-    after = mind.lines_owed(SENT_BY, SENT_BY + 1, at)
-
-    assert (early.count, early.dropped, early.until) == (1, 0, SENT_BY)
-    assert (late.count, late.dropped) == (0, 1)
-    assert (after.count, after.dropped) == (0, 0)
-
-
-def test_a_waiter_whose_own_turn_is_over_at_the_sending_turns_bound_leaves_the_lines_to_that_turn():
-    mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
-    at = AppPlace(CALL.app, CALL.place)
-    mind.speech_sent(at, SENT_BY)
+    mind.speech_sent(at)
     mind.speech_answered(at, "One.", spoken=True)
 
-    owed = mind.lines_owed(SENT_BY, SENT_BY, at)
+    mind.take((line,))
 
-    assert (owed.count, owed.dropped) == (1, 0)
+    assert mind.speech_saying(at) == "One."
