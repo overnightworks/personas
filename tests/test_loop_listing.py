@@ -6,12 +6,14 @@ import asyncio
 
 import pytest
 
+from personas.failures import leaves_of
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import CANCELLED_TURN
 from tests.support.gateway import Gateway, says
 from tests.support.history import HistoriesHoldingTheAddressedLine, settled
 from tests.support.hopin import LIMIT_SECONDS, LIST_TOOLS
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
+from tests.support.transport import opener_whose_request_raises
 from tests.support.wire import hangs
 
 pytestmark = pytest.mark.anyio
@@ -58,4 +60,24 @@ async def test_a_turn_whose_place_is_left_while_its_claim_is_written_ends_cancel
     runner.histories.release.set()
 
     assert runner.reports.turn_endings == [CANCELLED_TURN]
+    assert runner.gateway.arrivals == 0
+
+
+async def test_a_defect_the_listing_meets_as_its_turn_is_left_while_its_claim_is_written_ends_the_runner_loud(runner):
+    defect = ValueError("a defect")
+    arrived = asyncio.Event()
+    runner.histories = HistoriesHoldingTheAddressedLine()
+    runner.open_session = opener_whose_request_raises("declared_tools", defect, arrived=arrived, when_cancelled=True)
+    runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.histories.reached.wait()
+    async with asyncio.timeout(LIMIT_SECONDS):
+        await arrived.wait()
+
+    runner.app.stand(SUBJECT)
+
+    async with asyncio.timeout(LIMIT_SECONDS):
+        (ended,) = await asyncio.gather(runner.task, return_exceptions=True)
+    assert set(leaves_of(ended)) == {defect}
     assert runner.gateway.arrivals == 0
