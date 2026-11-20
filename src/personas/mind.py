@@ -29,17 +29,26 @@ from personas.entries import KeptLine
 from personas.present import EMPTY_PRESENT, answered_into, taken_into
 from personas.speech import (
     NO_SPEECH,
+    Answered,
+    DropReason,
     Held,
+    Request,
+    Sentence,
     SpeechRecord,
     hold_decided,
     hold_marked_told,
     hold_read,
     hold_turn_ended,
     hold_untold,
+    sentence_taken,
+    sentences_released,
     speech_answered,
+    speech_continued,
     speech_ended,
     speech_line_entered,
-    speech_sent,
+    speech_stopped,
+    speech_unsaid,
+    unsent_dropped,
 )
 
 if TYPE_CHECKING:
@@ -82,8 +91,8 @@ class Mind:
         self._placed = frozenset[str]()
         self._not_granted: dict[str, float] = {}
         self._wake_events: list[asyncio.Event] = []
-        self._next_take = asyncio.Event()
         self._speech: dict[AppPlace, SpeechRecord] = {}
+        self._speech_wakes: dict[AppPlace, asyncio.Event] = {}
 
     @property
     def present(self) -> Present:
@@ -94,42 +103,83 @@ class Mind:
         return self._present.history
 
     def take(self, entries: Iterable[Entry]) -> None:
-        """Appends the lines, spoken sentences, views and acts taken, in order, and sets the event ``next_take`` gave
-        before; taking nothing leaves the history and that event as they are."""
+        """Appends the lines, spoken sentences, views and acts taken, in order; taking nothing leaves the history as it
+        is."""
         taken = tuple(entries)
         if not taken:
             return
-        previous, self._next_take = self._next_take, asyncio.Event()
         for entry in taken:
             if isinstance(entry, KeptLine) and entry.own and entry.spoken:
                 at = AppPlace(entry.visit.app, entry.visit.place)
                 self._set_speech(at, speech_line_entered(self._speech.get(at, NO_SPEECH)))
         self._present = taken_into(self._present, taken, self._history_bytes, self._history_keep_bytes)
-        previous.set()
         self._change()
 
-    def speech_sent(self, at: AppPlace) -> None:
-        """A request to ``speak`` at the place goes out."""
-        self._set_speech(at, speech_sent(self._speech.get(at, NO_SPEECH)))
+    def sentences_released(self, at: AppPlace, texts: Iterable[str], bound: float, *, replacing: bool) -> int:
+        """A spoken turn released sentences with its bound; how many unsent ones of the turns before it dropped."""
+        record, dropped = sentences_released(self._speech.get(at, NO_SPEECH), texts, bound, replacing=replacing)
+        self._set_speech(at, record)
+        return dropped
 
-    def speech_answered(self, at: AppPlace, sentence: str, *, spoken: bool) -> None:
-        """The request at the place for ``sentence`` ended, answered as spoken or not."""
-        self._set_speech(at, speech_answered(self._speech.get(at, NO_SPEECH), sentence, spoken=spoken))
+    def sentence_to_send(self, at: AppPlace, now: float) -> tuple[Sentence | None, int]:
+        """The next sentence to send at the place, which then counts as in flight, none while a hold stands or a request
+        is open; and how many unsent ones past their bound dropped."""
+        record, sentence, expired = sentence_taken(self._speech.get(at, NO_SPEECH), now)
+        self._set_speech(at, record)
+        return sentence, expired
+
+    def speech_answered(self, at: AppPlace, answered: Answered) -> Request:
+        """The request in flight at the place ended; the request it was."""
+        record = self._speech.get(at, NO_SPEECH)
+        assert record.in_flight is not None  # noqa: S101 - an answer ends the request that was sent
+        self._set_speech(at, speech_answered(record, answered))
+        return record.in_flight
 
     def speech_saying(self, at: AppPlace) -> str | None:
         """The sentence that plays at the place: the one last answered as spoken, until his own line enters."""
         return self._speech.get(at, NO_SPEECH).saying
 
-    def speech_ended(self, at: AppPlace) -> None:
-        """The turn that sent at the place ended: its requests in flight are gone; the sentence that plays and the hold
-        that stands stay."""
-        self._set_speech(at, speech_ended(self._speech.get(at, NO_SPEECH)))
+    def speech_unsaid(self, at: AppPlace) -> tuple[str, ...]:
+        """The sentences not said yet at the place: the one in flight, then the unsent ones."""
+        return speech_unsaid(self._speech.get(at, NO_SPEECH))
+
+    def speech_stopped(self, at: AppPlace) -> tuple[tuple[str, ...], int]:
+        """His stop at the place: the sentences not said yet, and how many unsent ones dropped. A request in flight runs
+        to its answer."""
+        record = self._speech.get(at, NO_SPEECH)
+        stopped, dropped = speech_stopped(record)
+        self._set_speech(at, stopped)
+        return speech_unsaid(record), dropped
+
+    def unsent_dropped(self, at: AppPlace) -> int:
+        """The unsent sentences at the place drop: how many."""
+        record, dropped = unsent_dropped(self._speech.get(at, NO_SPEECH))
+        self._set_speech(at, record)
+        return dropped
+
+    def speech_ended(self, at: AppPlace) -> int:
+        """The sender at the place ended: its request in flight is gone and its unsent sentences drop, how many. The
+        sentence that plays and the hold that stands stay."""
+        record, dropped = speech_ended(self._speech.get(at, NO_SPEECH))
+        self._set_speech(at, record)
+        return dropped
+
+    def drop_reason_at_end(self) -> DropReason:
+        """Why the unsent sentences of a turn or a sender that ended unanswered drop: this pod stops serving him, or
+        the turn or session failed."""
+        return DropReason.STOPPED if self._stopping else DropReason.FAILED
+
+    def speech_wake(self, at: AppPlace) -> asyncio.Event:
+        """The event the place's sender waits on, set by every change of the place's record and by every read of its
+        window; the sender clears it."""
+        return self._speech_wakes.setdefault(at, asyncio.Event())
 
     def hold_read(self, at: AppPlace, window: PlaceWindow) -> Held | None:
         """The place's window was read: the hold it states stands in the record, with the words people said over him
         kept after their record ends and whether a turn was told it. The hold that stands, none when it was decided."""
         record = hold_read(self._speech.get(at, NO_SPEECH), window)
         self._set_speech(at, record)
+        self._speech_wake(at)
         return record.hold
 
     def hold_to_tell(self, at: AppPlace) -> Held | None:
@@ -153,6 +203,10 @@ class Mind:
         """The hold ``hold_id`` at the place was decided: it stands no more and is not decided again."""
         self._set_speech(at, hold_decided(self._speech.get(at, NO_SPEECH), hold_id))
 
+    def speech_continued(self, at: AppPlace, bound: float) -> None:
+        """His continue at the place: the unsent sentences have the deciding turn's ``bound``."""
+        self._set_speech(at, speech_continued(self._speech.get(at, NO_SPEECH), bound))
+
     def hold_decided_id(self, at: AppPlace) -> str | None:
         """The id of the hold decided last at the place."""
         return self._speech.get(at, NO_SPEECH).decided
@@ -162,15 +216,17 @@ class Mind:
         return self._speech.get(at, NO_SPEECH).hold
 
     def _set_speech(self, at: AppPlace, record: SpeechRecord) -> None:
+        if record == self._speech.get(at, NO_SPEECH):
+            return
         if record == NO_SPEECH:
-            self._speech.pop(at, None)
+            del self._speech[at]
         else:
             self._speech[at] = record
+        self._speech_wake(at)
 
-    def next_take(self) -> asyncio.Event:
-        """The event the next take sets. A waiter reads it in the same synchronous step as the history it judges, so a
-        take made after that step sets it."""
-        return self._next_take
+    def _speech_wake(self, at: AppPlace) -> None:
+        if (wake := self._speech_wakes.get(at)) is not None:
+            wake.set()
 
     def changed(self) -> asyncio.Event:
         """The event every change of his present or of what ``turn_state`` holds sets, which stays set until its

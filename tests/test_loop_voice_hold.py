@@ -154,8 +154,10 @@ async def test_a_round_that_makes_no_decision_stops_him_with_the_id_and_says_not
 
 
 async def test_a_round_that_makes_no_decision_whose_stop_the_app_cannot_take_reports_no_decision(runner):
-    await held_in_the_first_sentence(runner, completion(TWO_SENTENCES), completion("[silent]"))
+    deciding_round = await calling_while_held(runner, completion("[silent]"), hold_round=True)
+    await runner.gateway.until_requested(3)
     runner.app.script(CALL, refuses_with_a_server_error)
+    deciding_round.set()
 
     await runner.reports.until(Event.HELD_APP_FAILED)
 
@@ -168,9 +170,9 @@ async def test_a_decision_for_a_hold_already_decided_starts_no_round_and_a_new_h
         runner,
         completion("First sentence. Second sentence. Third sentence."),
         deciding(CONTINUE_SPEAKING_TOOL),
-        completion(),
+        completion("[silent]"),
         deciding(CONTINUE_SPEAKING_TOOL, "hold-2"),
-        completion(),
+        completion("[silent]"),
     )
     await decided(runner)
     arrivals = runner.gateway.arrivals

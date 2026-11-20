@@ -116,6 +116,37 @@ async def test_the_next_turns_first_sentence_goes_out_while_the_one_before_plays
 
 
 @pytest.mark.parametrize(
+    ("reply", "later", "dropped"),
+    [
+        pytest.param("New.", ["New."], [1], id="a spoken turn replaces the rest"),
+        pytest.param("[silent]", ["Three."], [], id="a silent turn keeps it"),
+    ],
+)
+async def test_a_later_spoken_turns_first_sentence_drops_the_unsent_rest_and_queues_behind_the_sent_ones(
+    runner, reply, later, dropped
+):
+    """TURNS-25, TURNS-45."""
+    holding_sentence_ends(runner)
+    await a_voice_call(runner, completion("One. Two. Three."), completion(reply))
+    say_in_the_call(runner, ADDRESSED, spoken=True)
+    await runner.app.spoken_count(1)
+    await runner.app.until_called(2)
+    await runner.reports.until_a_turn_completed()
+    said_at(runner, PLACE_ID, AGAIN)
+    await runner.reports.until_a_turn_completed(count=2)
+    await settled(runner.app)
+
+    runner.app.end_sentence()
+    await runner.app.spoken_count(2)
+    runner.app.end_sentence()
+    await runner.app.spoken_count(3)
+
+    assert sentences_spoken(runner) == ["One.", "Two.", *later]
+    assert [each.sentences for each in runner.reports.changes_of(Event.SPEECH_DROPPED)] == dropped
+    assert runner.reports.codes_of(Event.SPEECH_DROPPED) == ["replaced"] * len(dropped)
+
+
+@pytest.mark.parametrize(
     ("tool", "cut"),
     [pytest.param(CONTINUE_SPEAKING_TOOL, False, id="continue"), pytest.param(STOP_SPEAKING_TOOL, True, id="stop")],
 )

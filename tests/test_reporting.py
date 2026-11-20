@@ -58,6 +58,12 @@ def of(event: Event, code: str | None = None, **fields: object) -> StateChange:
             id="paused",
         ),
         pytest.param(of(Event.SPEAK_REFUSED, "busy"), "speak.refused", {"reason": "busy"}, id="speak refused"),
+        pytest.param(
+            of(Event.SPEECH_DROPPED, "replaced", sentences=2),
+            "speech.dropped",
+            {"reason": "replaced", "sentence_count": 2},
+            id="speech dropped",
+        ),
         pytest.param(of(Event.STORE_FAILED, "store_timeout"), "store.failed", {"reason": "store_timeout"}, id="store"),
         pytest.param(of(Event.STORE_RESUMED), "store.resumed", {}, id="store resumed"),
         pytest.param(
@@ -156,11 +162,11 @@ def test_a_turn_that_sent_nothing_says_zero_counts_and_no_first_output_tokens_or
     assert not {"first_output_ms", "input_tokens", "tools_bytes"} & line.keys()
 
 
-def test_the_first_sentence_sent_marks_the_first_output(capsys):
+def test_the_first_sentence_released_marks_the_first_output(capsys):
     with configured("personas"):
         tally = start_turn_tally(AGENT, APP_URL)
-        tally.sentence_sent()
-        tally.sentence_sent()
+        tally.sentence_released()
+        tally.sentence_released()
         tally.end(TurnEnding(Outcome.OK))
     line = json.loads(capsys.readouterr().out)
 

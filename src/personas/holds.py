@@ -43,21 +43,16 @@ DECISION_DECLARATIONS: Final = tuple(
 
 
 class TurnHold:
-    """The hold a turn was told at its start and has not decided yet: until he decides, the turn's sentences wait
-    unsent and its every other call is answered that he decides first."""
+    """The hold a turn was told at its start and has not decided yet: until he decides, its every other call is
+    answered that he decides first, and the sentences wait unsent in the mind's record, where the hold stands."""
 
     def __init__(self, held: Held) -> None:
         self.held = held
         self.outcome: HoldOutcome | None = None
-        self.released = asyncio.Event()
-        """Set when the turn's sentences may go out: after the decision, or when the speech is silenced."""
 
     @property
     def pending(self) -> bool:
         return self.outcome is None
-
-    def decided(self) -> None:
-        self.released.set()
 
     def dropped(self) -> bool:
         """The turn's speech was cut before he decided this hold: it counts as undecided, once. Whether it was still
@@ -65,7 +60,6 @@ class TurnHold:
         if not self.pending:
             return False
         self.outcome = HoldOutcome.UNDECIDED
-        self.released.set()
         return True
 
 

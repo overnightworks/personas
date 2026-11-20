@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from http import HTTPStatus
+from typing import TYPE_CHECKING
 
 import anyio
 import pytest
@@ -15,7 +17,7 @@ from personas.decision import status_code
 from personas.failures import Unreachable, leaves_of
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
-from tests.support.fakes import CANCELLED_TURN
+from tests.support.fakes import CANCELLED_TURN, COMPLETED_TURN, TurnEnded
 from tests.support.gateway import Gateway, says
 from tests.support.hopin import CALL, DISCOVER, LIMIT_SECONDS, LIST_TOOLS, LISTEN, READ
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
@@ -27,6 +29,9 @@ from tests.support.transport import (
 )
 from tests.support.voice import a_turn_whose_speak_is_in_flight
 from tests.support.wire import hangs, hangs_once_entered, lost_on_demand
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
 pytestmark = pytest.mark.anyio
 
@@ -238,21 +243,37 @@ async def a_turn_whose_call_is_in_flight(runner, said: asyncio.Event | None = No
     await runner.app.log.until(CALL, 1)
 
 
+@dataclass(frozen=True)
+class InFlight:
+    """A request to the app that is open and how the turn it belongs to ends: a call the turn relays ends with it, a
+    sentence the sender sends outlives it."""
+
+    arrange: Callable[[asyncio.Event | None], Awaitable[None]]
+    ending: TurnEnded
+
+
 @pytest.fixture(params=["an own-app call", "a speak"])
 def in_flight(request, runner):
-    """Arranges a turn whose request to the app is in flight: a call it relays, or a sentence it speaks."""
+    """Arranges a turn whose request to the app is in flight: a call it relays, or a sentence its sender sends."""
     if request.param == "a speak":
-        return lambda said=None: a_turn_whose_speak_is_in_flight(runner, said)
-    return lambda said=None: a_turn_whose_call_is_in_flight(runner, said)
+
+        async def sentence_sent(said=None):
+            await a_turn_whose_speak_is_in_flight(runner, said)
+            await runner.reports.until_a_turn_ended()
+
+        return InFlight(sentence_sent, COMPLETED_TURN)
+    return InFlight(lambda said=None: a_turn_whose_call_is_in_flight(runner, said), CANCELLED_TURN)
 
 
-async def test_a_runner_stopped_while_a_turns_request_is_in_flight_ends_the_turn_cancelled(runner, in_flight):
-    await in_flight()
+async def test_a_runner_stopped_while_a_request_of_a_turn_is_in_flight_ends_the_turn_as_it_ends_that_request(
+    runner, in_flight
+):
+    await in_flight.arrange(None)
 
     runner.task.cancel()
 
     assert isinstance(await ended_by(runner.task), asyncio.CancelledError)
-    assert runner.reports.turn_endings == [CANCELLED_TURN]
+    assert runner.reports.turn_endings == [in_flight.ending]
     assert StopOutcome.UNAVAILABLE not in stopped_outcomes(runner)
 
 
@@ -276,18 +297,18 @@ async def test_a_runner_stopped_while_a_turns_own_app_listing_is_in_flight_ends_
     assert [due.place for due in kept.due] == [CALL_PLACE]
 
 
-async def test_a_lost_stream_while_a_turns_request_is_in_flight_ends_the_turn_cancelled_and_backs_off_once(
+async def test_a_lost_stream_while_a_turns_request_is_in_flight_ends_the_turn_as_that_request_does_and_backs_off_once(
     runner, in_flight
 ):
     said, lost = asyncio.Event(), asyncio.Event()
     runner.app.script(LISTEN, lost_on_demand(said, lost, place_window_uri(CALL_PLACE)))
-    await in_flight(said)
+    await in_flight.arrange(said)
 
     lost.set()
     await runner.reports.until(Event.BACKOFF)
     await runner.reports.until_a_turn_ended()
 
-    assert runner.reports.turn_endings == [CANCELLED_TURN]
+    assert runner.reports.turn_endings == [in_flight.ending]
     assert StopOutcome.UNAVAILABLE not in stopped_outcomes(runner)
     assert [event for event, _ in runner.reports.reported(started=False)].count(Event.BACKOFF) == 1
 

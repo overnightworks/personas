@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
-from agents.member import ContinueSpeakingRefusal, StopSpeakingRefusal
+from agents.member import ContinueSpeakingRefusal, SpeakRefusal, Spoken, StopSpeakingRefusal, Written
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -15,37 +15,162 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
-class SpeechRecord:
-    """What he holds of his speech at one place: the requests in flight, the sentence that plays, the hold that stands
-    there and the id of the last hold decided there. All of it outlives the turn that sent."""
+class Sentence:
+    """A sentence released into the record, with the time its sending turn's longest duration ends at, on the clock's
+    monotonic scale."""
 
-    in_flight: int = 0
+    text: str
+    bound: float
+
+
+@dataclass(frozen=True)
+class Request:
+    """The request to ``speak`` that is open for a sentence, whether his own stop reached it and whether his own line
+    for it entered before its answer did."""
+
+    sentence: Sentence
+    cut: bool = False
+    line_entered: bool = False
+
+    def cut_by_stop(self, refusal: SpeakRefusal) -> bool:
+        """Whether the refusal is the app's answer to his own stop, which is no news."""
+        return self.cut and refusal is SpeakRefusal.STOPPED
+
+
+class Answered(StrEnum):
+    """How the request to ``speak`` for a sentence ended."""
+
+    SPOKEN = "spoken"
+    WRITTEN = "written"
+    HELD = "held"
+    REFUSED = "refused"
+    """Any refusal but held."""
+    UNANSWERED = "unanswered"
+    """The request failed, was cut or was given up."""
+
+
+class DropReason(StrEnum):
+    """Why unsent sentences were dropped, as the one line per drop reports it."""
+
+    REPLACED = "replaced"
+    LIMIT_EXCEEDED = "limit_exceeded"
+    STOPPED = "stopped"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class SpeechRecord:
+    """What he holds of his speech at one place: the request in flight, the sentences released and not yet sent, the
+    sentence that plays, the hold that stands there and the id of the last hold decided there. All of it outlives the
+    turn that released the sentences. ``held_unread`` says the app answered a sentence as held and no read of the window
+    has stated the hold since."""
+
+    in_flight: Request | None = None
+    unsent: tuple[Sentence, ...] = ()
     saying: str | None = None
     hold: Held | None = None
     decided: str | None = None
+    held_unread: bool = False
 
 
 NO_SPEECH: Final = SpeechRecord()
 
 
-def speech_sent(record: SpeechRecord) -> SpeechRecord:
-    """A request to ``speak`` counts from its send."""
-    return SpeechRecord(record.in_flight + 1, record.saying, record.hold, record.decided)
+def answered_as(ended: object) -> Answered:
+    """How a request ended, from its answer or from the error or cancellation it ended with."""
+    if isinstance(ended, Spoken):
+        return Answered.SPOKEN
+    if isinstance(ended, Written):
+        return Answered.WRITTEN
+    if isinstance(ended, SpeakRefusal):
+        return Answered.HELD if ended is SpeakRefusal.HELD else Answered.REFUSED
+    return Answered.UNANSWERED
 
 
-def speech_answered(record: SpeechRecord, sentence: str, *, spoken: bool) -> SpeechRecord:
-    """A request ended: it stops counting, and a sentence answered as ``Spoken`` is the one that plays."""
-    return SpeechRecord(record.in_flight - 1, sentence if spoken else record.saying, record.hold, record.decided)
+def bound_reached(now: float, bound: float) -> bool:
+    """Whether a bound is reached at ``now``, a tie going to the bound."""
+    return now >= bound
+
+
+def sentences_released(
+    record: SpeechRecord, texts: Iterable[str], bound: float, *, replacing: bool
+) -> tuple[SpeechRecord, int]:
+    """The record once a turn released sentences with its bound, and how many unsent ones it dropped: the first
+    sentence of a spoken turn replaces the rest of the turns before it, the sentence in flight and the one that plays
+    staying."""
+    kept = () if replacing else record.unsent
+    released = tuple(Sentence(text, bound) for text in texts)
+    return replace(record, unsent=(*kept, *released)), len(record.unsent) - len(kept)
+
+
+def sentence_taken(record: SpeechRecord, now: float) -> tuple[SpeechRecord, Sentence | None, int]:
+    """The record once the next sentence goes out, that sentence and how many unsent ones past their bound it dropped.
+    Nothing is dropped or sent while a hold stands; nothing is sent while a request is open or after one answered as
+    held until a read of the window."""
+    if record.hold is not None:
+        return record, None, 0
+    alive = tuple(each for each in record.unsent if not bound_reached(now, each.bound))
+    expired = len(record.unsent) - len(alive)
+    if record.in_flight is not None or record.held_unread or not alive:
+        return replace(record, unsent=alive), None, expired
+    first, *rest = alive
+    return replace(record, in_flight=Request(first), unsent=tuple(rest)), first, expired
+
+
+def speech_answered(record: SpeechRecord, answered: Answered) -> SpeechRecord:
+    """The open request ended. A sentence answered as spoken is the one that plays, unless his own line for it entered
+    already; one answered as held goes back first among the unsent; any other refusal drops the unsent ones."""
+    request = record.in_flight
+    assert request is not None  # noqa: S101 - an answer ends the request that was sent
+    ended = replace(record, in_flight=None)
+    match answered:
+        case Answered.SPOKEN:
+            return ended if request.line_entered else replace(ended, saying=request.sentence.text)
+        case Answered.HELD:
+            return replace(ended, unsent=(request.sentence, *record.unsent), held_unread=True)
+        case Answered.REFUSED:
+            return replace(ended, unsent=())
+        case _:
+            return ended
 
 
 def speech_line_entered(record: SpeechRecord) -> SpeechRecord:
-    """His own spoken line entered at the place: the sentence that played has ended."""
-    return SpeechRecord(record.in_flight, None, record.hold, record.decided)
+    """His own spoken line entered at the place: the sentence that played has ended, or, when none plays, the request
+    open for a sentence has already played to its end."""
+    if record.saying is not None:
+        return replace(record, saying=None)
+    if record.in_flight is not None:
+        return replace(record, in_flight=replace(record.in_flight, line_entered=True))
+    return record
 
 
-def speech_ended(record: SpeechRecord) -> SpeechRecord:
-    """The turn that sent ended: its requests in flight are gone; the sentence that plays and the hold stay."""
-    return SpeechRecord(0, record.saying, record.hold, record.decided)
+def speech_unsaid(record: SpeechRecord) -> tuple[str, ...]:
+    """The sentences not said yet: the one in flight, then the unsent ones in order."""
+    open_ = () if record.in_flight is None else (record.in_flight.sentence,)
+    return tuple(each.text for each in (*open_, *record.unsent))
+
+
+def speech_stopped(record: SpeechRecord) -> tuple[SpeechRecord, int]:
+    """His own stop: the unsent sentences drop, which is how many; a request in flight is marked cut and runs to its
+    answer."""
+    cut = None if record.in_flight is None else replace(record.in_flight, cut=True)
+    return replace(record, in_flight=cut, unsent=()), len(record.unsent)
+
+
+def speech_continued(record: SpeechRecord, bound: float) -> SpeechRecord:
+    """His continue: the unsent sentences have the deciding turn's bound."""
+    return replace(record, unsent=tuple(Sentence(each.text, bound) for each in record.unsent))
+
+
+def speech_ended(record: SpeechRecord) -> tuple[SpeechRecord, int]:
+    """The sender ended: its request in flight is gone and the unsent sentences drop, which is how many; the sentence
+    that plays and the hold stay."""
+    return replace(record, in_flight=None, unsent=(), held_unread=False), len(record.unsent)
+
+
+def unsent_dropped(record: SpeechRecord) -> tuple[SpeechRecord, int]:
+    """The unsent sentences drop, which is how many."""
+    return replace(record, unsent=()), len(record.unsent)
 
 
 class Telling(StrEnum):
@@ -106,8 +231,8 @@ def hold_stated(window: PlaceWindow, seen: Held | None) -> Held | None:
 def hold_read(record: SpeechRecord, window: PlaceWindow) -> SpeechRecord:
     """The record once the window is read: the hold it states, none when that is the one decided last."""
     if window.interrupted is not None and window.interrupted.id == record.decided:
-        return SpeechRecord(record.in_flight, record.saying, None, record.decided)
-    return SpeechRecord(record.in_flight, record.saying, hold_stated(window, record.hold), record.decided)
+        return replace(record, hold=None, held_unread=False)
+    return replace(record, hold=hold_stated(window, record.hold), held_unread=False)
 
 
 def hold_untold(record: SpeechRecord) -> Held | None:
@@ -119,7 +244,7 @@ def hold_untold(record: SpeechRecord) -> Held | None:
 def hold_marked_told(record: SpeechRecord) -> SpeechRecord:
     """A turn is told the hold that stands."""
     assert record.hold is not None  # noqa: S101 - a turn is told only a hold that stands
-    return SpeechRecord(record.in_flight, record.saying, replace(record.hold, telling=Telling.TELLING), record.decided)
+    return replace(record, hold=replace(record.hold, telling=Telling.TELLING))
 
 
 def hold_turn_ended(record: SpeechRecord) -> SpeechRecord:
@@ -127,12 +252,12 @@ def hold_turn_ended(record: SpeechRecord) -> SpeechRecord:
     held = record.hold
     if held is None or held.telling is not Telling.TELLING:
         return record
-    return SpeechRecord(record.in_flight, record.saying, replace(held, telling=Telling.UNDECIDED), record.decided)
+    return replace(record, hold=replace(held, telling=Telling.UNDECIDED))
 
 
 def hold_decided(record: SpeechRecord, hold_id: str) -> SpeechRecord:
     """The hold ended with a decision: it stands no more and is never decided again."""
-    return SpeechRecord(record.in_flight, record.saying, None, hold_id)
+    return replace(record, hold=None, decided=hold_id, held_unread=False)
 
 
 def hold_tellable(held: Held) -> bool:

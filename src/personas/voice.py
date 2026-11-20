@@ -1,14 +1,13 @@
-"""What a spoken turn does with its text: the sentences it releases, sent in order to the app's ``speak``, one ahead of
-the one playing."""
+"""What a spoken turn does with its text and who sends it: the turn releases its sentences into the mind's record, and
+the sender of the place sends them to the app's ``speak``, one request open at a time."""
 
 from __future__ import annotations
 
 import asyncio
-from collections import deque
 from typing import TYPE_CHECKING
 
 from agents.backend import TurnStopKind, TurnStopped
-from agents.member import SpeakRefusal, Spoken
+from agents.member import SpeakRefusal
 from agents.turn import FailureCode
 from agents.voice import StayedSilent
 from agents.voice.reply import ReplyReader
@@ -17,7 +16,8 @@ from personas.decision import AppPlace, speech_outcome
 from personas.entries import SaidAloud
 from personas.failures import task_is_being_cancelled
 from personas.reporting import Event
-from personas.task_record import RelayFailed
+from personas.speech import Answered, DropReason, answered_as
+from personas.task_record import TaskRecord, ending_loud_when_cancelled, ending_with_recorded_defect
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine
@@ -29,22 +29,74 @@ if TYPE_CHECKING:
     from personas.clock import Clock
     from personas.mind import Mind
     from personas.reporting import TurnTally
+    from personas.speech import Sentence
     from personas.turn_bound import TurnBound
+
+type DropReporter = Callable[[DropReason, int], None]
 
 
 class Speaking:
-    """One spoken turn's speech: the sentences its reply releases, sent to ``speak`` in order, one request open at a
-    time. The app answers a request when its sentence starts to play, so the next sentence goes out while the one
-    before plays and he is never more than one sentence ahead. A tool call is not held for it. Each sentence answered
-    as spoken gets his own line from the app, whole or cut, which enters the history when the sentence ends. The turn
-    hands every event to ``hear`` and runs ``play`` beside its events. The speech ends at the answer of its last
-    sentence. A request is sent only before the turn's bound: a request not answered by then ends the turn as
-    ``limit_exceeded``. Each sentence sent enters the agent's history as a ``SaidAloud`` however its request ends. A
-    refusal, a stop included, ends the speech and is reported; the turn goes on without it. The turn's tally counts each
-    sentence sent and each silent round. His own stop (``cut``) is no refusal and is not reported.
+    """One spoken turn's speech: the sentences its reply releases, put into the mind's record at the place with the
+    turn's bound, and a round that opened with the silent marker counted. The turn's tally counts each sentence
+    released. The first sentence a turn told no hold releases replaces the unsent rest of the turns before it, which
+    is logged as dropped. His own stop (``cut``) ends the releasing; the sentences the stop drops are the record's.
+    Sending them is the place's ``Sender``'s, also after the turn.
+    """
 
-    A turn told a hold hands ``released``: no sentence is sent until it is set, which a decision does, and his own stop
-    or a failed turn does too, so that the sentences waiting end unsent.
+    def __init__(
+        self,
+        app: str,
+        place: PlaceRef,
+        bound: TurnBound,
+        mind: Mind,
+        tally: TurnTally,
+        report_dropped: DropReporter,
+        *,
+        replacing: bool,
+    ) -> None:
+        self._at = AppPlace(app, place)
+        self._bound = bound
+        self._mind = mind
+        self._tally = tally
+        self._report_dropped = report_dropped
+        self._replacing = replacing
+        self._reader = ReplyReader()
+        self.was_cut = False
+
+    def hear(self, event: TurnEvent) -> None:
+        """Releases the sentences the event completed, and counts a round that opened with the silent marker."""
+        reading = self._reader.read(event)
+        if isinstance(reading.opening, StayedSilent):
+            self._tally.silent_count += 1
+        if self.was_cut or not reading.sentences:
+            return
+        for _ in reading.sentences:
+            self._tally.sentence_released()
+        dropped = self._mind.sentences_released(
+            self._at, reading.sentences, self._bound.ends_at(), replacing=self._replacing
+        )
+        self._replacing = False
+        self._report_dropped(DropReason.REPLACED, dropped)
+
+    def cut(self) -> None:
+        """His own stop: the turn releases no sentence from now on."""
+        self.was_cut = True
+
+    def seconds_left(self) -> float:
+        return self._bound.seconds_left()
+
+
+class Sender:
+    """The sender of one place's sentences on the loop's session: it takes the next sentence of the mind's record and
+    sends it to ``speak``, one request open at a time, which the app answers when its sentence starts to play, so he is
+    never more than one sentence ahead. Nothing goes out while a hold stands. A sentence unsent at its bound is dropped
+    and logged, and a request not answered by its bound is given up. Each sentence sent enters the agent's history as
+    a ``SaidAloud`` however its request ends, unless the app answered it as held, which keeps it first among the
+    unsent. Any other refusal drops the unsent sentences and is reported; one that his own stop caused is not. It wakes
+    on the place's own event, never on the mind's change.
+
+    A ``speak`` that fails as a call ends the sender with the failure, which ends the loop's session. A defect ends the
+    runner loud, a cancel included. At its end the request in flight is gone and the unsent sentences drop.
     """
 
     def __init__(
@@ -53,152 +105,88 @@ class Speaking:
         app: str,
         place: PlaceRef,
         clock: Clock,
-        bound: TurnBound,
         renew_token: Callable[[], Awaitable[None]],
         report: Callable[[Event, str | None], None],
+        report_dropped: DropReporter,
         mind: Mind,
-        tally: TurnTally,
-        released: asyncio.Event | None = None,
     ) -> None:
         self._session = session
         self._app = app
         self._place = place
         self._clock = clock
-        self._bound = bound
         self._renew_token = renew_token
         self._report = report
+        self._report_dropped = report_dropped
         self._mind = mind
-        self._tally = tally
-        self._released = released
         self._at = AppPlace(app, place)
-        self._reader = ReplyReader()
-        self._queue: asyncio.Queue[str | None] = asyncio.Queue()
-        self._silenced = False
-        self.was_cut = False
-        self.unsaid: deque[str] = deque()
-        """The sentences heard that the app has not answered as spoken, the one in flight first."""
-        self._idle = asyncio.Event()
-        self._idle.set()
+        self._wake = mind.speech_wake(self._at)
+        self._record = TaskRecord()
 
-    def hear(self, event: TurnEvent) -> None:
-        """Queues the sentences the event completed, and counts a round that opened with the silent marker."""
-        reading = self._reader.read(event)
-        if isinstance(reading.opening, StayedSilent):
-            self._tally.silent_count += 1
-        for sentence in reading.sentences:
-            self.unsaid.append(sentence)
-            self._queue.put_nowait(sentence)
+    async def run(self) -> None:
+        """Sends until it is cancelled, wrapped like a turn's task: a defect ends the runner loud whatever way the
+        task ends."""
+        record = self._record
+        await ending_loud_when_cancelled(ending_with_recorded_defect(self._serve(), record), record.loud_end)
 
-    def cut(self) -> tuple[str, ...]:
-        """His own stop: no sentence is sent from now on and the speech ends once the one in flight is answered; the
-        sentences not yet said are returned."""
-        unsaid = tuple(self.unsaid)
-        self.was_cut = True
-        self._silence()
-        self.unsaid.clear()
-        self._queue.put_nowait(None)
-        return unsaid
-
-    def seconds_left(self) -> float:
-        return self._bound.seconds_left()
-
-    def end(self) -> None:
-        """No more events come: ``play`` ends once the queued sentences are spoken."""
-        self._queue.put_nowait(None)
-
-    async def settle(self) -> None:
-        """The turn's events failed: no sentence is sent from now on, and one in flight is answered and entered."""
-        self._silence()
-        await self._idle.wait()
-
-    def _silence(self) -> None:
-        self._silenced = True
-        if self._released is not None:
-            self._released.set()
-
-    async def play(self) -> None:
-        """Speaks the queued sentences in order until the queue ends, which is at the answer of the last one."""
-        while (sentence := await self._queue.get()) is not None:
-            if not self._silenced:
-                await self._speak(sentence)
-
-    async def _until_released(self) -> None:
-        """Returns once the hold the turn was told is decided or the speech is silenced; the turn's deadline ends the
-        turn first when it passes before."""
-        if self._released is None or self._released.is_set():
-            return
-        waiting = asyncio.create_task(self._released.wait())
+    async def _serve(self) -> None:
         try:
-            await asyncio.wait({waiting, self._bound.deadline()}, return_when=asyncio.FIRST_COMPLETED)
-        finally:
-            waiting.cancel()
-        if not self._released.is_set():
-            self._bound.deadline().result()
-            raise TurnStopped(TurnStopKind.FAILED, FailureCode.LIMIT_EXCEEDED)
-
-    async def _speak(self, sentence: str) -> None:
-        self._bound.stop_if_past()
-        await self._until_released()
-        try:
-            outcome = await self._entered_as_said(sentence)
-        except TurnStopped:
-            raise
+            await self._send_forever()
         except Exception as error:
-            raise RelayFailed(error) from None
-        if outcome is None:
-            if not self._silenced:
-                self._bound.stop_if_past()
-            return
-        if isinstance(outcome, SpeakRefusal):
-            if not (self.was_cut and outcome is SpeakRefusal.STOPPED):
-                self._report(Event.SPEAK_REFUSED, outcome.value)
-            self._silenced = True
-        else:
-            self._said()
+            self._record.note(error)
+            raise
+        finally:
+            self._report_dropped(self._mind.drop_reason_at_end(), self._mind.speech_ended(self._at))
 
-    def _said(self) -> None:
-        """The app took the sentence, voiced or written: it is no longer unsaid."""
-        if not self.was_cut:
-            self.unsaid.popleft()
+    async def _send_forever(self) -> None:
+        given_up = 0
+        while True:
+            self._wake.clear()
+            await self._renew_token()
+            sentence, expired = self._mind.sentence_to_send(self._at, self._clock.now())
+            self._report_dropped(DropReason.LIMIT_EXCEEDED, expired + given_up)
+            given_up = 0
+            if sentence is None:
+                await self._wake.wait()
+                continue
+            try:
+                await self._sent(sentence)
+            except TurnStopped:
+                given_up = 1
 
-    async def _answered_before_the_deadline(
-        self, request: Coroutine[None, None, SpeakAnswer | SpeakRefusal]
+    async def _answered_before_its_bound(
+        self, sentence: Sentence, request: Coroutine[None, None, SpeakAnswer | SpeakRefusal]
     ) -> SpeakAnswer | SpeakRefusal:
         """The answer of the request, which the app holds back while the sentence before plays; a request not answered
-        by the turn's deadline is given up, the turn ending ``limit_exceeded``."""
+        by the sentence's bound is given up."""
         sending = asyncio.create_task(request)
+        giving_up = asyncio.create_task(self._clock.sleep(max(0.0, sentence.bound - self._clock.now())))
         try:
-            while True:
-                taken = self._mind.next_take()
-                if sending.done():
-                    return sending.result()
-                if self._bound.deadline().done():
-                    raise TurnStopped(TurnStopKind.FAILED, FailureCode.LIMIT_EXCEEDED)
-                await self._bound.first_of(taken, sending, self._bound.deadline())
+            await asyncio.wait({sending, giving_up}, return_when=asyncio.FIRST_COMPLETED)
+            if sending.done():
+                return sending.result()
+            raise TurnStopped(TurnStopKind.FAILED, FailureCode.LIMIT_EXCEEDED)
         finally:
+            giving_up.cancel()
             if not sending.done():
                 sending.cancel()
-                await asyncio.gather(sending, return_exceptions=True)
+            # A cancel can reach this wait after the request raised, which the cancel would lose.
+            self._note_failure_of(sending)
+            await asyncio.gather(sending, giving_up, return_exceptions=True)
+            self._note_failure_of(sending)
 
-    async def _entered_as_said(self, sentence: str) -> SpeakAnswer | SpeakRefusal | None:
-        """Sends the sentence and enters it into the history however its request ends; ``None`` when the token's
-        renewal ran into the deadline or a silence, so that nothing was sent and nothing is entered.
+    def _note_failure_of(self, request: asyncio.Task[object]) -> None:
+        if request.done() and not request.cancelled() and isinstance(failure := request.exception(), Exception):
+            self._record.note(failure)
 
-        Whether the turn is being cancelled is asked once the request and every scope inside it have exited.
+    async def _sent(self, sentence: Sentence) -> None:
+        """Sends the sentence and enters it into the history however its request ends.
+
+        Whether the sender is being cancelled is asked once the request and every scope inside it have exited.
         """
         ended: SpeakAnswer | SpeakRefusal | BaseException | None = None
-        sent = False
-        self._idle.clear()
         try:
-            await self._renew_token()
-            if self._silenced or self._bound.past():
-                return None
-            self._tally.sentence_sent()
-            self._mind.speech_sent(self._at)
-            sent = True
-            answer = await self._answered_before_the_deadline(self._session.speak(self._place, sentence))
+            answer = await self._answered_before_its_bound(sentence, self._session.speak(self._place, sentence.text))
             ended = answer
-            return answer
         except Exception as error:
             ended = error
             raise
@@ -206,9 +194,10 @@ class Speaking:
             ended = cancelled
             raise
         finally:
-            if sent:
-                self._mind.speech_answered(self._at, sentence, spoken=isinstance(ended, Spoken))
-            self._idle.set()
+            answered = answered_as(ended)
+            request = self._mind.speech_answered(self._at, answered)
             outcome = None if ended is None else speech_outcome(ended, cancelling=task_is_being_cancelled())
-            if outcome is not None:
-                self._mind.take((SaidAloud(self._app, self._place, sentence, outcome, self._clock.wall()),))
+            if outcome is not None and answered is not Answered.HELD:
+                self._mind.take((SaidAloud(self._app, self._place, sentence.text, outcome, self._clock.wall()),))
+        if isinstance(answer, SpeakRefusal) and answered is Answered.REFUSED and not request.cut_by_stop(answer):
+            self._report(Event.SPEAK_REFUSED, answer.value)

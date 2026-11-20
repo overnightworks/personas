@@ -53,6 +53,7 @@ class Event(Enum):
     INVITATION_LEFT_OUT = auto()
     PAUSED = auto()
     SPEAK_REFUSED = auto()
+    SPEECH_DROPPED = auto()
     HOLD_DECIDED = auto()
     TURN_STATE_FAILED = auto()
     TURN_STATE_LOST = auto()
@@ -76,7 +77,8 @@ class StateChange:
     to the runner alone. The lock of an agent taken, lost or slow to stop belongs to no app. The start says the model
     the agent's turns run on, when it has a persona. An invitation the loop leaves out says its place's kind and the
     reason as the code. A pause of his turns says its reason as the code and its wait in seconds. Tools left out for an
-    earlier app's of the same name say how many. Lines that never came say how many. A call that failed says its
+    earlier app's of the same name say how many. Sentences dropped unsent say how many and why, as the code. Lines
+    that never came say how many. A call that failed says its
     failure: the line holds its HTTP status, the MCP method that failed and a closed reason.
     """
 
@@ -90,6 +92,7 @@ class StateChange:
     model: str | None = None
     tool_count: int | None = None
     failure: CallFailure | None = None
+    sentences: int | None = None
 
 
 type Reporter = Callable[[StateChange], None]
@@ -105,6 +108,7 @@ _LINE_OF: Final = {
     Event.INVITATION_LEFT_OUT: (logging.INFO, "invitation.left_out"),
     Event.PAUSED: (logging.INFO, "turns.paused"),
     Event.SPEAK_REFUSED: (logging.INFO, "speak.refused"),
+    Event.SPEECH_DROPPED: (logging.INFO, "speech.dropped"),
     Event.HOLD_DECIDED: (logging.INFO, "hold.decided"),
     Event.TURN_STATE_FAILED: (logging.WARNING, "turn_state.failed"),
     Event.TURN_STATE_LOST: (logging.INFO, "turn_state.lost"),
@@ -143,6 +147,8 @@ def _fields_of(change: StateChange) -> dict[str, str | int | float]:
         fields["pause_ms"] = round(change.seconds * 1000, 3)
     if change.tool_count is not None:
         fields["tool_count"] = change.tool_count
+    if change.sentences is not None:
+        fields["sentence_count"] = change.sentences
     if change.model is not None:
         fields["model"] = change.model
     return fields
@@ -165,7 +171,7 @@ class TurnTally:
     """What a turn counts while it runs, and its one ``turn.ended`` line: the step timer started with the turn, and the
     counts, sizes and usage the line carries beside the timer's duration, outcome and reason, never a name or content.
 
-    A sentence counts when it is sent to ``speak``, refused and cut ones included, and the first one marks the
+    A sentence counts when the turn's reply releases it, whether it is ever sent or not, and the first one marks the
     timer's first output. A silent round counts when its marker is read, a tool call when the model makes it.
     ``stop_code`` is the code of a stop the turn reported itself; ``answered`` says its final event came.
     """
@@ -179,7 +185,7 @@ class TurnTally:
     stop_code: str | None = None
     answered: bool = False
 
-    def sentence_sent(self) -> None:
+    def sentence_released(self) -> None:
         self.sentence_count += 1
         self.timer.first_output()
 
