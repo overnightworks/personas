@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from enum import StrEnum
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, cast
 
 from agents.member import ContinueSpeakingRefusal, SpeakRefusal, Spoken, StopSpeakingRefusal, Written
 
@@ -76,6 +76,11 @@ class SpeechRecord:
 NO_SPEECH: Final = SpeechRecord()
 
 
+def _revised(record: SpeechRecord, **changes: object) -> SpeechRecord:
+    """The record with the named fields changed; the cast states the type a static scanner reads as a bare dataclass."""
+    return cast("SpeechRecord", replace(record, **changes))  # pyright: ignore[reportUnnecessaryCast]
+
+
 def answered_as(ended: object) -> Answered:
     """How a request ended, from its answer or from the error or cancellation it ended with."""
     if isinstance(ended, Spoken):
@@ -122,14 +127,14 @@ def speech_answered(record: SpeechRecord, answered: Answered) -> SpeechRecord:
     already; one answered as held goes back first among the unsent; any other refusal drops the unsent ones."""
     request = record.in_flight
     assert request is not None  # noqa: S101 - an answer ends the request that was sent
-    ended = replace(record, in_flight=None)
+    ended = _revised(record, in_flight=None)
     match answered:
         case Answered.SPOKEN:
-            return ended if request.line_entered else replace(ended, saying=request.sentence.text)
+            return ended if request.line_entered else _revised(ended, saying=request.sentence.text)
         case Answered.HELD:
-            return replace(ended, unsent=(request.sentence, *record.unsent), held_unread=True)
+            return _revised(ended, unsent=(request.sentence, *record.unsent), held_unread=True)
         case Answered.REFUSED:
-            return replace(ended, unsent=())
+            return _revised(ended, unsent=())
         case _:
             return ended
 
@@ -138,9 +143,9 @@ def speech_line_entered(record: SpeechRecord) -> SpeechRecord:
     """His own spoken line entered at the place: the sentence that played has ended, or, when none plays, the request
     open for a sentence has already played to its end."""
     if record.saying is not None:
-        return replace(record, saying=None)
+        return _revised(record, saying=None)
     if record.in_flight is not None:
-        return replace(record, in_flight=replace(record.in_flight, line_entered=True))
+        return _revised(record, in_flight=replace(record.in_flight, line_entered=True))
     return record
 
 
@@ -159,7 +164,7 @@ def speech_stopped(record: SpeechRecord) -> tuple[SpeechRecord, int]:
 
 def speech_continued(record: SpeechRecord, bound: float) -> SpeechRecord:
     """His continue: the unsent sentences have the deciding turn's bound."""
-    return replace(record, unsent=tuple(Sentence(each.text, bound) for each in record.unsent))
+    return _revised(record, unsent=tuple(Sentence(each.text, bound) for each in record.unsent))
 
 
 def speech_ended(record: SpeechRecord) -> tuple[SpeechRecord, int]:
@@ -231,8 +236,8 @@ def hold_stated(window: PlaceWindow, seen: Held | None) -> Held | None:
 def hold_read(record: SpeechRecord, window: PlaceWindow) -> SpeechRecord:
     """The record once the window is read: the hold it states, none when that is the one decided last."""
     if window.interrupted is not None and window.interrupted.id == record.decided:
-        return replace(record, hold=None, held_unread=False)
-    return replace(record, hold=hold_stated(window, record.hold), held_unread=False)
+        return _revised(record, hold=None, held_unread=False)
+    return _revised(record, hold=hold_stated(window, record.hold), held_unread=False)
 
 
 def hold_untold(record: SpeechRecord) -> Held | None:
@@ -244,7 +249,7 @@ def hold_untold(record: SpeechRecord) -> Held | None:
 def hold_marked_told(record: SpeechRecord) -> SpeechRecord:
     """A turn is told the hold that stands."""
     assert record.hold is not None  # noqa: S101 - a turn is told only a hold that stands
-    return replace(record, hold=replace(record.hold, telling=Telling.TELLING))
+    return _revised(record, hold=replace(record.hold, telling=Telling.TELLING))
 
 
 def hold_turn_ended(record: SpeechRecord) -> SpeechRecord:
@@ -252,12 +257,12 @@ def hold_turn_ended(record: SpeechRecord) -> SpeechRecord:
     held = record.hold
     if held is None or held.telling is not Telling.TELLING:
         return record
-    return replace(record, hold=replace(held, telling=Telling.UNDECIDED))
+    return _revised(record, hold=replace(held, telling=Telling.UNDECIDED))
 
 
 def hold_decided(record: SpeechRecord, hold_id: str) -> SpeechRecord:
     """The hold ended with a decision: it stands no more and is never decided again."""
-    return replace(record, hold=None, decided=hold_id, held_unread=False)
+    return _revised(record, hold=None, decided=hold_id, held_unread=False)
 
 
 def hold_tellable(held: Held) -> bool:
