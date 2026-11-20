@@ -1,0 +1,8 @@
+claim_id = "e7e374eda07e460ca90f33ab781ac14c"
+agent = "Claude d32028b7-a7a0-48ff-8c29-65b317313c7d"
+role = "builder"
+base = "4f22cf16a5b0062184d9b28967400414f73dfb9e"
+branch = "claude/issue-323-one-turn-per-run-of-another-speaker"
+scope = ["docs/ARCHITECTURE.md", "docs/turns.md", "pyproject.toml", "src/personas/decision.py", "tests/test_decision.py", "tests/test_loop_turns.py", "uv.lock"]
+opened_commit = "6d9e681878b4a0d474581130da85dd12f3544cc2"
+whole_reason = "one rule, a marked line of another speaker wakes no turn, with the pin that brings the mark and the docs that state the rule"
