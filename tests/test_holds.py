@@ -49,12 +49,13 @@ async def test_calls_answered_waits_while_one_of_two_calls_is_still_on_its_way()
         await inbox.calls_answered()
         answered = True
 
-    async with anyio.create_task_group() as tasks:
-        with inbox.sending():
+    with anyio.fail_after(1):
+        async with anyio.create_task_group() as tasks:
             with inbox.sending():
-                pass
-            tasks.start_soon(wait_for_answers)
+                with inbox.sending():
+                    pass
+                tasks.start_soon(wait_for_answers)
+                await anyio.wait_all_tasks_blocked()
+                assert not answered
             await anyio.wait_all_tasks_blocked()
-            assert not answered
-        await anyio.wait_all_tasks_blocked()
-        assert answered
+            assert answered
