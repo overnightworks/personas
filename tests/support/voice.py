@@ -187,15 +187,17 @@ SECOND_HOLD_DECISIONS = pytest.mark.parametrize(
 )
 
 
-def heard_after_the_second_hold(outcome: str | None, spoken: list[str], rest: list[str]) -> list[str]:
+def heard_after_the_second_hold(outcome: str, spoken: list[str], rest: list[str]) -> list[str]:
     """What the app has played once the second hold is decided: what had played, and then what the decision lets
     follow it, the rest of the turn unless he stops or answers instead."""
     follows = {
         "continued": rest,
         "short_line": [SECOND_LINE, *rest],
         "answered": [SECOND_ANSWER],
+        "stopped": [],
+        "undecided": [],
     }
-    return [*spoken, *follows.get(outcome or "", [])]
+    return [*spoken, *follows[outcome]]
 
 
 async def decided(runner, count: int = 1) -> list[str | None]:
