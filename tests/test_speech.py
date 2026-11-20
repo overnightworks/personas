@@ -14,13 +14,20 @@ from personas.speech import (
     hold_tellable,
     hold_turn_ended,
     hold_untold,
+    lines_owed,
     may_send_next,
     speech_answered,
+    speech_dropped,
     speech_ended,
+    speech_lapsed,
     speech_line_entered,
     speech_sent,
     untold_words,
 )
+
+
+def _sent(record: SpeechRecord) -> SpeechRecord:
+    return speech_sent(record, 50.0)
 
 
 def _spoken(record: SpeechRecord) -> SpeechRecord:
@@ -36,22 +43,28 @@ def _written(record: SpeechRecord) -> SpeechRecord:
     [
         pytest.param((), 0, None, id="nothing sent"),
         pytest.param((speech_line_entered,), 0, None, id="a line with no request and nothing owed is ignored"),
-        pytest.param((speech_sent, _spoken), 1, "One.", id="a sentence answered as spoken owes its line"),
-        pytest.param((speech_sent, _spoken, speech_line_entered), 0, "One.", id="the line brings the debt in"),
+        pytest.param((_sent, _spoken), 1, "One.", id="a sentence answered as spoken owes its line"),
+        pytest.param((_sent, _spoken, speech_line_entered), 0, "One.", id="the line brings the debt in"),
         pytest.param(
-            (speech_sent, speech_line_entered, _spoken), 0, "One.", id="a line before its answer leaves nothing owed"
+            (_sent, speech_line_entered, _spoken), 0, "One.", id="a line before its answer leaves nothing owed"
         ),
         pytest.param(
-            (speech_sent, speech_line_entered, _written), 0, None, id="a line before a non-spoken answer is no debt"
+            (_sent, speech_line_entered, _written), 0, None, id="a line before a non-spoken answer is no debt"
         ),
-        pytest.param((speech_sent, _written), 0, None, id="a sentence answered otherwise owes nothing"),
+        pytest.param((_sent, _written), 0, None, id="a sentence answered otherwise owes nothing"),
         pytest.param(
-            (speech_sent, _spoken, speech_line_entered, speech_line_entered),
+            (_sent, _spoken, speech_line_entered, speech_line_entered),
             0,
             "One.",
             id="a line owed to none is ignored",
         ),
-        pytest.param((speech_sent, _spoken, speech_sent, _spoken), 2, "One.", id="two sentences owe two lines"),
+        pytest.param((_sent, _spoken, _sent, _spoken), 2, "One.", id="two sentences owe two lines"),
+        pytest.param(
+            (_sent, speech_line_entered, speech_line_entered, _spoken, _sent, _spoken),
+            1,
+            "One.",
+            id="a stray line while a request is open does not leave the next sentence's line uncounted",
+        ),
     ],
 )
 def test_the_speech_record_counts_a_request_from_its_send_and_credits_his_line_only_while_one_is_open_or_owed(
@@ -172,11 +185,78 @@ def test_a_hold_the_turn_that_was_told_it_did_not_decide_stays_undecided_and_a_d
     assert hold_turn_ended(told).hold == _held(Telling.UNDECIDED)
     assert hold_turn_ended(_record_with(_held())).hold == _held()
     assert hold_turn_ended(SpeechRecord()) == SpeechRecord()
-    assert hold_decided(told, "h1") == SpeechRecord(saying="One.", hold=None, decided="h1")
+    assert hold_decided(told, "h1", 120.0) == SpeechRecord(saying="One.", hold=None, decided="h1")
 
 
-def test_the_sentence_he_was_in_outlives_the_turn_that_sent_only_while_a_hold_stands():
-    ended = speech_ended(SpeechRecord(in_flight=1, credit=2, saying="One.", hold=_held()))
+def test_the_end_of_the_sending_turn_keeps_the_lines_it_owes_and_the_sentence_that_plays_and_forgets_the_rest():
+    owing = speech_ended(SpeechRecord(in_flight=1, credit=2, saying="One.", sending=(60.0,), bounds=(50.0, 55.0)))
+    settled = speech_ended(SpeechRecord(in_flight=1, credit=0, saying="One.", sending=(50.0,)))
+    held = speech_ended(SpeechRecord(in_flight=1, credit=0, saying="One.", hold=_held()))
 
-    assert ended == SpeechRecord(saying="One.", hold=_held())
-    assert speech_ended(SpeechRecord(in_flight=1, credit=2, saying="One.")) == SpeechRecord()
+    assert owing == SpeechRecord(credit=2, saying="One.", bounds=(50.0, 55.0))
+    assert settled == SpeechRecord()
+    assert held == SpeechRecord(saying="One.", hold=_held())
+
+
+@pytest.mark.parametrize(
+    ("record", "now", "lapsed"),
+    [
+        pytest.param(SpeechRecord(credit=1, bounds=(50.0,)), 49.0, False, id="the sending turn is not over"),
+        pytest.param(SpeechRecord(credit=1, bounds=(50.0,)), 50.0, True, id="the sending turn is over"),
+        pytest.param(SpeechRecord(), 60.0, False, id="nothing is owed"),
+        pytest.param(
+            SpeechRecord(credit=1, hold=_held(), bounds=(50.0,)), 60.0, False, id="a hold stands over the sentence"
+        ),
+        pytest.param(SpeechRecord(credit=1), 60.0, False, id="no turn sent it"),
+    ],
+)
+def test_lines_that_a_turn_over_before_the_waiters_own_bound_owes_are_lost_once_it_is_over_unless_a_hold_stands(
+    record, now, lapsed
+):
+    assert speech_lapsed(record, now, by=100.0) is lapsed
+
+
+def test_the_lines_of_a_turn_over_when_the_waiter_is_are_left_to_that_turn():
+    assert speech_lapsed(SpeechRecord(credit=1, bounds=(100.0,)), 100.0, by=100.0) is False
+
+
+def test_giving_up_the_lines_whose_sending_turn_is_over_keeps_the_lines_of_a_later_turn_and_a_request_in_flight():
+    both = SpeechRecord(credit=2, bounds=(50.0, 90.0))
+
+    assert speech_dropped(both, 60.0, by=100.0) == SpeechRecord(credit=1, bounds=(90.0,))
+    assert speech_dropped(both, 90.0, by=100.0) == SpeechRecord()
+    assert speech_dropped(SpeechRecord(in_flight=1, sending=(70.0,), credit=1, bounds=(50.0,)), 60.0, by=100.0) == (
+        SpeechRecord(in_flight=1, sending=(70.0,))
+    )
+
+
+def test_a_later_turns_sentence_leaves_the_bound_of_the_line_an_earlier_turn_still_owes():
+    record = speech_answered(speech_sent(speech_sent(SpeechRecord(), 50.0), 90.0), "One.", spoken=True)
+    record = speech_answered(record, "Two.", spoken=True)
+
+    assert record.bounds == (50.0, 90.0)
+    assert speech_line_entered(record).bounds == (90.0,)
+    assert speech_lapsed(record, 60.0, by=90.0) is True
+
+
+def test_a_decided_hold_re_arms_the_bound_of_the_line_it_held_for_the_turn_that_decided_it():
+    record = SpeechRecord(credit=2, hold=_held(), bounds=(50.0, 70.0))
+
+    assert hold_decided(record, "h1", 120.0).bounds == (120.0, 70.0)
+
+
+def test_the_lines_owed_together_are_counted_with_the_first_hold_over_one_and_the_earliest_bound_of_the_others():
+    held = _held()
+
+    owed = lines_owed(
+        [
+            SpeechRecord(credit=2, bounds=(70.0, 80.0)),
+            SpeechRecord(credit=1, bounds=(60.0,)),
+            SpeechRecord(credit=1, hold=held, bounds=(10.0,)),
+            SpeechRecord(),
+        ],
+        dropped=3,
+    )
+
+    assert (owed.count, owed.held, owed.until, owed.dropped) == (4, held, 60.0, 3)
+    assert lines_owed([]).count == 0

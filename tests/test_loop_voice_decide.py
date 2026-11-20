@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import TYPE_CHECKING
 
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
@@ -11,6 +10,8 @@ from agents.member import (
     CONTINUE_SPEAKING_TOOL,
     SPEAK_TOOL,
     STOP_SPEAKING_TOOL,
+    ContinueSpeakingRefusal,
+    ContinueSpeakingRefused,
     StopSpeakingRefusal,
     StopSpeakingRefused,
     VoiceState,
@@ -24,33 +25,11 @@ from tests.support.call import ADDRESSED, PLACE_ID, say_in_the_call
 from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
 from tests.support.gateway import BUDGET_SPENT, say
 from tests.support.hopin import CALL, SAY_TOOL
+from tests.support.store import ScriptedStore
 from tests.support.voice import TWO_SENTENCES, a_voice_call, gated, holding_sentence_ends, sentences_spoken
 from tests.support.wire import refuses_with_a_server_error
 
-if TYPE_CHECKING:
-    from datetime import datetime
-
-    from personas.entries import KeptLine, WindowRead
-    from personas.recall import LineSearch
-
 pytestmark = pytest.mark.anyio
-
-
-class WatchedLines:
-    """A store of lines that keeps none and finds none, and counts the searches."""
-
-    def __init__(self) -> None:
-        self.searches = 0
-
-    async def keep(self, read: WindowRead) -> None:
-        return None
-
-    async def search(self, search: LineSearch) -> tuple[KeptLine, ...]:
-        self.searches += 1
-        return ()
-
-    async def erase_before(self, first_read_before: datetime) -> int:
-        return 0
 
 
 HOLD_ID = "hold-1"
@@ -187,18 +166,79 @@ async def test_a_turn_that_ends_without_a_decision_drops_what_waited_and_the_nex
     assert runner.gateway.arrivals == arrivals
 
 
-async def test_a_stop_the_app_refuses_ends_the_hold_and_is_not_sent_again(runner):
+@pytest.mark.parametrize(
+    ("reply", "outcome"),
+    [
+        pytest.param(deciding(STOP_SPEAKING_TOOL, "hold-2"), "stopped", id="stopped"),
+        pytest.param(completion("[silent]"), "undecided", id="undecided"),
+    ],
+)
+async def test_a_round_for_a_newer_hold_that_stops_him_or_ends_undecided_logs_the_older_hold_the_turn_was_told(
+    runner, reply, outcome
+):
+    """TURNS-31, LOG-17."""
+    await a_voice_call(runner, reply)
+    runner.gateway.pause_request(1, "Never said. No", "r this.")
+
+    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
+    await runner.gateway.until_requested(1)
+    runner.app.hold(PLACE_ID, "hold-2", ("Bob", "no, stop"))
+
+    assert await decided(runner, 2) == [outcome, "undecided"]
+    assert sentences_spoken(runner) == []
+
+
+async def test_a_round_for_a_newer_hold_logs_no_line_for_the_older_hold_the_turn_already_decided(runner):
+    """TURNS-31, LOG-17."""
+    await a_voice_call(runner, deciding(CONTINUE_SPEAKING_TOOL), deciding(STOP_SPEAKING_TOOL, "hold-2"))
+    resumed = runner.gateway.pause_request(2, "Still ", "thinking.")
+
+    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
+    await runner.gateway.until_requested(2)
+    runner.app.hold(PLACE_ID, "hold-2", ("Bob", "no, stop"))
+    assert await decided(runner, 2) == ["continued", "stopped"]
+    resumed.release()
+    await runner.reports.until_a_turn_completed()
+
+    assert runner.reports.codes_of(Event.HOLD_DECIDED) == ["continued", "stopped"]
+
+
+async def test_a_stop_the_app_refuses_because_no_such_hold_stands_ends_the_hold_as_gone_and_is_not_sent_again(runner):
+    """LOG-17."""
     await a_voice_call(runner, completion("[silent]"))
     refusal = StopSpeakingRefused(refused=StopSpeakingRefusal.NOT_INTERRUPTED)
     runner.app.hold_outcomes.append(ToolOutcome(refusal.model_dump_json(), is_error=True))
 
     runner.app.hold(PLACE_ID, HOLD_ID, SAID)
-    assert await decided(runner) == ["undecided"]
+    assert await decided(runner) == ["gone"]
     runner.app.hold(PLACE_ID, HOLD_ID, SAID)
     await window_read_after(runner)
 
     assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
-    assert runner.reports.codes_of(Event.HOLD_DECIDED) == ["undecided"]
+    assert runner.reports.codes_of(Event.HOLD_DECIDED) == ["gone"]
+
+
+@pytest.mark.parametrize(
+    ("tool", "refusal"),
+    [
+        pytest.param(
+            CONTINUE_SPEAKING_TOOL,
+            ContinueSpeakingRefused(refused=ContinueSpeakingRefusal.NOT_INTERRUPTED),
+            id="continue",
+        ),
+        pytest.param(STOP_SPEAKING_TOOL, StopSpeakingRefused(refused=StopSpeakingRefusal.NOT_INTERRUPTED), id="stop"),
+    ],
+)
+async def test_a_decision_for_a_hold_that_no_longer_stands_is_logged_gone_and_he_is_told_so(runner, tool, refusal):
+    """TURNS-31, LOG-17."""
+    await a_voice_call(runner, deciding(tool), completion("[silent]"))
+    runner.app.hold_outcomes.append(ToolOutcome(refusal.model_dump_json(), is_error=True))
+
+    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
+
+    assert await decided(runner) == ["gone"]
+    await runner.reports.until_a_turn_completed()
+    assert runner.gateway.tool_results(2) == ['{"gone": true}']
 
 
 async def test_a_stop_whose_call_failed_is_sent_again_by_a_later_read_and_decided_once(runner):
@@ -218,7 +258,7 @@ async def test_a_stop_whose_call_failed_is_sent_again_by_a_later_read_and_decide
 
 async def test_a_turn_told_a_hold_answers_the_lookup_that_it_decides_first_and_spends_no_lookup(runner):
     """TURNS-31."""
-    store = WatchedLines()
+    store = ScriptedStore()
     runner.remember_in(store)
     await a_voice_call(
         runner,
@@ -234,7 +274,7 @@ async def test_a_turn_told_a_hold_answers_the_lookup_that_it_decides_first_and_s
     lookup, other = runner.gateway.tool_results(3)
     assert lookup.startswith("Error")
     assert lookup == other
-    assert store.searches == 0
+    assert store.searches == []
 
 
 async def test_a_hold_joins_the_lines_already_due_into_one_written_turn_that_is_offered_both_decisions(runner):

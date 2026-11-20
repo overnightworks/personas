@@ -54,6 +54,15 @@ class TurnHold:
     def decided(self) -> None:
         self.released.set()
 
+    def dropped(self) -> bool:
+        """The turn's speech was cut before he decided this hold: it counts as undecided, once. Whether it was still
+        pending."""
+        if not self.pending:
+            return False
+        self.outcome = HoldOutcome.UNDECIDED
+        self.released.set()
+        return True
+
 
 def deciding_first(told: TurnHold | None) -> bool:
     """Whether the turn was told a hold that he has not decided."""

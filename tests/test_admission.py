@@ -6,9 +6,9 @@ import pytest
 from agents.member import PlaceRef
 from agents.turn import Principal
 
+from personas.admission import Admitted
 from personas.entries import Lines, Visit, Waiting
 from personas.tokens import TokenFacts
-from personas.turning import Admitted
 from tests.support.history import a_marked_present
 
 PLACE = PlaceRef(kind="table", id="table-1")

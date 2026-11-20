@@ -30,14 +30,18 @@ from personas.present import EMPTY_PRESENT, answered_into, taken_into
 from personas.speech import (
     NO_SPEECH,
     Held,
+    OwedLines,
     SpeechRecord,
     hold_decided,
     hold_marked_told,
     hold_read,
     hold_turn_ended,
     hold_untold,
+    lines_owed,
     speech_answered,
+    speech_dropped,
     speech_ended,
+    speech_lapsed,
     speech_line_entered,
     speech_sent,
 )
@@ -108,25 +112,36 @@ class Mind:
         previous.set()
         self._change()
 
-    def speech_sent(self, at: AppPlace) -> None:
-        """A request to ``speak`` at the place goes out."""
-        self._set_speech(at, speech_sent(self._speech.get(at, NO_SPEECH)))
+    def speech_sent(self, at: AppPlace, bound: float) -> None:
+        """A request to ``speak`` at the place goes out, from a turn that is over by ``bound`` on the clock's monotonic
+        scale."""
+        self._set_speech(at, speech_sent(self._speech.get(at, NO_SPEECH), bound))
 
     def speech_answered(self, at: AppPlace, sentence: str, *, spoken: bool) -> None:
         """The request at the place for ``sentence`` ended, answered as spoken or not."""
         self._set_speech(at, speech_answered(self._speech.get(at, NO_SPEECH), sentence, spoken=spoken))
 
-    def speech_owed(self, at: AppPlace) -> int:
-        """The own spoken lines at the place that sentences answered as spoken have not yet brought in."""
-        return self._speech.get(at, NO_SPEECH).owed
+    def lines_owed(self, now: float, by: float, at: AppPlace | None = None) -> OwedLines:
+        """The own spoken lines that sentences answered as spoken have not yet brought in, at the place or, with none,
+        at every place, for a waiter whose own turn is over by ``by``. The mind has no clock: the lines whose sending
+        turn was over before ``by`` and is at ``now`` are given up and counted as dropped, so the first waiter to look
+        at them says they are lost."""
+        places = self._speech if at is None else {at: self._speech.get(at, NO_SPEECH)}
+        dropped = 0
+        for place, record in tuple(places.items()):
+            if speech_lapsed(record, now, by):
+                kept = speech_dropped(record, now, by)
+                dropped += record.owed - kept.owed
+                self._set_speech(place, kept)
+        return lines_owed((self._speech.get(place, NO_SPEECH) for place in places), dropped)
 
     def speech_saying(self, at: AppPlace) -> str | None:
         """The sentence that plays at the place: the one last answered as spoken."""
         return self._speech.get(at, NO_SPEECH).saying
 
     def speech_ended(self, at: AppPlace) -> None:
-        """The turn that sent at the place ended: its requests in flight and what it still owes are dropped, and the
-        hold that stands stays."""
+        """The turn that sent at the place ended: its requests in flight are gone; the lines it still owes and the hold
+        that stands stay."""
         self._set_speech(at, speech_ended(self._speech.get(at, NO_SPEECH)))
 
     def hold_read(self, at: AppPlace, window: PlaceWindow) -> Held | None:
@@ -153,9 +168,10 @@ class Mind:
         """The turn told the hold at the place ended: a hold it did not decide stays undecided."""
         self._set_speech(at, hold_turn_ended(self._speech.get(at, NO_SPEECH)))
 
-    def hold_decided(self, at: AppPlace, hold_id: str) -> None:
-        """The hold ``hold_id`` at the place was decided: it stands no more and is not decided again."""
-        self._set_speech(at, hold_decided(self._speech.get(at, NO_SPEECH), hold_id))
+    def hold_decided(self, at: AppPlace, hold_id: str, bound: float) -> None:
+        """The hold ``hold_id`` at the place was decided: it stands no more and is not decided again. Its
+        held sentence's line is owed over by ``bound`` on the clock's monotonic scale."""
+        self._set_speech(at, hold_decided(self._speech.get(at, NO_SPEECH), hold_id, bound))
 
     def hold_decided_id(self, at: AppPlace) -> str | None:
         """The id of the hold decided last at the place."""

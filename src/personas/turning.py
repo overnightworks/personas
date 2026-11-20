@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import aclosing
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, Final
 
@@ -55,7 +55,7 @@ from personas.recall import (
 )
 from personas.reporting import Event, TurnTally, step_timer, stepping
 from personas.sizing import Sizing
-from personas.speech import Held, HoldOutcome, Telling
+from personas.speech import Held, HoldOutcome, Telling, hold_ended_as, untold_words
 from personas.task_record import (
     RelayFailed,
     ending_loud_when_cancelled,
@@ -63,13 +63,13 @@ from personas.task_record import (
     failure_held_by,
     failures_leaving_with,
 )
+from personas.turn_bound import TurnBound
 from personas.turn_sessions import TurnSessions
 from personas.voice import Speaking
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterable
+    from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
     from contextlib import AbstractAsyncContextManager
-    from datetime import datetime
 
     from agents.agent_file import AgentDefinition
     from agents.backend import AgentBackend, TurnEvent
@@ -77,16 +77,15 @@ if TYPE_CHECKING:
     from agents.turn import FailureCode, JsonObject, Principal
     from logline import StepTimer
 
+    from personas.admission import Admitted
     from personas.app_session import AppSession, SessionOpener
     from personas.clock import Clock
     from personas.config import AgentCredentials, AppTarget
-    from personas.entries import History, Occasion
     from personas.mind import Mind
-    from personas.present import Present
     from personas.recall import LookupBounds
     from personas.remembering import Remembering
     from personas.task_record import TaskRecord
-    from personas.tokens import TokenFacts, TokenSource
+    from personas.tokens import TokenSource
 
 # The backend a turn runs on, which it closes when the turn ends.
 type BackendFactory = Callable[[Iterable[HandTool]], AbstractAsyncContextManager[AgentBackend]]
@@ -99,6 +98,7 @@ _APART_TEXT: Final = (
 _DECIDING_FIRST_TEXT: Final = "a hold is decided first: call continue_speaking or stop_speaking"
 _DECIDED_TEXT: Final = "this hold is decided"
 _CONTINUED_TEXT: Final = '{"continued": true}'
+_GONE_TEXT: Final = '{"gone": true}'
 
 
 def _failure_event(app: AppTarget) -> Event:
@@ -139,30 +139,7 @@ class _Voiced:
     speaking: Speaking
     record: TaskRecord
     inbox: HoldInbox
-
-
-@dataclass(frozen=True)
-class Admitted:
-    """A turn decided on, with the facts it was decided from: the token's, what woke it, what its agent had taken in,
-    the wall time it was admitted at, whether its text is spoken and the other apps whose tools it holds."""
-
-    facts: TokenFacts
-    place: PlaceRef
-    occasion: Occasion
-    present: Present = field(repr=False)
-    at: datetime
-    aloud: bool
-    apps: frozenset[str]
-    held: Held | None = None
-    """The hold the turn is told first, which the mind marked as told when the turn was claimed."""
-
-    @property
-    def history(self) -> History:
-        return self.present.history
-
-    def groups(self) -> Coroutine[None, None, frozenset[str]]:
-        """The library's GroupSource wants an awaitable; the groups are already known."""
-        return asyncio.sleep(0, self.facts.groups)
+    bound: TurnBound
 
 
 class Turning:
@@ -191,6 +168,7 @@ class Turning:
         report: Callable[[Event, str | None, AppTarget | None, CallFailure | None], None],
         report_pause: Callable[[float, str], None],
         report_tools_left_out: Callable[[AppTarget, int], None],
+        report_lines_missing: Callable[[int], None],
         remembering: Remembering,
     ) -> None:
         self._agent = agent
@@ -203,6 +181,7 @@ class Turning:
         self._report = report
         self._report_pause = report_pause
         self._report_tools_left_out = report_tools_left_out
+        self._report_lines_missing = report_lines_missing
         self._left_out_reported: set[str] = set()
         self._remembering = remembering
         self._listening: tuple[PlaceRef, HoldInbox] | None = None
@@ -291,11 +270,16 @@ class Turning:
             told = turn_messages(admitted.facts.name, admitted.present, turn)
             if admitted.held is not None:
                 told = (*told, self._told_standing(admitted, admitted.held))
+            bound = TurnBound(self._clock, setup.persona.max_duration_seconds, self._mind, self._report_lines_missing)
             try:
-                await self._run_session_body(setup, admitted, turn, told, session, record, sizing, tally, hand_off)
+                await self._run_session_body(
+                    setup, admitted, turn, told, session, record, sizing, tally, hand_off, bound
+                )
             except Exception as error:
                 record.note(error)
                 raise
+            finally:
+                bound.close()
 
     async def _run_session_body(
         self,
@@ -308,9 +292,10 @@ class Turning:
         sizing: Sizing,
         tally: TurnTally,
         hand_off: StepTimer,
+        bound: TurnBound,
     ) -> None:
         raise_if_cancelled()
-        held = await self._hold_tools(session, record, admitted)
+        held = await self._hold_tools(session, record, admitted, bound)
         system = f"{setup.persona.prompt}\n\n{REPLY_RULES}" if admitted.aloud else setup.persona.prompt
         request = TurnRequest(
             agent=setup.persona.name,
@@ -336,14 +321,14 @@ class Turning:
                     self._app.mcp_url,
                     admitted.place,
                     self._clock,
-                    setup.persona.max_duration_seconds,
+                    bound,
                     partial(self._use_current_token, session),
                     lambda event, code: self._report(event, code, None, None),
                     self._mind,
                     tally,
                     None if held.told is None else held.told.released,
                 )
-                voiced = _Voiced(setup, admitted, turn, request, held, speaking, record, held.inbox)
+                voiced = _Voiced(setup, admitted, turn, request, held, speaking, record, held.inbox, bound)
                 try:
                     final = await self._speak_along(voiced, events, tally)
                 finally:
@@ -364,8 +349,9 @@ class Turning:
 
         A call is relayed only when the events are asked for again, so it goes out after his own line for every
         sentence before it has entered. When the events end in an error, the sentence in flight is answered and entered
-        before it is raised; only a cancel or his own stop cuts the speech. The turn ends once the speech has, and its
-        final event, if it had one, is returned; his stop ends the turn without one.
+        before it is raised; only a cancel or his own stop cuts the speech. The turn ends once the speech has, which
+        is at the answer of its last sentence: that sentence's line enters after the turn, in the mind's record. The
+        final event, if the turn had one, is returned; his stop ends the turn without one.
         """
         self._listening = (voiced.admitted.place, voiced.inbox)
         try:
@@ -404,10 +390,13 @@ class Turning:
             speaking.end()
         return final
 
-    async def hold(self, session: AppSession, place: PlaceRef, window: PlaceWindow) -> None:
+    async def hold(
+        self, session: AppSession, place: PlaceRef, window: PlaceWindow, max_duration_seconds: float
+    ) -> None:
         """What a read of the place's window says of him. The hold it states stands in the mind's record of the place.
         The spoken turn at the place hears it; with none there, a hold that may be told makes the place due, and a hold
-        whose turn ended without deciding it is stopped with its id, the loop's session taking the call."""
+        whose turn ended without deciding it is stopped with its id, the loop's session taking the call; the line of the
+        sentence it held is owed for ``max_duration_seconds`` from that stop."""
         at = self._at(place)
         held = self._mind.hold_read(at, window)
         if self._listening is not None and self._listening[0] == place:
@@ -415,13 +404,15 @@ class Turning:
         elif held is None or self._aloud_at == place:
             return
         elif held.telling is Telling.UNDECIDED:
-            await session.stop_speaking(place, held.id)
-            self._hold_decided(place, held.id, HoldOutcome.UNDECIDED)
+            refusal = await session.stop_speaking(place, held.id)
+            self._hold_decided(
+                place, held.id, hold_ended_as(HoldOutcome.UNDECIDED, refusal), self._clock.now() + max_duration_seconds
+            )
         elif self._mind.hold_makes_due(at):
             self._mind.due_for_hold(at, window.generation, self._clock.now())
 
-    def _hold_decided(self, place: PlaceRef, hold_id: str, outcome: HoldOutcome) -> None:
-        self._mind.hold_decided(self._at(place), hold_id)
+    def _hold_decided(self, place: PlaceRef, hold_id: str, outcome: HoldOutcome, bound: float) -> None:
+        self._mind.hold_decided(self._at(place), hold_id, bound)
         self._report(Event.HOLD_DECIDED, outcome.value, None, None)
 
     async def _decide_holds(self, voiced: _Voiced, hearing: _Hearing) -> None:
@@ -474,7 +465,11 @@ class Turning:
             pass
         if self._mind.hold_decided_id(self._at(admitted.place)) != hold.id:
             self._cut_speech(voiced, hearing)
-            await self._end_hold(voiced.admitted.place, voiced.record, hold.id, HoldOutcome.UNDECIDED)
+            if (
+                await self._end_hold(voiced.admitted.place, voiced.record, hold.id, HoldOutcome.UNDECIDED, voiced.bound)
+                is not None
+            ):
+                self._report_told_hold_dropped(voiced)
 
     async def _answer_round(
         self, voiced: _Voiced, hearing: _Hearing, hold: Held, name: str, _principal: Principal, _arguments: JsonObject
@@ -487,9 +482,12 @@ class Turning:
         if self._mind.hold_decided_id(self._at(voiced.admitted.place)) == hold.id:
             return ToolOutcome(_DECIDED_TEXT, is_error=True)
         told = _CONTINUED_TEXT if outcome is HoldOutcome.CONTINUED else self._cut_speech(voiced, hearing)
-        if not await self._end_hold(voiced.admitted.place, voiced.record, hold.id, outcome):
+        ended = await self._end_hold(voiced.admitted.place, voiced.record, hold.id, outcome, voiced.bound)
+        if ended is None:
             return ToolOutcome(_APP_FAILED_TEXT, is_error=True)
-        return ToolOutcome(told, is_error=False)
+        if outcome is HoldOutcome.STOPPED:
+            self._report_told_hold_dropped(voiced)
+        return ToolOutcome(_GONE_TEXT if ended is HoldOutcome.GONE else told, is_error=False)
 
     @staticmethod
     def _cut_speech(voiced: _Voiced, hearing: _Hearing) -> str:
@@ -500,8 +498,18 @@ class Turning:
         hearing.cancel()
         return told
 
-    async def _end_hold(self, place: PlaceRef, record: TaskRecord, hold_id: str, outcome: HoldOutcome) -> bool:
-        """Sends his decision in a session of its own; says if the app answered."""
+    def _report_told_hold_dropped(self, voiced: _Voiced) -> None:
+        """A round for a newer hold cut the speech before the turn decided the hold it was told, which the app may have
+        ended already: the older id gets its line."""
+        told = voiced.held.told
+        if told is not None and told.dropped():
+            self._report(Event.HOLD_DECIDED, HoldOutcome.UNDECIDED.value, None, None)
+
+    async def _end_hold(
+        self, place: PlaceRef, record: TaskRecord, hold_id: str, outcome: HoldOutcome, bound: TurnBound
+    ) -> HoldOutcome | None:
+        """Sends his decision in a session of its own; how the hold ended, or ``None`` when the app did not answer.
+        The turn that decides it owes the line of the sentence it held until its ``bound``."""
         try:
             answer = await self._sessions.ask_elsewhere(
                 self._app,
@@ -516,9 +524,10 @@ class Turning:
             raise RelayFailed(error) from None
         if isinstance(answer, CallFailure):
             self._report(_failure_event(self._app), failure_code(answer), self._app, answer)
-            return False
-        self._hold_decided(place, hold_id, outcome)
-        return True
+            return None
+        ended = hold_ended_as(outcome, answer)
+        self._hold_decided(place, hold_id, ended, bound.ends_at)
+        return ended
 
     def _told_standing(self, admitted: Admitted, held: Held) -> str:
         """The telling of the hold a turn starts with: what was said over him and the sentence he was in, which is
@@ -529,6 +538,7 @@ class Turning:
         self,
         admitted: Admitted,
         record: TaskRecord,
+        bound: TurnBound,
         deciding: TurnHold,
         name: str,
         _principal: Principal,
@@ -539,13 +549,18 @@ class Turning:
         if not deciding.pending:
             return ToolOutcome(_DECIDED_TEXT, is_error=True)
         deciding.outcome = outcome
-        if not await self._end_hold(admitted.place, record, deciding.held.id, outcome):
+        ended = await self._end_hold(admitted.place, record, deciding.held.id, outcome, bound)
+        if ended is None:
             deciding.outcome = None
             return ToolOutcome(_APP_FAILED_TEXT, is_error=True)
         deciding.decided()
+        if ended is HoldOutcome.GONE:
+            return ToolOutcome(_GONE_TEXT, is_error=False)
         return ToolOutcome(_CONTINUED_TEXT if outcome is HoldOutcome.CONTINUED else told_stop((), None), is_error=False)
 
-    async def _hold_tools(self, session: AppSession, record: TaskRecord, admitted: Admitted) -> HeldTools:
+    async def _hold_tools(
+        self, session: AppSession, record: TaskRecord, admitted: Admitted, bound: TurnBound
+    ) -> HeldTools:
         """The lookup when the configuration has a memory, then the tools of the place's app, of each app named in the
         admission and of each tools-only app the realm grants and that answers, in the configuration's order, each app
         counting its own calls.
@@ -557,7 +572,7 @@ class Turning:
         own = await self._list_own_tools(session)
         deciding = None if admitted.held is None else TurnHold(admitted.held)
         inbox = self._inbox_of(admitted) if admitted.aloud else None
-        hold = HoldBack(admitted.history, inbox, deciding)
+        hold = HoldBack(admitted.history, inbox, bound, deciding)
         tools: list[HandTool] = []
         bounds: list[int] = []
         taken = frozenset[str]()
@@ -580,7 +595,7 @@ class Turning:
                 bounds.append(calls.bound)
         if deciding is not None:
             tools.extend(
-                HandTool(each, partial(self._decide_told, admitted, record, deciding, each.name))
+                HandTool(each, partial(self._decide_told, admitted, record, bound, deciding, each.name))
                 for each in DECISION_DECLARATIONS
             )
             bounds.append(DECISION_CALLS)
@@ -696,10 +711,16 @@ class Turning:
     ) -> ToolOutcome:
         return ToolOutcome(_APART_TEXT, is_error=True)
 
-    def _held(self, hold: HoldBack) -> ToolOutcome | None:
-        """The result of a call that is not sent, or ``None`` when the call goes on. It is asked before any await."""
+    async def _held(self, hold: HoldBack) -> ToolOutcome | None:
+        """The result of a call that is not sent, or ``None`` when the call goes on, which it does only after every line
+        he owes at any place has entered. A sentence held over him at a place whose lines are owed is not waited for,
+        since no round of this turn decides it: the call is answered at once with what was said over him. The turn's
+        bound ends the wait, and the turn."""
         if hold.deciding_first:
             return ToolOutcome(_DECIDING_FIRST_TEXT, is_error=True)
+        owed = await hold.bound.until_lines(lambda count: count == 0, held_ends=True)
+        if owed.held is not None:
+            return ToolOutcome(told_words(untold_words(owed.held.speech, ())), is_error=False)
         arrived = hold.holding(self._mind.history)
         if arrived is not None:
             return ToolOutcome(held_told(arrived), is_error=False)
@@ -710,7 +731,7 @@ class Turning:
     async def _relay(
         self, session: AppSession, name: str, calls: Calls, hold: HoldBack, _principal: Principal, arguments: JsonObject
     ) -> ToolOutcome:
-        if (held := self._held(hold)) is not None:
+        if (held := await self._held(hold)) is not None:
             return held
         if not calls.take():
             return ToolOutcome(_CALL_BOUND_TEXT, is_error=True)
@@ -733,7 +754,7 @@ class Turning:
         _principal: Principal,
         arguments: JsonObject,
     ) -> ToolOutcome:
-        if (held := self._held(hold)) is not None:
+        if (held := await self._held(hold)) is not None:
             return held
         if not calls.take():
             return ToolOutcome(_CALL_BOUND_TEXT, is_error=True)

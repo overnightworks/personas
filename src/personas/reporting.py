@@ -53,6 +53,7 @@ class Event(Enum):
     INVITATION_LEFT_OUT = auto()
     PAUSED = auto()
     SPEAK_REFUSED = auto()
+    SPEAK_LINE_MISSING = auto()
     HOLD_DECIDED = auto()
     TURN_STATE_FAILED = auto()
     TURN_STATE_LOST = auto()
@@ -76,8 +77,8 @@ class StateChange:
     to the runner alone. The lock of an agent taken, lost or slow to stop belongs to no app. The start says the model
     the agent's turns run on, when it has a persona. An invitation the loop leaves out says its place's kind and the
     reason as the code. A pause of his turns says its reason as the code and its wait in seconds. Tools left out for an
-    earlier app's of the same name say how many. A call that failed says its failure: the line holds its HTTP status,
-    the MCP method that failed and a closed reason.
+    earlier app's of the same name say how many. Lines that never came say how many. A call that failed says its
+    failure: the line holds its HTTP status, the MCP method that failed and a closed reason.
     """
 
     event: Event
@@ -105,6 +106,7 @@ _LINE_OF: Final = {
     Event.INVITATION_LEFT_OUT: (logging.INFO, "invitation.left_out"),
     Event.PAUSED: (logging.INFO, "turns.paused"),
     Event.SPEAK_REFUSED: (logging.INFO, "speak.refused"),
+    Event.SPEAK_LINE_MISSING: (logging.WARNING, "speak.line_missing"),
     Event.HOLD_DECIDED: (logging.INFO, "hold.decided"),
     Event.TURN_STATE_FAILED: (logging.WARNING, "turn_state.failed"),
     Event.TURN_STATE_LOST: (logging.INFO, "turn_state.lost"),

@@ -1,5 +1,5 @@
-"""What a turn holds of the apps' tools, and what a call of it passes: its app's bound, and the hold-back of a call
-for news that arrived since the turn's admission."""
+"""What a turn holds of the apps' tools, and what a call of it passes: its app's bound, the lines he still owes, and
+the hold-back of a call for news that arrived since the turn's admission."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from personas.entries import History
     from personas.holds import HoldInbox, TurnHold
     from personas.present import Arrived
+    from personas.turn_bound import TurnBound
 
 
 @dataclass
@@ -44,6 +45,7 @@ class HoldBack:
 
     admitted: History = field(repr=False)
     inbox: HoldInbox | None
+    bound: TurnBound
     told: TurnHold | None = None
     spent: bool = False
 

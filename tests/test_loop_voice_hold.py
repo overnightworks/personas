@@ -7,7 +7,6 @@ import json
 from dataclasses import replace
 from http import HTTPStatus
 
-import anyio
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL, VoiceState
@@ -123,6 +122,16 @@ async def test_a_round_that_makes_no_decision_stops_him_with_the_id_and_says_not
 
     assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
     assert sentences_spoken(runner) == [FIRST]
+
+
+async def test_a_round_that_makes_no_decision_whose_stop_the_app_cannot_take_reports_no_decision(runner):
+    await held_in_the_first_sentence(runner, completion(TWO_SENTENCES), completion("[silent]"))
+    runner.app.script(CALL, refuses_with_a_server_error)
+
+    await runner.reports.until(Event.HELD_APP_FAILED)
+
+    assert runner.reports.codes_of(Event.HOLD_DECIDED) == []
+    assert runner.reports.reported(apps=True, started=False)[0].code == status_code(HTTPStatus.INTERNAL_SERVER_ERROR)
 
 
 async def test_a_decision_for_a_hold_already_decided_starts_no_round_and_a_new_hold_starts_one(runner):
@@ -330,19 +339,16 @@ async def test_a_decision_whose_call_fails_beside_a_defect_ends_the_runner_loud_
 
 
 async def test_a_decision_whose_call_fails_beside_a_speak_that_fails_ends_the_runner_loud_with_both(runner):
-    released = asyncio.Event()
     speak_turns_behind_the_decision = 5
     defects = {
-        "speak": (BrokenResourceError(), speak_turns_behind_the_decision),
         "continue_speaking": (KeyError("decision"), 0),
+        "speak": (BrokenResourceError(), speak_turns_behind_the_decision),
     }
-    runner.open_session = opener_whose_requests_raise_together(defects, released=released)
+    runner.open_session = opener_whose_requests_raise_together(defects)
     await a_voice_call(runner, completion(TWO_SENTENCES), deciding(CONTINUE_SPEAKING_TOOL))
     say_in_the_call(runner, ADDRESSED, spoken=True)
     await runner.gateway.until_requested(1)
     runner.app.hold(PLACE_ID, HOLD_ID, SAID)
-    await anyio.wait_all_tasks_blocked()
-    released.set()
 
     ended = await ended_by(runner.task)
 

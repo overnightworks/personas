@@ -89,14 +89,16 @@ An entry has its app and the time he took it (`at`), and is one of:
   turn is written instead. (TURNS-24)
 - The text is spoken sentence by sentence through `speak`, at most one sentence ahead of the one playing,
   a fixed rule. The app appends his own spoken line for each sentence as it ends, whole or cut; a call goes
-  out, and the turn ends, only after the line of every sentence the app took has entered. (TURNS-25)
+  out only after the line of every sentence the app took has entered; the turn ends once the app has taken its
+  last sentence, and that sentence's line enters when it arrives. (TURNS-25)
 - A round that opens with `[silent]` says nothing; a final round with no text and no call is a provider
   error, so the characters end a silent turn with `[silent]`. (TURNS-26)
 - A refused sentence (`stopped` included) ends the turn's speech, is logged as `speak.refused`, and the turn
   goes on. A sentence the app wrote instead is entered as written. A `speak` that fails as a call ends the
   turn. (TURNS-27)
-- The persona's `maxDurationSeconds` bounds the turn with its speech: past it nothing more goes out and the
-  turn ends with the reason `limit_exceeded`. (TURNS-28)
+- The persona's `maxDurationSeconds` bounds the turn and the sentences it sends: past it nothing more goes out
+  and the turn ends with the reason `limit_exceeded`; a line still owed when the turn ended is awaited until
+  that bound, and one that never came is logged. (TURNS-28)
 
 ## Holds
 
@@ -112,7 +114,9 @@ An entry has its app and the time he took it (`at`), and is one of:
   without a decision stops him, and what waited is dropped unsaid. Each id is logged once as `hold.decided`.
   (TURNS-31)
 - After he went on, a call of his is not sent while people said words no round told him; its result says
-  so (`sent` false, `talked_over`). (TURNS-32)
+  so (`sent` false, `talked_over`). A call of his anywhere that would wait for a sentence whose hold stands is
+  answered at once, not sent (`sent` false, `talked_over`), unless its turn's round or the turn told that hold
+  decides it. (TURNS-32)
 
 ## Pictures
 

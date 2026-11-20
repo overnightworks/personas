@@ -341,26 +341,6 @@ async def test_a_line_or_answer_that_never_arrives_ends_the_turn_limit_exceeded_
     assert not runner.task.done()
 
 
-async def test_a_turn_that_ended_limit_exceeded_with_a_line_still_owed_leaves_no_debt_to_the_next_turn_at_the_place(
-    runner,
-):
-    sleeps = holding_sentence_ends(runner)
-    await a_voice_call(runner, completion(TWO_SENTENCES), completion("Later."))
-    say_in_the_call(runner, ADDRESSED)
-    await sentences_playing_with_the_next_open(runner, ["First sentence.", "Second sentence."])
-    runner.app.waiting_speaks.pop(0).set_result(True)
-    await anyio.wait_all_tasks_blocked()
-    runner.clock.time += PERSONA_MAX_DURATION_SECONDS
-    sleeps.release.set()
-    await runner.reports.until(Event.PAUSED)
-    say_in_the_call(runner, f"{ADDRESSED} Again.")
-    await runner.gateway.until_turns(2)
-
-    await runner.app.until_called(3)
-
-    assert runner.app.calls == [SPEAK_TOOL] * 3
-
-
 @pytest.fixture
 def speak_defect(runner):
     """A defect that ``speak`` raises, whatever the sentence."""

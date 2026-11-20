@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Final, Literal, NoReturn
 
 from logline import unit_trace
 
+from personas.admission import Admitted
 from personas.decision import (
     NETWORK_FAILURE_CODE,
     NO_TURNS_CODE,
@@ -77,7 +78,7 @@ from personas.task_record import (
 )
 from personas.tokens import facts_of
 from personas.turn_states import TurnStates
-from personas.turning import Admitted, Turning, TurnSetup
+from personas.turning import Turning, TurnSetup
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
@@ -176,6 +177,7 @@ class AgentLoop:
             self._report,
             self._report_pause,
             self._report_tools_left_out,
+            self._report_lines_missing,
             self._remembering,
         )
         self._turn_states = TurnStates(self._use_current_token, self._report, app.call_seconds)
@@ -368,7 +370,7 @@ class AgentLoop:
                 continue
             read_at = self._boundaries.clock.wall()
             self._take_lines(place, window, read_at, serves_view=place in serving_view)
-            await self._turning.hold(session, place, window)
+            await self._turning.hold(session, place, window, self._turn_setup.persona.max_duration_seconds)
             await self._remembering.keep(WindowRead(self._agent.client_id, self._app.mcp_url, place, window, read_at))
         return lost
 
@@ -525,6 +527,11 @@ class AgentLoop:
 
     def _report_tools_left_out(self, app: AppTarget, count: int) -> None:
         self._boundaries.report(StateChange(Event.TOOLS_LEFT_OUT, self._agent.client_id, app.mcp_url, tool_count=count))
+
+    def _report_lines_missing(self, lines: int) -> None:
+        self._boundaries.report(
+            StateChange(Event.SPEAK_LINE_MISSING, self._agent.client_id, self._app.mcp_url, lines=lines)
+        )
 
     async def _react(self, failure: CallFailure) -> None:
         match reaction_to(failure, already_renewed=self._renewed_after_401):
