@@ -1,0 +1,8 @@
+claim_id = "b41b642e041a417c9497bfd3f777dfd0"
+agent = "Claude d21def74-68af-4c98-89a2-70bc45cbdd6a"
+role = "builder"
+base = "7317391091a2209b8665bcf656a255fed6c47198"
+branch = "claude/issue-349-a-call-does-not-wait-for-his-own-sound"
+scope = [".aco/ahead-of-caller.toml", "docs/ARCHITECTURE.md", "docs/log.md", "docs/turns.md", "src/personas/held_tools.py", "src/personas/holds.py", "src/personas/loop.py", "src/personas/mind.py", "src/personas/reporting.py", "src/personas/speech.py", "src/personas/turn_bound.py", "src/personas/turning.py", "src/personas/voice.py", "tests"]
+opened_commit = "1560b887464f54a32783e3a6212dcc2e6cac2328"
+whole_reason = "one wait removed from the relay path with what only it needed, and the hold wait made explicit"
