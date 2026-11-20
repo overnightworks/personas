@@ -31,11 +31,16 @@ RINGLET_TAPER = 0.35
 
 
 def hair_cap(course: Sequence[Key], paint: Paint, body: float, tousle: float, tufts: float) -> list[Part]:
-    """Hair over the skull. The course gives, by level above the eye line, its half width, front depth, back depth and
-    how far from the middle its front edges part; `body` is how much it thickens from its edge, and tufts, as many as
-    `tufts` round the head, stand out from the skull by up to `tousle` more."""
+    """Hair over the skull; the course, `body`, `tousle` and `tufts` are as for `cap_shell`."""
+    return [part(cap_shell(course, body, tousle, tufts), paint, Material.HAIR, NECK_BINDER)]
+
+
+def cap_shell(course: Sequence[Key], body: float, tousle: float, tufts: float, rows: int = ROWS) -> Shape:
+    """A shell over the skull. The course gives, by level above the eye line, its half width, front depth, back depth
+    and how far from the middle its front edges part; `body` is how much it thickens from its edge, and tufts, as many
+    as `tufts` round the head, stand out from the skull by up to `tousle` more; it is lofted through `rows` levels."""
     heights = [(EYE_HEIGHT + level, keys) for level, keys in course]
-    levels = spread(course[0][0], course[-1][0], ROWS)
+    levels = spread(course[0][0], course[-1][0], rows)
     outer = [
         [_hair_point(course, heights, level, column, body, tousle, tufts) for column in range(COLUMNS + 1)]
         for level in levels
@@ -44,7 +49,7 @@ def hair_cap(course: Sequence[Key], paint: Paint, body: float, tousle: float, tu
         [_hair_point(course, heights, level, column, 0.0, tousle, tufts) for column in range(COLUMNS + 1)]
         for level in levels
     ]
-    return [part(shell(outer, inner), paint, Material.HAIR, NECK_BINDER)]
+    return shell(outer, inner)
 
 
 def _hair_point(
