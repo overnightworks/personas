@@ -4,8 +4,8 @@ the sentence he was held in and sends his unsent sentences after it."""
 from __future__ import annotations
 
 import pytest
-from agents.backend.fake_gateway import Reply, completion, tool_call, tool_round
-from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL, SpeakRefusal, VoiceState
+from agents.backend.fake_gateway import Reply, completion
+from agents.member import STOP_SPEAKING_TOOL, SpeakRefusal, VoiceState
 
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, PLACE_ID, say_in_the_call
@@ -21,6 +21,8 @@ from tests.support.voice import (
     THREE_SENTENCES,
     a_voice_call,
     calling_while_held,
+    continuing,
+    continuing_hold,
     decided,
     heard_after_the_second_hold,
     held_in_the_first_sentence,
@@ -32,14 +34,6 @@ from tests.support.voice import (
 pytestmark = pytest.mark.anyio
 
 LINE = "Right, one moment."
-
-
-def continuing(arguments: dict[str, object], hold_id: str = HOLD_ID):
-    return tool_round(tool_call(f"continue-{hold_id}", CONTINUE_SPEAKING_TOOL, {"id": hold_id, **arguments}))
-
-
-def continuing_hold(hold_id: str):
-    return continuing({}, hold_id)
 
 
 STYLE = "louder and angrier"

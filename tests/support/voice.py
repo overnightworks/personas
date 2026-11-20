@@ -136,6 +136,14 @@ async def calling_while_held(runner, *after_the_hold, hold_round: bool = False, 
     return deciding_round
 
 
+def continuing(arguments: dict[str, object], hold_id: str = HOLD_ID):
+    return tool_round(tool_call(f"continue-{hold_id}", CONTINUE_SPEAKING_TOOL, {"id": hold_id, **arguments}))
+
+
+def continuing_hold(hold_id: str):
+    return continuing({}, hold_id)
+
+
 def deciding(tool: str, hold_id: str = HOLD_ID):
     return tool_round(tool_call(f"{tool}-{hold_id}", tool, {"id": hold_id}))
 
@@ -172,10 +180,7 @@ SECOND_HOLD_DECISIONS = pytest.mark.parametrize(
         (deciding(CONTINUE_SPEAKING_TOOL, SECOND_HOLD), "continued"),
         (deciding(STOP_SPEAKING_TOOL, SECOND_HOLD), "stopped"),
         (completion("[silent]"), "undecided"),
-        (
-            tool_round(tool_call("line-hold-2", CONTINUE_SPEAKING_TOOL, {"id": SECOND_HOLD, "line": SECOND_LINE})),
-            "short_line",
-        ),
+        (continuing({"line": SECOND_LINE}, SECOND_HOLD), "short_line"),
         (completion(SECOND_ANSWER), "answered"),
     ],
     ids=["go on", "stop", "no decision", "short line", "answer instead"],
