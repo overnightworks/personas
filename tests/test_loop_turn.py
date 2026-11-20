@@ -390,17 +390,14 @@ async def test_a_tool_that_answers_gone_shows_the_model_that_and_leaves_the_life
     assert runner.clock.slept == []
 
 
-async def test_a_turn_binds_the_tools_the_app_lists_right_now_and_a_missing_one_is_no_failure(runner):
+@pytest.mark.parametrize("announces_tools", [True])
+async def test_a_turn_binds_the_tools_the_app_lists_after_its_last_notice_and_a_missing_one_is_no_failure(runner):
     """TURNS-18."""
-
-    async def lists_no_tools(reply):
-        await reply.result(ListToolsResult(tools=[]))
-
     runner.gateway = Gateway(completion("done"), completion("done"))
     await restarted_in_the_call(runner)
     say_in_the_call(runner, ADDRESSED)
     await runner.reports.until_a_turn_completed()
-    runner.app.script(LIST_TOOLS, lists_no_tools)
+    await runner.app.change_offer(SUBJECT, withheld={SAY_TOOL})
     say_in_the_call(runner, f"{ADDRESSED} Once more.")
     await runner.reports.until_a_turn_completed(count=2)
 

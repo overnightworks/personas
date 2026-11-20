@@ -56,7 +56,7 @@ class ToolLists:
         when the turn holds none of its. The apps are listed side by side, so their reports come in any order; the
         place's own app is listed whether the configuration names it or not."""
         async with asyncio.TaskGroup() as group:
-            own = group.create_task(self._list_own_tools(session))
+            own = group.create_task(self._list_own_tools(session, record))
             elsewhere = {
                 app.mcp_url: group.create_task(self._declared_elsewhere(app, admitted, record))
                 for app in self._apps
@@ -89,9 +89,14 @@ class ToolLists:
             self._report(Event.RESUMED, None, app, None)
         return declared
 
-    async def _list_own_tools(self, session: AppSession) -> Declared:
+    async def _list_own_tools(self, session: AppSession, record: TaskRecord) -> Declared:
         """The tools the place's app lists, or ``None`` when it did not answer within its call time; the step then
-        ends failed with its reason and the turn goes on."""
+        ends failed with its reason and the turn goes on. The list the session kept is used as it is: no request is
+        sent and no step is written. The record keeps how many tools notices the session had received when the turn
+        read its list."""
+        record.tools_notices_read = session.tools_notices()
+        if (kept := session.kept_tools()) is not None:
+            return kept
         timer = step_timer("tool_list.ended", self._agent.client_id, self._app.mcp_url)
         with stepping(timer):
             try:

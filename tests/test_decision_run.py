@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import pytest
+from agents.member import PlaceRef
 
-from personas.decision import waking_line
+from personas.decision import revisions_after_turn, waking_line
 from tests.support.standings import line
 
 
@@ -27,3 +28,25 @@ def test_a_run_of_another_speakers_marked_lines_wakes_him_at_its_last_line(taken
     waking = waking_line(lines, serves_view=False)
 
     assert (None if waking is None else waking.seq) == expected
+
+
+@pytest.mark.parametrize(
+    ("turn_revision", "notices_read", "notices_now", "kept"),
+    [
+        pytest.param(2, 4, 5, False, id="a notice after the turn read its list"),
+        pytest.param(2, 4, 4, True, id="no notice after the turn read its list"),
+        pytest.param(2, None, 5, True, id="a turn that read no list"),
+        pytest.param(None, 4, 5, True, id="a turn that came from lines"),
+        pytest.param(1, 4, 5, True, id="a place already at a newer revision"),
+    ],
+)
+def test_a_turn_a_tools_notice_overtook_does_not_count_for_its_view_revision(
+    turn_revision, notices_read, notices_now, kept
+):
+    table = PlaceRef(kind="table", id="table-1")
+    other = PlaceRef(kind="table", id="other")
+    turned = {table: 2, other: 2}
+
+    after = revisions_after_turn(turned, table, turn_revision, notices_read, notices_now)
+
+    assert after == (turned if kept else {other: 2})

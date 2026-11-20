@@ -535,6 +535,23 @@ def view_turn_due(turned_revision: int | None, view: PlaceView) -> bool:
     return view.awaits_you and turned_revision != view.revision
 
 
+def revisions_after_turn(
+    turned: Mapping[PlaceRef, int],
+    place: PlaceRef,
+    turn_revision: int | None,
+    tools_notices_read: int | None,
+    tools_notices_now: int,
+) -> dict[PlaceRef, int]:
+    """The revisions turned once a turn at ``place`` ended. A turn whose tool list a tools notice overtook, because
+    the notice came after the turn read its list, does not count for the view revision it was started for, so that
+    revision waits for one more turn while it still waits for the agent; a turn that read no list was overtaken by
+    nothing."""
+    overtaken = tools_notices_read is not None and tools_notices_now > tools_notices_read
+    if overtaken and turn_revision is not None and turned.get(place) == turn_revision:
+        return {each: revision for each, revision in turned.items() if each != place}
+    return dict(turned)
+
+
 def holds_a_place(standings: tuple[Standing, ...]) -> bool:
     """Whether any of his standings at an app is active."""
     return any(standing.state is StandingState.ACTIVE for standing in standings)

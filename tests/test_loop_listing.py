@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from agents.backend.fake_gateway import completion
 
 from personas.failures import leaves_of
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
@@ -12,6 +13,7 @@ from tests.support.fakes import CANCELLED_TURN
 from tests.support.gateway import Gateway, says
 from tests.support.history import HistoriesHoldingTheAddressedLine, settled
 from tests.support.hopin import LIMIT_SECONDS, LIST_TOOLS
+from tests.support.logs import lines_of
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.transport import opener_whose_request_raises
 from tests.support.wire import hangs
@@ -81,3 +83,16 @@ async def test_a_defect_the_listing_meets_as_its_turn_is_left_while_its_claim_is
         (ended,) = await asyncio.gather(runner.task, return_exceptions=True)
     assert set(leaves_of(ended)) == {defect}
     assert runner.gateway.arrivals == 0
+
+
+async def test_every_turn_lists_at_an_app_whose_stream_does_not_carry_the_tools_notice(runner, caplog):
+    """TURNS-18, LOG-13."""
+    runner.gateway = Gateway(completion("done"), completion("done"))
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED)
+    await runner.reports.until_a_turn_completed()
+    say_in_the_call(runner, f"{ADDRESSED} Once more.")
+    await runner.reports.until_a_turn_completed(count=2)
+
+    assert runner.app.log.count(LIST_TOOLS) == 2
+    assert len(lines_of(caplog.get_records("call"), "tool_list.ended")) == 2

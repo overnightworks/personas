@@ -159,8 +159,21 @@ class _Wakes:
         await asyncio.Event().wait()
 
 
+class BareSession:
+    """A session stand-in that holds no token, no list of its app's tools and received no tools notice."""
+
+    def use_token(self, token: Secret) -> None:
+        pass
+
+    def kept_tools(self) -> None:
+        return None
+
+    def tools_notices(self) -> int:
+        return 0
+
+
 @dataclass
-class FakeSession:
+class FakeSession(BareSession):
     """Answers each read and accept from a script and notes their bearer and time; blocking ends a scenario.
 
     The first ``graceful_ends`` streams end at once, as an app ends a stream at its bound.

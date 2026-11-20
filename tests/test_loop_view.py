@@ -27,7 +27,7 @@ from tests.support.history import (
     view_entry,
     woke_at_table,
 )
-from tests.support.hopin import CALL, READ, SAY_TOOL, a_traceparent, trace_id_of
+from tests.support.hopin import CALL, LIST_TOOLS, READ, SAY_TOOL, a_traceparent, trace_id_of
 from tests.support.logs import lines_of, written_by_the_runner
 from tests.support.realm import AGENT_NAME
 from tests.support.songmaker import CREATE_SONG, GENERATE_SONG
@@ -391,6 +391,33 @@ async def test_a_reaction_after_a_turn_that_left_its_revision_waiting_starts_no_
     await runner.gateway.until_turns(2)
 
     assert told_states(runner) == [first, second]
+
+
+@pytest.mark.parametrize("announces_tools", [True])
+async def test_a_tools_notice_during_a_view_turn_gives_the_revision_that_still_waits_one_more_turn_holding_the_new_tool(
+    runner,
+):
+    """TURNS-7."""
+    runner.gateway = Gateway(completion("done"), completion("done"))
+    runner.app.withheld_tools = {SAY_TOOL}
+    view_turn = runner.gateway.hold_request(1)
+    runner.app.stand(SUBJECT, at_table())
+    state = waits(runner, 1)
+    runner.start()
+    await runner.gateway.until_requested(1)
+    reads = runner.app.view_reads(TABLE)
+    await runner.app.change_offer(SUBJECT, withheld=set())
+    runner.app.show_view(TABLE.id, 1, state)
+    await runner.app.until_view_read(TABLE, reads + 1)
+    view_turn.set()
+    await runner.gateway.until_turns(2)
+    await runner.reports.until_a_turn_completed(count=2)
+    await settled(runner.app)
+
+    assert [runner.gateway.offered_tools(each) for each in (1, 2)] == [[], [SAY_TOOL]]
+    assert runner.app.log.count(LIST_TOOLS) == 2
+    assert told_states(runner) == [state, state]
+    assert len(runner.gateway.openings()) == 2
 
 
 async def test_a_line_that_addresses_him_while_a_view_turn_runs_gets_its_turn_once_that_one_has_ended(runner):

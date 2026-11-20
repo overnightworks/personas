@@ -31,6 +31,7 @@ from personas.failures import StatusFailure, TokenStatusFailure, Unreachable, Un
 from personas.loop import AgentLoop, Boundaries
 from personas.reporting import Event
 from tests.support.fakes import (
+    BareSession,
     FakeClock,
     FakeReadyMarker,
     FakeTokens,
@@ -371,7 +372,7 @@ class _Wakes:
         self._left -= 1
 
 
-class ScriptedSessions:
+class ScriptedSessions(BareSession):
     """One loop over a stand-in that is the app's session; a subclass scripts what `open` and the reads do.
 
     The place is invited at the first read and active at every later one, so the agent joins it and reads its window
@@ -388,9 +389,6 @@ class ScriptedSessions:
         self.loop = AgentLoop(
             self.config.agents[0], self.config.apps[0], boundaries, unstored_mind(), self.config.apps, None
         )
-
-    def use_token(self, token) -> None:
-        pass
 
     @asynccontextmanager
     async def changes(self):
