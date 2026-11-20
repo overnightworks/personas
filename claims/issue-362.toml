@@ -1,0 +1,8 @@
+claim_id = "f420bdd3a2c84396b86593143aa1fc0a"
+agent = "Claude d21def74-68af-4c98-89a2-70bc45cbdd6a"
+role = "builder"
+base = "ff7f472d6320b37075aea35f6e9e802d5c4a3ce6"
+branch = "claude/issue-362-hildegard-figure"
+scope = ["scripts/figures", "scripts/write_figures.py", "src/characters", "tests/scripts/test_write_figures.py"]
+opened_commit = "9c85263a74553b7c7af020303f88ba66433846ec"
+whole_reason = "one persona's figure from the shared generator, proven by the shared check and a render"
