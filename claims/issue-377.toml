@@ -1,8 +1,0 @@
-claim_id = "eab2f1bdb4854688a68e6c8c3d768196"
-agent = "Claude d32028b7-a7a0-48ff-8c29-65b317313c7d"
-role = "builder"
-base = "f64b9ae7aaee7140e535531dcd4019cec232736e"
-branch = "claude/issue-377-short-line-before-he-goes-on"
-scope = ["docs/log.md", "docs/turns.md", "src/personas/holds.py", "src/personas/mind.py", "src/personas/speech.py", "src/personas/turning.py", "src/personas/voice.py", "tests"]
-opened_commit = "15f70651ad1918149cfba5f6b8cb70f0a4923986"
-whole_reason = "one decision, a short line before he goes on: its argument on continue_speaking, its speak naming the hold, and the record's rule that keeps his unsent sentences"
