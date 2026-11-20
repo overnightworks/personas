@@ -115,6 +115,7 @@ async def test_while_a_cancelled_turn_still_unwinds_a_new_addressed_line_starts_
     try:
         async with asyncio.timeout(LIMIT_SECONDS):
             await unwinding.closing.wait()
+        await runner.app.until_turn_states(1)
         runner.app.stand(SUBJECT, active(OTHER_PLACE_ID))
         async with asyncio.timeout(LIMIT_SECONDS):
             await unwinding.cancelled.wait()
@@ -197,6 +198,7 @@ async def a_turn_whose_request_fails_as_its_place_leaves(runner, *, seam, error)
     say_in_the_call(runner, ADDRESSED)
     async with asyncio.timeout(LIMIT_SECONDS):
         await arrived.wait()
+    await runner.app.until_turn_states(1)
     runner.app.stand(SUBJECT)
 
 
@@ -332,6 +334,7 @@ async def a_turn_opening_a_tools_only_session(runner, songmaker, monkeypatch, *,
     say_in_the_call(runner, ADDRESSED)
     async with asyncio.timeout(LIMIT_SECONDS):
         await arrived.wait()
+    await runner.app.until_turn_states(1)
     return release
 
 

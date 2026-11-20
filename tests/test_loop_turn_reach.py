@@ -703,7 +703,8 @@ async def test_a_defect_in_a_tools_only_request_whose_loop_session_loses_a_child
     finally:
         closing.release.set()
 
-    await ends_with_the_defect_beside(runner, defect)
+    # A call met in the middle of its close is still open when the child is lost, so the lost child leaves beside it.
+    await ends_with_the_defect_beside(runner, defect, *([Unreachable] if where == "call" else []))
 
 
 async def test_a_second_defect_of_the_turns_session_body_leaves_beside_the_first_one_a_tools_only_call_recorded(
