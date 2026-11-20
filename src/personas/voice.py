@@ -151,7 +151,7 @@ class Answering:
         self._tally.sentence_released()
         answer = await self._speak(first, hold.id)
         outcome = speech_outcome(answer, cancelling=False)
-        assert outcome is not None  # noqa: S101 - an answer, a refusal or a call failure each end with an outcome
+        assert outcome is not None  # noqa: S101 - a sent sentence always ends with an outcome
         self._mind.take((SaidAloud(self._app.mcp_url, self._place, first, outcome, self._clock.wall()),))
         if isinstance(answer, Spoken | Written):
             if isinstance(answer, Spoken):
