@@ -35,6 +35,7 @@ events and their fields. A test cites each rule by its ID at the start of its do
 | `loop.backed_off` | a network failure, a lost stream or a 5xx | `reason`; `status` and `mcp_method` when a call failed (LOG-9) |
 | `invitation.accepted`, `invitation.refused` | an accept answered | `reason` for a refusal (LOG-10) |
 | `invitation.left_out` | an invitation the agent cannot take turns at | `place_kind`, `reason` `no_turns` (LOG-11) |
+| `turn.fell_due` | a pass made a place due that was not due | `occasion` (`line`, `view` or `hold`), `spoken` (whether its turn would be spoken), `read_ms` (LOG-37) |
 | `turn.ended` | every turn, however it ends | see below (LOG-12) |
 | `turn_wait.ended`, `claim_write.ended`, `thinking.ended`, `session_open.ended`, `tool_list.ended`, `turn_setup.ended` | each step of a turn | `duration_ms`, `outcome`; `reason` and `error_type` of a failed `session_open`, `tool_list` or `turn_setup` (`session_open` is a session the turn opens to another app, since the turn's own app is served on the loop's session; a place's own app that does not list its tools within its `call_seconds` fails the `tool_list` step and the turn goes on without them; `turn_wait` ends when the turn starts and `claim_write` only waits for the store's writer, so neither fails; `thinking` is the statement that the turn is thinking, answered by the app; `turn_setup` is what the turn still waited for after its thinking was answered); `wait_reason` on `turn_wait.ended` (LOG-13) |
 | `token_request.ended` | each token request | `duration_ms`, `outcome`; `reason` and `error_type` of a failed request (LOG-14) |
@@ -75,6 +76,14 @@ A `claim_write.ended` runs from the turn's start until the store keeps its claim
 `thinking` and `turn_setup` run in sequence and add up to the time from due to the model request. `tool_list`
 and `session_open` may run beside `claim_write` and `thinking`: their overlap is read from each line's time
 minus its duration. (LOG-33)
+
+A `turn.fell_due` is written once for a place that a pass makes due while it was not due: by a line that wakes
+him, by a view revision that waits for him, or by a hold that may be told. `read_ms` runs from the pass's start
+of reading the standing to that moment, on the monotonic scale of `Clock.now`. It stands in the trace of the
+line or revision that made the place due, so it joins that place's `turn_wait.ended`; a hold carries no trace, so
+its event has none. A line that joins a place already due, a wake that makes nothing due, a place due again after
+a turn without an answer and a place a pod resumes write none. The event carries no line's kind, text or
+name. (LOG-37)
 
 ## `turn.ended`
 
