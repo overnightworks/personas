@@ -1,8 +1,0 @@
-claim_id = "961bb8171cd142298de492db83048ec2"
-agent = "Claude d32028b7-a7a0-48ff-8c29-65b317313c7d"
-role = "builder"
-base = "a17ec50cddf0f42cc8e9b548face8138ce7e0d15"
-branch = "claude/issue-382-a-second-interruption-in-one-spoken-turn"
-scope = ["docs/turns.md", "src/personas", "tests"]
-opened_commit = "62c75b5fdc06aa71164a7cfe6da0152f81a5f977"
-whole_reason = "the rule spans the hold round, the loop and their tests"
