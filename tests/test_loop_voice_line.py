@@ -46,7 +46,7 @@ async def held_with_a_line(runner, line: object = LINE):
 
 
 async def test_a_short_line_is_said_at_once_and_his_unsent_sentences_follow_plain(runner):
-    """TURNS-30, TURNS-31, LOG-17."""
+    """TURNS-30, TURNS-46, LOG-17."""
     await held_with_a_line(runner)
 
     assert await decided(runner) == ["short_line"]
@@ -100,7 +100,7 @@ async def test_a_line_that_is_no_string_decides_nothing(runner):
 
 
 async def test_a_turn_told_a_hold_says_the_short_line_and_its_sentences_follow_it(runner):
-    """TURNS-31, LOG-17."""
+    """TURNS-46, LOG-17."""
     await a_voice_call(runner, continuing({"line": LINE}), completion(f"{FIRST} {SECOND}"))
 
     runner.app.hold(PLACE_ID, HOLD_ID, SAID)
@@ -128,7 +128,7 @@ async def test_the_short_line_beside_his_parked_run_leaves_the_run_to_go_on(runn
 
 
 async def test_a_new_hold_beside_the_short_line_starts_one_more_round_while_his_run_is_parked(runner):
-    """TURNS-31."""
+    """TURNS-46."""
     deciding_round = await calling_while_held(
         runner,
         continuing({"line": LINE}),
@@ -146,7 +146,7 @@ async def test_a_new_hold_beside_the_short_line_starts_one_more_round_while_his_
 
 
 async def test_a_turn_told_a_hold_refuses_a_non_string_line_and_decides_nothing(runner):
-    """TURNS-31."""
+    """TURNS-46."""
     await a_voice_call(runner, continuing({"line": 7}), completion("[silent]"))
 
     runner.app.hold(PLACE_ID, HOLD_ID, SAID)
@@ -156,7 +156,7 @@ async def test_a_turn_told_a_hold_refuses_a_non_string_line_and_decides_nothing(
 
 
 async def test_a_turn_told_a_hold_whose_short_line_the_app_refused_stops_him_and_ends_the_hold_undecided(runner):
-    """TURNS-31, LOG-17."""
+    """TURNS-46, LOG-17."""
     runner.app.speak_outcomes.append(refusing(SpeakRefusal.TOO_LONG))
     await a_voice_call(runner, continuing({"line": LINE}), completion(f"{FIRST} {SECOND}"))
 
@@ -167,7 +167,7 @@ async def test_a_turn_told_a_hold_whose_short_line_the_app_refused_stops_him_and
 
 
 async def test_a_line_in_a_turn_that_does_not_speak_is_refused_and_the_hold_stays_undecided(runner):
-    """TURNS-31."""
+    """TURNS-46."""
     runner.app.state_voice(PLACE_ID, VoiceState.UNAVAILABLE)
     await a_voice_call(runner, completion("done"), continuing({"line": LINE}), completion("[silent]"))
     answer = runner.gateway.hold_request(1)

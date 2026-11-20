@@ -104,7 +104,6 @@ _APART_TEXT: Final = (
 )
 _DECIDING_FIRST_TEXT: Final = "a hold is decided first: call continue_speaking or stop_speaking"
 _DECIDED_TEXT: Final = "this hold is decided"
-_NO_SPEECH_FOR_LINE_TEXT: Final = "this turn does not speak: continue_speaking without a line"
 
 
 async def _final_event_of(events: AsyncIterator[TurnEvent], tally: TurnTally) -> FinalEvent | None:
@@ -601,9 +600,7 @@ class Turning:
         if not deciding.pending:
             return ToolOutcome(_DECIDED_TEXT, is_error=True)
         if outcome is HoldOutcome.CONTINUED and LINE_ARGUMENT in arguments:
-            if deciding.say_line is None:
-                return ToolOutcome(_NO_SPEECH_FOR_LINE_TEXT, is_error=True)
-            return await deciding.say_line(arguments[LINE_ARGUMENT])
+            return await deciding.line_said(arguments[LINE_ARGUMENT])
         deciding.outcome = outcome
         unsaid = self._mind.speech_unsaid(self._at(admitted.place))
         ended = await self._end_hold(admitted.place, record, deciding.held, outcome, bound)

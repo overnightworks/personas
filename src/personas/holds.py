@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Final
 
 from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL
-from agents.tools import ToolDeclaration, ToolEffect
+from agents.tools import ToolDeclaration, ToolEffect, ToolOutcome
 
 from personas.speech import Held, HoldKey, HoldOutcome, hold_stated, hold_tellable, untold_words
 
@@ -15,13 +15,13 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Generator
 
     from agents.member import PartialSpeech, PlaceWindow
-    from agents.tools import ToolOutcome
     from agents.turn_events import ToolCallEvent
 
     from personas.turn_bound import TurnBound
 
 DECISION_CALLS: Final = 1
 LINE_ARGUMENT: Final = "line"
+_NO_SPEECH_FOR_LINE_TEXT: Final = "this turn does not speak: continue_speaking without a line"
 APP_FAILED_TEXT: Final = "the app did not answer"
 CONTINUED_TEXT: Final = '{"continued": true}'
 GONE_TEXT: Final = '{"gone": true}'
@@ -78,6 +78,12 @@ class TurnHold:
         self.outcome: HoldOutcome | None = None
         self.say_line: Callable[[object], Awaitable[ToolOutcome]] | None = None
         """His short line before he goes on, set once the turn's speech exists."""
+
+    async def line_said(self, line: object) -> ToolOutcome:
+        """His ``continue_speaking`` with a ``line``: refused in a turn that does not speak."""
+        if self.say_line is None:
+            return ToolOutcome(_NO_SPEECH_FOR_LINE_TEXT, is_error=True)
+        return await self.say_line(line)
 
     @property
     def pending(self) -> bool:
