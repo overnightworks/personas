@@ -7,7 +7,6 @@ import math
 from typing import TYPE_CHECKING
 
 from figures.figure_body import (
-    SEAT,
     arm_binder,
     arm_tube,
     both_sides,
@@ -84,6 +83,13 @@ TROUSERS = (
     (0.82, (0.060, 0.076, 0.0)),
     (0.90, (0.050, 0.068, 0.0)),
     (0.97, (0.040, 0.060, 0.0)),
+)
+# The seat that joins the trousers' legs inside the waistcoat, as for `figure_body.SEAT` but closed at the waistcoat's
+# hem, so that no front of it shows between the thighs below it.
+SEAT = (
+    (0.845, (0.092, 0.029, 0.084)),
+    (0.86, (0.110, 0.034, 0.092)),
+    (0.94, (0.140, 0.080, 0.106)),
 )
 # Height, then the cravat's half width, front depth and back depth there, with its knot at the front.
 CRAVAT = ((1.425, (0.060, 0.052, 0.065)), (1.46, (0.062, 0.055, 0.067)), (1.50, (0.059, 0.053, 0.065)))
