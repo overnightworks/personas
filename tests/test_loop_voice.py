@@ -407,7 +407,7 @@ async def test_his_line_for_the_playing_sentence_that_the_bound_cuts_while_the_n
     assert runner.reports.reported() == [(Event.STARTED, None)]
 
 
-async def test_a_line_that_enters_before_the_answer_of_its_speak_leaves_nothing_owed_and_the_turn_ends(runner):
+async def test_a_line_that_enters_before_the_answer_of_its_speak_still_lets_the_turn_end(runner):
     answer = runner.app.hold_next_speak()
     await a_voice_call(runner, completion(ANSWER))
     say_in_the_call(runner, ADDRESSED)
@@ -446,7 +446,7 @@ async def test_a_sentence_refused_while_the_one_before_plays_does_not_hold_the_c
     assert len(runner.app.playing) == 1
 
 
-async def test_a_stop_while_a_sentence_plays_leaves_its_cut_line_awaited_and_the_next_stopped_and_none_sent(
+async def test_a_stop_while_a_sentence_plays_cuts_it_and_stops_the_next_and_none_is_sent(
     runner,
 ):
     holding_sentence_ends(runner)
