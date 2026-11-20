@@ -59,7 +59,7 @@ def calls_of_voice(runner) -> list[str]:
 
 
 @pytest.mark.parametrize(("tool", "outcome"), DECISIONS)
-async def test_a_hold_with_words_where_nothing_is_owed_makes_his_turn_due_and_that_turn_decides_it(
+async def test_a_hold_with_words_where_no_turn_of_his_speaks_makes_his_turn_due_and_that_turn_decides_it(
     runner, tool, outcome
 ):
     """TURNS-30, TURNS-31, LOG-17."""
