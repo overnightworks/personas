@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import aclosing
+from contextlib import aclosing, asynccontextmanager
 from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, Final
@@ -66,7 +66,7 @@ from personas.turn_sessions import TurnSessions
 from personas.voice import DropReporter, Speaking
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+    from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterable
     from contextlib import AbstractAsyncContextManager
 
     from agents.agent_file import AgentDefinition
@@ -211,10 +211,11 @@ class Turning:
                 at = self._at(admitted.place)
                 self._report_dropped(self._mind.drop_reason_at_end(), self._mind.unsent_dropped(at))
 
-    async def _listed_beside(
-        self, gate: Callable[[], Awaitable[None]], session: AppSession, admitted: Admitted, record: TaskRecord
-    ) -> tuple[Declared, ...]:
-        """Passes the gate while the tools are listed beside it, and returns what the apps listed.
+    @asynccontextmanager
+    async def _listing_beside(
+        self, session: AppSession, admitted: Admitted, record: TaskRecord
+    ) -> AsyncGenerator[asyncio.Task[tuple[Declared, ...]]]:
+        """Lists the tools of the apps in a task beside the block, which awaits it where it needs what they listed.
 
         The listing is a task of its own, not in a group with the gate, so a listing that fails never cuts the gate
         and its failure ends the turn after the thinking. A turn that ends before it awaited the listing cancels it,
@@ -222,8 +223,7 @@ class Turning:
         """
         listing = asyncio.create_task(self._lists.listed(session, admitted, record))
         try:
-            await gate()
-            return await listing
+            yield listing
         finally:
             listing.cancel()
             await asyncio.wait((listing,))
@@ -291,29 +291,31 @@ class Turning:
         tally: TurnTally,
         gate: Callable[[], Awaitable[None]],
     ) -> None:
-        lists = await self._listed_beside(gate, session, admitted, record)
-        with stepping(step_timer("turn_setup.ended", self._agent.client_id, self._app.mcp_url)) as hand_off:
-            turn = TurnTold(
-                admitted.at,
-                self._app.mcp_url,
-                admitted.place,
-                admitted.occasion,
-                aloud=admitted.aloud,
-                through=admitted.history.taken,
-            )
-            told = turn_messages(admitted.facts.name, admitted.present, turn)
-            if admitted.held is not None:
-                told = (*told, self._told_standing(admitted, admitted.held))
-            bound = TurnBound(self._clock, setup.persona.max_duration_seconds)
-            try:
-                await self._run_session_body(
-                    setup, admitted, turn, told, session, record, sizing, tally, hand_off, bound, lists
+        async with self._listing_beside(session, admitted, record) as listing:
+            await gate()
+            with stepping(step_timer("turn_setup.ended", self._agent.client_id, self._app.mcp_url)) as hand_off:
+                lists = await listing
+                turn = TurnTold(
+                    admitted.at,
+                    self._app.mcp_url,
+                    admitted.place,
+                    admitted.occasion,
+                    aloud=admitted.aloud,
+                    through=admitted.history.taken,
                 )
-            except Exception as error:
-                record.note(error)
-                raise
-            finally:
-                bound.close()
+                told = turn_messages(admitted.facts.name, admitted.present, turn)
+                if admitted.held is not None:
+                    told = (*told, self._told_standing(admitted, admitted.held))
+                bound = TurnBound(self._clock, setup.persona.max_duration_seconds)
+                try:
+                    await self._run_session_body(
+                        setup, admitted, turn, told, session, record, sizing, tally, hand_off, bound, lists
+                    )
+                except Exception as error:
+                    record.note(error)
+                    raise
+                finally:
+                    bound.close()
 
     async def _run_session_body(
         self,
