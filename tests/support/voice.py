@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 
 from agents.backend.fake_gateway import completion, tool_call, tool_round
+from agents.member import SpeakRefusal, SpeakRefused
+from agents.tools import ToolOutcome
 
+from personas.reporting import Event
 from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
 from tests.support.gateway import Gateway, say
@@ -143,3 +146,15 @@ async def held_in_the_first_sentence(runner, *replies, said=(SAID,), hold_id: st
 
 def sentences_spoken(runner) -> list[str]:
     return [text for _, _, text in runner.app.spoken]
+
+
+THREE_SENTENCES = "First sentence. Second sentence. Third sentence."
+
+
+async def decided(runner, count: int = 1) -> list[str | None]:
+    await runner.reports.until(Event.HOLD_DECIDED, count=count)
+    return runner.reports.codes_of(Event.HOLD_DECIDED)
+
+
+def refusing(refusal: SpeakRefusal) -> ToolOutcome:
+    return ToolOutcome(SpeakRefused(refused=refusal).model_dump_json(), is_error=True)

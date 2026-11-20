@@ -166,23 +166,18 @@ class Answering:
 
     async def line_decided(self, hold: Held, line: object) -> ToolOutcome:
         """His ``continue_speaking`` of ``hold`` with a ``line``: the line says at once what the call tells him; a
-        line that is no string decides nothing."""
+        line that is no string decides nothing. The hold the turn was told is decided for the turn's calls."""
         if not isinstance(line, str):
             return ToolOutcome(_LINE_TEXT, is_error=True)
-        return _line_told(await self._line(hold, line))
-
-    async def line_decided_told(self, line: object) -> ToolOutcome:
-        """His short line for the hold the turn was told; the hold is decided for the turn's calls."""
-        assert self._told is not None  # noqa: S101 - only a turn told a hold decides it
-        if not isinstance(line, str):
-            return ToolOutcome(_LINE_TEXT, is_error=True)
-        self._told.outcome = await self._line(self._told.held, line)
-        return _line_told(self._told.outcome)
+        ended = await self._line(hold, line)
+        if self._told is not None and self._told.held is hold:
+            self._told.outcome = ended
+        return _line_told(ended)
 
     async def _line(self, hold: Held, line: str) -> HoldOutcome:
         """The line goes to ``speak`` naming ``hold``, the hold's sentence cut and the unsent ones kept for after it;
-        a line the app refused or never answered sends no further sentence."""
-        self._inbox.answering()
+        a line the app refused or never answered sends no further sentence. The inbox stays
+        open: a hold that stands after it is a new hold."""
         self._mind.speech_line_said(self._at, self._bound.ends_at())
         ended = await self._sent_naming(hold, line, HoldOutcome.SHORT_LINE, ())
         if ended is HoldOutcome.GONE:

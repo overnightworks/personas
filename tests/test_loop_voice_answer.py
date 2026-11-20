@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
-from agents.member import STOP_SPEAKING_TOOL, SpeakRefusal, SpeakRefused
+from agents.member import STOP_SPEAKING_TOOL, SpeakRefusal
 from agents.tools import ToolOutcome
 
 from personas.failures import leaves_of
@@ -19,29 +19,22 @@ from tests.support.voice import (
     HOLD_ID,
     SAID,
     SECOND,
+    THREE_SENTENCES,
     a_voice_call,
     calling_while_held,
+    decided,
     deciding,
     ended_by,
     held_in_the_first_sentence,
+    refusing,
     sentences_spoken,
 )
 from tests.support.wire import refuses_with_a_server_error
 
 pytestmark = pytest.mark.anyio
 
-THREE_SENTENCES = "First sentence. Second sentence. Third sentence."
 ANSWER_FIRST, ANSWER_REST = "I hear you.", "Go on."
 ANSWER = f"{ANSWER_FIRST} {ANSWER_REST}"
-
-
-async def decided(runner, count: int = 1) -> list[str | None]:
-    await runner.reports.until(Event.HOLD_DECIDED, count=count)
-    return runner.reports.codes_of(Event.HOLD_DECIDED)
-
-
-def refusing(refusal: SpeakRefusal) -> ToolOutcome:
-    return ToolOutcome(SpeakRefused(refused=refusal).model_dump_json(), is_error=True)
 
 
 async def answered_in_the_round(runner, *replies):
