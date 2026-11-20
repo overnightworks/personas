@@ -30,22 +30,22 @@ NO_SPEECH: Final = SpeechRecord()
 
 def speech_sent(record: SpeechRecord) -> SpeechRecord:
     """A request to ``speak`` counts from its send."""
-    return replace(record, in_flight=record.in_flight + 1)
+    return SpeechRecord(record.in_flight + 1, record.saying, record.hold, record.decided)
 
 
 def speech_answered(record: SpeechRecord, sentence: str, *, spoken: bool) -> SpeechRecord:
     """A request ended: it stops counting, and a sentence answered as ``Spoken`` is the one that plays."""
-    return replace(record, in_flight=record.in_flight - 1, saying=sentence if spoken else record.saying)
+    return SpeechRecord(record.in_flight - 1, sentence if spoken else record.saying, record.hold, record.decided)
 
 
 def speech_line_entered(record: SpeechRecord) -> SpeechRecord:
     """His own spoken line entered at the place: the sentence that played has ended."""
-    return replace(record, saying=None)
+    return SpeechRecord(record.in_flight, None, record.hold, record.decided)
 
 
 def speech_ended(record: SpeechRecord) -> SpeechRecord:
     """The turn that sent ended: its requests in flight are gone; the sentence that plays and the hold stay."""
-    return replace(record, in_flight=0)
+    return SpeechRecord(0, record.saying, record.hold, record.decided)
 
 
 class Telling(StrEnum):
@@ -106,8 +106,8 @@ def hold_stated(window: PlaceWindow, seen: Held | None) -> Held | None:
 def hold_read(record: SpeechRecord, window: PlaceWindow) -> SpeechRecord:
     """The record once the window is read: the hold it states, none when that is the one decided last."""
     if window.interrupted is not None and window.interrupted.id == record.decided:
-        return replace(record, hold=None)
-    return replace(record, hold=hold_stated(window, record.hold))
+        return SpeechRecord(record.in_flight, record.saying, None, record.decided)
+    return SpeechRecord(record.in_flight, record.saying, hold_stated(window, record.hold), record.decided)
 
 
 def hold_untold(record: SpeechRecord) -> Held | None:
@@ -119,7 +119,7 @@ def hold_untold(record: SpeechRecord) -> Held | None:
 def hold_marked_told(record: SpeechRecord) -> SpeechRecord:
     """A turn is told the hold that stands."""
     assert record.hold is not None  # noqa: S101 - a turn is told only a hold that stands
-    return replace(record, hold=replace(record.hold, telling=Telling.TELLING))
+    return SpeechRecord(record.in_flight, record.saying, replace(record.hold, telling=Telling.TELLING), record.decided)
 
 
 def hold_turn_ended(record: SpeechRecord) -> SpeechRecord:
@@ -127,12 +127,12 @@ def hold_turn_ended(record: SpeechRecord) -> SpeechRecord:
     held = record.hold
     if held is None or held.telling is not Telling.TELLING:
         return record
-    return replace(record, hold=replace(held, telling=Telling.UNDECIDED))
+    return SpeechRecord(record.in_flight, record.saying, replace(held, telling=Telling.UNDECIDED), record.decided)
 
 
 def hold_decided(record: SpeechRecord, hold_id: str) -> SpeechRecord:
     """The hold ended with a decision: it stands no more and is never decided again."""
-    return replace(record, hold=None, decided=hold_id)
+    return SpeechRecord(record.in_flight, record.saying, None, hold_id)
 
 
 def hold_tellable(held: Held) -> bool:
