@@ -93,7 +93,7 @@ def of(event: Event, code: str | None = None, **fields: object) -> StateChange:
     ],
 )
 def test_a_change_is_one_literal_event_with_ids_the_host_of_the_app_and_closed_codes(written, change, event, fields):
-    """LOG-2, LOG-6, LOG-7, LOG-8, LOG-9, LOG-10, LOG-11, LOG-15, LOG-16, LOG-19, LOG-20."""
+    """LOG-2, LOG-6, LOG-7, LOG-8, LOG-9, LOG-10, LOG-11, LOG-15, LOG-16, LOG-19, LOG-20, LOG-36."""
     line = written(change)
 
     assert line["event"] == event
