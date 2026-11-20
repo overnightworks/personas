@@ -188,6 +188,37 @@ async def test_a_turn_that_ends_without_a_decision_drops_what_waited_and_the_nex
 
 
 @pytest.mark.parametrize(
+    ("reply", "dropped"),
+    [
+        pytest.param(completion("[silent]"), 1, id="silent"),
+        pytest.param(completion("Let me think."), 2, id="text only"),
+    ],
+)
+async def test_a_turn_told_a_hold_that_ends_undecided_drops_the_rest_of_an_ended_turn_and_the_stop_sends_none(
+    runner, reply, dropped
+):
+    """TURNS-31, LOG-17."""
+    await a_voice_call(runner, completion(TWO_SENTENCES), reply)
+    answer = runner.app.hold_next_speak()
+    say_in_the_call(runner, ADDRESSED, spoken=True)
+    await runner.app.until_called(1)
+    runner.app.hold(PLACE_ID, HOLD_ID, ("Ada", ""))
+    await window_read_after(runner)
+    answer.set()
+    await runner.reports.until_a_turn_completed()
+    runner.app.end_record(PLACE_ID)
+    assert await decided(runner) == ["undecided"]
+
+    await runner.reports.until(Event.SPEECH_DROPPED)
+    await window_read_after(runner)
+
+    assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
+    assert runner.reports.codes_of(Event.SPEECH_DROPPED) == [DropReason.STOPPED.value]
+    assert [each.sentences for each in runner.reports.changes_of(Event.SPEECH_DROPPED)] == [dropped]
+    assert sentences_spoken(runner) == [FIRST]
+
+
+@pytest.mark.parametrize(
     ("reply", "outcome"),
     [
         pytest.param(deciding(STOP_SPEAKING_TOOL, "hold-2"), "stopped", id="stopped"),

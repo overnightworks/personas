@@ -381,7 +381,8 @@ class Turning:
     async def hold(self, session: AppSession, place: PlaceRef, window: PlaceWindow) -> None:
         """What a read of the place's window says of him. The hold it states stands in the mind's record of the place.
         The spoken turn at the place hears it; with none there, a hold that may be told makes the place due, and a hold
-        whose turn ended without deciding it is stopped with its id, the loop's session taking the call."""
+        whose turn ended without deciding it is stopped with its id, the loop's session taking the call, and the unsent
+        sentences at the place drop."""
         at = self._at(place)
         held = self._mind.hold_read(at, window)
         if self._listening is not None and self._listening[0] == place:
@@ -389,6 +390,7 @@ class Turning:
         elif held is None or self._aloud_at == place:
             return
         elif held.telling is Telling.UNDECIDED:
+            self._stop_speech(place)
             refusal = await session.stop_speaking(place, held.id)
             self._hold_decided(place, held.id, hold_ended_as(HoldOutcome.UNDECIDED, refusal))
         elif self._mind.hold_makes_due(at):
