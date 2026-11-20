@@ -88,10 +88,9 @@ An entry has its app and the time he took it (`at`), and is one of:
   is told `"aloud": true`. Where the place's last window states his voice unavailable (`voice_state`) the
   turn is written instead. (TURNS-24)
 - The text is spoken sentence by sentence through `speak`, at most one sentence ahead of the one playing,
-  a fixed rule: one request is open at a time and the app answers it when its sentence starts to play. His
-  place's sender sends them, also after the turn, which ends once its last model round has returned. The
-  app appends his own spoken line for each sentence as it ends, whole or cut. A call goes out at once, also
-  while his sentences play or wait. (TURNS-25)
+  a fixed rule, by his place's sender also after the turn, which ends once its last model round has
+  returned. The app appends his own spoken line for each sentence as it ends, whole or cut. A call goes out
+  at once, also while his sentences play or wait. (TURNS-25)
 - A round that opens with `[silent]` says nothing; a final round with no text and no call is a provider
   error, so the characters end a silent turn with `[silent]`. (TURNS-26)
 - A refused sentence (`stopped` included) drops every unsent sentence at the place, is logged as

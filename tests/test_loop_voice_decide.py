@@ -368,7 +368,7 @@ async def test_a_decision_the_app_could_not_take_is_told_to_him_as_not_made_and_
 
 async def test_a_sentence_answered_as_held_stays_first_among_the_unsent_unlogged_until_his_decision(runner):
     """TURNS-27."""
-    await a_voice_call(runner, deciding(CONTINUE_SPEAKING_TOOL))
+    await a_voice_call(runner, deciding(CONTINUE_SPEAKING_TOOL), completion("[silent]"))
     reply = runner.gateway.pause_request(1, "One", ". Two.")
     say_in_the_call(runner, ADDRESSED, spoken=True)
     await runner.gateway.until_requested(1)
