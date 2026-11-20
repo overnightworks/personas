@@ -571,4 +571,4 @@ async def test_a_spoken_turn_logs_its_start_and_no_sentence(runner, caplog):
     await runner.app.spoken_count(1)
 
     events = [line["event"] for line in lines_of(caplog.get_records("call"))]
-    assert [event for event in events if not event.endswith(".ended")] == ["loop.started"]
+    assert [event for event in events if not event.endswith(".ended")] == ["loop.started", "turn.fell_due"]
