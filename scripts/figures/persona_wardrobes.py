@@ -1,5 +1,5 @@
-"""The wardrobes of the personas: the faces, hair and clothes that tell Mozart, Leonardo, Humboldt, Curie and Lovelace
-apart."""
+"""The wardrobes of the personas: the faces, hair and clothes that tell Mozart, Leonardo, Humboldt, Curie, Lovelace and
+Hildegard apart."""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 from figures.curie_dress import curie_clothes
 from figures.curie_hair import curie_hair
 from figures.figure_head import Face
+from figures.hildegard_habit import hildegard_clothes
+from figures.hildegard_headdress import hildegard_headdress
 from figures.humanoid_figure import Wardrobe
 from figures.humboldt_coat import humboldt_clothes
 from figures.humboldt_hair import humboldt_hair
@@ -28,6 +30,10 @@ def _dress_curie(face: Face) -> list[Part]:
 
 def _dress_lovelace(face: Face) -> list[Part]:
     return [*lovelace_clothes(face), *lovelace_hair()]
+
+
+def _dress_hildegard(face: Face) -> list[Part]:
+    return [*hildegard_clothes(face), *hildegard_headdress()]
 
 
 def _dress_mozart(face: Face) -> list[Part]:
@@ -141,4 +147,24 @@ LOVELACE = Wardrobe(
         cheek=0.002,
     ),
     dress=_dress_lovelace,
+)
+HILDEGARD = Wardrobe(
+    name="Hildegard",
+    face=Face(
+        skin=(240, 220, 204),
+        blush=(220, 160, 150),
+        lips=(184, 112, 112),
+        iris=(104, 128, 148),
+        brow=(150, 128, 108),
+        brow_weight=0.8,
+        length=1.0,
+        jaw=0.98,
+        nose_length=1.02,
+        nose_height=0.023,
+        nose_width=0.94,
+        brow_ridge=0.003,
+        eye_set=0.0060,
+        cheek=-0.0005,
+    ),
+    dress=_dress_hildegard,
 )
