@@ -7,7 +7,7 @@ import time
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
-from enum import Enum, auto
+from enum import Enum, StrEnum, auto
 from typing import TYPE_CHECKING, Final, Protocol
 from urllib.parse import urlsplit
 
@@ -263,6 +263,28 @@ async def carry_trace(request: httpx2.Request) -> None:
     traceparent = current_traceparent()
     if traceparent is not None:
         request.headers["traceparent"] = traceparent
+
+
+class DueOccasion(StrEnum):
+    LINE = "line"
+    VIEW = "view"
+    HOLD = "hold"
+
+
+def report_fell_due(agent_id: str, app: str, occasion: DueOccasion, *, spoken: bool, read_ms: int) -> None:
+    """Writes ``turn.fell_due``: a pass made a place due that was not due. The line carries ids, the occasion's kind,
+    whether the turn would be spoken and the milliseconds the pass had read the standing, never a line's text, kind or
+    a name. The caller's current trace is the line's."""
+    _LOG.info(
+        "turn.fell_due",
+        extra={
+            "agent_id": agent_id,
+            "app_id": urlsplit(app).hostname or "",
+            "occasion": occasion.value,
+            "spoken": spoken,
+            "read_ms": read_ms,
+        },
+    )
 
 
 def step_timer(event: str, /, agent_id: str, app: str | None = None, *, elapsed_seconds: float = 0.0) -> StepTimer:

@@ -78,12 +78,17 @@ def with_due(turns: Turns, at: AppPlace, occasion: Occasion, since: float) -> Tu
     return Turns(turns.running, {**turns.due, at: due}, turns.not_before)
 
 
+def lines_of_a_hold(generation: str) -> Lines:
+    """What a hold makes a place due for: lines of the window's generation with none."""
+    return Lines(generation, frozenset(), missed=False)
+
+
 def due_for_hold(turns: Turns, at: AppPlace, generation: str, since: float) -> Turns:
     """A hold that may be told stands at ``at``: the place is due from ``since`` for lines of the window's generation
     with none, unless it is due already, when the turn it has is the one that is told the hold."""
     if at in turns.due:
         return turns
-    return with_due(turns, at, Lines(generation, frozenset(), missed=False), since)
+    return with_due(turns, at, lines_of_a_hold(generation), since)
 
 
 def due_again(turns: Turns, at: AppPlace, occasion: Occasion, since: float) -> Turns:

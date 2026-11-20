@@ -477,3 +477,17 @@ def test_a_place_that_leaves_the_standing_forgets_its_decided_hold_and_keeps_the
 
     assert (mind.hold_decided_key(here), mind.hold_decided_key(there)) == (None, HoldKey(CALL.generation, "hold-1"))
     assert mind.speech_answered(here, Answered.SPOKEN).sentence.text == "One."
+
+
+def test_a_place_becomes_due_once_however_often_it_is_made_due_and_again_after_its_turn_claimed_it():
+    mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
+    lines = Lines("generation-1", frozenset({1}), missed=False)
+
+    first = mind.due(CALL_AT_B, lines, NOW)
+    joined = mind.due(CALL_AT_B, Lines("generation-1", frozenset({2}), missed=False), NOW)
+    held = mind.due_for_hold(CALL_AT_B, "generation-1", NOW)
+    assert (first, joined, held) == (True, False, False)
+
+    assert _claimed(mind, CALL_AT_B.app, NOW) is not None
+    mind.release()
+    assert mind.due_for_hold(CALL_AT_B, "generation-1", NOW) is True

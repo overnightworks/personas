@@ -339,18 +339,23 @@ class Mind:
         self._wake_events.append(event)
         return event
 
-    def due(self, at: AppPlace, occasion: Occasion, since: float) -> None:
-        """The place is due for ``occasion`` from ``since``, on the clock's monotonic scale."""
+    def due(self, at: AppPlace, occasion: Occasion, since: float) -> bool:
+        """The place is due for ``occasion`` from ``since``, on the clock's monotonic scale. Whether it was not due
+        before."""
+        became_due = at not in self._turns.due
         self._turns = with_due(self._turns, at, occasion, since)
         self._change()
+        return became_due
 
-    def due_for_hold(self, at: AppPlace, generation: str, since: float) -> None:
+    def due_for_hold(self, at: AppPlace, generation: str, since: float) -> bool:
         """A hold that may be told stands at the place: it is due from ``since`` as lines of the window's generation
-        with none, unless it is due already, when the turn that comes is told the hold."""
+        with none, unless it is due already, when the turn that comes is told the hold. Whether it became due."""
         turns = due_for_hold(self._turns, at, generation, since)
-        if turns is not self._turns:
-            self._turns = turns
-            self._change()
+        if turns is self._turns:
+            return False
+        self._turns = turns
+        self._change()
+        return True
 
     def due_again(self, at: AppPlace, occasion: Occasion, since: float) -> None:
         """The turn at ``at`` ended without an answer: the place is due for ``occasion`` again from ``since``, the end

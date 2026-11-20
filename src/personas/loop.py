@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import aclosing
+from contextlib import aclosing, nullcontext
 from dataclasses import dataclass, replace
 from functools import partial
 from operator import eq
@@ -46,8 +46,8 @@ from personas.decision import (
     view_turn_due,
     waking_line,
 )
-from personas.due import left_standing, resumed_turns
-from personas.entries import Lines, ViewSeen, Visit, Waiting, WindowRead, taken_lines
+from personas.due import left_standing, lines_of_a_hold, resumed_turns
+from personas.entries import Lines, Occasion, ViewSeen, Visit, Waiting, WindowRead, taken_lines
 from personas.failures import (
     CallFailure,
     leaves_of,
@@ -58,10 +58,12 @@ from personas.present import present_of
 from personas.recall import LookupBounds
 from personas.remembering import LineStore, Remembering
 from personas.reporting import (
+    DueOccasion,
     Event,
     Reporter,
     StateChange,
     TurnTally,
+    report_fell_due,
     start_turn_tally,
     step_timer,
     stepping,
@@ -293,10 +295,11 @@ class AgentLoop:
         The views are read before the windows, so a window holds every line up to its view's revision; the lines enter
         the history before the views do.
         """
+        began = self._boundaries.clock.now()
         standings = await self._take_standing(session)
         views = await self._read_views(session, standings)
-        window_lost = await self._read_windows(session, standings)
-        self._take_views(views)
+        window_lost = await self._read_windows(session, standings, began)
+        self._take_views(views, began)
         if window_lost:
             # A window the app lost dropped its place's checkpoint: the standing says where the place stands now.
             await self._take_standing(session)
@@ -371,8 +374,9 @@ class AgentLoop:
             if is_news:
                 self._report(Event.REFUSED, refusal.value)
 
-    async def _read_windows(self, session: AppSession, standings: tuple[Standing, ...]) -> bool:
-        """Reads the active window places' windows, a turn of his running or not, and takes their lines in.
+    async def _read_windows(self, session: AppSession, standings: tuple[Standing, ...], began: float) -> bool:
+        """Reads the active window places' windows, a turn of his running or not, and takes their lines in. ``began`` is
+        when the pass began, for the due it logs.
 
         It says whether a window was lost, which dropped its place's checkpoint.
         """
@@ -388,8 +392,10 @@ class AgentLoop:
                 lost = True
                 continue
             read_at = self._boundaries.clock.wall()
-            self._take_lines(place, window, read_at, serves_view=place in serving_view)
-            await self._turning.hold(session, place, window)
+            self._take_lines(place, window, read_at, began, serves_view=place in serving_view)
+            if await self._turning.hold(session, place, window):
+                at = AppPlace(self._app.mcp_url, place)
+                self._report_fell_due(at, lines_of_a_hold(window.generation), DueOccasion.HOLD, began)
             await self._remembering.keep(WindowRead(self._agent.client_id, self._app.mcp_url, place, window, read_at))
         return lost
 
@@ -409,7 +415,7 @@ class AgentLoop:
             )
         return read
 
-    def _take_views(self, read: dict[PlaceRef, ViewSeen | None]) -> None:
+    def _take_views(self, read: dict[PlaceRef, ViewSeen | None], began: float) -> None:
         """Takes each view read into the agent's history. A revision that waits for him and has no turn yet makes a turn
         due at its place; one that does not wait, and a view the app gives none of, take the place's due away. A
         revision waiting for him that has had its turn keeps a due that turn left behind by ending without an answer.
@@ -421,7 +427,9 @@ class AgentLoop:
                 continue
             self._mind.take((seen,))
             if view_turn_due(self._turned_revisions.get(place), seen.view):
-                self._mind.due(at, Waiting(seen.view.revision, seen.view.traceparent), self._boundaries.clock.now())
+                waiting = Waiting(seen.view.revision, seen.view.traceparent)
+                if self._mind.due(at, waiting, self._boundaries.clock.now()):
+                    self._report_fell_due(at, waiting, DueOccasion.VIEW, began)
             elif not seen.view.awaits_you:
                 self._mind.undue(partial(eq, at))
 
@@ -464,7 +472,9 @@ class AgentLoop:
         await self._boundaries.clock.sleep(seconds)
         self._mind.wake()
 
-    def _take_lines(self, place: PlaceRef, window: PlaceWindow, read_at: datetime, *, serves_view: bool) -> None:
+    def _take_lines(
+        self, place: PlaceRef, window: PlaceWindow, read_at: datetime, began: float, *, serves_view: bool
+    ) -> None:
         """Moves the place's checkpoint and takes the new lines into the agent's history; ``waking_line`` decides
         whether they make a turn due, and in whose trace. No await stands in it."""
         at = AppPlace(self._app.mcp_url, place)
@@ -477,7 +487,15 @@ class AgentLoop:
         if waking is not None:
             seqs = frozenset(line.seq for line in perception.new)
             lines = Lines(window.generation, seqs, perception.missed, waking.traceparent)
-            self._mind.due(at, lines, self._boundaries.clock.now())
+            if self._mind.due(at, lines, self._boundaries.clock.now()):
+                self._report_fell_due(at, lines, DueOccasion.LINE, began)
+
+    def _report_fell_due(self, at: AppPlace, occasion: Occasion, kind: DueOccasion, began: float) -> None:
+        """Writes that the pass made ``at`` due, in the occasion's trace when it carries one; a hold has none."""
+        spoken = speaks_aloud(self._voice_app, occasion, self._mind.checkpoint(at))
+        read_ms = round((self._boundaries.clock.now() - began) * 1000)
+        with nullcontext() if occasion.traceparent is None else unit_trace(occasion.traceparent):
+            report_fell_due(self._agent.client_id, self._app.mcp_url, kind, spoken=spoken, read_ms=read_ms)
 
     def _start_turn(
         self,
