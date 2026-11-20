@@ -91,9 +91,13 @@ sequenceDiagram
     Loop->>Mind: take the new lines; the place is due
     Mind->>Store: write through under his generation
     Loop->>Mind: claim the oldest due place
-    Mind-->>Loop: the claim is kept in the store
     Loop->>Turn: start the turn
-    Turn->>App: list the tools, on the loop's session
+    par the claim is written
+        Mind-->>Turn: the claim is kept in the store
+        Turn->>App: state thinking
+    and the tools are listed
+        Turn->>App: list the tools of his apps
+    end
     Turn->>Gateway: persona and told messages
     Gateway-->>Turn: a tool call, say
     Turn->>Mind: did anything arrive that holds the call?

@@ -3,6 +3,7 @@ the admission names or the realm grants, with the reports of a listing that fail
 
 from __future__ import annotations
 
+import asyncio
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -56,15 +57,18 @@ class ToolLists:
 
     async def listed(self, session: AppSession, admitted: Admitted, record: TaskRecord) -> tuple[Declared, ...]:
         """What each configured app lists for the turn, in the configuration's order: its declarations, or ``None``
-        when the turn holds none of its. The place's own app is listed whether the configuration names it or not."""
-        own = await self._list_own_tools(session)
-        listed: list[Declared] = []
-        for app in self._apps:
-            if app.mcp_url == self._app.mcp_url:
-                listed.append(own)
-            else:
-                listed.append(await self._declared_elsewhere(app, admitted, record))
-        return tuple(listed)
+        when the turn holds none of its. The apps are listed side by side, so their reports come in any order; the
+        place's own app is listed whether the configuration names it or not."""
+        async with asyncio.TaskGroup() as group:
+            own = group.create_task(self._list_own_tools(session))
+            elsewhere = {
+                app.mcp_url: group.create_task(self._declared_elsewhere(app, admitted, record))
+                for app in self._apps
+                if app.mcp_url != self._app.mcp_url
+            }
+        return tuple(
+            own.result() if app.mcp_url == self._app.mcp_url else elsewhere[app.mcp_url].result() for app in self._apps
+        )
 
     async def _declared_elsewhere(self, app: AppTarget, admitted: Admitted, record: TaskRecord) -> Declared:
         """The tools another app lists for the turn, or ``None`` when the turn holds none of its: a listening app the

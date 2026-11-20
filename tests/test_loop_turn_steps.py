@@ -26,9 +26,11 @@ SHORT_CALL_SECONDS = 0.3
 STEPS = (
     "turn_wait.ended",
     "claim_write.ended",
+    "thinking.ended",
     "tool_list.ended",
     "turn_setup.ended",
 )
+SEQUENTIAL_STEPS = ("turn_wait.ended", "claim_write.ended", "thinking.ended", "turn_setup.ended")
 
 
 async def a_written_turn(runner, traceparent: str | None = None) -> None:
@@ -51,13 +53,12 @@ async def test_each_step_of_a_turn_writes_one_line_with_its_duration_and_outcome
     assert ended["trace_id"] is not None
 
 
-async def test_the_claims_write_ends_before_the_turns_other_steps(runner, written):
+async def test_the_waits_of_a_turn_run_in_sequence_from_its_wait_to_its_setup(runner, written):
     """LOG-33."""
     await a_written_turn(runner)
 
     events = [line["event"] for line in written_by_the_runner(written)]
-    in_the_turn = [event for event in events if event in STEPS]
-    assert in_the_turn[:2] == ["turn_wait.ended", "claim_write.ended"]
+    assert [event for event in events if event in SEQUENTIAL_STEPS] == list(SEQUENTIAL_STEPS)
 
 
 async def test_every_step_names_the_agent_and_the_app_it_is_at(runner, written):
@@ -70,11 +71,12 @@ async def test_every_step_names_the_agent_and_the_app_it_is_at(runner, written):
         assert (line["agent_id"], line["app_id"]) == (runner.agent.client_id, ended["app_id"])
 
 
-async def test_the_setup_of_a_turn_contains_the_steps_it_waits_for(runner, caplog):
+async def test_the_setup_of_a_turn_begins_once_its_tool_list_ended(runner, written):
+    """LOG-13."""
     await a_written_turn(runner)
 
-    duration = {step: lines_of(caplog.get_records("call"), step)[0]["duration_ms"] for step in STEPS}
-    assert duration["turn_setup.ended"] >= duration["tool_list.ended"]
+    events = [line["event"] for line in written_by_the_runner(written)]
+    assert events.index("tool_list.ended") < events.index("turn_setup.ended")
 
 
 def the_app_refusing_the_tool_list(runner):
@@ -94,11 +96,9 @@ async def test_a_failed_step_ends_failed_with_a_closed_reason(runner, caplog):
     (failed,) = lines_of(caplog.get_records("call"), "tool_list.ended")
     (failed_record,) = [each for each in caplog.get_records("call") if each.getMessage() == "tool_list.ended"]
     assert failed_record.levelname == "ERROR"
-    (setup,) = lines_of(caplog.get_records("call"), "turn_setup.ended")
     assert (failed["outcome"], failed["reason"]) == ("failed", NO_ANSWER_REASON)
-    assert (setup["outcome"], setup["reason"]) == ("failed", NO_ANSWER_REASON)
     assert failed["error_type"]
-    assert setup["error_type"]
+    assert lines_of(caplog.get_records("call"), "turn_setup.ended") == []
 
 
 async def test_a_tool_list_the_turns_own_app_does_not_answer_in_time_ends_failed_and_the_model_round_starts(
@@ -108,7 +108,7 @@ async def test_a_tool_list_the_turns_own_app_does_not_answer_in_time_ends_failed
     runner.bound_listening_calls_to(SHORT_CALL_SECONDS)
     runner.gateway = Gateway(*says(PLACE_ID, "Here."))
     await restarted_in_the_call(runner)
-    # The first listing is the one the client makes before the turn's thinking statement; the second is the turn's own.
+    # The first listing is the turn's own; the second is the one the client makes before the turn's thinking statement.
     runner.app.script(LIST_TOOLS, hangs, hangs)
     say_in_the_call(runner, ADDRESSED)
     await runner.reports.until_a_turn_ended()
@@ -120,19 +120,20 @@ async def test_a_tool_list_the_turns_own_app_does_not_answer_in_time_ends_failed
     assert runner.gateway.arrivals == 1
 
 
-async def test_a_tool_list_the_turns_own_app_loses_its_stream_in_fails_the_setup_of_the_turn(runner, caplog):
+async def test_a_tool_list_the_turns_own_app_loses_its_stream_in_ends_the_turn_before_its_setup(runner, caplog):
     """LOG-13."""
     runner.bound_listening_calls_to(SHORT_CALL_SECONDS)
     runner.gateway = Gateway(*says(PLACE_ID, "Here."))
     await restarted_in_the_call(runner)
-    # The first listing is the one the client makes before the turn's thinking statement; the second is the turn's own.
-    runner.app.script(LIST_TOOLS, hangs, cuts)
+    # The first listing is the turn's own; the second is the one the client makes before the turn's thinking statement.
+    runner.app.script(LIST_TOOLS, cuts, hangs)
     say_in_the_call(runner, ADDRESSED)
     await runner.reports.until_a_turn_ended()
     await runner.app.log.until(LISTEN, 2)
 
-    (setup,) = lines_of(caplog.get_records("call"), "turn_setup.ended")
-    assert (setup["outcome"], setup["reason"]) == ("failed", NETWORK_FAILURE_CODE)
+    (failed,) = lines_of(caplog.get_records("call"), "tool_list.ended")
+    assert (failed["outcome"], failed["reason"]) == ("failed", NETWORK_FAILURE_CODE)
+    assert lines_of(caplog.get_records("call"), "turn_setup.ended") == []
 
 
 async def test_every_request_of_a_turn_carries_its_trace_and_the_requests_of_the_loop_carry_none(runner, written):

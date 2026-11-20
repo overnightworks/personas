@@ -510,11 +510,23 @@ class AgentLoop:
     async def _take_once_kept(
         self, claimed: int, session: AppSession, setup: TurnSetup, admitted: Admitted, tally: TurnTally
     ) -> None:
-        """Takes the turn once the ``claimed``-th change of his mind, its claim, is kept in the store."""
+        """Takes the turn, which waits for its claim, the ``claimed``-th change of his mind, to be kept in the store
+        and for its thinking to be answered before its first model request."""
+        await self._turning.take(
+            session,
+            setup,
+            admitted,
+            TaskRecord(),
+            tally,
+            partial(self._claim_kept_and_thinking, claimed, admitted.place),
+        )
+
+    async def _claim_kept_and_thinking(self, claimed: int, place: PlaceRef) -> None:
+        """The gate of a turn: the claim is kept, then the thinking statement is answered."""
         with stepping(step_timer("claim_write.ended", self._agent.client_id, self._app.mcp_url)):
             await self._mind.until_written(claimed)
-        await self._turn_states.turn_started(admitted.place)
-        await self._turning.take(session, setup, admitted, TaskRecord(), tally)
+        with stepping(step_timer("thinking.ended", self._agent.client_id, self._app.mcp_url)):
+            await self._turn_states.turn_started(place)
 
     def _turn_over(self, task: asyncio.Task[None]) -> None:
         """The one writer of ``turn.ended``, whatever way the task ended."""

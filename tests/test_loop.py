@@ -408,6 +408,16 @@ class ScriptedSessions:
         return self._windows.pop(0)
 
 
+# The steps between the app answering a listing and the turn that awaits it reacting: the listing task, the group
+# that lists the apps side by side and the turn.
+STEPS_UNTIL_THE_TURN_HAS_ITS_LISTING = 5
+
+
+async def let_the_turn_have_its_listing() -> None:
+    for _ in range(STEPS_UNTIL_THE_TURN_HAS_ITS_LISTING):
+        await asyncio.sleep(0)
+
+
 class TurnAndLifecycle(ScriptedSessions):
     """One loop whose turn and lifecycle both wait for one release and then fail in the same step.
 
@@ -441,6 +451,7 @@ class TurnAndLifecycle(ScriptedSessions):
             await self.turn_waiting.wait()
             self.lifecycle_waiting.set()
             await self.release.wait()
+            await let_the_turn_have_its_listing()
             raise self._lifecycle_failure
         if self._reads > 3:
             self.reopened.set()
@@ -592,6 +603,7 @@ class TurnEndingInTheStepItsPlaceLeaves(TurnAndLifecycle):
             await self.turn_waiting.wait()
             self.lifecycle_waiting.set()
             await self.release.wait()
+            await let_the_turn_have_its_listing()
             return read_of()
         if self._reads > 3:
             self.reopened.set()
