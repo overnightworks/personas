@@ -3,6 +3,6 @@ agent = "Claude d32028b7-a7a0-48ff-8c29-65b317313c7d"
 role = "builder"
 base = "5e68b47b75e35248ece160170311bb92135ece61"
 branch = "claude/issue-354-the-log-says-when-a-place-became-due"
-scope = ["docs/log.md", "src/personas/loop.py", "src/personas/mind.py", "src/personas/reporting.py", "src/personas/turning.py", "tests"]
+scope = ["docs/log.md", "src/personas/due.py", "src/personas/loop.py", "src/personas/mind.py", "src/personas/reporting.py", "src/personas/turning.py", "tests"]
 opened_commit = "f8e9aaffa06130f42820ba29b5f43e4cc23ff915"
 whole_reason = "one log event at the one moment a pass makes a place due, with the return value that tells the loop so"
