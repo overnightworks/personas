@@ -4,7 +4,7 @@ the sentence he was held in and sends his unsent sentences after it."""
 from __future__ import annotations
 
 import pytest
-from agents.backend.fake_gateway import completion, tool_call, tool_round
+from agents.backend.fake_gateway import Reply, completion, tool_call, tool_round
 from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL, SpeakRefusal, VoiceState
 
 from personas.reporting import Event
@@ -19,7 +19,9 @@ from tests.support.voice import (
     a_voice_call,
     calling_while_held,
     decided,
+    deciding,
     held_in_the_first_sentence,
+    play_out,
     refused_ends_the_hold_as_the_app_says,
     sentences_spoken,
 )
@@ -43,16 +45,18 @@ STYLE = "louder and angrier"
 ARRANGEMENTS = pytest.mark.parametrize("told", [False, True], ids=["round", "told"])
 
 
-async def held_deciding(runner, told: bool, arguments: dict[str, object], then: str = f"{FIRST} {SECOND}"):
+async def held_deciding(
+    runner, told: bool, arguments: dict[str, object], then: str = f"{FIRST} {SECOND}", *after: Reply
+):
     """A hold decided with ``continue_speaking``: in the round beside his parked run, a turn whose first sentence plays,
     whose second waits at the app and whose third is unsent, held by the app; or a turn told the hold at its start,
     which says ``then`` once the call is answered."""
     if told:
-        await a_voice_call(runner, continuing(arguments), completion(then))
+        await a_voice_call(runner, continuing(arguments), completion(then), *after)
         runner.app.hold(PLACE_ID, HOLD_ID, SAID)
     else:
         await held_in_the_first_sentence(
-            runner, completion(THREE_SENTENCES), continuing(arguments), completion("[silent]")
+            runner, completion(THREE_SENTENCES), continuing(arguments), completion("[silent]"), *after
         )
 
 
@@ -219,3 +223,33 @@ async def test_a_line_in_a_turn_that_does_not_speak_is_refused_and_the_hold_stay
     assert await decided(runner) == ["undecided"]
     assert runner.gateway.tool_results(3)[0].startswith("Error")
     assert runner.app.speaks_naming_holds == []
+
+
+SECOND_HOLD = "hold-2"
+
+
+@pytest.mark.parametrize(
+    ("reply", "outcome"),
+    [
+        (deciding(CONTINUE_SPEAKING_TOOL, SECOND_HOLD), "continued"),
+        (deciding(STOP_SPEAKING_TOOL, SECOND_HOLD), "stopped"),
+        (completion("[silent]"), "undecided"),
+    ],
+    ids=["go on", "stop", "no decision"],
+)
+@ARRANGEMENTS
+async def test_a_second_hold_after_the_short_line_is_decided_as_the_first(runner, told, reply, outcome):
+    """TURNS-47."""
+    await held_deciding(runner, told, {"line": LINE}, THREE_SENTENCES, reply, completion("[silent]"))
+    assert await decided(runner) == ["short_line"]
+    await runner.app.spoken_count(1 if told else 2)
+
+    runner.app.hold(PLACE_ID, SECOND_HOLD, ("Bob", "no, wait"))
+    assert await decided(runner, 2) == ["short_line", outcome]
+    before_the_line = [] if told else [FIRST]
+    after_the_line = [FIRST, SECOND, THIRD] if told else [SECOND, THIRD]
+    heard = [*before_the_line, LINE, *(after_the_line if outcome == "continued" else [])]
+    await play_out(runner, len(heard))
+    await runner.reports.until_a_turn_completed()
+
+    assert sentences_spoken(runner) == heard

@@ -149,6 +149,14 @@ async def held_in_the_first_sentence(runner, *replies, said=(SAID,), hold_id: st
     runner.app.hold(PLACE_ID, hold_id, *said)
 
 
+async def play_out(runner, count: int) -> None:
+    """Each of the first ``count`` sentences that plays ends."""
+    for spoken in range(1, count + 1):
+        await runner.app.spoken_count(spoken)
+        if runner.app.playing:
+            runner.app.end_sentence()
+
+
 def sentences_spoken(runner) -> list[str]:
     return [text for _, _, text in runner.app.spoken]
 
