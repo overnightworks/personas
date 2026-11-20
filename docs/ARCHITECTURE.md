@@ -56,7 +56,7 @@ flowchart LR
   sentence that plays, the hold that stands there with what was said over him and whether a turn was told it, and
   the id of the hold decided last. A turn's `Speaking` (`voice.py`) releases its sentences into it; the record
   outlives the turn.
-- **A turn** (`turning.py`) runs on its loop's session at its own app, lists the tools of its apps, sends the
+- **A turn** (`turning.py`) runs on its loop's session at its own app, lists the tools of its apps (the place's own app's list is kept on the loop's session while a stream that carries the tools notice is open, and a notice, an acknowledgement or a stream's end drops it; a turn a notice overtook before it ended does not count for its view's revision), sends the
   gateway the persona and the told messages, and relays each call; it ends when the backend's events end, not
   when its sentences have played. `voice.py` reads an aloud turn's reply into sentences, `turn_bound.py` bounds the
   turn's waits and the sentences it released, `holds.py` decides a hold (the round beside the parked run, the
@@ -98,7 +98,9 @@ sequenceDiagram
         Mind-->>Turn: the claim is kept in the store
         Turn->>App: state thinking
     and the tools are listed
-        Turn->>App: list the tools of his apps
+        opt the session keeps no list of the app's tools
+            Turn->>App: list the tools of his apps
+        end
     end
     Turn->>Gateway: persona and told messages
     Gateway-->>Turn: a tool call, say

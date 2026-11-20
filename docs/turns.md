@@ -26,7 +26,8 @@ seat, its lease or its client.
 - One turn runs at a time across all his apps. What arrives meanwhile enters his history at once; each place
   with something for him gets one turn after it, the place that waited longest first, told all that arrived. (TURNS-6)
 - A view that waits for him at a revision no turn was started for gives one turn, however that turn ends.
-  The runner does not ask again by itself; an app that wants him to act again moves the revision. (TURNS-7)
+  The runner does not ask again by itself; an app that wants him to act again moves the revision. A turn whose
+  tool list a tools notice overtook before it ended does not count for its view's revision. (TURNS-7)
 - The gateway's budget is the only limit on how often he thinks: in a lively call he thinks almost without a
   pause, and two agents in one call can keep each other talking. (TURNS-8)
 
@@ -62,11 +63,13 @@ An entry has its app and the time he took it (`at`), and is one of:
 
 ## Tools and calls
 
-- A turn holds every tool its own app lists when it starts, the tools of every other app where he holds an
+- A turn holds every tool its own app listed after its last tools notice on the loop's open stream, or at the
+  turn's start when that stream carries no notice, the tools of every other app where he holds an
   active place, and those of the tools-only apps, declared in the configuration's order. A name two apps
   offer goes to the first; `accept_invitation`, `speak`, `recall`, `continue_speaking`, `stop_speaking` and
   `set_turn_state` are the runner's own and never taken from an app. (TURNS-18)
-- The turn's own app's listing, its relayed calls and `speak` go on the loop's session of that app, under the
+- The turn's own app's list is kept on the loop's session for the stream and listed again after a tools notice, a
+  new stream or a stream's end. The turn's relayed calls and `speak` go on the loop's session of that app, under the
   token the loop holds; a hold's decision and every call to another app go in a session of their own under a
   token for that app's scope. A call to another app that fails gives the model an error result and that app
   takes no more calls in the turn; a failed call to the turn's own app ends the turn, and a turn still running
