@@ -12,6 +12,7 @@ from tests.support.call import ADDRESSED, PLACE_ID, say_in_the_call
 from tests.support.voice import (
     FIRST,
     HOLD_ID,
+    REFUSALS,
     SAID,
     SECOND,
     THREE_SENTENCES,
@@ -19,6 +20,7 @@ from tests.support.voice import (
     calling_while_held,
     decided,
     held_in_the_first_sentence,
+    refused_ends_the_hold_as_the_app_says,
     refusing,
     sentences_spoken,
 )
@@ -67,26 +69,14 @@ async def test_a_short_line_is_said_at_once_and_his_unsent_sentences_follow_plai
     assert Event.SPEAK_REFUSED not in [event for event, _ in runner.reports.reported()]
 
 
-@pytest.mark.parametrize(
-    ("refusal", "outcome", "stops"),
-    [
-        pytest.param(SpeakRefusal.TOO_LONG, "undecided", [(STOP_SPEAKING_TOOL, HOLD_ID)], id="refused"),
-        pytest.param(SpeakRefusal.NOT_INTERRUPTED, "gone", [], id="not interrupted"),
-    ],
-)
+@REFUSALS
 async def test_a_short_line_the_app_refused_sends_no_further_sentence_and_ends_the_hold_as_the_app_says(
     runner, refusal, outcome, stops
 ):
     """TURNS-30, LOG-17."""
-    runner.app.speak_outcomes.extend([None, None, refusing(refusal)])
-    await held_with_a_line(runner)
-
-    assert await decided(runner) == [outcome]
-    await runner.reports.until_a_turn_completed()
-
-    assert runner.app.hold_calls == stops
-    assert runner.reports.codes_of(Event.SPEAK_REFUSED) == [refusal.value]
-    assert [text for text, _ in runner.app.speaks_naming_holds if text == THIRD] == []
+    await refused_ends_the_hold_as_the_app_says(
+        runner, lambda: held_with_a_line(runner), refusal, outcome, stops, unsent=THIRD
+    )
 
 
 async def test_a_line_that_is_no_string_decides_nothing(runner):

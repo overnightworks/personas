@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING
 
+import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
-from agents.member import SpeakRefusal, SpeakRefused
+from agents.member import STOP_SPEAKING_TOOL, SpeakRefusal, SpeakRefused
 from agents.tools import ToolOutcome
 
 from personas.reporting import Event
@@ -16,6 +18,9 @@ from tests.support.history import at_table, settled
 from tests.support.hopin import CALL, LIMIT_SECONDS
 from tests.support.standings import AGENT_SUBJECT, active
 from tests.support.wire import hangs_once_entered
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
 TWO_SENTENCES = "First sentence. Second sentence."
 HOLD_ID = "hold-1"
@@ -158,3 +163,33 @@ async def decided(runner, count: int = 1) -> list[str | None]:
 
 def refusing(refusal: SpeakRefusal) -> ToolOutcome:
     return ToolOutcome(SpeakRefused(refused=refusal).model_dump_json(), is_error=True)
+
+
+REFUSALS = pytest.mark.parametrize(
+    ("refusal", "outcome", "stops"),
+    [
+        pytest.param(SpeakRefusal.TOO_LONG, "undecided", [(STOP_SPEAKING_TOOL, HOLD_ID)], id="refused"),
+        pytest.param(SpeakRefusal.NOT_INTERRUPTED, "gone", [], id="not interrupted"),
+    ],
+)
+
+
+async def refused_ends_the_hold_as_the_app_says(
+    runner,
+    arrange: Callable[[], Awaitable[None]],
+    refusal: SpeakRefusal,
+    outcome: str,
+    stops: list[tuple[str, str]],
+    unsent: str,
+) -> None:
+    """The app refuses the third speak: the hold ends as its refusal says and the ``unsent`` sentence is never sent.
+    ``arrange`` sets up the held turn."""
+    runner.app.speak_outcomes.extend([None, None, refusing(refusal)])
+    await arrange()
+
+    assert await decided(runner) == [outcome]
+    await runner.reports.until_a_turn_completed()
+
+    assert runner.app.hold_calls == stops
+    assert runner.reports.codes_of(Event.SPEAK_REFUSED) == [refusal.value]
+    assert [text for text, _ in runner.app.speaks_naming_holds if text == unsent] == []
