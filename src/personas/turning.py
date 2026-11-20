@@ -50,7 +50,7 @@ from personas.recall import (
     search_text,
     text_refused_text,
 )
-from personas.reporting import Event, LoopReport, TurnTally, step_timer, stepping
+from personas.reporting import Event, LoopReport, TurnTally, failure_event, step_timer, stepping
 from personas.sizing import Sizing
 from personas.speech import DropReason, Held, HoldOutcome, Telling, hold_ended_as
 from personas.task_record import (
@@ -60,7 +60,7 @@ from personas.task_record import (
     failure_held_by,
     failures_leaving_with,
 )
-from personas.tool_lists import Declared, ToolLists, failure_event
+from personas.tool_lists import Declared, ToolLists
 from personas.turn_bound import TurnBound
 from personas.turn_sessions import TurnSessions
 from personas.voice import Answering, DropReporter, Speaking, Voicing
