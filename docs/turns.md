@@ -130,13 +130,15 @@ An entry has its app and the time he took it (`at`), and is one of:
   hold's id, and the hold ends `undecided`, or `gone` for that refusal. A new hold during his answer starts no
   round and stands for his next turn; words said over him after it start no second decision. Text in a
   round after his decision says nothing. (TURNS-31)
-- `continue_speaking(id, line)` says one short line and then goes on: the line goes to `speak` naming the hold, in
-  a session of its own, and counts in the turn's tally; the sentence he was held in is cut and not said again, and his
-  unsent sentences follow plain with the deciding turn's bound, the one the app dropped for the line first. The hold
+- `continue_speaking(id, line, style)` says one short line and then goes on: the line goes to `speak` naming the hold, in
+  a session of its own, with the optional `style` (how it sounds, such as `louder and angrier`) passed on unchanged, and counts in the turn's tally; the sentence he was held in is cut and not said again, and his
+  unsent sentences follow plain, without the style, with the deciding turn's bound, the one the app dropped for the line first. The hold
   ends `short_line` once the app took the line. The parked run is not cut: its waiting call goes on once the hold no
-  longer stands; a turn told the hold sends its sentences after the line. A line the app refused or never answered
+  longer stands; a turn told the hold sends its sentences after the line. A line or style the app refused (`style_unavailable` for a style
+  the voice does not take) or never answered
   sends no further sentence and is logged; unless refused as `not_interrupted` he is stopped with the hold's id, and
-  the hold ends `undecided`, or `gone` for that refusal. A `line` that is no string decides nothing, and so does one in a turn that does not speak. After the line a new hold is a
+  the hold ends `undecided`, or `gone` for that refusal. A `line` or `style` that is no non-empty string decides nothing, and so does a `style` without a `line` and a
+  line in a turn that does not speak. After the line a new hold is a
   new hold, as after a continue: it starts one more round in the same turn. (TURNS-46)
 - After he went on, a call of his is not sent while people said words no round told him; its result says
   so (`sent` false, `talked_over`). (TURNS-32)

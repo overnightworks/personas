@@ -125,9 +125,12 @@ class AppSession(Protocol):
         """
         ...
 
-    async def speak(self, place: PlaceRef, sentence: str, interrupted: str | None = None) -> SpeakAnswer | SpeakRefusal:
+    async def speak(
+        self, place: PlaceRef, sentence: str, style: str | None = None, interrupted: str | None = None
+    ) -> SpeakAnswer | SpeakRefusal:
         """That the sentence starts to play, that the app wrote it at the place instead, or why it does not speak it;
-        ``interrupted`` names the hold the sentence answers instead of the held rest; raises ``StatusFailure``,
+        ``style`` is how it sounds, passed on unchanged; ``interrupted`` names the hold the sentence answers instead of
+        the held rest; raises ``StatusFailure``,
         ``Unreachable`` or ``UnusableAnswer``, the last for an answer that is none of these."""
         ...
 
@@ -322,10 +325,14 @@ class _McpAppSession:
         result = await self._called(ACCEPT_INVITATION_TOOL, arguments)
         return _refusal_of(_text_of(result)) if result.is_error else None
 
-    async def speak(self, place: PlaceRef, sentence: str, interrupted: str | None = None) -> SpeakAnswer | SpeakRefusal:
+    async def speak(
+        self, place: PlaceRef, sentence: str, style: str | None = None, interrupted: str | None = None
+    ) -> SpeakAnswer | SpeakRefusal:
         # The arguments are the wire shape of ``SpeakArguments``, built unvalidated: a refusal of a sentence is
         # the app's, and a validation error would carry the sentence.
         arguments: JsonObject = {"place": place.model_dump(mode="json"), "text": sentence}
+        if style is not None:
+            arguments["style"] = style
         if interrupted is not None:
             arguments["interrupted"] = interrupted
         result = await self._called(SPEAK_TOOL, arguments)

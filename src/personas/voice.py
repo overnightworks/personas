@@ -19,7 +19,7 @@ from agents.voice.reply import ReplyReader
 from personas.decision import AppPlace, failure_code, speech_outcome
 from personas.entries import SaidAloud
 from personas.failures import CallFailure, task_is_being_cancelled
-from personas.holds import APP_FAILED_TEXT, CONTINUED_TEXT, GONE_TEXT
+from personas.holds import APP_FAILED_TEXT, CONTINUED_TEXT, GONE_TEXT, LINE_ARGUMENT, STYLE_ARGUMENT
 from personas.reporting import Event, failure_event
 from personas.speech import Answered, DropReason, HoldOutcome, answered_as
 from personas.task_record import (
@@ -34,6 +34,7 @@ if TYPE_CHECKING:
 
     from agents.backend import TurnEvent
     from agents.member import PlaceRef, SpeakAnswer
+    from agents.turn import JsonObject
 
     from personas.app_session import AppSession
     from personas.clock import Clock
@@ -47,8 +48,14 @@ if TYPE_CHECKING:
 
 type DropReporter = Callable[[DropReason, int], None]
 
-_LINE_TEXT: Final = "line must be a string"
+_LINE_TEXT: Final = "line must be a non-empty string"
+_STYLE_TEXT: Final = "style must be a non-empty string"
+_STYLE_ALONE_TEXT: Final = "style comes only with a line"
 _REFUSED: Final = frozenset({Answered.REFUSED, Answered.STOPPED})
+
+
+def _is_text(value: object) -> bool:
+    return isinstance(value, str) and bool(value)
 
 
 def _line_told(ended: HoldOutcome) -> ToolOutcome:
@@ -164,34 +171,40 @@ class Answering:
         self._report_dropped(DropReason.REPLACED, dropped)
         return await self._sent_naming(hold, first, HoldOutcome.ANSWERED, rest)
 
-    async def line_decided(self, hold: Held, line: object) -> ToolOutcome:
-        """His ``continue_speaking`` of ``hold`` with a ``line``: the line says at once what the call tells him; a
-        line that is no string decides nothing. The hold the turn was told is decided for the turn's calls."""
-        if not isinstance(line, str):
+    async def line_decided(self, hold: Held, arguments: JsonObject) -> ToolOutcome:
+        """His ``continue_speaking`` of ``hold`` with a ``line`` and maybe a ``style``: the line says at once, in that
+        style, what the call tells him; a line or style that is no non-empty string, or a style without a line, decides
+        nothing. The hold the turn was told is decided for the turn's calls."""
+        line, style = arguments.get(LINE_ARGUMENT), arguments.get(STYLE_ARGUMENT)
+        if LINE_ARGUMENT in arguments and not _is_text(line):
             return ToolOutcome(_LINE_TEXT, is_error=True)
-        ended = await self._line(hold, line)
+        if STYLE_ARGUMENT in arguments and not _is_text(style):
+            return ToolOutcome(_STYLE_TEXT, is_error=True)
+        if not isinstance(line, str):
+            return ToolOutcome(_STYLE_ALONE_TEXT, is_error=True)
+        ended = await self._line(hold, line, style if isinstance(style, str) else None)
         if self._told is not None and self._told.held is hold:
             self._told.outcome = ended
         return _line_told(ended)
 
-    async def _line(self, hold: Held, line: str) -> HoldOutcome:
+    async def _line(self, hold: Held, line: str, style: str | None) -> HoldOutcome:
         """The line goes to ``speak`` naming ``hold``, the hold's sentence cut and the unsent ones kept for after it;
         a line the app refused or never answered sends no further sentence. The inbox stays
         open: a hold that stands after it is a new hold."""
         self._mind.speech_line_said(self._at, self._bound.ends_at())
-        ended = await self._sent_naming(hold, line, HoldOutcome.SHORT_LINE, ())
+        ended = await self._sent_naming(hold, line, HoldOutcome.SHORT_LINE, (), style)
         if ended is HoldOutcome.GONE:
             _, dropped = self._mind.speech_stopped(self._at)
             self._report_dropped(DropReason.STOPPED, dropped)
         return ended
 
     async def _sent_naming(
-        self, hold: Held, first: str, ended_as: HoldOutcome, rest: list[str] | tuple[str, ...]
+        self, hold: Held, first: str, ended_as: HoldOutcome, rest: list[str] | tuple[str, ...], style: str | None = None
     ) -> HoldOutcome:
         """The sentence goes to ``speak`` naming ``hold``; once the app took it the hold ends as ``ended_as`` and the
         rest follows; how the hold ended."""
         self._tally.sentence_released()
-        answer = await self._speak(first, hold.id)
+        answer = await self._speak(first, hold.id, style)
         outcome = speech_outcome(answer, cancelling=False)
         assert outcome is not None  # noqa: S101 - a sent sentence always ends with an outcome
         self._mind.take((SaidAloud(self._app.mcp_url, self._place, first, outcome, self._clock.wall()),))
@@ -216,10 +229,10 @@ class Answering:
             self._tally.sentence_released()
         self._mind.sentences_released(self._at, sentences, self._bound.ends_at(), replacing=False)
 
-    async def _speak(self, text: str, hold_id: str) -> SpeakAnswer | SpeakRefusal | CallFailure:
+    async def _speak(self, text: str, hold_id: str, style: str | None) -> SpeakAnswer | SpeakRefusal | CallFailure:
         try:
             return await self._sessions.ask_elsewhere(
-                self._app, lambda session: session.speak(self._place, text, hold_id), self._record
+                self._app, lambda session: session.speak(self._place, text, style, interrupted=hold_id), self._record
             )
         except Exception as error:
             raise RelayFailed(error) from None
