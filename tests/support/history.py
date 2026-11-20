@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import secrets
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from agents.member import STANDING_URI, PlaceRef, PlaceView, Spoken
 
-from personas.entries import ActDone, Answered, History, KeptLine, SaidAloud, ViewSeen, Visit
+from personas.entries import ActDone, Answered, History, HistoryDelta, KeptLine, KeptTurns, SaidAloud, ViewSeen, Visit
 from personas.present import EMPTY_PRESENT, Present, taken_into
-from tests.support.call import PERSON
+from tests.support.call import ADDRESSED, PERSON
+from tests.support.ownership import KeptHistories
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active
 
@@ -264,3 +266,22 @@ def a_marked_present() -> tuple[str, Present]:
     act = ActDone(APP, "say", {"text": marker}, Answered(marker, is_error=False), LATER)
     line = KeptLine(MORNING, 1, LATER, marker, "message", marker, own=False, spoken=False, cut=False, act=False)
     return marker, taken_into(EMPTY_PRESENT, (line, view, act), ROOMY_BYTES, ROOMY_BYTES)
+
+
+@dataclass
+class HistoriesHoldingTheAddressedLine(KeptHistories):
+    """Histories whose first write that holds the addressed line, and the claim of its turn with it or after it, waits
+    until ``release`` is set: a write the store is slow to take."""
+
+    reached: asyncio.Event = field(default_factory=asyncio.Event)
+    release: asyncio.Event = field(default_factory=asyncio.Event)
+
+    async def write(self, client_id: str, generation: int, delta: HistoryDelta | None, turns: KeptTurns) -> None:
+        if not self.reached.is_set() and delta is not None and ADDRESSED in _texts_of(delta):
+            self.reached.set()
+            await self.release.wait()
+        await super().write(client_id, generation, delta, turns)
+
+
+def _texts_of(delta: HistoryDelta) -> set[str]:
+    return {each.text for each in delta.entries if isinstance(each, KeptLine)}

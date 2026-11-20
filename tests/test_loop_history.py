@@ -31,6 +31,7 @@ from tests.support.history import (
     SPEAKER,
     STATE_BYTES,
     TABLE,
+    HistoriesHoldingTheAddressedLine,
     act_entry,
     after_start,
     answered,
@@ -302,22 +303,6 @@ async def test_a_write_in_flight_when_the_pod_stops_is_written_again_before_the_
 
     entries = [entry for _, delta in runner.histories.written for entry in delta.entries]
     assert REMARK in [each.text for each in entries if isinstance(each, KeptLine)]
-
-
-@dataclass
-class HistoriesHoldingTheAddressedLine(KeptHistories):
-    """Histories whose first write that holds the addressed line, and the claim of its turn with it or after it, waits
-    until ``release`` is set: a write the store is slow to take."""
-
-    reached: asyncio.Event = field(default_factory=asyncio.Event)
-    release: asyncio.Event = field(default_factory=asyncio.Event)
-
-    async def write(self, client_id: str, generation: int, delta: HistoryDelta | None, turns: KeptTurns) -> None:
-        entries = () if delta is None else delta.entries
-        if not self.reached.is_set() and any(isinstance(each, KeptLine) and each.text == ADDRESSED for each in entries):
-            self.reached.set()
-            await self.release.wait()
-        await super().write(client_id, generation, delta, turns)
 
 
 async def test_a_turn_reaches_the_gateway_only_once_the_write_that_holds_its_claim_was_taken(runner):

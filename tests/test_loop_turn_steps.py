@@ -3,8 +3,13 @@ carry that trace to the app."""
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
+from contextlib import contextmanager
+from datetime import datetime, timedelta
 from http import HTTPStatus
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 import pytest
@@ -14,21 +19,27 @@ from personas.decision import NETWORK_FAILURE_CODE, NO_ANSWER_REASON
 from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import FakeClock
 from tests.support.gateway import Gateway, says
-from tests.support.hopin import LIST_TOOLS, LISTEN, a_traceparent, trace_id_of
+from tests.support.hopin import LIMIT_SECONDS, LIST_TOOLS, LISTEN, a_traceparent, trace_id_of
 from tests.support.logs import lines_of, written_by_the_runner
 from tests.support.wire import cuts, hangs
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 pytestmark = pytest.mark.anyio
 
 TOKEN_RAN_OUT_SECONDS = 10_000.0
 SHORT_CALL_SECONDS = 0.3
+CLOCK_SKEW = timedelta(milliseconds=1)
 
 STEPS = (
     "turn_wait.ended",
     "claim_write.ended",
+    "thinking.ended",
     "tool_list.ended",
     "turn_setup.ended",
 )
+SEQUENTIAL_STEPS = ("turn_wait.ended", "claim_write.ended", "thinking.ended", "turn_setup.ended")
 
 
 async def a_written_turn(runner, traceparent: str | None = None) -> None:
@@ -51,13 +62,12 @@ async def test_each_step_of_a_turn_writes_one_line_with_its_duration_and_outcome
     assert ended["trace_id"] is not None
 
 
-async def test_the_claims_write_ends_before_the_turns_other_steps(runner, written):
+async def test_the_waits_of_a_turn_run_in_sequence_from_its_wait_to_its_setup(runner, written):
     """LOG-33."""
     await a_written_turn(runner)
 
     events = [line["event"] for line in written_by_the_runner(written)]
-    in_the_turn = [event for event in events if event in STEPS]
-    assert in_the_turn[:2] == ["turn_wait.ended", "claim_write.ended"]
+    assert [event for event in events if event in SEQUENTIAL_STEPS] == list(SEQUENTIAL_STEPS)
 
 
 async def test_every_step_names_the_agent_and_the_app_it_is_at(runner, written):
@@ -70,11 +80,57 @@ async def test_every_step_names_the_agent_and_the_app_it_is_at(runner, written):
         assert (line["agent_id"], line["app_id"]) == (runner.agent.client_id, ended["app_id"])
 
 
-async def test_the_setup_of_a_turn_contains_the_steps_it_waits_for(runner, caplog):
-    await a_written_turn(runner)
+async def test_the_setup_of_a_turn_runs_from_its_answered_thinking_until_its_slow_tool_list_ended(
+    runner, written, songmaker
+):
+    """LOG-13, LOG-33."""
+    thought = asyncio.Event()
+    thinking_answered = LineSeen("thinking.ended")
 
-    duration = {step: lines_of(caplog.get_records("call"), step)[0]["duration_ms"] for step in STEPS}
-    assert duration["turn_setup.ended"] >= duration["tool_list.ended"]
+    async def listed_once_thought(reply):
+        await thought.wait()
+        await reply.status(HTTPStatus.SERVICE_UNAVAILABLE)
+
+    songmaker.script(LIST_TOOLS, listed_once_thought)
+    runner.gateway = Gateway(*says(PLACE_ID, "Here."))
+    await restarted_in_the_call(runner)
+    with thinking_answered.watching(logging.getLogger()):
+        say_in_the_call(runner, ADDRESSED)
+        async with asyncio.timeout(LIMIT_SECONDS):
+            await thinking_answered.seen.wait()
+        thought.set()
+        await runner.reports.until_a_turn_ended()
+
+    lines = {line["event"]: line for line in written_by_the_runner(written)}
+    setup_began = time_of(lines["turn_setup.ended"]) - timedelta(
+        milliseconds=float(lines["turn_setup.ended"]["duration_ms"])
+    )
+    assert time_of(lines["thinking.ended"]) - CLOCK_SKEW <= setup_began < time_of(lines["tool_list.ended"])
+
+
+class LineSeen(logging.Handler):
+    """Sets ``seen`` once a record of the event was logged."""
+
+    def __init__(self, event: str) -> None:
+        super().__init__()
+        self.seen = asyncio.Event()
+        self._event = event
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if record.getMessage() == self._event:
+            self.seen.set()
+
+    @contextmanager
+    def watching(self, logger: logging.Logger) -> Iterator[None]:
+        logger.addHandler(self)
+        try:
+            yield
+        finally:
+            logger.removeHandler(self)
+
+
+def time_of(line) -> datetime:
+    return datetime.fromisoformat(str(line["ts"]))
 
 
 def the_app_refusing_the_tool_list(runner):
@@ -94,8 +150,8 @@ async def test_a_failed_step_ends_failed_with_a_closed_reason(runner, caplog):
     (failed,) = lines_of(caplog.get_records("call"), "tool_list.ended")
     (failed_record,) = [each for each in caplog.get_records("call") if each.getMessage() == "tool_list.ended"]
     assert failed_record.levelname == "ERROR"
-    (setup,) = lines_of(caplog.get_records("call"), "turn_setup.ended")
     assert (failed["outcome"], failed["reason"]) == ("failed", NO_ANSWER_REASON)
+    (setup,) = lines_of(caplog.get_records("call"), "turn_setup.ended")
     assert (setup["outcome"], setup["reason"]) == ("failed", NO_ANSWER_REASON)
     assert failed["error_type"]
     assert setup["error_type"]
@@ -108,7 +164,7 @@ async def test_a_tool_list_the_turns_own_app_does_not_answer_in_time_ends_failed
     runner.bound_listening_calls_to(SHORT_CALL_SECONDS)
     runner.gateway = Gateway(*says(PLACE_ID, "Here."))
     await restarted_in_the_call(runner)
-    # The first listing is the one the client makes before the turn's thinking statement; the second is the turn's own.
+    # The first listing is the turn's own; the second is the one the client makes before the turn's thinking statement.
     runner.app.script(LIST_TOOLS, hangs, hangs)
     say_in_the_call(runner, ADDRESSED)
     await runner.reports.until_a_turn_ended()
@@ -120,18 +176,20 @@ async def test_a_tool_list_the_turns_own_app_does_not_answer_in_time_ends_failed
     assert runner.gateway.arrivals == 1
 
 
-async def test_a_tool_list_the_turns_own_app_loses_its_stream_in_fails_the_setup_of_the_turn(runner, caplog):
+async def test_a_tool_list_the_turns_own_app_loses_its_stream_in_ends_the_turn_and_its_setup_failed(runner, caplog):
     """LOG-13."""
     runner.bound_listening_calls_to(SHORT_CALL_SECONDS)
     runner.gateway = Gateway(*says(PLACE_ID, "Here."))
     await restarted_in_the_call(runner)
-    # The first listing is the one the client makes before the turn's thinking statement; the second is the turn's own.
-    runner.app.script(LIST_TOOLS, hangs, cuts)
+    # The first listing is the turn's own; the second is the one the client makes before the turn's thinking statement.
+    runner.app.script(LIST_TOOLS, cuts, hangs)
     say_in_the_call(runner, ADDRESSED)
     await runner.reports.until_a_turn_ended()
     await runner.app.log.until(LISTEN, 2)
 
+    (failed,) = lines_of(caplog.get_records("call"), "tool_list.ended")
     (setup,) = lines_of(caplog.get_records("call"), "turn_setup.ended")
+    assert (failed["outcome"], failed["reason"]) == ("failed", NETWORK_FAILURE_CODE)
     assert (setup["outcome"], setup["reason"]) == ("failed", NETWORK_FAILURE_CODE)
 
 

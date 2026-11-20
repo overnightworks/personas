@@ -434,6 +434,7 @@ async def test_while_a_cancelled_turn_still_unwinds_no_turn_of_his_starts_at_ano
     try:
         async with asyncio.timeout(LIMIT_SECONDS):
             await unwinding.closing.wait()
+        await runner.app.until_turn_states(1)
         runner.app.stand(SUBJECT)
         async with asyncio.timeout(LIMIT_SECONDS):
             await unwinding.cancelled.wait()
