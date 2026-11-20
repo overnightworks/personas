@@ -48,6 +48,7 @@ from personas.speech import (
     speech_continued,
     speech_ended,
     speech_line_entered,
+    speech_line_said,
     speech_started,
     speech_stopped,
     speech_unsaid,
@@ -209,6 +210,11 @@ class Mind:
     def speech_continued(self, at: AppPlace, bound: float) -> None:
         """His continue at the place: the unsent sentences have the deciding turn's ``bound``."""
         self._set_speech(at, speech_continued(self._speech.get(at, NO_SPEECH), bound))
+
+    def speech_line_said(self, at: AppPlace, bound: float) -> None:
+        """His short line before he goes on is on its way at the place: the unsent sentences have the deciding turn's
+        ``bound``, and the request in flight, if the app drops it for the line, goes back first among them."""
+        self._set_speech(at, speech_line_said(self._speech.get(at, NO_SPEECH), bound))
 
     def speech_started(self, at: AppPlace, text: str) -> None:
         """The sentence that answered his hold at the place plays now."""

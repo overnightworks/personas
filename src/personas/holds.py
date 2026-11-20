@@ -12,36 +12,59 @@ from agents.tools import ToolDeclaration, ToolEffect
 from personas.speech import Held, HoldKey, HoldOutcome, hold_stated, hold_tellable, untold_words
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Awaitable, Callable, Generator
 
     from agents.member import PartialSpeech, PlaceWindow
+    from agents.tools import ToolOutcome
     from agents.turn_events import ToolCallEvent
 
     from personas.turn_bound import TurnBound
 
 DECISION_CALLS: Final = 1
+LINE_ARGUMENT: Final = "line"
+APP_FAILED_TEXT: Final = "the app did not answer"
+CONTINUED_TEXT: Final = '{"continued": true}'
+GONE_TEXT: Final = '{"gone": true}'
 _ANSWER_INSTEAD: Final = (
     " Or reply with text instead, which answers the hold: the text is what you say now, and everything you had not "
     "yet said is dropped."
 )
+_HOLD_ID: Final = {"id": {"type": "string", "description": "The id of the hold you were told."}}
+_SHORT_LINE: Final = {
+    LINE_ARGUMENT: {
+        "type": "string",
+        "minLength": 1,
+        "description": (
+            "One short line to say at once. The sentence you were held in is cut, not said again, and your next "
+            "sentences follow the line."
+        ),
+    }
+}
 DECISION_DECLARATIONS: Final = tuple(
     ToolDeclaration(
         name=name,
         description=description + _ANSWER_INSTEAD,
         parameters={
             "type": "object",
-            "properties": {"id": {"type": "string", "description": "The id of the hold you were told."}},
+            "properties": {**_HOLD_ID, **properties},
             "required": ["id"],
             "additionalProperties": False,
         },
         effect=ToolEffect.SIDE_EFFECTING,
     )
-    for name, description in (
+    for name, description, properties in (
         (
             CONTINUE_SPEAKING_TOOL,
-            "Lets the sentence you were held in go on to its end, and your next sentences follow.",
+            "Lets the sentence you were held in go on to its end, and your next sentences follow. With `line`, that "
+            "one short line is said at once instead, the sentence you were held in is cut, and your next sentences "
+            "follow the line.",
+            _SHORT_LINE,
         ),
-        (STOP_SPEAKING_TOOL, "Drops the rest of the sentence you were held in and everything you had not yet said."),
+        (
+            STOP_SPEAKING_TOOL,
+            "Drops the rest of the sentence you were held in and everything you had not yet said.",
+            {},
+        ),
     )
 )
 
@@ -53,6 +76,8 @@ class TurnHold:
     def __init__(self, held: Held) -> None:
         self.held = held
         self.outcome: HoldOutcome | None = None
+        self.say_line: Callable[[object], Awaitable[ToolOutcome]] | None = None
+        """His short line before he goes on, set once the turn's speech exists."""
 
     @property
     def pending(self) -> bool:

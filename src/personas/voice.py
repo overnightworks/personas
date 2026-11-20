@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Final
 
 from agents.backend import TurnStopKind, TurnStopped
 from agents.member import SpeakRefusal, Spoken, Written
+from agents.tools import ToolOutcome
 from agents.turn import FailureCode
 from agents.turn_events import FinalEvent, ToolCallEvent
 from agents.voice import StayedSilent
@@ -18,6 +19,7 @@ from agents.voice.reply import ReplyReader
 from personas.decision import AppPlace, failure_code, speech_outcome
 from personas.entries import SaidAloud
 from personas.failures import CallFailure, task_is_being_cancelled
+from personas.holds import APP_FAILED_TEXT, CONTINUED_TEXT, GONE_TEXT
 from personas.reporting import Event, failure_event
 from personas.speech import Answered, DropReason, HoldOutcome, answered_as
 from personas.task_record import (
@@ -45,7 +47,19 @@ if TYPE_CHECKING:
 
 type DropReporter = Callable[[DropReason, int], None]
 
+_LINE_TEXT: Final = "line must be a string"
 _REFUSED: Final = frozenset({Answered.REFUSED, Answered.STOPPED})
+
+
+def _line_told(ended: HoldOutcome) -> ToolOutcome:
+    """What his short line's call is told once the hold ended as ``ended``."""
+    match ended:
+        case HoldOutcome.SHORT_LINE:
+            return ToolOutcome(CONTINUED_TEXT, is_error=False)
+        case HoldOutcome.GONE:
+            return ToolOutcome(GONE_TEXT, is_error=False)
+        case _:
+            return ToolOutcome(APP_FAILED_TEXT, is_error=True)
 
 
 @dataclass(frozen=True)
@@ -148,6 +162,39 @@ class Answering:
         first, *rest = sentences
         _, dropped = self._mind.speech_stopped(self._at)
         self._report_dropped(DropReason.REPLACED, dropped)
+        return await self._sent_naming(hold, first, HoldOutcome.ANSWERED, rest)
+
+    async def line_decided(self, hold: Held, line: object) -> ToolOutcome:
+        """His ``continue_speaking`` of ``hold`` with a ``line``: the line says at once what the call tells him; a
+        line that is no string decides nothing."""
+        if not isinstance(line, str):
+            return ToolOutcome(_LINE_TEXT, is_error=True)
+        return _line_told(await self._line(hold, line))
+
+    async def line_decided_told(self, line: object) -> ToolOutcome:
+        """His short line for the hold the turn was told; the hold is decided for the turn's calls."""
+        assert self._told is not None  # noqa: S101 - only a turn told a hold decides it
+        if not isinstance(line, str):
+            return ToolOutcome(_LINE_TEXT, is_error=True)
+        self._told.outcome = await self._line(self._told.held, line)
+        return _line_told(self._told.outcome)
+
+    async def _line(self, hold: Held, line: str) -> HoldOutcome:
+        """The line goes to ``speak`` naming ``hold``, the hold's sentence cut and the unsent ones kept for after it;
+        a line the app refused or never answered sends no further sentence."""
+        self._inbox.answering()
+        self._mind.speech_line_said(self._at, self._bound.ends_at())
+        ended = await self._sent_naming(hold, line, HoldOutcome.SHORT_LINE, ())
+        if ended is HoldOutcome.GONE:
+            _, dropped = self._mind.speech_stopped(self._at)
+            self._report_dropped(DropReason.STOPPED, dropped)
+        return ended
+
+    async def _sent_naming(
+        self, hold: Held, first: str, ended_as: HoldOutcome, rest: list[str] | tuple[str, ...]
+    ) -> HoldOutcome:
+        """The sentence goes to ``speak`` naming ``hold``; once the app took it the hold ends as ``ended_as`` and the
+        rest follows; how the hold ended."""
         self._tally.sentence_released()
         answer = await self._speak(first, hold.id)
         outcome = speech_outcome(answer, cancelling=False)
@@ -156,9 +203,9 @@ class Answering:
         if isinstance(answer, Spoken | Written):
             if isinstance(answer, Spoken):
                 self._mind.speech_started(self._at, first)
-            self._decided(hold, HoldOutcome.ANSWERED)
+            self._decided(hold, ended_as)
             self._release(rest)
-            return HoldOutcome.ANSWERED
+            return ended_as
         if isinstance(answer, CallFailure):
             self._report(failure_event(self._app), failure_code(answer), self._app, answer)
         else:

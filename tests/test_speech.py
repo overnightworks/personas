@@ -28,6 +28,7 @@ from personas.speech import (
     speech_continued,
     speech_ended,
     speech_line_entered,
+    speech_line_said,
     speech_started,
     speech_stopped,
     speech_unsaid,
@@ -305,3 +306,19 @@ def test_the_end_of_the_sender_drops_the_unsent_sentences_and_keeps_the_sentence
     )
 
     assert (ended, dropped) == (SpeechRecord(saying="One.", hold=_held()), 1)
+
+
+def test_his_short_line_gives_the_unsent_ones_the_deciding_bound_and_the_stopped_request_goes_back_first():
+    said = speech_line_said(SpeechRecord(in_flight=Request(ONE), unsent=(TWO,)), 500.0)
+
+    assert said.unsent == (Sentence("Two.", 500.0),)
+    assert said.in_flight.cut_by_stop(SpeakRefusal.STOPPED)
+
+    stopped = speech_answered(said, Answered.STOPPED)
+
+    assert stopped.unsent == (Sentence("One.", 500.0), Sentence("Two.", 500.0))
+    assert stopped.in_flight is None
+
+
+def test_his_short_line_with_no_request_in_flight_only_gives_the_unsent_sentences_the_deciding_bound():
+    assert speech_line_said(SpeechRecord(unsent=(ONE,)), 500.0) == SpeechRecord(unsent=(Sentence("One.", 500.0),))
