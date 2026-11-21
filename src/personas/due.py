@@ -1,5 +1,6 @@
-"""Which of his places has a turn due, when his next turn may start, and what a pod that takes him over keeps of his
-turns; with no process, network or clock.
+"""Which of his places has a turn due and in which order they are claimed, when his next turn may start, when a running
+turn gives way to a spoken one, and what a pod that takes him over keeps of his turns; with no process, network or
+clock.
 
 It imports ``entries``, ``decision`` and ``present`` and is imported by none of them: ``entries`` <- ``recall`` <-
 ``decision`` <- ``present`` <- ``due``.
@@ -26,8 +27,9 @@ if TYPE_CHECKING:
 
 
 class WaitReason(StrEnum):
-    """What first stood directly in front of a due place once its wait began: an older due place, else his running
-    turn at the place's app or at another, else a pause of his turns; nothing when its turn could start at once."""
+    """What first stood directly in front of a due place once its wait began: a due place that goes before it, else
+    his running turn at the place's app or at another, else a pause of his turns; nothing when its turn could start at
+    once."""
 
     NONE = "none"
     OLDER_DUE = "older_due"
@@ -47,14 +49,25 @@ class Due:
     waited_on: WaitReason = WaitReason.NONE
 
 
+type Spoken = Callable[[AppPlace, Due], bool]
+"""Whether the turn of a due place would be spoken."""
+
+
 @dataclass(frozen=True)
 class Turns:
     """The place of the one turn of an agent that runs, if one does, which places have a turn due, in the order they
-    became due, with what the turn is for, and until when, on the clock's monotonic scale, no turn of his may start."""
+    became due, with what the turn is for, and until when, on the clock's monotonic scale, no turn of his may start.
+
+    A written place gives way to a spoken place at most once until its turn has run to its end: ``gave_way`` holds the
+    places that were passed over for a spoken place and ``cut`` those whose turn was cut for one that is not claimed
+    yet; both stop a turn at the place from being cut.
+    """
 
     running: AppPlace | None = None
     due: Mapping[AppPlace, Due] = field(default_factory=dict[AppPlace, Due])
     not_before: float = 0.0
+    gave_way: frozenset[AppPlace] = frozenset()
+    cut: frozenset[AppPlace] = frozenset()
 
 
 def _joined(held: Occasion | None, occasion: Occasion) -> Occasion:
@@ -75,7 +88,7 @@ def with_due(turns: Turns, at: AppPlace, occasion: Occasion, since: float) -> Tu
         if held is None
         else Due(_joined(held.occasion, occasion), min(held.since, since), held.waited_on)
     )
-    return Turns(turns.running, {**turns.due, at: due}, turns.not_before)
+    return Turns(turns.running, {**turns.due, at: due}, turns.not_before, turns.gave_way, turns.cut)
 
 
 def lines_of_a_hold(generation: str) -> Lines:
@@ -110,13 +123,29 @@ def due_again(turns: Turns, at: AppPlace, occasion: Occasion, since: float) -> T
 
 def without_due(turns: Turns, leaving: Callable[[AppPlace], bool]) -> Turns:
     """The turns without the due places for which ``leaving`` holds."""
-    due = {at: held for at, held in turns.due.items() if not leaving(at)}
-    return Turns(turns.running, due, turns.not_before)
+    gone = frozenset(at for at in turns.due if leaving(at))
+    due = {at: held for at, held in turns.due.items() if at not in gone}
+    return Turns(turns.running, due, turns.not_before, turns.gave_way - gone, turns.cut - gone)
 
 
-def _in_front(turns: Turns, at: AppPlace, now: float) -> WaitReason:
+def _claim_order(turns: Turns, spoken: Spoken) -> list[AppPlace]:
+    """The due places in the order they are claimed: a written place that gave way before the spoken places, those in
+    the order they became due, then the written places, a place cut for a spoken one among them; within each kind the
+    place that became due first goes first."""
+
+    def rank(at: AppPlace) -> int:
+        if at in turns.cut:
+            return 2
+        if at in turns.gave_way:
+            return 0
+        return 1 if spoken(at, turns.due[at]) else 2
+
+    return sorted(turns.due, key=rank)
+
+
+def _in_front(turns: Turns, at: AppPlace, now: float, spoken: Spoken) -> WaitReason:
     """What stands directly in front of the due place ``at`` at ``now``."""
-    if next(iter(turns.due)) != at:
+    if _claim_order(turns, spoken)[0] != at:
         return WaitReason.OLDER_DUE
     if turns.running is not None:
         return WaitReason.TURN_HERE if turns.running.app == at.app else WaitReason.TURN_ELSEWHERE
@@ -125,62 +154,91 @@ def _in_front(turns: Turns, at: AppPlace, now: float) -> WaitReason:
     return WaitReason.NONE
 
 
-def waited(turns: Turns, now: float) -> Turns:
+def waited(turns: Turns, now: float, spoken: Spoken) -> Turns:
     """The turns once each due place whose wait has begun by ``now`` and that nothing kept waiting yet names what stands
     in front of it now; a place keeps the first reason it named."""
     due = {
         at: held
         if held.waited_on is not WaitReason.NONE or held.since > now
-        else replace(held, waited_on=_in_front(turns, at, now))
+        else replace(held, waited_on=_in_front(turns, at, now, spoken))
         for at, held in turns.due.items()
     }
-    return Turns(turns.running, due, turns.not_before)
+    return Turns(turns.running, due, turns.not_before, turns.gave_way, turns.cut)
 
 
-def _oldest_in(turns: Turns, app: str) -> tuple[AppPlace, Due] | None:
-    """The place that has waited longest and what its turn is for, when that place is in ``app``."""
+def _first_in(turns: Turns, app: str, spoken: Spoken) -> tuple[AppPlace, Due] | None:
+    """The place that is claimed first and what its turn is for, when that place is in ``app``."""
     if not turns.due:
         return None
-    at, due = next(iter(turns.due.items()))
-    return (at, due) if at.app == app else None
+    at = _claim_order(turns, spoken)[0]
+    return (at, turns.due[at]) if at.app == app else None
 
 
-def claimed(turns: Turns, app: str, now: float) -> tuple[Turns, AppPlace, Due] | None:
-    """The turns after a turn starts at the place that has waited longest, with that place and what the turn is for
-    and since when; none while a turn runs, while a pause holds his turns at ``now``, or when that place is not in
-    ``app``."""
-    oldest = _oldest_in(turns, app)
-    if oldest is None or _in_front(turns, oldest[0], now) is not WaitReason.NONE:
+def claimed(turns: Turns, app: str, now: float, spoken: Spoken) -> tuple[Turns, AppPlace, Due] | None:
+    """The turns after a turn starts at the place that is claimed first, with that place and what the turn is for and
+    since when; none while a turn runs, while a pause holds his turns at ``now``, or when that place is not in ``app``.
+    A spoken place claimed passes over the written places that became due before it."""
+    first = _first_in(turns, app, spoken)
+    if first is None or _in_front(turns, first[0], now, spoken) is not WaitReason.NONE:
         return None
-    at, due = oldest
-    return replace(without_due(turns, lambda each: each == at), running=at), at, due
+    at, due = first
+    passed = frozenset[AppPlace]()
+    if spoken(at, due):
+        order = list(turns.due)
+        passed = frozenset(each for each in order[: order.index(at)] if not spoken(each, turns.due[each]))
+    rest = {each: held for each, held in turns.due.items() if each != at}
+    return Turns(at, rest, turns.not_before, turns.gave_way | passed, turns.cut - passed), at, due
 
 
 def paused_for(turns: Turns, now: float, seconds: float) -> Turns:
     """The turns while no turn of his may start for ``seconds`` from ``now``."""
-    return Turns(turns.running, turns.due, now + seconds)
+    return Turns(turns.running, turns.due, now + seconds, turns.gave_way, turns.cut)
 
 
-def pause_left(turns: Turns, app: str, now: float) -> float:
-    """The seconds a pause still holds the turn of the place that has waited longest, when it is in ``app``; zero when
+def pause_left(turns: Turns, app: str, now: float, spoken: Spoken) -> float:
+    """The seconds a pause still holds the turn of the place that is claimed first, when it is in ``app``; zero when
     that turn waits for something else or for nothing."""
-    oldest = _oldest_in(turns, app)
-    waits_for_pause = oldest is not None and _in_front(turns, oldest[0], now) is WaitReason.PAUSED
+    first = _first_in(turns, app, spoken)
+    waits_for_pause = first is not None and _in_front(turns, first[0], now, spoken) is WaitReason.PAUSED
     return turns.not_before - now if waits_for_pause else 0.0
 
 
 def released(turns: Turns) -> Turns:
-    """The turns once the running turn ended; what is due stays."""
-    return Turns(None, turns.due, turns.not_before)
+    """The turns once the running turn ended; what is due stays. A place whose turn ran to its end has not given way
+    any more."""
+    gone = frozenset[AppPlace]() if turns.running is None else frozenset({turns.running})
+    return Turns(None, turns.due, turns.not_before, turns.gave_way - gone, turns.cut - gone)
 
 
 @dataclass(frozen=True)
 class Claim:
-    """The running turn's place, what it was due for, and how many entries his history had taken when it was claimed."""
+    """The running turn's place, what it was due for, whether the turn is spoken, and how many entries his history had
+    taken when it was claimed."""
 
     at: AppPlace
     due: Due
     mark: int
+    aloud: bool
+
+
+def yields_to_spoken(turns: Turns, claim: Claim, spoken: Spoken) -> bool:
+    """Whether the running turn ends at its next safe point for a spoken place that is due: it is written, it has not
+    given way to a spoken place since it started to run to its end, and a place whose turn would be spoken is due."""
+    return (
+        not claim.aloud
+        and claim.at not in turns.gave_way
+        and claim.at not in turns.cut
+        and any(spoken(at, due) for at, due in turns.due.items())
+    )
+
+
+def _due_again_first(turns: Turns, claim: Claim) -> dict[AppPlace, Due]:
+    """The due places with the claimed turn's place first again, for what it was due for joined with what made it due
+    meanwhile, and since it first became due."""
+    held = turns.due.get(claim.at)
+    occasion = claim.due.occasion if held is None else _joined(claim.due.occasion, held.occasion)
+    rest = {at: due for at, due in turns.due.items() if at != claim.at}
+    return {claim.at: replace(claim.due, occasion=occasion), **rest}
 
 
 def cut_by_stop(turns: Turns, claim: Claim, history: History) -> Turns:
@@ -189,10 +247,19 @@ def cut_by_stop(turns: Turns, claim: Claim, history: History) -> Turns:
     what made it due meanwhile, so the pod that takes him over answers it once."""
     if spoke_since(history, claim.mark):
         return turns
+    return Turns(turns.running, _due_again_first(turns, claim), turns.not_before, turns.gave_way, turns.cut)
+
+
+def cut_for_spoken(turns: Turns, claim: Claim) -> Turns:
+    """The turns once the claimed written turn ended at a safe point for a spoken place. The turn is no running turn
+    any more and its place is due again first, for what it was due for joined with what arrived meanwhile, since it
+    first became due; a place a hold alone made due, with no line, is not, since the read after decides it. The place is
+    behind the spoken places until one is claimed."""
     held = turns.due.get(claim.at)
     occasion = claim.due.occasion if held is None else _joined(claim.due.occasion, held.occasion)
-    rest = {at: due for at, due in turns.due.items() if at != claim.at}
-    return Turns(turns.running, {claim.at: replace(claim.due, occasion=occasion), **rest}, turns.not_before)
+    if isinstance(occasion, Lines) and not occasion.seqs:
+        return Turns(None, turns.due, turns.not_before, turns.gave_way, turns.cut)
+    return Turns(None, _due_again_first(turns, claim), turns.not_before, turns.gave_way, turns.cut | {claim.at})
 
 
 def left_standing(app: str, standings: tuple[Standing, ...]) -> Callable[[AppPlace], bool]:

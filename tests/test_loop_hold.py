@@ -7,6 +7,7 @@ import secrets
 
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
+from agents.member import VoiceState
 from agents.turn import FailureCode
 
 from personas.config import load_config
@@ -325,12 +326,13 @@ async def test_an_act_line_of_someone_else_at_his_table_holds_the_first_call_of_
     assert [text for _, _, text in other.said] == [ANSWER]
 
 
-async def test_a_line_heard_at_a_voice_place_holds_the_call_of_his_table_turn(runner):
+async def test_a_line_heard_at_a_place_whose_voice_is_unavailable_holds_the_call_of_his_table_turn(runner):
     call = words(1)[0]
     heard = "Anyone there?"
     await in_a_voice_call_and_at_a_table(
         runner, tool_round(say(call, TABLE.id)), tool_round(say(call, TABLE.id)), completion("done")
     )
+    runner.app.voice_states[PLACE_ID] = VoiceState.UNAVAILABLE
     running = runner.gateway.hold_request(1)
     waits(runner.app, 1)
     await runner.gateway.until_requested(1)

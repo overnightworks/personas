@@ -109,6 +109,60 @@ def test_one_turn_runs_at_a_time_and_the_next_goes_to_the_place_that_waited_long
     assert _claimed(mind, TABLE_AT_A.app, NOW) == (TABLE_AT_A, Waiting(2))
 
 
+CALL_AT_A = AppPlace(CALL.app, CALL.place)
+SAID = Lines("generation-1", frozenset({1}), missed=False)
+
+
+def _mind_with_a_voice_at_a() -> Mind:
+    mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
+    mind.voice_at(CALL.app, voice=True)
+    return mind
+
+
+def test_a_written_turn_is_to_be_cut_once_a_spoken_place_is_due_and_not_before():
+    mind = _mind_with_a_voice_at_a()
+    mind.due(TABLE_AT_A, Waiting(1), NOW)
+    assert _claimed(mind, TABLE_AT_A.app, NOW) == (TABLE_AT_A, Waiting(1))
+    mind.due(CALL_AT_B, Waiting(1), NOW)
+    assert not mind.cut_wanted().is_set()
+
+    mind.due(CALL_AT_A, SAID, NOW)
+
+    assert mind.cut_wanted().is_set()
+
+
+def test_no_cut_is_wanted_where_no_voice_is_or_while_a_spoken_turn_runs():
+    mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
+    mind.due(TABLE_AT_A, Waiting(1), NOW)
+    mind.claim(TABLE_AT_A.app, NOW)
+    mind.due(CALL_AT_A, SAID, NOW)
+    assert not mind.cut_wanted().is_set()
+    spoken = _mind_with_a_voice_at_a()
+    spoken.due(CALL_AT_A, SAID, NOW)
+    spoken.claim(CALL.app, NOW)
+
+    spoken.due(TABLE_AT_A, Waiting(1), NOW)
+    spoken.due(CALL_AT_A, SAID, NOW)
+
+    assert not spoken.cut_wanted().is_set()
+
+
+def test_a_cut_written_turn_is_due_again_behind_the_spoken_place_and_is_not_cut_for_the_next_one():
+    mind = _mind_with_a_voice_at_a()
+    mind.due(TABLE_AT_A, Waiting(1), NOW)
+    mind.claim(TABLE_AT_A.app, NOW)
+    mind.due(CALL_AT_A, SAID, NOW)
+
+    mind.cut_for_spoken()
+    mind.release()
+
+    assert _claimed(mind, CALL.app, NOW) == (CALL_AT_A, SAID)
+    mind.release()
+    assert _claimed(mind, CALL.app, NOW) == (TABLE_AT_A, Waiting(1))
+    mind.due(CALL_AT_A, SAID, NOW)
+    assert not mind.cut_wanted().is_set()
+
+
 CUT_IN_FLIGHT = Unanswered(TURN_CANCELLED_CODE)
 CALLED_AGAIN = (CALL_AT_B, Waiting(1))
 TABLE_WAITING = (TABLE_AT_A, Waiting(2))

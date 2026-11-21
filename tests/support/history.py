@@ -13,6 +13,7 @@ from agents.member import STANDING_URI, PlaceRef, PlaceView, Spoken
 from personas.entries import ActDone, Answered, History, HistoryDelta, KeptLine, KeptTurns, SaidAloud, ViewSeen, Visit
 from personas.present import EMPTY_PRESENT, Present, taken_into
 from tests.support.call import ADDRESSED, PERSON
+from tests.support.logs import lines_of
 from tests.support.ownership import KeptHistories
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active
@@ -66,6 +67,17 @@ def told_line_bytes(
         f' "spoken": {str(spoken).lower()}}}'
     )
     return len(told.encode())
+
+
+def wait_reasons(caplog) -> list[object]:
+    """What each turn's wait names as having kept it waiting, in the order the turns started."""
+    return [line["wait_reason"] for line in lines_of(caplog.get_records("call"), "turn_wait.ended")]
+
+
+def turn_order(runner) -> list[tuple[int, str]]:
+    """Each turn in the order it was asked of the model: the index of its app and why it ran."""
+    apps = [each.mcp_url for each in runner.config.apps]
+    return [(apps.index(each.room["woke"]["app"]), each.room["woke"]["why"]) for each in runner.gateway.turns()]
 
 
 def url_of(runner, number: int) -> str:

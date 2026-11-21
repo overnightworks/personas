@@ -24,7 +24,18 @@ seat, its lease or its client.
 - Every line by someone else gives one turn, unless the app marked it as an act or as followed by more of the
   same speaker's speech, or it was said at a place with a view. His own lines give none. (TURNS-5)
 - One turn runs at a time across all his apps. What arrives meanwhile enters his history at once; each place
-  with something for him gets one turn after it, the place that waited longest first, told all that arrived. (TURNS-6)
+  with something for him gets one turn after it, told all that arrived; the order is TURNS-48. (TURNS-6)
+- A place whose turn would be spoken (a call place of his voice app whose last window does not state his voice
+  unavailable) is claimed before the written places; within each kind the place that waited longest goes first.
+  When such a place becomes due while a written turn of his runs, that turn ends at its next safe point: at
+  once while the model thinks, or once a relayed call in flight has answered or ended and entered his history.
+  Nothing more of it goes out, it adds no message (its entries go to the next turn's), it starts no pause, and
+  its place is due again for what it was for, joined with what arrived meanwhile and from when it first became
+  due. The spoken turn is told the cut turn's entries and holds the tools of its app (TURNS-18), so he may answer
+  and do what the cut turn was for in that one turn; the cut place gets its turn after it only while something is
+  left for him, so a view that no longer waits for him is not due. A written place gives way to a spoken place at
+  most once until its turn has run to its end, whether passed over in the order or cut; after that it is claimed
+  before the spoken places and its turn is not cut for one. A spoken turn is never cut. (TURNS-48)
 - A view that waits for him at a revision no turn was started for gives one turn, however that turn ends.
   The runner does not ask again by itself; an app that wants him to act again moves the revision. A turn whose
   tool list a tools notice overtook before it ended does not count for its view's revision. (TURNS-7)

@@ -24,8 +24,10 @@ from tests.support.history import (
     entry,
     said_and_taken,
     settled,
+    turn_order,
     url_of,
     view_turns,
+    wait_reasons,
     waits,
     written_turns,
 )
@@ -35,7 +37,7 @@ from tests.support.logs import lines_of
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, paused
 from tests.support.transport import ClosingHold
-from tests.support.voice import HeldSleeps, in_a_voice_call_and_at_a_table
+from tests.support.voice import HeldSleeps
 from tests.support.wire import answers_with, cuts
 
 pytestmark = pytest.mark.anyio
@@ -44,20 +46,9 @@ AGAIN = "And once more."
 SECOND_AGENT, SECOND_SUBJECT, SECOND_NAME = "agent-bach", "agent-subject-2", "Bach"
 
 
-def wait_reasons(caplog) -> list[object]:
-    """What each turn's wait names as having kept it waiting, in the order the turns started."""
-    return [line["wait_reason"] for line in lines_of(caplog.get_records("call"), "turn_wait.ended")]
-
-
 def wait_durations(caplog) -> list[object]:
     """How long each turn's wait lasted, in the order the turns started."""
     return [line["duration_ms"] for line in lines_of(caplog.get_records("call"), "turn_wait.ended")]
-
-
-def turn_order(runner) -> list[tuple[int, str]]:
-    """Each turn in the order it was asked of the model: the index of its app and why it ran."""
-    apps = [each.mcp_url for each in runner.config.apps]
-    return [(apps.index(each.room["woke"]["app"]), each.room["woke"]["why"]) for each in runner.gateway.turns()]
 
 
 async def at_a_table_turn_that_waits_for_the_model(runner, other):
@@ -589,38 +580,6 @@ async def test_a_table_whose_view_the_app_no_longer_gives_loses_its_due_and_a_yo
     await settled(other)
 
     assert turn_order(runner) == [(0, "lines"), (0, "lines")]
-
-
-async def test_a_line_heard_at_a_voice_place_while_his_table_turn_of_that_app_runs_makes_a_spoken_turn_due_after_it(
-    runner,
-):
-    await in_a_voice_call_and_at_a_table(runner, completion("table"), completion(ANSWER))
-    running = runner.gateway.hold_request(1)
-    waits(runner.app, 1)
-    await runner.gateway.until_requested(1)
-    await said_and_taken(runner.app, PLACE_ID, "Anyone there?")
-
-    assert runner.gateway.arrivals == 1
-    running.set()
-    await runner.app.spoken_count(1)
-
-    assert turn_order(runner) == [(0, "view"), (0, "lines")]
-    assert runner.app.spoken == [(SUBJECT, PLACE_ID, ANSWER)]
-
-
-async def test_a_spoken_turn_due_while_his_table_turn_of_that_app_runs_names_that_turn_as_its_wait(runner, caplog):
-    """LOG-32."""
-    await in_a_voice_call_and_at_a_table(runner, completion("table"), completion(ANSWER))
-    running = runner.gateway.hold_request(1)
-    waits(runner.app, 1)
-    await runner.gateway.until_requested(1)
-    await said_and_taken(runner.app, PLACE_ID, "Anyone there?")
-
-    running.set()
-    await runner.app.spoken_count(1)
-
-    assert turn_order(runner) == [(0, "view"), (0, "lines")]
-    assert wait_reasons(caplog) == ["none", "turn_here"]
 
 
 async def test_a_line_said_during_his_pause_at_its_own_place_waits_out_the_pause_and_names_it(runner, caplog):

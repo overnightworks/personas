@@ -168,6 +168,16 @@ class Turning:
         self._remembering = remembering
         self._holds = HoldDeciding(agent, app, self._sessions, mind, report, report_dropped)
         self._aloud_at: PlaceRef | None = None
+        self._calls_in_flight = 0
+        self._at_safe_point: Callable[[], None] | None = None
+
+    def at_safe_point(self, act: Callable[[], None]) -> None:
+        """Runs ``act``, which ends the turn, now when no call it relayed is in flight, else once the last one has
+        answered or ended and entered the agent's history, before the call's result goes back to the model."""
+        if self._calls_in_flight:
+            self._at_safe_point = act
+        else:
+            act()
 
     async def take(
         self,
@@ -192,6 +202,7 @@ class Turning:
             )
         finally:
             self._aloud_at = None
+            self._at_safe_point = None
             if admitted.aloud and not tally.answered:
                 at = self._at(admitted.place)
                 self._report_dropped(self._mind.drop_reason_at_end(), self._mind.unsent_dropped(at))
@@ -601,6 +612,7 @@ class Turning:
         Whether the turn is being cancelled is asked once the request and every scope inside it have exited.
         """
         ended: ToolOutcome | BaseException | None = None
+        self._calls_in_flight += 1
         try:
             answer = await request
             ended = answer
@@ -615,3 +627,11 @@ class Turning:
             outcome = None if ended is None else act_outcome(ended, cancelling=task_is_being_cancelled())
             if outcome is not None:
                 self._mind.take((ActDone(app.mcp_url, name, arguments, outcome, self._clock.wall()),))
+            self._calls_in_flight -= 1
+            if not self._calls_in_flight and (act := self._at_safe_point) is not None:
+                self._at_safe_point = None
+                act()
+                if not isinstance(ended, BaseException):
+                    # The cancellation reaches the turn at its next suspension, which can come after the model's next
+                    # request went out; the answer of the call does not go back to the model.
+                    raise_if_cancelled()
