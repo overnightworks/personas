@@ -425,7 +425,7 @@ class TurnAndLifecycle(ScriptedSessions):
         super().__init__(files, self._no_model)
 
     @asynccontextmanager
-    async def open(self, app, token):
+    async def open(self, app, token, agent_id):
         yield self
 
     async def declared_tools(self):
@@ -573,7 +573,7 @@ class TurnEndingInTheStepItsPlaceLeaves(TurnAndLifecycle):
         self._ending = ending
 
     @asynccontextmanager
-    async def open(self, app, token):
+    async def open(self, app, token, agent_id):
         yield self
 
     async def declared_tools(self):
@@ -706,7 +706,7 @@ class WakesFailingWhileTheReadFails(ScriptedSessions):
         super().__init__(files, None)
 
     @asynccontextmanager
-    async def open(self, app, token):
+    async def open(self, app, token, agent_id):
         yield self
 
     @asynccontextmanager
@@ -769,7 +769,7 @@ class DefectInARelayedCall(ScriptedSessions):
         return GatewayBackend(self.config.gateway, tools=tools, transport=self.gateway)
 
     @asynccontextmanager
-    async def open(self, app, token):
+    async def open(self, app, token, agent_id):
         try:
             yield self
         except asyncio.CancelledError:

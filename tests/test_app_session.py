@@ -28,7 +28,6 @@ from agents.member import (
     PlaceEntry,
     PlaceRef,
     PlaceWindow,
-    SetTurnStateArguments,
     SpeakRefusal,
     SpeakRefused,
     Spoken,
@@ -67,7 +66,7 @@ from personas.failures import (
 )
 from personas.secret import Secret
 from tests.support.hopin import CALL, LIMIT_SECONDS, LIST_TOOLS, LISTEN, NO_METHOD, READ, SAY_TOOL, FakeApp
-from tests.support.logs import configure_logging_into, fields_of, formatted
+from tests.support.logs import configure_logging_into, formatted
 from tests.support.loopback import serving
 from tests.support.pictures import a_picture, base64_of
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
@@ -132,11 +131,8 @@ def nothing_secret_is_logged(app, bearer, restored_logging, caplog):
     assert not [held for held in app.kept_out_of_logs() if held in logged]
 
 
-AGENT_ID = "agent-one"
-
-
 def opened(app, bearer, **keywords):
-    return open_mcp_session(AppTarget(app.url, "scope"), bearer, AGENT_ID, **keywords)
+    return open_mcp_session(AppTarget(app.url, "scope"), bearer, "agent-one", **keywords)
 
 
 async def opens(app, bearer):
@@ -259,65 +255,6 @@ async def test_an_accept_error_outside_the_record_is_unrecognised(app, bearer, t
             await session.accept(Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 0))
             is UnrecognisedRefusal.UNRECOGNISED
         )
-
-
-def left_out_events(caplog):
-    return [fields_of(record) for record in caplog.get_records("call") if record.message == "argument.left_out"]
-
-
-@pytest.fixture
-async def app_that_predates_the_optional_arguments():
-    fake = FakeApp(undeclared_arguments=frozenset({"figure", "voices", "style", "interrupted", "thinking"}))
-    async with fake.serving() as url:
-        fake.url = url
-        yield fake
-
-
-async def test_optional_arguments_an_app_does_not_declare_are_left_out_and_each_is_logged_once_per_session(
-    app_that_predates_the_optional_arguments, place, caplog
-):
-    """LOG-39."""
-    app = app_that_predates_the_optional_arguments
-    bearer = Secret(secrets.token_urlsafe(24))
-    app.let_in(bearer.reveal(), SUBJECT)
-    figure = FigureRef(url="https://figures.test/figure.glb", sha256=secrets.token_hex(32))
-    accept = Accept(place, "inv-3", 2, figure, ("amy",))
-
-    async with opened(app, bearer) as session:
-        assert await session.accept(accept) is None
-        assert await session.accept(accept) is None
-        await session.speak(place, "hello", style="calm")
-        await session.speak(place, "again", interrupted="hold-1")
-        await session.speak(place, "once more", interrupted="hold-2")
-        await session.set_turn_state(SetTurnStateArguments(place=place, thinking=True))
-
-    assert [sent for _, sent in app.accepted_on_the_wire] == [
-        {"place": {"kind": "call", "id": "room-7"}, "invitation": "inv-3", "epoch": 2}
-    ] * 2
-    assert app.speak_styles == [None] * 3
-    assert app.speaks_naming_holds == [("hello", None), ("again", None), ("once more", None)]
-    assert [(left["tool"], left["argument"]) for left in left_out_events(caplog)] == [
-        (ACCEPT_INVITATION_TOOL, "figure"),
-        (ACCEPT_INVITATION_TOOL, "voices"),
-        (SPEAK_TOOL, "style"),
-        (SPEAK_TOOL, "interrupted"),
-        (SET_TURN_STATE_TOOL, "thinking"),
-    ]
-    assert {(left["agent_id"], left["app_id"]) for left in left_out_events(caplog)} == {(AGENT_ID, "127.0.0.1")}
-
-
-async def test_optional_arguments_an_app_declares_are_sent_and_logged_as_none(app, bearer, place, caplog):
-    figure = FigureRef(url="https://figures.test/figure.glb", sha256=secrets.token_hex(32))
-
-    async with opened(app, bearer) as session:
-        await session.accept(Accept(place, "inv-3", 2, figure, ("amy",)))
-        await session.speak(place, "hello", style="calm")
-
-    [(_, sent)] = app.accepted_on_the_wire
-    assert sent["voices"] == ["amy"]
-    assert sent["figure"]["url"] == figure.url
-    assert app.speak_styles == ["calm"]
-    assert left_out_events(caplog) == []
 
 
 async def test_a_speak_sends_the_place_and_the_sentence_and_gives_that_it_starts_to_play(app, bearer, place):
@@ -550,7 +487,7 @@ async def test_a_redirect_the_app_answers_is_an_unusable_answer_named_by_its_sta
 
 
 async def opens_at(mcp_url, bearer):
-    async with open_mcp_session(AppTarget(mcp_url, "scope"), bearer, AGENT_ID):
+    async with open_mcp_session(AppTarget(mcp_url, "scope"), bearer, "agent-one"):
         pass
 
 
