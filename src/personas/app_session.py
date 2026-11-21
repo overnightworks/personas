@@ -24,6 +24,7 @@ from agents.member import (
     AcceptInvitationRefused,
     ContinueSpeakingRefusal,
     ContinueSpeakingRefused,
+    MemberResourceRecord,
     MemberStanding,
     PlaceRef,
     PlaceView,
@@ -352,7 +353,7 @@ class _McpAppSession:
     async def read_view(self, place: PlaceRef) -> PlaceView | None:
         return await self._read_record(PlaceView, place_view_uri(place))
 
-    async def _read_record[Record: BaseModel](self, record: type[Record], uri: str) -> Record | None:
+    async def _read_record[Record: MemberResourceRecord](self, record: type[Record], uri: str) -> Record | None:
         """The record at the resource, or ``None`` when the app shows this member no such resource."""
         read = self._read(uri, unknown_is_absent=True)
         try:
@@ -482,7 +483,7 @@ async def _wakes_of(
         raise _failure_of(lost, auth.last_answer) from None
 
 
-def _record_of[Record: BaseModel](record: type[Record], result: ReadResourceResult) -> Record:
+def _record_of[Record: MemberResourceRecord](record: type[Record], result: ReadResourceResult) -> Record:
     text = "".join(block.text for block in result.contents if isinstance(block, TextResourceContents))
     try:
         return member_resource_from_json(record, text)
