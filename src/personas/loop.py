@@ -144,8 +144,8 @@ class AgentLoop:
     a read answers again. A network failure, a lost stream or a 5xx backs off, logged once until a read answers. In an
     app that binds tools, the lines of the agent's call places are read too, while any turn of his runs, and every new
     line and every view read goes into the agent's history. A line that is not his own and a view that waits for him
-    make a turn due in the agent's mind, and after each read the loop starts the turn of the place that has waited
-    longest when it is in this app; at most one turn of the agent runs across all his loops, and the turn's own-app
+    make a turn due in the agent's mind, and after each read the loop starts the turn of the place claimed first
+    when it is in this app; at most one turn of the agent runs across all his loops, and the turn's own-app
     listing, relayed calls and speak run on this loop's session, so a failure of them goes into the one reaction of the
     loop. The turn also holds the tools of the tools-only apps and of the other apps where the agent holds an active
     place when it is admitted, which the loops of those apps record in his mind: each request to one runs in a session
@@ -439,7 +439,7 @@ class AgentLoop:
                 self._mind.undue(partial(eq, at))
 
     async def _start_due_turn(self, turns: asyncio.TaskGroup, session: AppSession) -> None:
-        """Starts the turn of the place that has waited longest when it is in this app and none of his runs. The claim
+        """Starts the turn of the place claimed first when it is in this app and none of his runs. The claim
         and the turn's start share one synchronous step; the turn waits until the claim is kept, so a pod that takes
         him over before then answers the place instead of him."""
         setup = self._turn_setup
@@ -467,7 +467,7 @@ class AgentLoop:
         self._start_turn(turns, session, setup, at.place, admitted, due, claimed)
 
     def _wake_when_pause_over(self, turns: asyncio.TaskGroup, now: float) -> None:
-        """A pause holds the turn of the place at this app that has waited longest: one waiter of this loop wakes
+        """A pause holds the turn of the place at this app that is claimed first: one waiter of this loop wakes
         every loop of his when it is over, and a waiter that ended early sees the rest of the pause again."""
         seconds = self._mind.pause_left(self._app.mcp_url, now)
         if seconds > 0 and (self._pause_wake is None or self._pause_wake.done()):
@@ -575,7 +575,7 @@ class AgentLoop:
 
     def _yield_turn(self, task: asyncio.Task[None]) -> None:
         turn = self._turn
-        if turn is not None and turn.task is task and not task.done():
+        if turn is not None and turn.task is task and not task.done() and not turn.cancel_requested:
             self._turn = replace(turn, yielded=True)
             task.cancel()
 

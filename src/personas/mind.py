@@ -402,7 +402,7 @@ class Mind:
             self.wake()
 
     def claim(self, app: str, now: float) -> tuple[AppPlace, Due] | None:
-        """Takes the one turn for the place that has waited longest when it is at ``app`` and no pause holds it. Before,
+        """Takes the one turn for the place claimed first when it is at ``app`` and no pause holds it. Before,
         each due place that nothing kept waiting yet names what stands in front of it at ``now``."""
         self._turns = waited(self._turns, now, self.spoken)
         taken = claimed(self._turns, app, now, self.spoken)
@@ -415,7 +415,7 @@ class Mind:
         return at, due
 
     def pause_left(self, app: str, now: float) -> float:
-        """The seconds a pause still holds the turn of the place that has waited longest, when it is at ``app``."""
+        """The seconds a pause still holds the turn of the place claimed first, when it is at ``app``."""
         return pause_left(self._turns, app, now, self.spoken)
 
     def voice_at(self, app: str, *, voice: bool) -> None:
