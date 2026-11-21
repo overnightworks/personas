@@ -11,7 +11,9 @@ release changes the runner, its characters and its figures together. The rules i
    uses, or adds a tool that `docs/calling.md` requires an app to serve, until every such app pins that
    agents version or a newer one. A tool that `docs/calling.md` lets an app leave unserved does not hold
    a release, since that app answers "unknown tool". A record or field that a release only adds holds
-   nothing: the added-tool clause is the only addition that holds. Read each agents release's `Member-tool wire:` line,
+   nothing, an optional argument of a tool included, since the runner leaves out an optional argument the app's
+   declared schema does not name and logs `argument.left_out`: the added-tool clause is the only addition that
+   holds. A removed, renamed or newly required argument still holds. Read each agents release's `Member-tool wire:` line,
    from the version in `pyproject.toml` at the newest `v<version>` tag up to the one on `main`. Its names
    are changes, removals or additions: a name is an addition when `docs/calling.md` at the previous
    release does not list it (compare the two files), and otherwise a change or removal. A line that says

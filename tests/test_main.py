@@ -209,8 +209,8 @@ class World:
             assert config.gateway is not None
             return StopsAfterTheAnswer(GatewayBackend(config.gateway, tools=tools, transport=self.gateway))
 
-        def open_at_the_app(app: AppTarget, token: Secret):
-            return open_mcp_session(replace(app, mcp_url=app_url), token)
+        def open_at_the_app(app: AppTarget, token: Secret, agent_id: str):
+            return open_mcp_session(replace(app, mcp_url=app_url), token, agent_id)
 
         async with (
             self.app.serving() as app_url,

@@ -358,8 +358,8 @@ async def test_a_call_cut_in_flight_whose_request_ends_as_a_transport_failure_is
             raise Unreachable("cut")
 
     @contextlib.asynccontextmanager
-    async def opened(app, token):
-        async with open_mcp_session(app, token, stream_seconds=READ_SECONDS) as session:
+    async def opened(app, token, agent_id):
+        async with open_mcp_session(app, token, agent_id, stream_seconds=READ_SECONDS) as session:
             yield EndsACutCallAsAFailure(session)
 
     act, second = await a_call_waiting_for_its_app_while_its_place_leaves(

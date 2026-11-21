@@ -574,10 +574,10 @@ def opener_failing_while(stopping: asyncio.Event, defect: Exception):
     set."""
 
     @asynccontextmanager
-    async def opened(app: AppTarget, token: Secret) -> AsyncGenerator[AppSession]:
+    async def opened(app: AppTarget, token: Secret, agent_id: str) -> AsyncGenerator[AppSession]:
         if stopping.is_set():
             raise defect
-        async with open_mcp_session(app, token) as session:
+        async with open_mcp_session(app, token, agent_id) as session:
             yield session
 
     return opened

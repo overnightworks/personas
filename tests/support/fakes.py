@@ -228,7 +228,7 @@ class FakeSession(BareSession):
         return step
 
     @asynccontextmanager
-    async def open(self, app: AppTarget, token: Secret):
+    async def open(self, app: AppTarget, token: Secret, agent_id: str):
         self.opened_with.append(token)
         self.bearer = token
         yield self

@@ -65,7 +65,8 @@ from personas.failures import (
     leaves_of,
 )
 from personas.secret import Secret
-from tests.support.hopin import CALL, LIMIT_SECONDS, LIST_TOOLS, LISTEN, NO_METHOD, READ, SAY_TOOL, FakeApp
+from tests.support.app_session import opened
+from tests.support.hopin import CALL, LIMIT_SECONDS, LIST_TOOLS, LISTEN, NO_METHOD, READ, SAY_TOOL
 from tests.support.logs import configure_logging_into, formatted
 from tests.support.loopback import serving
 from tests.support.pictures import a_picture, base64_of
@@ -86,21 +87,8 @@ def short_stream_seconds():
 
 
 @pytest.fixture
-def place():
-    return PlaceRef(kind="call", id="room-7")
-
-
-@pytest.fixture
 def table():
     return PlaceRef(kind="table", id="table-1")
-
-
-@pytest.fixture
-async def app():
-    fake = FakeApp()
-    async with fake.serving() as url:
-        fake.url = url
-        yield fake
 
 
 @pytest.fixture
@@ -114,13 +102,6 @@ def front_page(front_words):
     return f"<html>{front_words}</html>".encode()
 
 
-@pytest.fixture
-def bearer(app):
-    token = Secret(secrets.token_urlsafe(24))
-    app.let_in(token.reveal(), SUBJECT)
-    return token
-
-
 @pytest.fixture(autouse=True)
 def nothing_secret_is_logged(app, bearer, restored_logging, caplog):
     """At a test's end no log line, traceback included, holds a bearer the app saw or content it served or took."""
@@ -129,10 +110,6 @@ def nothing_secret_is_logged(app, bearer, restored_logging, caplog):
     logged = formatted(caplog.get_records("call"))
     assert bearer.reveal() in app.kept_out_of_logs()
     assert not [held for held in app.kept_out_of_logs() if held in logged]
-
-
-def opened(app, bearer, **keywords):
-    return open_mcp_session(AppTarget(app.url, "scope"), bearer, **keywords)
 
 
 async def opens(app, bearer):
@@ -487,7 +464,7 @@ async def test_a_redirect_the_app_answers_is_an_unusable_answer_named_by_its_sta
 
 
 async def opens_at(mcp_url, bearer):
-    async with open_mcp_session(AppTarget(mcp_url, "scope"), bearer):
+    async with open_mcp_session(AppTarget(mcp_url, "scope"), bearer, "agent-one"):
         pass
 
 
