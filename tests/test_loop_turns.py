@@ -7,7 +7,7 @@ import asyncio
 from http import HTTPStatus
 
 import pytest
-from agents.backend.fake_gateway import Reply, completion, tool_call, tool_round
+from agents.backend.fake_gateway import Reply, completion
 from agents.turn import Principal, RejectionCode, person_fingerprint
 
 from personas.decision import BACKOFF_BASE_SECONDS, NETWORK_FAILURE_CODE
@@ -24,19 +24,20 @@ from tests.support.history import (
     entry,
     said_and_taken,
     settled,
+    turn_order,
     url_of,
     view_turns,
+    wait_reasons,
     waits,
-    woke_at_table,
     written_turns,
 )
-from tests.support.hopin import CALL, LIMIT_SECONDS, PLAY_TOOL, READ, SAY_TOOL
+from tests.support.hopin import CALL, LIMIT_SECONDS, READ
 from tests.support.hopin_places import ISSUER
 from tests.support.logs import lines_of
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, paused
 from tests.support.transport import ClosingHold
-from tests.support.voice import HeldSleeps, in_a_voice_call_and_at_a_table
+from tests.support.voice import HeldSleeps
 from tests.support.wire import answers_with, cuts
 
 pytestmark = pytest.mark.anyio
@@ -45,20 +46,9 @@ AGAIN = "And once more."
 SECOND_AGENT, SECOND_SUBJECT, SECOND_NAME = "agent-bach", "agent-subject-2", "Bach"
 
 
-def wait_reasons(caplog) -> list[object]:
-    """What each turn's wait names as having kept it waiting, in the order the turns started."""
-    return [line["wait_reason"] for line in lines_of(caplog.get_records("call"), "turn_wait.ended")]
-
-
 def wait_durations(caplog) -> list[object]:
     """How long each turn's wait lasted, in the order the turns started."""
     return [line["duration_ms"] for line in lines_of(caplog.get_records("call"), "turn_wait.ended")]
-
-
-def turn_order(runner) -> list[tuple[int, str]]:
-    """Each turn in the order it was asked of the model: the index of its app and why it ran."""
-    apps = [each.mcp_url for each in runner.config.apps]
-    return [(apps.index(each.room["woke"]["app"]), each.room["woke"]["why"]) for each in runner.gateway.turns()]
 
 
 async def at_a_table_turn_that_waits_for_the_model(runner, other):
@@ -590,183 +580,6 @@ async def test_a_table_whose_view_the_app_no_longer_gives_loses_its_due_and_a_yo
     await settled(other)
 
     assert turn_order(runner) == [(0, "lines"), (0, "lines")]
-
-
-async def a_table_turn_that_waits_for_the_model_in_a_voice_call(runner, *replies):
-    """His table turn waits for the model while his call at the same app is a voice call; the call's window was read."""
-    await in_a_voice_call_and_at_a_table(runner, *replies)
-    running = runner.gateway.hold_request(1)
-    waits(runner.app, 1)
-    await runner.gateway.until_requested(1)
-    return running
-
-
-def turn_endings(caplog) -> list[tuple[object, object]]:
-    """The outcome of each turn and whether it was cut for a spoken place, in the order the turns ended."""
-    return [(line["outcome"], line.get("cut")) for line in lines_of(caplog.get_records("call"), "turn.ended")]
-
-
-async def test_a_line_heard_at_a_voice_place_cuts_his_table_turn_of_that_app_that_waits_for_the_model(runner, caplog):
-    """TURNS-48, LOG-38."""
-    await a_table_turn_that_waits_for_the_model_in_a_voice_call(runner, completion(ANSWER), completion("table again"))
-
-    await said_and_taken(runner.app, PLACE_ID, "Anyone there?")
-    await runner.app.spoken_count(1)
-    await runner.reports.until_a_turn_completed(count=2)
-
-    assert runner.gateway.arrivals == 3
-    assert turn_order(runner) == [(0, "lines"), (0, "view")]
-    assert runner.app.spoken == [(SUBJECT, PLACE_ID, ANSWER)]
-    assert turn_endings(caplog) == [("cancelled", "spoken"), ("ok", None), ("ok", None)]
-    call_turn, table_turn = runner.gateway.openings()
-    assert [each["entry"] for each in call_turn.room["history"]["entries"]] == ["view", "line"]
-    assert SAY_TOOL in runner.gateway.offered_tools(2)
-    assert table_turn.room["woke"] == woke_at_table(url_of(runner, 0), 1)
-
-
-async def test_a_line_heard_at_a_voice_call_cuts_his_table_turn_at_another_app_and_the_spoken_turn_holds_its_tools(
-    runner, other, caplog
-):
-    """TURNS-48, TURNS-18."""
-    runner.give_voice()
-    runner.gateway = Gateway(completion(ANSWER), completion("table again"))
-    runner.gateway.hold_request(1)
-    other.stand(SUBJECT, at_table())
-    await restarted_in_the_call(runner)
-    waits(other, 1)
-    await runner.gateway.until_requested(1)
-
-    await said_and_taken(runner.app, PLACE_ID, "Anyone there?")
-    await runner.app.spoken_count(1)
-    await runner.reports.until_a_turn_completed(count=2)
-
-    assert runner.gateway.arrivals == 3
-    assert turn_order(runner) == [(0, "lines"), (1, "view")]
-    assert turn_endings(caplog) == [("cancelled", "spoken"), ("ok", None), ("ok", None)]
-    assert runner.app.spoken == [(SUBJECT, PLACE_ID, ANSWER)]
-    assert PLAY_TOOL in runner.gateway.offered_tools(2)
-
-
-async def test_a_table_turn_cut_for_a_spoken_turn_names_the_spoken_place_in_front_of_it_as_its_wait(runner, caplog):
-    """LOG-32."""
-    await a_table_turn_that_waits_for_the_model_in_a_voice_call(runner, completion(ANSWER), completion("table again"))
-
-    await said_and_taken(runner.app, PLACE_ID, "Anyone there?")
-    await runner.reports.until_a_turn_completed(count=2)
-
-    assert wait_reasons(caplog)[-1] == "older_due"
-
-
-async def test_a_table_turn_with_a_call_in_flight_is_cut_once_the_call_answered_and_entered_his_history(runner, caplog):
-    """TURNS-48."""
-    answer = runner.app.hold_next_say()
-    await in_a_voice_call_and_at_a_table(
-        runner,
-        tool_round(tool_call("play-1", SAY_TOOL, {"place": TABLE.id, "text": "Jack of hearts"})),
-        completion(ANSWER),
-        completion("table again"),
-    )
-    waits(runner.app, 1)
-    await runner.app.until_called(1)
-
-    await said_and_taken(runner.app, PLACE_ID, "Anyone there?")
-
-    assert runner.gateway.arrivals == 1
-    assert runner.reports.turn_endings == []
-    answer.set()
-    await runner.app.spoken_count(1)
-    await runner.reports.until_a_turn_completed(count=2)
-    assert turn_endings(caplog) == [("cancelled", "spoken"), ("ok", None), ("ok", None)]
-    assert runner.gateway.arrivals == 3
-    call_turn, _ = runner.gateway.openings()[1:]
-    (act,) = call_turn.told("act")
-    assert (act["tool"], act["outcome"]["answered"]) == (SAY_TOOL, True)
-
-
-async def test_a_table_turn_whose_table_left_with_a_call_in_flight_ends_cancelled_without_a_spoken_cut(runner, caplog):
-    """TURNS-48."""
-    runner.app.hold_next_say()
-    await in_a_voice_call_and_at_a_table(
-        runner,
-        tool_round(tool_call("play-1", SAY_TOOL, {"place": TABLE.id, "text": "Jack of hearts"})),
-        completion(ANSWER),
-    )
-    waits(runner.app, 1)
-    await runner.app.until_called(1)
-    await said_and_taken(runner.app, PLACE_ID, "Anyone there?")
-
-    runner.app.stand(SUBJECT, active(PLACE_ID))
-    await runner.app.spoken_count(1)
-    await runner.reports.until_a_turn_completed(count=1)
-
-    assert turn_endings(caplog)[0] == ("cancelled", None)
-
-
-async def test_a_spoken_turn_that_does_what_the_cut_table_turn_was_for_leaves_the_table_no_turn_after_it(runner):
-    """TURNS-48."""
-    runner.app.says_move_the_view = True
-    await in_a_voice_call_and_at_a_table(
-        runner,
-        tool_round(tool_call("play-1", SAY_TOOL, {"place": TABLE.id, "text": "Jack of hearts"})),
-        completion(ANSWER),
-    )
-    runner.gateway.hold_request(1)
-    spoken_turn = runner.gateway.hold_request(2)
-    waits(runner.app, 1)
-    await runner.gateway.until_requested(1)
-
-    await said_and_taken(runner.app, PLACE_ID, "Anyone there?")
-    await runner.gateway.until_requested(2)
-    await settled(runner.app)
-    spoken_turn.set()
-    await runner.reports.until_a_turn_completed(count=1)
-    await settled(runner.app)
-
-    assert runner.app.said == [(SUBJECT, TABLE.id, "Jack of hearts")]
-    assert runner.gateway.arrivals == 3
-
-
-async def test_a_written_turn_that_gave_way_to_a_spoken_one_is_not_cut_for_the_next(runner, caplog):
-    """TURNS-48."""
-    await a_table_turn_that_waits_for_the_model_in_a_voice_call(
-        runner, completion(ANSWER), completion("table again"), completion(AGAIN)
-    )
-    again = runner.gateway.hold_request(3)
-
-    await said_and_taken(runner.app, PLACE_ID, "Anyone there?")
-    await runner.gateway.until_requested(3)
-    await said_and_taken(runner.app, PLACE_ID, "Hello?")
-    again.set()
-    await runner.app.spoken_count(2)
-
-    assert turn_endings(caplog) == [("cancelled", "spoken"), ("ok", None), ("ok", None), ("ok", None)]
-    assert turn_order(runner) == [(0, "lines"), (0, "view"), (0, "lines")]
-
-
-async def test_a_due_spoken_place_is_claimed_before_a_written_place_that_became_due_before_it(runner):
-    """TURNS-48."""
-    runner.give_voice()
-    runner.gateway = Gateway(completion(ANSWER), completion(AGAIN), completion("table"))
-    running = runner.gateway.hold_request(1)
-    runner.app.stand(SUBJECT, active(PLACE_ID), active(OTHER_CALL_ID))
-    runner.start()
-    await runner.app.until_window_read(PLACE_ID)
-    await runner.app.until_window_read(OTHER_CALL_ID)
-    say_in_the_call(runner, REMARK, spoken=True)
-    await runner.gateway.until_requested(1)
-    runner.app.stand(SUBJECT, active(PLACE_ID), active(OTHER_CALL_ID), at_table())
-    waits(runner.app, 1)
-    await settled(runner.app)
-    await said_and_taken(runner.app, OTHER_CALL_ID, "Anyone there?")
-
-    running.set()
-    await runner.gateway.until_turns(3)
-
-    assert [each.room["woke"]["place"]["id"] for each in runner.gateway.openings()] == [
-        PLACE_ID,
-        OTHER_CALL_ID,
-        TABLE.id,
-    ]
 
 
 async def test_a_line_said_during_his_pause_at_its_own_place_waits_out_the_pause_and_names_it(runner, caplog):
