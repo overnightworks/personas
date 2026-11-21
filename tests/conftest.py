@@ -64,6 +64,8 @@ if TYPE_CHECKING:
     from personas.sweep import SweptStore
     from personas.tokens import GrantedToken
 
+pytest_plugins = ["tests.support.app_session"]
+
 SCENARIO_LIMIT_SECONDS = 10
 
 

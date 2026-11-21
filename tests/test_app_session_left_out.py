@@ -10,14 +10,12 @@ from agents.member import (
     SET_TURN_STATE_TOOL,
     SPEAK_TOOL,
     FigureRef,
-    PlaceRef,
     SetTurnStateArguments,
 )
 
-from personas.app_session import open_mcp_session
-from personas.config import AppTarget
 from personas.decision import Accept
 from personas.secret import Secret
+from tests.support.app_session import opened, served
 from tests.support.hopin import FakeApp
 from tests.support.logs import configure_logging_into, fields_of
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
@@ -32,30 +30,6 @@ def logging_captured(restored_logging, caplog):
     configure_logging_into(caplog)
 
 
-@pytest.fixture
-def place():
-    return PlaceRef(kind="call", id="room-7")
-
-
-@pytest.fixture
-async def app():
-    fake = FakeApp()
-    async with fake.serving() as url:
-        fake.url = url
-        yield fake
-
-
-@pytest.fixture
-def bearer(app):
-    token = Secret(secrets.token_urlsafe(24))
-    app.let_in(token.reveal(), SUBJECT)
-    return token
-
-
-def opened(app, bearer):
-    return open_mcp_session(AppTarget(app.url, "scope"), bearer, AGENT_ID)
-
-
 def left_out_events(caplog):
     return [fields_of(record) for record in caplog.get_records("call") if record.message == "argument.left_out"]
 
@@ -63,8 +37,7 @@ def left_out_events(caplog):
 @pytest.fixture
 async def app_that_predates_the_optional_arguments():
     fake = FakeApp(undeclared_arguments=frozenset({"figure", "voices", "style", "interrupted", "thinking"}))
-    async with fake.serving() as url:
-        fake.url = url
+    async with served(fake):
         yield fake
 
 
