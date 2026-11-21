@@ -26,6 +26,7 @@ from agents.member import (
     SPEAK_TOOL,
     STOP_SPEAKING_TOOL,
     AcceptInvitationRefusal,
+    DeclineInvitationReason,
     PlaceEntry,
     PlaceRef,
     PlaceView,
@@ -127,6 +128,16 @@ class Accept:
 
 
 @dataclass(frozen=True)
+class Decline:
+    """The decline the loop performs of one invitation: the library's reason for a runner that takes no more places."""
+
+    place: PlaceRef
+    invitation_id: str
+    epoch: int
+    reason: DeclineInvitationReason = DeclineInvitationReason.BUSY
+
+
+@dataclass(frozen=True)
 class Token:
     value: Secret = field(repr=False)
     expires_at: float
@@ -135,11 +146,12 @@ class Token:
 @dataclass(frozen=True)
 class Memory:
     """What a loop remembers: invitations refused as stale, the last other refusal of each, and the invitations it
-    reported as left out."""
+    reported as left out or declined."""
 
     stale: frozenset[str] = frozenset()
     refused: Mapping[str, Refusal] = field(default_factory=dict[str, Refusal])
     left_out: frozenset[str] = frozenset()
+    declined: frozenset[str] = frozenset()
 
 
 def _is_call(standing: Standing) -> bool:
@@ -150,6 +162,14 @@ def _is_call(standing: Standing) -> bool:
 def _has_window(standing: Standing) -> bool:
     """A place is read through its window when it is a call or serves a view, whose window holds what happened there."""
     return standing.place.kind == CALL_PLACE_KIND or standing.serves_view
+
+
+def _busy(standings: tuple[Standing, ...], standing: Standing) -> bool:
+    """A call invitation while the agent holds an active place other than the invited one; a table or tool reached
+    from the call is not a call place and stays accepted."""
+    return _is_call(standing) and any(
+        other.state is StandingState.ACTIVE and other.place != standing.place for other in standings
+    )
 
 
 def _accepted(standing: Standing, *, takes_turns: bool) -> bool:
@@ -184,8 +204,21 @@ def accepts_for(
     return tuple(
         Accept(standing.place, invitation.id, invitation.epoch, figure, voices)
         for standing, invitation in _invited(standings)
-        if _accepted(standing, takes_turns=takes_turns) and invitation.id not in memory.stale
+        if _accepted(standing, takes_turns=takes_turns)
+        and invitation.id not in memory.stale
+        and not _busy(standings, standing)
     )
+
+
+def declines_for(standings: tuple[Standing, ...], memory: Memory) -> tuple[Memory, tuple[Decline, ...]]:
+    """One decline, once, for each invitation to a call while the agent holds an active place, and the memory that
+    holds them declined: the inviter learns he is busy and invites again once the agent is free."""
+    news = tuple(
+        Decline(standing.place, invitation.id, invitation.epoch)
+        for standing, invitation in _invited(standings)
+        if _busy(standings, standing) and invitation.id not in memory.declined
+    )
+    return replace(memory, declined=memory.declined | {decline.invitation_id for decline in news}), news
 
 
 def left_out_for(
@@ -209,6 +242,7 @@ def forget_gone(memory: Memory, standings: tuple[Standing, ...]) -> Memory:
         stale=memory.stale,
         refused={invitation: code for invitation, code in memory.refused.items() if invitation in present},
         left_out=memory.left_out & present,
+        declined=memory.declined & present,
     )
 
 

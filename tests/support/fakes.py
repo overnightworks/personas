@@ -21,7 +21,7 @@ from personas.config import (
     AppTarget,
     MemoryTarget,
 )
-from personas.decision import Accept, Refusal
+from personas.decision import Accept, Decline, Refusal
 from personas.failures import CallFailure
 from personas.mind import Mind
 from personas.reporting import Event
@@ -189,6 +189,7 @@ class FakeSession(BareSession):
     entered_with_time: list[tuple[Secret, float]] = field(default_factory=list[tuple[Secret, float]])
     opened_with: list[Secret] = field(default_factory=list[Secret])
     accepted: list[Accept] = field(default_factory=list[Accept])
+    declined: list[Decline] = field(default_factory=list[Decline])
     bearers_with_time: list[tuple[Secret, float]] = field(default_factory=list[tuple[Secret, float]])
     idle: asyncio.Event = field(default_factory=asyncio.Event)
 
@@ -226,6 +227,9 @@ class FakeSession(BareSession):
         if isinstance(step, CallFailure):
             raise step
         return step
+
+    async def decline(self, decline: Decline) -> None:
+        self.declined.append(decline)
 
     @asynccontextmanager
     async def open(self, app: AppTarget, token: Secret, agent_id: str):

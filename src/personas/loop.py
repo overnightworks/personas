@@ -29,6 +29,7 @@ from personas.decision import (
     backoff_delay,
     backoff_states_unavailable,
     decisive_failure,
+    declines_for,
     failure_code,
     failure_reason,
     forget_gone,
@@ -363,6 +364,11 @@ class AgentLoop:
         self._memory, left_out = left_out_for(standings, self._memory, takes_turns=takes_turns)
         for standing in left_out:
             self._report(Event.INVITATION_LEFT_OUT, NO_TURNS_CODE, place_kind=standing.place.kind)
+        self._memory, declines = declines_for(standings, self._memory)
+        for decline in declines:
+            await self._use_current_token(session)
+            await session.decline(decline)
+            self._report(Event.INVITATION_DECLINED, decline.reason.value, place_kind=decline.place.kind)
         for accept in accepts_for(
             standings,
             self._memory,

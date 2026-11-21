@@ -16,6 +16,7 @@ from agents.member import (
     SPEAK_TOOL,
     STOP_SPEAKING_TOOL,
     AcceptInvitationRefusal,
+    DeclineInvitationReason,
     FigureRef,
     PlaceRef,
     PlaceWindow,
@@ -40,6 +41,7 @@ from personas.decision import (
     RENEW_BEFORE_EXPIRY_SECONDS,
     TURN_CANCELLED_CODE,
     Accept,
+    Decline,
     Joined,
     Memory,
     Paused,
@@ -59,6 +61,7 @@ from personas.decision import (
     budget_pause,
     call_within_bound,
     decisive_failure,
+    declines_for,
     failure_code,
     failure_reason,
     forget_gone,
@@ -127,6 +130,39 @@ def test_every_accept_brings_the_figure_the_agent_has():
 )
 def test_a_standing_that_is_no_call_invitation_is_not_accepted(standing):
     assert accepts_for((standing,), Memory(), takes_turns=False) == ()
+
+
+@pytest.mark.parametrize(
+    ("standings", "accepted", "declined"),
+    [
+        ((invited("room-7", "inv-3"),), ["inv-3"], []),
+        ((active("room-1"), invited("room-7", "inv-3")), [], ["inv-3"]),
+        ((paused("room-1"), invited("room-7", "inv-3")), ["inv-3"], []),
+        ((active("room-1"), invited("table-1", "inv-4", kind="table", serves_view=True)), ["inv-4"], []),
+        ((active("room-7"), invited("room-7", "inv-3")), ["inv-3"], []),
+    ],
+    ids=["no active place", "active call place", "paused place", "table reached from the call", "its own place"],
+)
+def test_a_call_invitation_while_another_place_is_active_is_declined_busy_and_not_accepted(
+    standings, accepted, declined
+):
+    """TURNS-1"""
+    _, declines = declines_for(standings, Memory())
+
+    assert [accept.invitation_id for accept in accepts_for(standings, Memory(), takes_turns=True)] == accepted
+    assert [decline.invitation_id for decline in declines] == declined
+    assert all(decline.reason is DeclineInvitationReason.BUSY for decline in declines)
+
+
+def test_a_decline_is_made_once_and_forgotten_with_its_invitation():
+    standings = (active("room-1"), invited("room-7", "inv-3", epoch=2))
+
+    memory, first = declines_for(standings, Memory())
+    memory, again = declines_for(standings, memory)
+
+    assert first == (Decline(PlaceRef(kind="call", id="room-7"), "inv-3", 2),)
+    assert again == ()
+    assert forget_gone(memory, (active("room-1"),)).declined == frozenset()
 
 
 def test_a_stale_invitation_is_never_accepted_again():
