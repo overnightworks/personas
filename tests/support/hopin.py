@@ -20,10 +20,12 @@ from agents.mcp_server import McpPersonFront, PersonRequest, PersonTool
 from agents.mcp_wire import MCP_ENDPOINT_PATH
 from agents.member import (
     ACCEPT_INVITATION_TOOL,
+    DECLINE_INVITATION_TOOL,
     SET_TURN_STATE_TOOL,
     SPEAK_TOOL,
     STANDING_URI,
     AcceptInvitationArguments,
+    DeclineInvitationArguments,
     Interrupted,
     MemberStanding,
     PlaceEntry,
@@ -86,6 +88,13 @@ _ACCEPT_DECLARATION = ToolDeclaration(
     name=ACCEPT_INVITATION_TOOL,
     description="Joins the place an invitation is for.",
     parameters=AcceptInvitationArguments.model_json_schema(),
+    effect=ToolEffect.SIDE_EFFECTING,
+)
+
+_DECLINE_DECLARATION = ToolDeclaration(
+    name=DECLINE_INVITATION_TOOL,
+    description="Turns down the invitation to a place.",
+    parameters=DeclineInvitationArguments.model_json_schema(),
     effect=ToolEffect.SIDE_EFFECTING,
 )
 
@@ -153,6 +162,7 @@ class FakeApp(AppVoice):
     accept_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
     accepted: list[AcceptInvitationArguments] = field(default_factory=list[AcceptInvitationArguments])
     accepted_on_the_wire: list[tuple[str, JsonObject]] = field(default_factory=list[tuple[str, JsonObject]])
+    declined: list[DeclineInvitationArguments] = field(default_factory=list[DeclineInvitationArguments])
     reads: dict[str, int] = field(default_factory=dict[str, int])
     read_order: list[str] = field(default_factory=list[str])
     """The uri of each resource read, in the order the reads arrived."""
@@ -243,6 +253,7 @@ class FakeApp(AppVoice):
     def _all_tools(self) -> list[PersonTool]:
         tools = [
             PersonTool(_ACCEPT_DECLARATION, self._accept),
+            PersonTool(_DECLINE_DECLARATION, self._decline),
             PersonTool(self._line_declaration(), self._say),
             PersonTool(SPEAK_DECLARATION, self._speak),
             PersonTool(_SET_TURN_STATE_DECLARATION, self._set_turn_state),
@@ -468,6 +479,10 @@ class FakeApp(AppVoice):
             return self.accept_outcomes.pop(0)
         self.join(taken.place.id)
         return ToolOutcome(json.dumps({"name": ACCEPTED_NAME}), is_error=False)
+
+    async def _decline(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
+        self.declined.append(DeclineInvitationArguments.model_validate_json(json.dumps(arguments)))
+        return ToolOutcome("{}", is_error=False)
 
     @asynccontextmanager
     async def serving(self) -> AsyncIterator[str]:
