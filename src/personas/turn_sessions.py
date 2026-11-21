@@ -62,9 +62,9 @@ class TurnSessions:
     async def opened(self, opened: AsyncExitStack, app: AppTarget, token: Secret, *, measured: bool) -> AppSession:
         """The session at another ``app``, closed with ``opened``; its opening is a step when ``measured``."""
         if not measured:
-            return await opened.enter_async_context(self._open_session(app, token))
+            return await opened.enter_async_context(self._open_session(app, token, self._agent.client_id))
         with stepping(step_timer("session_open.ended", self._agent.client_id, app.mcp_url), turn_goes_on=True):
-            return await opened.enter_async_context(self._open_session(app, token))
+            return await opened.enter_async_context(self._open_session(app, token, self._agent.client_id))
 
     async def _within_call_time[Answer](
         self, app: AppTarget, ask: Callable[[AppSession], Awaitable[Answer]], record: TaskRecord, *, opening: bool

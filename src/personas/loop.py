@@ -220,7 +220,7 @@ class AgentLoop:
         token = await self._current_token()
         async with (
             asyncio.TaskGroup() as turns,
-            self._boundaries.open_session(self._app, token.value) as session,
+            self._boundaries.open_session(self._app, token.value, self._agent.client_id) as session,
         ):
             turns.create_task(self._turn_states.state_each(session))
             try:
@@ -690,7 +690,7 @@ class AgentLoop:
         """States on a session of its own, outside the loop's; a failure to open it is logged as a failed statement."""
         try:
             token = await self._current_token()
-            async with self._boundaries.open_session(self._app, token.value) as session:
+            async with self._boundaries.open_session(self._app, token.value, self._agent.client_id) as session:
                 await state(session)
         except Exception as error:
             failure = decisive_failure(tuple(leaves_of(error)), already_renewed=False)

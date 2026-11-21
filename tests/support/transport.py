@@ -140,10 +140,10 @@ class ClosingHold:
         leaves = 0
 
         @asynccontextmanager
-        async def waiting(app: AppTarget, token: Secret) -> AsyncGenerator[AppSession]:
+        async def waiting(app: AppTarget, token: Secret, agent_id: str) -> AsyncGenerator[AppSession]:
             nonlocal leaves
             try:
-                async with open_mcp_session(app, token) as session:
+                async with open_mcp_session(app, token, agent_id) as session:
                     yield session
             finally:
                 if of_url in (None, str(app.mcp_url)):
@@ -183,8 +183,8 @@ def _opener_around(request: str, around: _Around, *, of_url: str | None) -> Sess
 
 def _opener_arounds(arounds: dict[str, _Around], *, of_url: str | None) -> SessionOpener:
     @asynccontextmanager
-    async def opened(app: AppTarget, token: Secret) -> AsyncGenerator[AppSession]:
-        async with open_mcp_session(app, token) as session:
+    async def opened(app: AppTarget, token: Secret, agent_id: str) -> AsyncGenerator[AppSession]:
+        async with open_mcp_session(app, token, agent_id) as session:
             if of_url in (None, str(app.mcp_url)):
                 yield cast("AppSession", _AroundSession(session, arounds))
             else:
