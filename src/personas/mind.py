@@ -9,13 +9,22 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from personas.decision import AppPlace, backoff_delay, budget_pause, held_apps, refusal_retry_at, sync_checkpoints
+from personas.decision import (
+    AppPlace,
+    backoff_delay,
+    budget_pause,
+    held_apps,
+    refusal_retry_at,
+    speaks_aloud,
+    sync_checkpoints,
+)
 from personas.due import (
     NO_TURNS,
     Claim,
     TurnState,
     claimed,
     cut_by_stop,
+    cut_for_spoken,
     due_again,
     due_for_hold,
     pause_left,
@@ -24,6 +33,7 @@ from personas.due import (
     waited,
     with_due,
     without_due,
+    yields_to_spoken,
 )
 from personas.entries import KeptLine
 from personas.present import EMPTY_PRESENT, answered_into, taken_into
@@ -91,6 +101,8 @@ class Mind:
         self._turns = resumed.turns
         self._claim: Claim | None = None
         self._stopping = False
+        self._cut_wanted = asyncio.Event()
+        self._voice_apps = frozenset[str]()
         self._checkpoints = resumed.checkpoints
         self._placed = frozenset[str]()
         self._not_granted: dict[str, float] = {}
@@ -351,6 +363,7 @@ class Mind:
         became_due = at not in self._turns.due
         self._turns = with_due(self._turns, at, occasion, since)
         self._change()
+        self._ask_for_a_cut()
         return became_due
 
     def due_for_hold(self, at: AppPlace, generation: str, since: float) -> bool:
@@ -361,6 +374,7 @@ class Mind:
             return False
         self._turns = turns
         self._change()
+        self._ask_for_a_cut()
         return True
 
     def due_again(self, at: AppPlace, occasion: Occasion, since: float) -> None:
@@ -390,18 +404,42 @@ class Mind:
     def claim(self, app: str, now: float) -> tuple[AppPlace, Due] | None:
         """Takes the one turn for the place that has waited longest when it is at ``app`` and no pause holds it. Before,
         each due place that nothing kept waiting yet names what stands in front of it at ``now``."""
-        self._turns = waited(self._turns, now)
-        taken = claimed(self._turns, app, now)
+        self._turns = waited(self._turns, now, self.spoken)
+        taken = claimed(self._turns, app, now, self.spoken)
         if taken is None:
             return None
         self._turns, at, due = taken
-        self._claim = Claim(at, due, self._present.history.taken)
+        self._claim = Claim(at, due, self._present.history.taken, self.spoken(at, due))
+        self._cut_wanted.clear()
         self._change()
         return at, due
 
     def pause_left(self, app: str, now: float) -> float:
         """The seconds a pause still holds the turn of the place that has waited longest, when it is at ``app``."""
-        return pause_left(self._turns, app, now)
+        return pause_left(self._turns, app, now, self.spoken)
+
+    def voice_at(self, app: str, *, voice: bool) -> None:
+        """Records whether the turns at the call places of ``app`` are spoken, as its loop decided for its session."""
+        self._voice_apps = self._voice_apps | {app} if voice else self._voice_apps - {app}
+
+    def speaks(self, at: AppPlace, occasion: Occasion) -> bool:
+        """Whether a turn at the place for ``occasion`` would be spoken."""
+        return speaks_aloud(at.app in self._voice_apps, occasion, self._checkpoints.get(at))
+
+    def spoken(self, at: AppPlace, due: Due) -> bool:
+        """Whether the turn of the due place would be spoken."""
+        return self.speaks(at, due.occasion)
+
+    def _ask_for_a_cut(self) -> None:
+        """A running written turn that has not given way yet is to end at its next safe point once a spoken place is
+        due."""
+        if self._claim is not None and yields_to_spoken(self._turns, self._claim, self.spoken):
+            self._cut_wanted.set()
+
+    def cut_wanted(self) -> asyncio.Event:
+        """The event set while the running written turn is to end at its next safe point for a spoken place that is
+        due; the turn's claim and its release clear it."""
+        return self._cut_wanted
 
     def stopping(self) -> None:
         """This pod stops serving him; a SIGKILL never gets here."""
@@ -418,10 +456,18 @@ class Mind:
             self._turns = turns
             self._change()
 
+    def cut_for_spoken(self) -> None:
+        """The running written turn ended at a safe point for a spoken place: its place is due again for what it was
+        for, after the spoken places."""
+        assert self._claim is not None  # noqa: S101 - a turn runs only from its claim until its release
+        self._turns = cut_for_spoken(self._turns, self._claim)
+        self._change()
+
     def release(self) -> None:
         """The running turn ended: every loop of his may claim now."""
         self._turns = released(self._turns)
         self._claim = None
+        self._cut_wanted.clear()
         self.wake()
 
     def wake(self) -> None:

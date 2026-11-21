@@ -40,7 +40,6 @@ from personas.decision import (
     reaction_to,
     renewal_due,
     revisions_after_turn,
-    speaks_aloud,
     sync_turned_revisions,
     turn_ending,
     turn_invalid,
@@ -133,6 +132,9 @@ class ActiveTurn:
     revision: int | None
     """The view revision the turn was started for; none for a turn that came from lines."""
     cancel_requested: bool = False
+    yielded: bool = False
+    """The loop ended the turn at a safe point for a spoken place."""
+    watcher: asyncio.Task[None] | None = None
 
 
 class AgentLoop:
@@ -196,7 +198,6 @@ class AgentLoop:
         self._senders: dict[PlaceRef, asyncio.Task[None]] = {}
         self._pause_wake: asyncio.Task[None] | None = None
         self._turn_ended = mind.wake_event()
-        self._voice_app = False
         persona, backend = agent.persona, boundaries.backend
         self._turn_setup = (
             None if persona is None or app.max_tool_calls is None or backend is None else TurnSetup(persona, backend)
@@ -223,7 +224,7 @@ class AgentLoop:
             turns.create_task(self._turn_states.state_each(session))
             try:
                 self._turning.new_session()
-                self._voice_app = await self._is_voice_app(session)
+                self._mind.voice_at(self._app.mcp_url, voice=await self._is_voice_app(session))
                 while True:
                     await self._use_current_token(session)
                     async with session.changes() as changes, aclosing(self._wakes(changes)) as wakes:
@@ -455,7 +456,7 @@ class AgentLoop:
         occasion = due.occasion
         if isinstance(occasion, Waiting):
             self._turned_revisions[at.place] = occasion.revision
-        aloud = speaks_aloud(self._voice_app, occasion, self._mind.checkpoint(at))
+        aloud = self._mind.speaks(at, occasion)
         apps = self._mind.held_apps(self._app.mcp_url)
         held = self._mind.hold_to_tell(at)
         if aloud:
@@ -496,7 +497,7 @@ class AgentLoop:
 
     def _report_fell_due(self, at: AppPlace, occasion: Occasion, kind: DueOccasion, began: float) -> None:
         """Writes that the pass made ``at`` due, in the occasion's trace when it carries one; a hold has none."""
-        spoken = speaks_aloud(self._voice_app, occasion, self._mind.checkpoint(at))
+        spoken = self._mind.speaks(at, occasion)
         read_ms = round((self._boundaries.clock.now() - began) * 1000)
         with nullcontext() if occasion.traceparent is None else unit_trace(occasion.traceparent):
             report_fell_due(self._agent.client_id, self._app.mcp_url, kind, spoken=spoken, read_ms=read_ms)
@@ -528,8 +529,14 @@ class AgentLoop:
             record = TaskRecord()
             task = turns.create_task(self._take_once_kept(claimed, session, setup, admitted, record, tally))
             occasion = admitted.occasion
+            watcher = turns.create_task(self._yield_when_a_spoken_place_is_due(task))
             self._turn = ActiveTurn(
-                task, place, tally, record, occasion.revision if isinstance(occasion, Waiting) else None
+                task,
+                place,
+                tally,
+                record,
+                occasion.revision if isinstance(occasion, Waiting) else None,
+                watcher=watcher,
             )
             task.add_done_callback(partial(self._turn_over, session))
 
@@ -560,11 +567,25 @@ class AgentLoop:
         with stepping(step_timer("thinking.ended", self._agent.client_id, self._app.mcp_url)):
             await self._turn_states.turn_started(place)
 
+    async def _yield_when_a_spoken_place_is_due(self, task: asyncio.Task[None]) -> None:
+        """The running written turn ends at its next safe point once a spoken place is due: at once while the model
+        thinks, else once the call in flight has answered or ended and entered his history. It ends with the turn."""
+        await self._mind.cut_wanted().wait()
+        self._turning.at_safe_point(partial(self._yield_turn, task))
+
+    def _yield_turn(self, task: asyncio.Task[None]) -> None:
+        turn = self._turn
+        if turn is not None and turn.task is task and not task.done():
+            self._turn = replace(turn, yielded=True)
+            task.cancel()
+
     def _turn_over(self, session: AppSession, task: asyncio.Task[None]) -> None:
         """The one writer of ``turn.ended``, whatever way the task ended. A view revision whose turn read its tool list
         before a tools notice that came before the turn ended is not turned yet."""
         turn, self._turn = self._turn, None
         assert turn is not None  # noqa: S101 - the loop clears its turn only here and once per task
+        if turn.watcher is not None:
+            turn.watcher.cancel()
         cancelled = task.cancelled()
         tally = turn.tally
         ending = turn_ending(
@@ -573,13 +594,16 @@ class AgentLoop:
             stop_code=tally.stop_code,
             answered=tally.answered,
         )
+        tally.cut_for_spoken = turn.yielded and cancelled and not tally.answered
         tally.end(ending)
         self._turned_revisions = revisions_after_turn(
             self._turned_revisions, turn.place, turn.revision, turn.record.tools_notices_read, session.tools_notices()
         )
         self._turn_states.turn_ended(turn.place, ending)
         self._mind.hold_turn_ended(AppPlace(self._app.mcp_url, turn.place))
-        if cancelled and not tally.answered and not turn.cancel_requested:
+        if tally.cut_for_spoken:
+            self._mind.cut_for_spoken()
+        elif cancelled and not tally.answered and not turn.cancel_requested:
             self._mind.cut()
         self._mind.release()
 

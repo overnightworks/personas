@@ -66,9 +66,9 @@ moment is read on the monotonic scale of the clock boundary (`Clock.now` in `clo
 the earliest through a join or a replacement. (LOG-27)
 
 A `turn_wait.ended` names in `wait_reason` what first stood directly in front of the place once its wait
-began: `older_due` for an older due place of his, else `turn_here` for his running turn at the place's app or
-`turn_elsewhere` for one at another app, else `paused` for a pause of his turns; `none` when its turn could
-start at once. It is the first reason, not the longest: a loop reads it only when it tries to claim a turn,
+began: `older_due` for a due place of his that is claimed before it, else `turn_here` for his running turn at the
+place's app or `turn_elsewhere` for one at another app, else `paused` for a pause of his turns; `none` when its
+turn could start at once. It is the first reason, not the longest: a loop reads it only when it tries to claim a turn,
 so what holds the place between two tries is not measured. A join keeps the reason; a place a pod resumes
 starts with none. (LOG-32)
 
@@ -91,6 +91,8 @@ name. (LOG-37)
   it), and an `outcome`: `ok` for an answer, `refused` by the gateway,
   `failed` at level error, `cancelled`. `refused` and `failed` carry a `reason`: the gateway's code, the
   reason of the failed call, `defect`, `limit_exceeded` or `no_final_event`. (LOG-28)
+- A written turn that ended at a safe point for a spoken place (TURNS-48) is `cancelled` and carries `cut`
+  with the value `spoken`; no other turn carries `cut`. (LOG-38)
 - `sentence_count` (released by the turn's reply, whether sent or not), `first_output_ms` (absent when none
   was released), `silent_count` (rounds that opened with `[silent]`) and `tool_call_count`. (LOG-29)
 - Of a turn that sent a model request, its input bytes: `tools_bytes`, `told_bytes`, `results_bytes` and

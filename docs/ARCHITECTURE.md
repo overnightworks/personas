@@ -51,7 +51,7 @@ flowchart LR
   `turn_states.py` states what his turns at each place do on its session, and on one of its own while the
   loop waits to retry or he stops.
 - **The mind** (`mind.py`) holds one agent's present in memory: his history, the answered turns it tells,
-  his due places, his pause, one turn at a time across all his apps, and per place a speech record, in
+  his due places in the order they are claimed, his pause, one turn at a time across all his apps, and per place a speech record, in
   memory only: the request in flight, the sentences released and not yet sent, each with its turn's time bound, the
   sentence that plays, the hold that stands there with what was said over him and whether a turn was told it, and
   the id of the hold decided last. A turn's `Speaking` (`voice.py`) releases its sentences into it; the record

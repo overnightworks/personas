@@ -30,6 +30,8 @@ if TYPE_CHECKING:
     from personas.failures import CallFailure
 
 _LOG: Final = logging.getLogger("personas")
+CUT_FOR_SPOKEN: Final = "spoken"
+"""The value of the ``cut`` field of a ``turn.ended`` line of a written turn that ended for a spoken place."""
 
 # The mcp client logs "Error parsing SSE message" at ERROR when its stream closes under a request, which a recovered
 # blip does too; the library's own comment names that case as no parse failure. The loop reports the failure itself
@@ -196,7 +198,8 @@ class TurnTally:
 
     A sentence counts when the turn's reply releases it, whether it is ever sent or not, and the first one marks the
     timer's first output. A silent round counts when its marker is read, a tool call when the model makes it.
-    ``stop_code`` is the code of a stop the turn reported itself; ``answered`` says its final event came.
+    ``stop_code`` is the code of a stop the turn reported itself; ``answered`` says its final event came;
+    ``cut_for_spoken`` says the loop ended it at a safe point for a spoken place.
     """
 
     timer: StepTimer
@@ -207,6 +210,7 @@ class TurnTally:
     sizes: InputSizes | None = None
     stop_code: str | None = None
     answered: bool = False
+    cut_for_spoken: bool = False
 
     def sentence_released(self) -> None:
         self.sentence_count += 1
@@ -242,6 +246,8 @@ class TurnTally:
                 self.timer.fail(_reason_of(ending))
                 self.timer.end()
             case _:  # Outcome.CANCELLED, the last outcome
+                if self.cut_for_spoken:
+                    self.timer.add(cut=CUT_FOR_SPOKEN)
                 self.timer.end_cancelled()
 
 
