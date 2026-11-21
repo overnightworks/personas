@@ -9,7 +9,14 @@ from datetime import UTC, datetime
 import pytest
 from agents.member import PlaceRef, PlaceView
 
-from personas.decision import BACKOFF_BASE_SECONDS, BACKOFF_CAP_SECONDS, TURN_CANCELLED_CODE, AppPlace
+from personas.decision import (
+    BACKOFF_BASE_SECONDS,
+    BACKOFF_CAP_SECONDS,
+    TURN_CANCELLED_CODE,
+    AppPlace,
+    Joined,
+    Paused,
+)
 from personas.entries import (
     ActDone,
     Entry,
@@ -545,3 +552,16 @@ def test_a_place_becomes_due_once_however_often_it_is_made_due_and_again_after_i
     assert _claimed(mind, CALL_AT_B.app, NOW) is not None
     mind.release()
     assert mind.due_for_hold(CALL_AT_B, "generation-1", NOW) is True
+
+
+def test_an_active_window_place_in_another_app_counts_as_held_elsewhere_and_a_paused_one_does_not():
+    """TURNS-1"""
+    mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
+    mind.move_checkpoint(AppPlace(OTHER_CALL.app, OTHER_CALL.place), Joined())
+
+    assert mind.holds_active_window_elsewhere(CALL.app)
+    assert not mind.holds_active_window_elsewhere(OTHER_CALL.app)
+
+    mind.move_checkpoint(AppPlace(OTHER_CALL.app, OTHER_CALL.place), Paused())
+
+    assert not mind.holds_active_window_elsewhere(CALL.app)

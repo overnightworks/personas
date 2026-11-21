@@ -115,8 +115,8 @@ async def test_a_token_is_renewed_before_it_expires_and_never_sent_expired(scena
 
 
 async def test_an_accept_never_carries_a_bearer_that_expired_while_the_read_and_earlier_accepts_ran(scenario):
-    invitations = [invited(f"room-{n}", f"inv-{n}") for n in range(3)]
-    run = scenario([read_of(*invitations)], seconds_per_accept=150.0)
+    reads = [read_of(invited(f"room-{n}", f"inv-{n}")) for n in range(3)]
+    run = scenario(reads, seconds_per_accept=150.0)
 
     await run.play()
 

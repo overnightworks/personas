@@ -364,7 +364,8 @@ class AgentLoop:
         self._memory, left_out = left_out_for(standings, self._memory, takes_turns=takes_turns)
         for standing in left_out:
             self._report(Event.INVITATION_LEFT_OUT, NO_TURNS_CODE, place_kind=standing.place.kind)
-        self._memory, declines = declines_for(standings, self._memory)
+        held_elsewhere = self._mind.holds_active_window_elsewhere(self._app.mcp_url)
+        self._memory, declines = declines_for(standings, self._memory, held_elsewhere=held_elsewhere)
         for decline in declines:
             await self._use_current_token(session)
             await session.decline(decline)
@@ -373,6 +374,7 @@ class AgentLoop:
             standings,
             self._memory,
             takes_turns=takes_turns,
+            held_elsewhere=held_elsewhere,
             figure=self._agent.figure,
             voices=() if voice is None else voice.names,
         ):

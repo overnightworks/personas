@@ -164,12 +164,21 @@ def _has_window(standing: Standing) -> bool:
     return standing.place.kind == CALL_PLACE_KIND or standing.serves_view
 
 
-def _busy(standings: tuple[Standing, ...], standing: Standing) -> bool:
-    """A call invitation while the agent holds an active place other than the invited one; a table or tool reached
-    from the call is not a call place and stays accepted."""
-    return _is_call(standing) and any(
+def _busy(standings: tuple[Standing, ...], standing: Standing, memory: Memory, *, held_elsewhere: bool) -> bool:
+    """A call invitation while the agent holds an active place other than the invited one, in this app or, as
+    ``held_elsewhere`` says, in another, or while an earlier call invitation of this read is the one to accept; a table
+    or tool reached from the call is not a call place and stays accepted."""
+    if not _is_call(standing):
+        return False
+    if held_elsewhere or any(
         other.state is StandingState.ACTIVE and other.place != standing.place for other in standings
+    ):
+        return True
+    first = next(
+        (other for other, invitation in _invited(standings) if _is_call(other) and invitation.id not in memory.stale),
+        None,
     )
+    return first is not None and first.place != standing.place
 
 
 def _accepted(standing: Standing, *, takes_turns: bool) -> bool:
@@ -194,29 +203,33 @@ def accepts_for(
     memory: Memory,
     *,
     takes_turns: bool,
+    held_elsewhere: bool = False,
     figure: FigureRef | None = None,
     voices: tuple[VoiceName, ...] = (),
 ) -> tuple[Accept, ...]:
     """One accept for each invited call standing whose invitation was not refused as stale, and, where the loop can
     take turns, for each other invited place, whether or not it serves a view yet: a seated agent that cannot act
     leaves the place waiting. Every accept brings the agent's figure and, in his order, the names of his voices, if he
-    has them."""
+    has them. At most one call is accepted, the first the standing lists; the others are declined busy, as is every call
+    while ``held_elsewhere`` says the agent holds an active place in another app."""
     return tuple(
         Accept(standing.place, invitation.id, invitation.epoch, figure, voices)
         for standing, invitation in _invited(standings)
         if _accepted(standing, takes_turns=takes_turns)
         and invitation.id not in memory.stale
-        and not _busy(standings, standing)
+        and not _busy(standings, standing, memory, held_elsewhere=held_elsewhere)
     )
 
 
-def declines_for(standings: tuple[Standing, ...], memory: Memory) -> tuple[Memory, tuple[Decline, ...]]:
+def declines_for(
+    standings: tuple[Standing, ...], memory: Memory, *, held_elsewhere: bool = False
+) -> tuple[Memory, tuple[Decline, ...]]:
     """One decline, once, for each invitation to a call while the agent holds an active place, and the memory that
     holds them declined: the inviter learns he is busy and invites again once the agent is free."""
     news = tuple(
         Decline(standing.place, invitation.id, invitation.epoch)
         for standing, invitation in _invited(standings)
-        if _busy(standings, standing) and invitation.id not in memory.declined
+        if _busy(standings, standing, memory, held_elsewhere=held_elsewhere) and invitation.id not in memory.declined
     )
     return replace(memory, declined=memory.declined | {decline.invitation_id for decline in news}), news
 

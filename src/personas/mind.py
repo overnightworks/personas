@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from personas.decision import (
     AppPlace,
+    Paused,
     backoff_delay,
     budget_pause,
     held_apps,
@@ -294,6 +295,10 @@ class Mind:
         else:
             moved[at] = checkpoint
         self._set_checkpoints(moved)
+
+    def holds_active_window_elsewhere(self, app: str) -> bool:
+        """Whether he holds an active window place in an app other than ``app``: a paused place is not active."""
+        return any(at.app != app and not isinstance(checkpoint, Paused) for at, checkpoint in self._checkpoints.items())
 
     def sync_checkpoints(self, app: str, standings: tuple[Standing, ...], before: tuple[Standing, ...]) -> None:
         """Keeps the checkpoints of ``app``'s places in line with a standing read there, given the one read before."""

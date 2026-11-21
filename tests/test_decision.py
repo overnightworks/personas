@@ -154,6 +154,26 @@ def test_a_call_invitation_while_another_place_is_active_is_declined_busy_and_no
     assert all(decline.reason is DeclineInvitationReason.BUSY for decline in declines)
 
 
+def test_only_the_first_of_two_call_invitations_is_accepted_and_the_other_declined_busy():
+    """TURNS-1"""
+    standings = (invited("room-7", "inv-3"), invited("room-8", "inv-4"))
+
+    _, declines = declines_for(standings, Memory())
+
+    assert [accept.invitation_id for accept in accepts_for(standings, Memory(), takes_turns=True)] == ["inv-3"]
+    assert [decline.invitation_id for decline in declines] == ["inv-4"]
+
+
+def test_a_call_invitation_while_an_active_place_is_held_in_another_app_is_declined_busy_and_not_accepted():
+    """TURNS-1"""
+    standings = (invited("room-7", "inv-3"),)
+
+    _, declines = declines_for(standings, Memory(), held_elsewhere=True)
+
+    assert accepts_for(standings, Memory(), takes_turns=True, held_elsewhere=True) == ()
+    assert [decline.invitation_id for decline in declines] == ["inv-3"]
+
+
 def test_a_decline_is_made_once_and_forgotten_with_its_invitation():
     standings = (active("room-1"), invited("room-7", "inv-3", epoch=2))
 
