@@ -1,7 +1,0 @@
-claim_id = "3d86f44683a44376aed83148ebae6b19"
-agent = "Claude d32028b7-a7a0-48ff-8c29-65b317313c7d"
-role = "builder"
-base = "d8fb7ecaf72d9a3ce912e0975a10be08f69caa3f"
-branch = "claude/issue-392-kept-list-tests-share-one-stream-script"
-scope = ["tests/test_loop_tools_kept.py"]
-opened_commit = "b2977645b79cce4524799a923d21654265f32fcf"
