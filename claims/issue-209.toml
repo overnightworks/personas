@@ -1,8 +1,0 @@
-claim_id = "70f44f0d2e874f17b5eecc47c1398ee9"
-agent = "Claude be7c4026-fca6-4c5a-a1e5-ae2afe22d493"
-role = "builder"
-base = "9d5dfd8aa641d77e1f1aa7b7593db5866bf02bc8"
-branch = "claude/issue-209-rooms-published-and-sent"
-scope = [".github/workflows/release.yml", "README.md", "docs/configuration.md", "docs/log.md", "docs/runbooks/release.md", "scripts/figure_release_notes.sh", "src/personas/app_session.py", "src/personas/config.py", "src/personas/decision.py", "src/personas/loop.py", "tests/scripts/test_figure_release_notes.py", "tests/support/hopin.py", "tests/test_app_session.py", "tests/test_app_session_left_out.py", "tests/test_config.py", "tests/test_loop_figure.py"]
-opened_commit = "41375fb086d7646cb153fa02988ca55dd42880f7"
-whole_reason = "Publishing the rooms, naming them in the notes and sending the room at accept are one release step of the room."
