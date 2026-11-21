@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+from http import HTTPStatus
 
 import pytest
 from agents.member import (
@@ -12,11 +13,13 @@ from agents.member import (
     FigureRef,
     SetTurnStateArguments,
 )
+from mcp_types import INTERNAL_ERROR
 
-from personas.decision import Accept
+from personas.decision import Accept, jsonrpc_code
+from personas.failures import UnusableAnswer
 from personas.secret import Secret
 from tests.support.app_session import opened, served
-from tests.support.hopin import FakeApp
+from tests.support.hopin import LIST_TOOLS, FakeApp
 from tests.support.logs import configure_logging_into, fields_of
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 
@@ -86,3 +89,18 @@ async def test_optional_arguments_an_app_declares_are_sent_and_logged_as_none(ap
     assert sent["figure"]["url"] == figure.url
     assert app.speak_styles == ["calm"]
     assert left_out_events(caplog) == []
+
+
+async def test_an_accept_on_a_cold_session_fails_with_the_failure_of_the_apps_tools_list(app, bearer, place):
+    async def refuses_the_list(reply):
+        await reply.error(INTERNAL_ERROR, status=HTTPStatus.OK)
+
+    app.script(LIST_TOOLS, refuses_the_list)
+    figure = FigureRef(url="https://figures.test/figure.glb", sha256=secrets.token_hex(32))
+
+    async with opened(app, bearer) as session:
+        with pytest.raises(UnusableAnswer) as failure:
+            await session.accept(Accept(place, "inv-3", 2, figure, ()))
+
+    assert failure.value.code == jsonrpc_code(INTERNAL_ERROR)
+    assert app.accepted_on_the_wire == []
