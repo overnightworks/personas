@@ -1,0 +1,8 @@
+claim_id = "723a4a651b8a433ca866f1499e06af22"
+agent = "Claude d32028b7-a7a0-48ff-8c29-65b317313c7d"
+role = "builder"
+base = "4f934d82bc42a80b9041a2c4d6747a384744a94b"
+branch = "claude/issue-223-spoken-place-not-held-by-written-turns"
+scope = ["docs/log.md", "docs/turns.md", "src/personas/decision.py", "src/personas/due.py", "src/personas/loop.py", "src/personas/mind.py", "src/personas/turning.py", "tests/test_due.py", "tests/test_loop_turns.py", "tests/test_mind.py"]
+opened_commit = "0c75638a65566d0d16b64e16d020c1c55aa1321f"
+whole_reason = "Which due place is claimed first and when a running written turn yields are one rule that the claim order, the mind, the turn, the loop and their references and tests carry together."
