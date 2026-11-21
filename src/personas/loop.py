@@ -131,10 +131,11 @@ class ActiveTurn:
     record: TaskRecord
     revision: int | None
     """The view revision the turn was started for; none for a turn that came from lines."""
+    watcher: asyncio.Task[None]
+    """The task that ends the turn for a spoken place once one is due."""
     cancel_requested: bool = False
     yielded: bool = False
     """The loop ended the turn at a safe point for a spoken place."""
-    watcher: asyncio.Task[None] | None = None
 
 
 class AgentLoop:
@@ -584,8 +585,7 @@ class AgentLoop:
         before a tools notice that came before the turn ended is not turned yet."""
         turn, self._turn = self._turn, None
         assert turn is not None  # noqa: S101 - the loop clears its turn only here and once per task
-        if turn.watcher is not None:
-            turn.watcher.cancel()
+        turn.watcher.cancel()
         cancelled = task.cancelled()
         tally = turn.tally
         ending = turn_ending(

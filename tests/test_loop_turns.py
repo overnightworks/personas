@@ -683,6 +683,27 @@ async def test_a_table_turn_with_a_call_in_flight_is_cut_once_the_call_answered_
     assert (act["tool"], act["outcome"]["answered"]) == (SAY_TOOL, True)
 
 
+async def test_a_table_turn_whose_table_left_with_a_call_in_flight_ends_cancelled_without_a_spoken_cut(
+    runner, caplog
+):
+    """TURNS-48."""
+    runner.app.hold_next_say()
+    await in_a_voice_call_and_at_a_table(
+        runner,
+        tool_round(tool_call("play-1", SAY_TOOL, {"place": TABLE.id, "text": "Jack of hearts"})),
+        completion(ANSWER),
+    )
+    waits(runner.app, 1)
+    await runner.app.until_called(1)
+    await said_and_taken(runner.app, PLACE_ID, "Anyone there?")
+
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    await runner.app.spoken_count(1)
+    await runner.reports.until_a_turn_completed(count=1)
+
+    assert turn_endings(caplog)[0] == ("cancelled", None)
+
+
 async def test_a_spoken_turn_that_does_what_the_cut_table_turn_was_for_leaves_the_table_no_turn_after_it(runner):
     """TURNS-48."""
     runner.app.says_move_the_view = True
