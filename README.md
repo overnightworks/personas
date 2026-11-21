@@ -33,7 +33,8 @@ What the runner keeps in Postgres, for how long and what a restart or a takeover
 Each agent's character is its agent file `src/characters/<name>.md`, which the image holds at
 `/app/characters/<name>.md`, so a character changes with a release. Its figure `<name>.vrm` and its room
 `<name>.room.glb` are described in [the architecture](docs/ARCHITECTURE.md), Building Block View. An
-agent's `[agents.figure]` table names the released figure that every accept carries.
+agent's `[agents.figure]` and `[agents.room]` tables name the released figure and room that every accept carries; a
+release publishes both beside each other.
 
 ## Release it
 
