@@ -1,0 +1,8 @@
+claim_id = "38982e0ff78244689ee0af599916e925"
+agent = "Claude be7c4026-fca6-4c5a-a1e5-ae2afe22d493"
+role = "builder"
+base = "c7ebade6838b08f3002b3343efdf0febe9d58760"
+branch = "claude/issue-404-the-runner-reads-an-app-s-standing-windo"
+scope = ["docs/runbooks/release.md", "pyproject.toml", "src/personas/app_session.py", "tests/test_app_session.py", "tests/test_app_session_left_out.py", "uv.lock"]
+opened_commit = "67c327a6e2ddae74f77ff4c199782133e8c2a536"
+whole_reason = "The bump and the one reader it brings change together, with the runbook line that lets apps rely on it."
