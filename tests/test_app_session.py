@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import copy
+import json
 import secrets
 import subprocess
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from http import HTTPStatus
+from typing import TYPE_CHECKING
 
 import anyio
 import pytest
@@ -24,9 +28,11 @@ from agents.member import (
     ContinueSpeakingRefusal,
     ContinueSpeakingRefused,
     FigureRef,
+    MemberStanding,
     PartialSpeech,
     PlaceEntry,
     PlaceRef,
+    PlaceView,
     PlaceWindow,
     SpeakRefusal,
     SpeakRefused,
@@ -71,12 +77,15 @@ from tests.support.logs import configure_logging_into, formatted
 from tests.support.loopback import serving
 from tests.support.pictures import a_picture, base64_of
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
-from tests.support.standings import active, invited
+from tests.support.standings import active, invited, line, window_of
 from tests.support.transport import (
     transport_closing_with_late_answers,
     transport_closing_with_leaves,
     transport_whose_close_loses_a_child,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 pytestmark = pytest.mark.anyio
 
@@ -932,6 +941,71 @@ async def test_a_view_that_is_no_view_is_an_unusable_answer(app, bearer, table):
     async with opened(app, bearer) as session:
         with pytest.raises(UnusableAnswer) as failure:
             await session.read_view(table)
+
+    assert failure.value.code == INVALID_ANSWER_CODE
+
+
+@dataclass(frozen=True)
+class ResourceCase:
+    """One resource record: the document an app shows, where a known field and a nested record sit, and its read."""
+
+    document: dict
+    known_field: tuple[str, ...]
+    nested: tuple[str, ...]
+    read: Callable
+
+
+def _read_standing(session, _place):
+    return session.read_standing()
+
+
+@pytest.fixture(params=["standing", "window", "view"])
+def resource(request, app, table):
+    """The resource of one kind, served by the app as a document the test edits before it answers."""
+    app.stand(SUBJECT, active(table.id, table.kind, serves_view=True))
+    if request.param == "standing":
+        document = MemberStanding(standings=(active(table.id, table.kind),)).model_dump(mode="json")
+        return ResourceCase(document, ("standings", "0", "state"), ("standings", "0"), _read_standing)
+    if request.param == "window":
+        document = window_of(line(1, "hello")).model_dump(mode="json")
+        return ResourceCase(document, ("entries", "0", "seq"), ("entries", "0"), lambda s, place: s.read_place(place))
+    document = PlaceView(revision=3, awaits_you=True, state={"hand": [1]}).model_dump(mode="json")
+    return ResourceCase(document, ("revision",), (), lambda s, place: s.read_view(place))
+
+
+def _at(document, path):
+    for step in path:
+        document = document[int(step) if step.isdigit() else step]
+    return document
+
+
+async def reads_the_document(app, bearer, resource, table, document):
+    async def shows(reply):
+        contents = TextResourceContents(uri="member://x", text=json.dumps(document), mime_type="application/json")
+        await reply.result(ReadResourceResult(contents=[contents], ttl_ms=0, cache_scope="private"))
+
+    app.script(READ, shows)
+    async with opened(app, bearer) as session:
+        return await resource.read(session, table)
+
+
+async def test_a_record_with_keys_this_release_does_not_know_at_any_depth_is_read_as_before(
+    app, bearer, resource, table
+):
+    expected = await reads_the_document(app, bearer, resource, table, resource.document)
+    served = copy.deepcopy(resource.document)
+    _at(served, resource.nested)["added_by_the_app"] = {"deeper": [1]}
+    served["added_by_the_app"] = "top"
+
+    assert await reads_the_document(app, bearer, resource, table, served) == expected
+
+
+async def test_a_record_with_a_wrong_known_field_is_an_unusable_answer(app, bearer, resource, table):
+    served = copy.deepcopy(resource.document)
+    _at(served, resource.known_field[:-1])[resource.known_field[-1]] = ["not", "valid"]
+
+    with pytest.raises(UnusableAnswer) as failure:
+        await reads_the_document(app, bearer, resource, table, served)
 
     assert failure.value.code == INVALID_ANSWER_CODE
 

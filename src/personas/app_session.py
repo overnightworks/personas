@@ -36,6 +36,7 @@ from agents.member import (
     SpeakRefused,
     StopSpeakingRefusal,
     StopSpeakingRefused,
+    member_resource_from_json,
     place_view_uri,
     place_window_uri,
 )
@@ -484,7 +485,7 @@ async def _wakes_of(
 def _record_of[Record: BaseModel](record: type[Record], result: ReadResourceResult) -> Record:
     text = "".join(block.text for block in result.contents if isinstance(block, TextResourceContents))
     try:
-        return record.model_validate_json(text)
+        return member_resource_from_json(record, text)
     except ValidationError:
         raise UnusableAnswer(INVALID_ANSWER_CODE) from None
 
