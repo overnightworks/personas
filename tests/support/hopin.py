@@ -8,6 +8,7 @@ Its places live in ``hopin_places`` and its voice in ``hopin_voice``.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import secrets
 from collections import defaultdict
@@ -41,7 +42,7 @@ from agents.member import (
     place_view_uri,
     place_window_uri,
 )
-from agents.tools import ToolDeclaration, ToolEffect, ToolOutcome
+from agents.tools import ToolDeclaration, ToolEffect, ToolOutcome, tool_parameters
 from agents.turn import JsonObject, Principal
 
 from tests.support.hopin_places import ACCEPTED_NAME, ISSUER
@@ -85,9 +86,20 @@ _SAY_DECLARATION = ToolDeclaration(
 _ACCEPT_DECLARATION = ToolDeclaration(
     name=ACCEPT_INVITATION_TOOL,
     description="Joins the place an invitation is for.",
-    parameters=AcceptInvitationArguments.model_json_schema(),
+    parameters=tool_parameters(AcceptInvitationArguments),
     effect=ToolEffect.SIDE_EFFECTING,
 )
+
+
+def _drop_property(schema: object, name: str) -> None:
+    """Removes the property ``name`` from every object schema inside ``schema``."""
+    if isinstance(schema, dict):
+        schema.get("properties", {}).pop(name, None)
+        for value in schema.values():
+            _drop_property(value, name)
+    elif isinstance(schema, list):
+        for value in schema:
+            _drop_property(value, name)
 
 
 def a_traceparent() -> str:
@@ -201,7 +213,8 @@ class FakeApp(AppVoice):
     """The declared tools the app does not offer now."""
     held_offer: asyncio.Event | None = None
     undeclared_arguments: frozenset[str] = frozenset()
-    """The arguments no declared tool of the app names, as an app that predates them."""
+    """The arguments no declared tool of the app names, as an app that predates them; ``looks[].room`` is the ``room``
+    of each entry of ``looks``."""
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -235,9 +248,14 @@ class FakeApp(AppVoice):
         return [self._without_undeclared(tool) for tool in self._all_tools()]
 
     def _without_undeclared(self, tool: PersonTool) -> PersonTool:
-        properties = tool.declaration.parameters.get("properties", {})
-        declared = {name: each for name, each in properties.items() if name not in self.undeclared_arguments}
-        parameters = tool.declaration.parameters | {"properties": declared}
+        parameters = copy.deepcopy(tool.declaration.parameters)
+        properties = parameters.get("properties", {})
+        for path in self.undeclared_arguments:
+            name, _, nested = path.partition("[].")
+            if nested:
+                _drop_property(properties.get(name), nested)
+            else:
+                properties.pop(name, None)
         return PersonTool(tool.declaration.model_copy(update={"parameters": parameters}), tool.handler)
 
     def _all_tools(self) -> list[PersonTool]:

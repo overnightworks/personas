@@ -54,7 +54,7 @@ from personas.recall import RECALL_TOOL
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
-    from agents.member import FigureRef, Invitation, VoiceName
+    from agents.member import FigureRef, HttpsFileRef, Invitation, VoiceName
     from agents.tools import ToolDeclaration, ToolOutcome
     from agents.turn import AgentRole
 
@@ -124,6 +124,7 @@ class Accept:
     epoch: int
     figure: FigureRef | None = field(default=None, repr=False)
     voices: tuple[VoiceName, ...] = field(default=(), repr=False)
+    room: HttpsFileRef | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -176,13 +177,14 @@ def accepts_for(
     takes_turns: bool,
     figure: FigureRef | None = None,
     voices: tuple[VoiceName, ...] = (),
+    room: HttpsFileRef | None = None,
 ) -> tuple[Accept, ...]:
     """One accept for each invited call standing whose invitation was not refused as stale, and, where the loop can
     take turns, for each other invited place, whether or not it serves a view yet: a seated agent that cannot act
-    leaves the place waiting. Every accept brings the agent's figure and, in his order, the names of his voices, if he
-    has them."""
+    leaves the place waiting. Every accept brings the agent's figure and room and, in his order, the names of his
+    voices, if he has them."""
     return tuple(
-        Accept(standing.place, invitation.id, invitation.epoch, figure, voices)
+        Accept(standing.place, invitation.id, invitation.epoch, figure, voices, room)
         for standing, invitation in _invited(standings)
         if _accepted(standing, takes_turns=takes_turns) and invitation.id not in memory.stale
     )

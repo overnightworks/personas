@@ -41,6 +41,7 @@ come and go last. An app with `max_tool_calls` requires `[gateway]` and a `perso
 | `model` | `text/<model>` | the agent file's | the gateway model his turns run on; needs `persona_file` (CONFIG-16) |
 | `hold_model` | `text/<model>` | the agent's model | the model of the round or turn that decides a hold; needs `persona_file` (CONFIG-17) |
 | `[agents.figure]` | `url` (absolute `https`, no user, query or fragment), `sha256` (64 lowercase hex) | none | carried by every accept; an app that shows figures and allows the address shows him with it (CONFIG-18) |
+| `[agents.room]` | `url`, `sha256` as `[agents.figure]`; needs `[agents.figure]` | none | the agent's own room, drawn behind his figure; every accept carries it as the `room` of his figure's look, beside the `figure`, and an app that does not declare `looks` or `looks[].room` gets the accept without it (CONFIG-18) |
 | `[agents.voice]` | table, optional `names`: 1 to 8 distinct voice ids, first choice first | none | turns spoken turns on; every accept carries `names` as `voices` (CONFIG-19) |
 
 The agent file names no tools and no call bound, offers the role `user`, and has no `voice` section. The

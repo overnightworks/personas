@@ -2,7 +2,8 @@
 
 The file holds the realm's token endpoint, the ready file's path, the apps (an MCP URL and its scope) and the agents
 (a client id and the path of the file holding its client secret, and optionally the ``figure`` table, a ``url`` and
-a ``sha256``, that every accept of the agent carries, and the ``voice`` table, which turns the agent's spoken turns on
+a ``sha256``, that every accept of the agent carries, the ``room`` table of the same fields, the agent's own room, which
+every accept carries beside its figure, and the ``voice`` table, which turns the agent's spoken turns on
 and may name, in ``names``, an ordered list of the speech service's voices that every accept of the agent carries
 as it stands, first choice first). Which apps an agent may reach
 is the realm's group membership, never this file, and what an agent may do in an app is the app's, through the tools
@@ -45,7 +46,7 @@ from typing import TYPE_CHECKING, Final, Self, cast
 
 from agents.agent_file import AgentDefinition, AgentFileError, load_agent
 from agents.config import AgentConfig  # noqa: TC002 - pydantic resolves the field's type at run time
-from agents.member import FigureRef, VoiceName, Voices  # noqa: TC002 - pydantic resolves the fields' types at run time
+from agents.member import FigureRef, HttpsFileRef, VoiceName, Voices  # noqa: TC002 - pydantic resolves the fields' types at run time
 from agents.turn import GatewayModelName, ModelKind, model_kind_of
 from pydantic import (
     AnyHttpUrl,
@@ -115,6 +116,7 @@ class AgentCredentials:
     hold_model: GatewayModelName | None = None
     figure: FigureRef | None = field(default=None, repr=False)
     voice: Voice | None = field(default=None, repr=False)
+    room: HttpsFileRef | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -263,6 +265,7 @@ class _AgentEntry(_Entry):
     model: GatewayModelName | None = None
     hold_model: GatewayModelName | None = None
     figure: FigureRef | None = None
+    room: HttpsFileRef | None = None
     voice: _VoiceEntry | None = None
 
     @field_validator("model", "hold_model")
@@ -271,6 +274,10 @@ class _AgentEntry(_Entry):
         if model_kind_of(model) is not ModelKind.TEXT:
             raise ValueError(f"must start with {ModelKind.TEXT}/")
         return model
+
+    @_refusal("room: needs a figure, which it is drawn behind")
+    def _a_room_is_drawn_behind_a_figure(self) -> bool:
+        return self.room is None or self.figure is not None
 
     @_refusal("model: needs a persona_file, whose agent it names the model of")
     def _a_model_names_the_model_of_an_agent_file(self) -> bool:
@@ -491,6 +498,7 @@ def load_config(environment: Mapping[str, str]) -> Config:
                 agent.hold_model,
                 agent.figure,
                 None if agent.voice is None else Voice(agent.voice.names or ()),
+                agent.room,
             )
             for index, agent in enumerate(parsed.agents)
         ),
