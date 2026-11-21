@@ -683,9 +683,7 @@ async def test_a_table_turn_with_a_call_in_flight_is_cut_once_the_call_answered_
     assert (act["tool"], act["outcome"]["answered"]) == (SAY_TOOL, True)
 
 
-async def test_a_table_turn_whose_table_left_with_a_call_in_flight_ends_cancelled_without_a_spoken_cut(
-    runner, caplog
-):
+async def test_a_table_turn_whose_table_left_with_a_call_in_flight_ends_cancelled_without_a_spoken_cut(runner, caplog):
     """TURNS-48."""
     runner.app.hold_next_say()
     await in_a_voice_call_and_at_a_table(
