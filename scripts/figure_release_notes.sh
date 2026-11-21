@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Print the release notes' figure lines: scripts/figure_release_notes.sh <version>
+# Print the release notes' figure and room lines: scripts/figure_release_notes.sh <version>
 #
-# One line per src/characters/*.vrm in name order, ready for the runner's TOML: the address the file has in the release
-# v<version> and the sha256 of the file as checked out. The release workflow publishes those very files.
+# One line per src/characters/*.vrm and per src/characters/*.room.glb in name order, ready for the runner's TOML: the
+# address the file has in the release v<version> and the sha256 of the file as checked out. The release workflow
+# publishes those very files.
 set -euo pipefail
 shopt -s nullglob
 
@@ -16,6 +17,7 @@ version="$1"
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 figures=(src/characters/*.vrm)
+rooms=(src/characters/*.room.glb)
 # A directory without a figure is a failure, not an empty loop.
 if [[ "${#figures[@]}" -eq 0 ]]; then
     echo "no figure file under src/characters" >&2
@@ -31,3 +33,17 @@ for figure in "${figures[@]}"; do
     digest="$(sha256sum "${figure}")"
     echo "${name}: figure = { url = \"${RELEASE_URL}/v${version}/${name}.vrm\", sha256 = \"${digest%% *}\" }"
 done
+
+# A character may have no room; the lines are then none.
+if [[ "${#rooms[@]}" -gt 0 ]]; then
+    echo
+    echo "## Agent rooms"
+    echo
+    echo "Each line is an agent's \`room\` for the runner's configuration, beside its \`figure\`: paste it, without the name and its colon, into that agent's \`[[agents]]\` entry:"
+    echo
+    for room in "${rooms[@]}"; do
+        name="$(basename "${room}" .room.glb)"
+        digest="$(sha256sum "${room}")"
+        echo "${name}: room = { url = \"${RELEASE_URL}/v${version}/${name}.room.glb\", sha256 = \"${digest%% *}\" }"
+    done
+fi

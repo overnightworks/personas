@@ -54,6 +54,28 @@ async def test_the_same_agent_brings_his_figure_to_a_table_of_a_second_app(runne
     assert the_figure_sent(other) == {"url": figure.url, "sha256": figure.sha256}
 
 
+async def test_an_agent_with_a_room_brings_it_in_the_look_of_his_figure(runner):
+    figure = a_figure()
+    brings(runner, figure)
+    runner.files.text += f'[agents.room]\nurl = "https://figures.test/room.glb"\nsha256 = "{secrets.token_hex(32)}"\n'
+    runner.config = load_config(runner.files.write())
+    [agent] = runner.config.agents[:1]
+    runner.app.stand(SUBJECT, invited("room-7", "inv-3"))
+    runner.start()
+    await runner.reports.until(Event.JOINED)
+
+    [(_, arguments)] = runner.app.accepted_on_the_wire
+    assert agent.room is not None
+    assert arguments["looks"] == [
+        {
+            "kind": "figure",
+            "url": figure.url,
+            "sha256": figure.sha256,
+            "room": {"url": agent.room.url, "sha256": agent.room.sha256},
+        }
+    ]
+
+
 async def test_an_agent_without_a_figure_sends_no_figure_key(runner):
     runner.app.stand(SUBJECT, invited("room-7", "inv-3"))
     runner.start()

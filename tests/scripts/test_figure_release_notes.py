@@ -11,6 +11,7 @@ from tests.support.scripts import run_from
 SCRIPT = Path(__file__).parents[2] / "scripts" / "figure_release_notes.sh"
 VERSION = "2026.11.12.1"
 FIGURE_LINE = re.compile(r'^(?P<name>\w+): figure = \{ url = "(?P<url>[^"]+)", sha256 = "(?P<sha256>[0-9a-f]{64})" \}$')
+ROOM_LINE = re.compile(r'^(?P<name>\w+): room = \{ url = "(?P<url>[^"]+)", sha256 = "(?P<sha256>[0-9a-f]{64})" \}$')
 
 
 def tree_with(root: Path, figures: dict[str, bytes]) -> Path:
@@ -37,6 +38,31 @@ def test_the_notes_hold_one_line_per_figure_in_name_order_with_its_address_and_d
         for line in lines
         if line
     ] == [(name, True, hashlib.sha256(figures[f"{name}.vrm"]).hexdigest()) for name in ("alpha", "zeta")]
+
+
+def test_the_notes_hold_one_line_per_room_in_name_order_with_its_address_and_digest(tmp_path):
+    rooms = {"zeta.room.glb": b"the room of zeta", "alpha.room.glb": b"the room of alpha"}
+    tree = tree_with(tmp_path, {"alpha.vrm": b"the bytes of alpha"} | rooms)
+
+    result = run_from(tree, SCRIPT, VERSION)
+
+    lines = [ROOM_LINE.fullmatch(line) for line in result.stdout.splitlines() if "room =" in line]
+    assert result.returncode == 0
+    assert all(lines)
+    assert [
+        (line["name"], line["url"].endswith(f"/v{VERSION}/{line['name']}.room.glb"), line["sha256"])
+        for line in lines
+        if line
+    ] == [(name, True, hashlib.sha256(rooms[f"{name}.room.glb"]).hexdigest()) for name in ("alpha", "zeta")]
+
+
+def test_a_tree_without_a_room_file_has_no_room_line(tmp_path):
+    tree = tree_with(tmp_path, {"alpha.vrm": b"the bytes of alpha"})
+
+    result = run_from(tree, SCRIPT, VERSION)
+
+    assert result.returncode == 0
+    assert "room" not in result.stdout
 
 
 def test_the_notes_open_with_a_heading(tmp_path):

@@ -83,7 +83,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --no-install-project --no-build --no-dev
 
-      - name: Write the notes' configuration and figure lines from the files the release carries
+      - name: Write the notes' configuration, figure and room lines from the files the release carries
         id: notes
         run: |
           {
@@ -99,12 +99,12 @@ jobs:
             echo "${delimiter}"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Gather the figure files
+      - name: Gather the figure and room files
         run: |
           mkdir release-figures
-          cp src/characters/*.vrm release-figures/
+          cp src/characters/*.vrm src/characters/*.room.glb release-figures/
 
-      - name: Upload the figure files
+      - name: Upload the figure and room files
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: figures
