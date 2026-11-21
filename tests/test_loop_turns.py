@@ -30,7 +30,7 @@ from tests.support.history import (
     woke_at_table,
     written_turns,
 )
-from tests.support.hopin import CALL, LIMIT_SECONDS, READ, SAY_TOOL
+from tests.support.hopin import CALL, LIMIT_SECONDS, PLAY_TOOL, READ, SAY_TOOL
 from tests.support.hopin_places import ISSUER
 from tests.support.logs import lines_of
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
@@ -622,6 +622,29 @@ async def test_a_line_heard_at_a_voice_place_cuts_his_table_turn_of_that_app_tha
     assert [each["entry"] for each in call_turn.room["history"]["entries"]] == ["view", "line"]
     assert SAY_TOOL in runner.gateway.offered_tools(2)
     assert table_turn.room["woke"] == woke_at_table(url_of(runner, 0), 1)
+
+
+async def test_a_line_heard_at_a_voice_call_cuts_his_table_turn_at_another_app_and_the_spoken_turn_holds_its_tools(
+    runner, other, caplog
+):
+    """TURNS-48, TURNS-18."""
+    runner.give_voice()
+    runner.gateway = Gateway(completion(ANSWER), completion("table again"))
+    runner.gateway.hold_request(1)
+    other.stand(SUBJECT, at_table())
+    await restarted_in_the_call(runner)
+    waits(other, 1)
+    await runner.gateway.until_requested(1)
+
+    await said_and_taken(runner.app, PLACE_ID, "Anyone there?")
+    await runner.app.spoken_count(1)
+    await runner.reports.until_a_turn_completed(count=2)
+
+    assert runner.gateway.arrivals == 3
+    assert turn_order(runner) == [(0, "lines"), (1, "view")]
+    assert turn_endings(caplog) == [("cancelled", "spoken"), ("ok", None), ("ok", None)]
+    assert runner.app.spoken == [(SUBJECT, PLACE_ID, ANSWER)]
+    assert PLAY_TOOL in runner.gateway.offered_tools(2)
 
 
 async def test_a_table_turn_cut_for_a_spoken_turn_names_the_spoken_place_in_front_of_it_as_its_wait(runner, caplog):
