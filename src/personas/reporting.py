@@ -293,11 +293,14 @@ def report_fell_due(agent_id: str, app: str, occasion: DueOccasion, *, spoken: b
     )
 
 
-def report_argument_left_out(app: str, tool: str, argument: str) -> None:
+def report_argument_left_out(agent_id: str, app: str, tool: str, argument: str) -> None:
     """Writes ``argument.left_out``: the runner sent a call without an optional argument its app's tool does not
-    declare. The line carries the app's host, the tool's name and the argument's name, never a value. The caller's
-    current trace is the line's."""
-    _LOG.info("argument.left_out", extra={"app_id": urlsplit(app).hostname or "", "tool": tool, "argument": argument})
+    declare. The line carries the agent, the app's host, the tool's name and the argument's name, never a value.
+    The caller's current trace is the line's."""
+    _LOG.info(
+        "argument.left_out",
+        extra={"agent_id": agent_id, "app_id": urlsplit(app).hostname or "", "tool": tool, "argument": argument},
+    )
 
 
 def step_timer(event: str, /, agent_id: str, app: str | None = None, *, elapsed_seconds: float = 0.0) -> StepTimer:

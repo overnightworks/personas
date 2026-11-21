@@ -172,7 +172,7 @@ class AppSession(Protocol):
         ...
 
 
-type SessionOpener = Callable[[AppTarget, Secret], AbstractAsyncContextManager[AppSession]]
+type SessionOpener = Callable[[AppTarget, Secret, str], AbstractAsyncContextManager[AppSession]]
 
 
 @dataclass(frozen=True)
@@ -292,6 +292,7 @@ class _McpAppSession:
     _left_out: set[tuple[str, str]] = field(default_factory=set[tuple[str, str]])
     """The tool and argument of each left-out argument already reported in this session."""
     app_url: str = ""
+    agent_id: str = ""
 
     def use_token(self, token: Secret) -> None:
         self.auth.token = token
@@ -439,7 +440,7 @@ class _McpAppSession:
         for argument in left_out:
             if (name, argument) not in self._left_out:
                 self._left_out.add((name, argument))
-                report_argument_left_out(self.app_url, name, argument)
+                report_argument_left_out(self.agent_id, self.app_url, name, argument)
         return await self._called(name, sent)
 
     async def _read(self, uri: str, *, unknown_is_absent: bool = False) -> ReadResourceResult:
@@ -617,7 +618,7 @@ def _settled(leaf: BaseException, from_body: set[int], auth: _BearerAuth, *, bes
 
 @asynccontextmanager
 async def open_mcp_session(
-    app: AppTarget, token: Secret, *, stream_seconds: float = READ_SECONDS
+    app: AppTarget, token: Secret, agent_id: str, *, stream_seconds: float = READ_SECONDS
 ) -> AsyncGenerator[AppSession]:
     """A session at the app's revision; the failures a call raises are the ones ``AppSession`` names.
 
@@ -644,7 +645,7 @@ async def open_mcp_session(
                 cancelled_in_body = task_is_being_cancelled()
                 raise
             try:
-                yield _McpAppSession(session, auth, stream_seconds, app_url=app.mcp_url)
+                yield _McpAppSession(session, auth, stream_seconds, app_url=app.mcp_url, agent_id=agent_id)
             except Exception as error:
                 raised_in_body = error
                 raise

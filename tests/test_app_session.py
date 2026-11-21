@@ -132,8 +132,11 @@ def nothing_secret_is_logged(app, bearer, restored_logging, caplog):
     assert not [held for held in app.kept_out_of_logs() if held in logged]
 
 
+AGENT_ID = "agent-one"
+
+
 def opened(app, bearer, **keywords):
-    return open_mcp_session(AppTarget(app.url, "scope"), bearer, **keywords)
+    return open_mcp_session(AppTarget(app.url, "scope"), bearer, AGENT_ID, **keywords)
 
 
 async def opens(app, bearer):
@@ -284,19 +287,23 @@ async def test_optional_arguments_an_app_does_not_declare_are_left_out_and_each_
         assert await session.accept(accept) is None
         assert await session.accept(accept) is None
         await session.speak(place, "hello", style="calm")
+        await session.speak(place, "again", interrupted="hold-1")
+        await session.speak(place, "once more", interrupted="hold-2")
         await session.set_turn_state(SetTurnStateArguments(place=place, thinking=True))
 
     assert [sent for _, sent in app.accepted_on_the_wire] == [
         {"place": {"kind": "call", "id": "room-7"}, "invitation": "inv-3", "epoch": 2}
     ] * 2
-    assert app.speak_styles == [None]
+    assert app.speak_styles == [None] * 3
+    assert app.speaks_naming_holds == [("hello", None), ("again", None), ("once more", None)]
     assert [(left["tool"], left["argument"]) for left in left_out_events(caplog)] == [
         (ACCEPT_INVITATION_TOOL, "figure"),
         (ACCEPT_INVITATION_TOOL, "voices"),
         (SPEAK_TOOL, "style"),
+        (SPEAK_TOOL, "interrupted"),
         (SET_TURN_STATE_TOOL, "thinking"),
     ]
-    assert {left["app_id"] for left in left_out_events(caplog)} == {"127.0.0.1"}
+    assert {(left["agent_id"], left["app_id"]) for left in left_out_events(caplog)} == {(AGENT_ID, "127.0.0.1")}
 
 
 async def test_optional_arguments_an_app_declares_are_sent_and_logged_as_none(app, bearer, place, caplog):
@@ -543,7 +550,7 @@ async def test_a_redirect_the_app_answers_is_an_unusable_answer_named_by_its_sta
 
 
 async def opens_at(mcp_url, bearer):
-    async with open_mcp_session(AppTarget(mcp_url, "scope"), bearer):
+    async with open_mcp_session(AppTarget(mcp_url, "scope"), bearer, AGENT_ID):
         pass
 
 
