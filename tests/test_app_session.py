@@ -28,6 +28,7 @@ from agents.member import (
     PlaceEntry,
     PlaceRef,
     PlaceWindow,
+    SetTurnStateArguments,
     SpeakRefusal,
     SpeakRefused,
     Spoken,
@@ -66,7 +67,7 @@ from personas.failures import (
 )
 from personas.secret import Secret
 from tests.support.hopin import CALL, LIMIT_SECONDS, LIST_TOOLS, LISTEN, NO_METHOD, READ, SAY_TOOL, FakeApp
-from tests.support.logs import configure_logging_into, formatted
+from tests.support.logs import configure_logging_into, fields_of, formatted
 from tests.support.loopback import serving
 from tests.support.pictures import a_picture, base64_of
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
@@ -255,6 +256,61 @@ async def test_an_accept_error_outside_the_record_is_unrecognised(app, bearer, t
             await session.accept(Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 0))
             is UnrecognisedRefusal.UNRECOGNISED
         )
+
+
+def left_out_events(caplog):
+    return [fields_of(record) for record in caplog.get_records("call") if record.message == "argument.left_out"]
+
+
+@pytest.fixture
+async def app_that_predates_the_optional_arguments():
+    fake = FakeApp(undeclared_arguments=frozenset({"figure", "voices", "style", "interrupted", "thinking"}))
+    async with fake.serving() as url:
+        fake.url = url
+        yield fake
+
+
+async def test_optional_arguments_an_app_does_not_declare_are_left_out_and_each_is_logged_once_per_session(
+    app_that_predates_the_optional_arguments, place, caplog
+):
+    """LOG-39."""
+    app = app_that_predates_the_optional_arguments
+    bearer = Secret(secrets.token_urlsafe(24))
+    app.let_in(bearer.reveal(), SUBJECT)
+    figure = FigureRef(url="https://figures.test/figure.glb", sha256=secrets.token_hex(32))
+    accept = Accept(place, "inv-3", 2, figure, ("amy",))
+
+    async with opened(app, bearer) as session:
+        assert await session.accept(accept) is None
+        assert await session.accept(accept) is None
+        await session.speak(place, "hello", style="calm")
+        await session.set_turn_state(SetTurnStateArguments(place=place, thinking=True))
+
+    assert [sent for _, sent in app.accepted_on_the_wire] == [
+        {"place": {"kind": "call", "id": "room-7"}, "invitation": "inv-3", "epoch": 2}
+    ] * 2
+    assert app.speak_styles == [None]
+    assert [(left["tool"], left["argument"]) for left in left_out_events(caplog)] == [
+        (ACCEPT_INVITATION_TOOL, "figure"),
+        (ACCEPT_INVITATION_TOOL, "voices"),
+        (SPEAK_TOOL, "style"),
+        (SET_TURN_STATE_TOOL, "thinking"),
+    ]
+    assert {left["app_id"] for left in left_out_events(caplog)} == {"127.0.0.1"}
+
+
+async def test_optional_arguments_an_app_declares_are_sent_and_logged_as_none(app, bearer, place, caplog):
+    figure = FigureRef(url="https://figures.test/figure.glb", sha256=secrets.token_hex(32))
+
+    async with opened(app, bearer) as session:
+        await session.accept(Accept(place, "inv-3", 2, figure, ("amy",)))
+        await session.speak(place, "hello", style="calm")
+
+    [(_, sent)] = app.accepted_on_the_wire
+    assert sent["voices"] == ["amy"]
+    assert sent["figure"]["url"] == figure.url
+    assert app.speak_styles == ["calm"]
+    assert left_out_events(caplog) == []
 
 
 async def test_a_speak_sends_the_place_and_the_sentence_and_gives_that_it_starts_to_play(app, bearer, place):

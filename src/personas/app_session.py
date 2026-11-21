@@ -7,7 +7,7 @@ import contextvars
 import re
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from http import HTTPStatus
 from typing import Final, Protocol, cast, override
 
@@ -76,7 +76,7 @@ from personas.failures import (
     leaves_of,
     task_is_being_cancelled,
 )
-from personas.reporting import carry_trace
+from personas.reporting import carry_trace, report_argument_left_out
 from personas.secret import Secret
 
 CONNECT_SECONDS: Final = 30.0
@@ -87,6 +87,11 @@ _MEDIA_TYPE: Final = re.compile(r"[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&
 """A media type as a log line may carry it: a type and a subtype of token characters, no parameters."""
 _TRANSPORT_ERROR_CODES: Final = frozenset({CONNECTION_CLOSED, REQUEST_TIMEOUT})
 """What the SDK answers for a connection that broke or a request that timed out."""
+_ACCEPT_OPTIONAL: Final = frozenset({"figure", "voices"})
+_SPEAK_OPTIONAL: Final = frozenset({"style", "interrupted"})
+_TURN_STATE_OPTIONAL: Final = frozenset({"thinking"})
+"""The arguments the runner builds itself that a call may leave out; every other one of the three tools is
+required."""
 
 
 class AppSession(Protocol):
@@ -282,6 +287,11 @@ class _McpAppSession:
     not kept."""
     _notices: int = 0
     _kept: tuple[ToolDeclaration, ...] | None = None
+    _declared_arguments: dict[str, frozenset[str]] | None = None
+    """The argument names each tool of the app's latest list declares; a list moves it with the tools notice."""
+    _left_out: set[tuple[str, str]] = field(default_factory=set[tuple[str, str]])
+    """The tool and argument of each left-out argument already reported in this session."""
+    app_url: str = ""
 
     def use_token(self, token: Secret) -> None:
         self.auth.token = token
@@ -319,6 +329,7 @@ class _McpAppSession:
         self._honoured = honoured
         self._list_counter += 1
         self._kept = None
+        self._declared_arguments = None
 
     def _tools_notice(self) -> None:
         self._notices += 1
@@ -354,8 +365,10 @@ class _McpAppSession:
             declared = tuple(_declaration_of(tool) for tool in listing.tools)
         except ValidationError:
             raise UnusableAnswer(INVALID_ANSWER_CODE) from None
-        if self._honoured and self._list_counter == started:
-            self._kept = declared
+        if self._list_counter == started:
+            self._declared_arguments = {tool.name: _argument_names_of(tool.parameters) for tool in declared}
+            if self._honoured:
+                self._kept = declared
         return declared
 
     async def accept(self, accept: Accept) -> Refusal | None:
@@ -366,7 +379,7 @@ class _McpAppSession:
             figure=accept.figure,
             voices=accept.voices or None,
         ).model_dump(mode="json")
-        result = await self._called(ACCEPT_INVITATION_TOOL, arguments)
+        result = await self._called_declared(ACCEPT_INVITATION_TOOL, arguments, optional=_ACCEPT_OPTIONAL, lists=True)
         return _refusal_of(_text_of(result)) if result.is_error else None
 
     async def speak(
@@ -379,7 +392,7 @@ class _McpAppSession:
             arguments["style"] = style
         if interrupted is not None:
             arguments["interrupted"] = interrupted
-        result = await self._called(SPEAK_TOOL, arguments)
+        result = await self._called_declared(SPEAK_TOOL, arguments, optional=_SPEAK_OPTIONAL)
         return _answer_of(result)
 
     async def continue_speaking(self, place: PlaceRef, interrupted: str) -> ContinueSpeakingRefusal | None:
@@ -391,7 +404,9 @@ class _McpAppSession:
         return _refusal_in(StopSpeakingRefused, result).refused if result.is_error else None
 
     async def set_turn_state(self, statement: SetTurnStateArguments) -> SetTurnStateRefusal | None:
-        result = await self._called(SET_TURN_STATE_TOOL, statement.model_dump(mode="json"))
+        result = await self._called_declared(
+            SET_TURN_STATE_TOOL, statement.model_dump(mode="json"), optional=_TURN_STATE_OPTIONAL
+        )
         return _refusal_in(SetTurnStateRefused, result).refused if result.is_error else None
 
     async def invoke(self, name: str, arguments: JsonObject) -> ToolOutcome:
@@ -403,6 +418,29 @@ class _McpAppSession:
         if not isinstance(result, CallToolResult):
             raise UnusableAnswer(INVALID_ANSWER_CODE)
         return result
+
+    async def _called_declared(
+        self, name: str, arguments: JsonObject, *, optional: frozenset[str], lists: bool = False
+    ) -> CallToolResult:
+        """``_called`` without the ``optional`` arguments its tool's declared schema does not name.
+
+        The schema is the app's latest list as ``declared_tools`` read it. A call that carries an optional argument
+        and has none yet asks for the list only when it ``lists``; a turn's own statements do not, since the turn lists
+        beside them. An argument left out is reported once per session.
+        """
+        if optional.isdisjoint(arguments):
+            return await self._called(name, arguments)
+        if self._declared_arguments is None and lists:
+            await self.declared_tools()
+        names = (self._declared_arguments or {}).get(name)
+        if names is None:
+            return await self._called(name, arguments)
+        sent, left_out = _split_undeclared(arguments, names, optional)
+        for argument in left_out:
+            if (name, argument) not in self._left_out:
+                self._left_out.add((name, argument))
+                report_argument_left_out(self.app_url, name, argument)
+        return await self._called(name, sent)
 
     async def _read(self, uri: str, *, unknown_is_absent: bool = False) -> ReadResourceResult:
         """The resource; an app that shows this member no such one answers an invalid-params error."""
@@ -448,6 +486,20 @@ def _record_of[Record: BaseModel](record: type[Record], result: ReadResourceResu
         return record.model_validate_json(text)
     except ValidationError:
         raise UnusableAnswer(INVALID_ANSWER_CODE) from None
+
+
+def _argument_names_of(schema: JsonObject) -> frozenset[str]:
+    properties = schema.get("properties")
+    return frozenset(properties) if isinstance(properties, dict) else frozenset()
+
+
+def _split_undeclared(
+    arguments: JsonObject, declared: frozenset[str], optional: frozenset[str]
+) -> tuple[JsonObject, tuple[str, ...]]:
+    """The arguments to send and the names left out: an ``optional`` argument the tool's ``declared`` names do not
+    include. Every other argument stays, so a required one is never dropped."""
+    left_out = tuple(name for name in arguments if name in optional and name not in declared)
+    return {name: value for name, value in arguments.items() if name not in left_out}, left_out
 
 
 def _declaration_of(tool: Tool) -> ToolDeclaration:
@@ -592,7 +644,7 @@ async def open_mcp_session(
                 cancelled_in_body = task_is_being_cancelled()
                 raise
             try:
-                yield _McpAppSession(session, auth, stream_seconds)
+                yield _McpAppSession(session, auth, stream_seconds, app_url=app.mcp_url)
             except Exception as error:
                 raised_in_body = error
                 raise
