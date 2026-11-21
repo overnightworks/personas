@@ -88,7 +88,7 @@ def with_due(turns: Turns, at: AppPlace, occasion: Occasion, since: float) -> Tu
         if held is None
         else Due(_joined(held.occasion, occasion), min(held.since, since), held.waited_on)
     )
-    return replace(turns, due={**turns.due, at: due})
+    return Turns(turns.running, {**turns.due, at: due}, turns.not_before, turns.gave_way, turns.cut)
 
 
 def lines_of_a_hold(generation: str) -> Lines:
@@ -125,7 +125,7 @@ def without_due(turns: Turns, leaving: Callable[[AppPlace], bool]) -> Turns:
     """The turns without the due places for which ``leaving`` holds."""
     gone = frozenset(at for at in turns.due if leaving(at))
     due = {at: held for at, held in turns.due.items() if at not in gone}
-    return replace(turns, due=due, gave_way=turns.gave_way - gone, cut=turns.cut - gone)
+    return Turns(turns.running, due, turns.not_before, turns.gave_way - gone, turns.cut - gone)
 
 
 def _claim_order(turns: Turns, spoken: Spoken) -> list[AppPlace]:
@@ -163,7 +163,7 @@ def waited(turns: Turns, now: float, spoken: Spoken) -> Turns:
         else replace(held, waited_on=_in_front(turns, at, now, spoken))
         for at, held in turns.due.items()
     }
-    return replace(turns, due=due)
+    return Turns(turns.running, due, turns.not_before, turns.gave_way, turns.cut)
 
 
 def _first_in(turns: Turns, app: str, spoken: Spoken) -> tuple[AppPlace, Due] | None:
@@ -187,12 +187,12 @@ def claimed(turns: Turns, app: str, now: float, spoken: Spoken) -> tuple[Turns, 
         order = list(turns.due)
         passed = frozenset(each for each in order[: order.index(at)] if not spoken(each, turns.due[each]))
     rest = {each: held for each, held in turns.due.items() if each != at}
-    return replace(turns, running=at, due=rest, gave_way=turns.gave_way | passed, cut=turns.cut - passed), at, due
+    return Turns(at, rest, turns.not_before, turns.gave_way | passed, turns.cut - passed), at, due
 
 
 def paused_for(turns: Turns, now: float, seconds: float) -> Turns:
     """The turns while no turn of his may start for ``seconds`` from ``now``."""
-    return replace(turns, not_before=now + seconds)
+    return Turns(turns.running, turns.due, now + seconds, turns.gave_way, turns.cut)
 
 
 def pause_left(turns: Turns, app: str, now: float, spoken: Spoken) -> float:
@@ -207,7 +207,7 @@ def released(turns: Turns) -> Turns:
     """The turns once the running turn ended; what is due stays. A place whose turn ran to its end has not given way
     any more."""
     gone = frozenset[AppPlace]() if turns.running is None else frozenset({turns.running})
-    return replace(turns, running=None, gave_way=turns.gave_way - gone, cut=turns.cut - gone)
+    return Turns(None, turns.due, turns.not_before, turns.gave_way - gone, turns.cut - gone)
 
 
 @dataclass(frozen=True)
@@ -247,7 +247,7 @@ def cut_by_stop(turns: Turns, claim: Claim, history: History) -> Turns:
     what made it due meanwhile, so the pod that takes him over answers it once."""
     if spoke_since(history, claim.mark):
         return turns
-    return replace(turns, due=_due_again_first(turns, claim))
+    return Turns(turns.running, _due_again_first(turns, claim), turns.not_before, turns.gave_way, turns.cut)
 
 
 def cut_for_spoken(turns: Turns, claim: Claim) -> Turns:
@@ -258,8 +258,8 @@ def cut_for_spoken(turns: Turns, claim: Claim) -> Turns:
     held = turns.due.get(claim.at)
     occasion = claim.due.occasion if held is None else _joined(claim.due.occasion, held.occasion)
     if isinstance(occasion, Lines) and not occasion.seqs:
-        return replace(turns, running=None)
-    return replace(turns, running=None, due=_due_again_first(turns, claim), cut=turns.cut | {claim.at})
+        return Turns(None, turns.due, turns.not_before, turns.gave_way, turns.cut)
+    return Turns(None, _due_again_first(turns, claim), turns.not_before, turns.gave_way, turns.cut | {claim.at})
 
 
 def left_standing(app: str, standings: tuple[Standing, ...]) -> Callable[[AppPlace], bool]:
