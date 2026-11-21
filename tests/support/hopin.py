@@ -200,6 +200,8 @@ class FakeApp(AppVoice):
     withheld_tools: set[str] = field(default_factory=set[str])
     """The declared tools the app does not offer now."""
     held_offer: asyncio.Event | None = None
+    undeclared_arguments: frozenset[str] = frozenset()
+    """The arguments no declared tool of the app names, as an app that predates them."""
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -230,6 +232,15 @@ class FakeApp(AppVoice):
         await self.changes.tools_changed(Principal(iss=ISSUER, sub=subject))
 
     def _tools(self) -> list[PersonTool]:
+        return [self._without_undeclared(tool) for tool in self._all_tools()]
+
+    def _without_undeclared(self, tool: PersonTool) -> PersonTool:
+        properties = tool.declaration.parameters.get("properties", {})
+        declared = {name: each for name, each in properties.items() if name not in self.undeclared_arguments}
+        parameters = tool.declaration.parameters | {"properties": declared}
+        return PersonTool(tool.declaration.model_copy(update={"parameters": parameters}), tool.handler)
+
+    def _all_tools(self) -> list[PersonTool]:
         tools = [
             PersonTool(_ACCEPT_DECLARATION, self._accept),
             PersonTool(self._line_declaration(), self._say),
