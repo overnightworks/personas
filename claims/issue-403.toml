@@ -3,6 +3,6 @@ agent = "Claude 00fba831-7946-4a00-8a59-5fa74cec8f4d"
 role = "builder"
 base = "233ed6ca6e9c487b3f0e47403afb7080265ce019"
 branch = "claude/issue-403-optional-arguments-only-when-declared"
-scope = ["docs/log.md", "docs/runbooks/release.md", "src/personas/app_session.py", "src/personas/reporting.py", "tests/support/hopin.py", "tests/test_app_session.py"]
+scope = ["docs/log.md", "docs/runbooks/release.md", "src/personas/app_session.py", "src/personas/loop.py", "src/personas/reporting.py", "src/personas/turn_sessions.py", "tests/support/hopin.py", "tests/support/transport.py", "tests/test_app_session.py", "tests/test_loop_acts.py", "tests/test_loop_turn_state.py", "tests/test_main.py"]
 opened_commit = "6fdd69cbb9ab8364aabde3b1774019aa3bb29235"
 whole_reason = "The check, its log event and the release rule it relaxes are one decision about what the runner sends an app."
