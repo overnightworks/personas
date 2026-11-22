@@ -9,6 +9,7 @@ from personas.decision import Decline
 from personas.reporting import Event
 from tests.support.call import PLACE_ID
 from tests.support.fakes import read_of
+from tests.support.history import settled
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, invited
 
@@ -21,6 +22,7 @@ async def test_a_call_invitation_at_one_app_is_declined_busy_while_a_call_is_act
     runner.app.stand(SUBJECT, active(PLACE_ID))
     runner.start()
     await runner.app.until_standing_read(1)
+    await settled(runner.app)
     other.stand(SUBJECT, invited(OTHER_CALL_ID, "inv-other"))
     await runner.reports.until(Event.INVITATION_DECLINED)
 
