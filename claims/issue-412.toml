@@ -3,6 +3,6 @@ agent = "Claude ed1b285f-1be6-42a2-85ab-585593709eb2"
 role = "builder"
 base = "dd899edd1bae726286db5986cbf45e27a0016471"
 branch = "claude/issue-412-busy-across-apps"
-scope = ["docs/log.md", "docs/turns.md", "src/personas/app_session.py", "src/personas/decision.py", "src/personas/loop.py", "src/personas/mind.py", "src/personas/reporting.py"]
+scope = ["docs/ARCHITECTURE.md", "docs/log.md", "docs/turns.md", "src/personas/app_session.py", "src/personas/decision.py", "src/personas/loop.py", "src/personas/main.py", "src/personas/mind.py", "src/personas/reporting.py", "src/personas/runner.py", "tests/support/fakes.py", "tests/support/hopin.py", "tests/test_decision_busy.py", "tests/test_loop_busy.py", "tests/test_loop_run_all.py", "tests/test_mind.py", "tests/test_reporting.py", "tests/test_runner.py"]
 opened_commit = "c40cf6e6324f35642623ad5bd429c5a99e8a3e53"
 whole_reason = "The busy claim, what counts as held and the rule's wording are one decision about when the agent is in a call."
