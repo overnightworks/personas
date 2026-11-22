@@ -172,6 +172,7 @@ class FakeApp(AppVoice):
     lists_standing: bool = True
     pulses_on_read: bool = False
     accept_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
+    decline_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
     accepted: list[AcceptInvitationArguments] = field(default_factory=list[AcceptInvitationArguments])
     accepted_on_the_wire: list[tuple[str, JsonObject]] = field(default_factory=list[tuple[str, JsonObject]])
     declined: list[DeclineInvitationArguments] = field(default_factory=list[DeclineInvitationArguments])
@@ -500,6 +501,8 @@ class FakeApp(AppVoice):
 
     async def _decline(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
         self.declined.append(DeclineInvitationArguments.model_validate_json(json.dumps(arguments)))
+        if self.decline_outcomes:
+            return self.decline_outcomes.pop(0)
         return ToolOutcome("{}", is_error=False)
 
     @asynccontextmanager

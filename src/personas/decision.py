@@ -185,7 +185,7 @@ def _busy(standings: tuple[Standing, ...], standing: Standing, memory: Memory, *
     or tool reached from the call is not a call place and stays accepted."""
     if not _is_call(standing):
         return False
-    if held_elsewhere or active_places(standings) - {standing.place}:
+    if held_elsewhere or any(place != standing.place for place in active_places(standings)):
         return True
     first = next(
         (other for other, invitation in _invited(standings) if _is_call(other) and invitation.id not in memory.stale),

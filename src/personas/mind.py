@@ -105,8 +105,8 @@ class Mind:
         self._voice_apps = frozenset[str]()
         self._checkpoints = resumed.checkpoints
         self._placed = frozenset[str]()
-        self._active = dict[str, frozenset[PlaceRef]]()
-        self._claimed = dict[str, frozenset[PlaceRef]]()
+        self._active: dict[str, frozenset[PlaceRef]] = {}
+        self._claimed: dict[str, frozenset[PlaceRef]] = {}
         self._not_granted: dict[str, float] = {}
         self._wake_events: list[asyncio.Event] = []
         self._speech: dict[AppPlace, SpeechRecord] = {}
@@ -303,12 +303,12 @@ class Mind:
         self._active = {**self._active, app: places}
         self._claimed = {**self._claimed, app: frozenset()}
 
-    def claim(self, app: str, places: frozenset[PlaceRef]) -> None:
+    def claim_places(self, app: str, places: frozenset[PlaceRef]) -> None:
         """He is about to take ``places`` at ``app``: each counts as held at once, before the accept is awaited, until
         the next standing read of ``app`` or its ``release``."""
         self._claimed = {**self._claimed, app: self._claimed.get(app, frozenset()) | places}
 
-    def release(self, app: str, places: frozenset[PlaceRef]) -> None:
+    def release_places(self, app: str, places: frozenset[PlaceRef]) -> None:
         """An accept of ``places`` at ``app`` did not take them: they count as held no more."""
         self._claimed = {**self._claimed, app: self._claimed.get(app, frozenset()) - places}
 

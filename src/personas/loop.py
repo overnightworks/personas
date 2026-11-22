@@ -18,6 +18,7 @@ from personas.decision import (
     NO_TURNS_CODE,
     SUSPENDED_RETRY_SECONDS,
     AppPlace,
+    Decline,
     Declined,
     Joined,
     Memory,
@@ -368,35 +369,28 @@ class AgentLoop:
         self._memory, left_out = left_out_for(standings, self._memory, takes_turns=takes_turns)
         for standing in left_out:
             self._report(Event.INVITATION_LEFT_OUT, NO_TURNS_CODE, place_kind=standing.place.kind)
-        for decline in declines_for(
-            standings, self._memory, held_elsewhere=self._mind.holds_active_place_elsewhere(self._app.mcp_url)
-        ):
-            await self._use_current_token(session)
-            answer = await session.decline(decline)
-            self._memory = after_decline(self._memory, decline, answer)
-            if isinstance(answer, DeclineInvitationRefusal):
-                self._report(Event.DECLINE_REFUSED, answer.value, place_kind=decline.place.kind)
-            elif answer is Declined.SENT:
-                self._report(Event.INVITATION_DECLINED, decline.reason.value, place_kind=decline.place.kind)
         # No await between reading what is held elsewhere and claiming the places to accept: another app's loop that
-        # decides meanwhile sees them held.
+        # decides meanwhile sees them held and declines its own invitations.
+        held_elsewhere = self._mind.holds_active_place_elsewhere(self._app.mcp_url)
         accepts = accepts_for(
             standings,
             self._memory,
             takes_turns=takes_turns,
-            held_elsewhere=self._mind.holds_active_place_elsewhere(self._app.mcp_url),
+            held_elsewhere=held_elsewhere,
             figure=self._agent.figure,
             room=self._agent.room,
             voices=() if self._agent.voice is None else self._agent.voice.names,
         )
         unjoined = frozenset(accept.place for accept in accepts)
-        self._mind.claim(self._app.mcp_url, unjoined)
+        self._mind.claim_places(self._app.mcp_url, unjoined)
         try:
+            for decline in declines_for(standings, self._memory, held_elsewhere=held_elsewhere):
+                await self._decline(session, decline)
             for accept in accepts:
                 await self._use_current_token(session)
                 refusal = await session.accept(accept)
                 if refusal is None:
-                    unjoined -= {accept.place}
+                    unjoined = unjoined.difference((accept.place,))
                     self._mind.move_checkpoint(AppPlace(self._app.mcp_url, accept.place), Joined())
                     self._report(Event.JOINED)
                     continue
@@ -404,7 +398,16 @@ class AgentLoop:
                 if is_news:
                     self._report(Event.REFUSED, refusal.value)
         finally:
-            self._mind.release(self._app.mcp_url, unjoined)
+            self._mind.release_places(self._app.mcp_url, unjoined)
+
+    async def _decline(self, session: AppSession, decline: Decline) -> None:
+        await self._use_current_token(session)
+        answer = await session.decline(decline)
+        self._memory = after_decline(self._memory, decline, answer)
+        if isinstance(answer, DeclineInvitationRefusal):
+            self._report(Event.DECLINE_REFUSED, answer.value, place_kind=decline.place.kind)
+        elif answer is Declined.SENT:
+            self._report(Event.INVITATION_DECLINED, decline.reason.value, place_kind=decline.place.kind)
 
     async def _read_windows(self, session: AppSession, standings: tuple[Standing, ...], began: float) -> bool:
         """Reads the active window places' windows, a turn of his running or not, and takes their lines in. ``began`` is
@@ -725,8 +728,8 @@ class AgentLoop:
             self._report(Event.TURN_STATE_FAILED, failure_reason(failure), None, failure)
 
     def _park(self) -> None:
-        """A parked app holds up no place of his other apps, and none of its own counts as held and lends no tools to their turns: its due places are
-        dropped and its place unrecorded; it reads them again after."""
+        """A parked app holds up no place of his other apps, none of its places counts as held and it lends no tools to
+        their turns: its due places are dropped and its place unrecorded; it reads them again after."""
         self._mind.undue(lambda at: at.app == self._app.mcp_url)
         self._mind.stand_at(self._app.mcp_url, holds=False)
         self._mind.hold_places(self._app.mcp_url, frozenset())
