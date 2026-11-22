@@ -23,7 +23,7 @@ from personas.clock import SystemClock
 from personas.config import Config, ConfigError, load_config
 from personas.failures import SchemaNotAtHeadError, StoreDefect, StoreUnavailable, leaves_of
 from personas.locks import PostgresAgentLocks
-from personas.loop import Boundaries, run_all
+from personas.loop import Boundaries
 from personas.memory import PostgresHistoryStore, PostgresLineStore, PostgresMemory, migrate
 from personas.ownership import LockedOwnership
 from personas.readiness import FileReadyMarker, ReadinessError, ReadyMarker
@@ -36,6 +36,7 @@ from personas.reporting import (
     demote_a_closed_stream,
     log_state_change,
 )
+from personas.runner import run_all
 from personas.sweep import sweep_lines
 from personas.tokens import HttpTokenSource
 

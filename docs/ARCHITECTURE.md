@@ -46,7 +46,7 @@ flowchart LR
   and the sweep side by side; it also serves the commands `migrate` and `memory`.
 - **Ownership** (`ownership.py` over `locks.py`) lets several pods serve one set of agents, each agent by
   one pod at a time: a round every `contend_seconds` takes free locks and confirms held ones.
-- **A loop** (`loop.py`, `app_session.py`, `tokens.py`) holds one token and one `subscriptions/listen` per
+- **A loop** (`loop.py`, `app_session.py`, `tokens.py`; `runner.py` starts one for each agent and listening app) holds one token and one `subscriptions/listen` per
   agent and app, reads the standing on every wake, accepts invitations, then reads windows and views;
   `turn_states.py` states what his turns at each place do on its session, and on one of its own while the
   loop waits to retry or he stops.
