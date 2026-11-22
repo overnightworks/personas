@@ -252,8 +252,18 @@ def after_decline(memory: Memory, decline: Decline, answer: Declined | DeclineIn
     """The memory once the decline was answered: a decline the app refused is not remembered as declined, since the
     invitation no longer stands, and one that failed stays due."""
     if isinstance(answer, DeclineInvitationRefusal):
-        return replace(memory, stale=memory.stale | {decline.invitation_id})
-    return replace(memory, declined=memory.declined | {decline.invitation_id})
+        return Memory(
+            stale=memory.stale | {decline.invitation_id},
+            refused=memory.refused,
+            left_out=memory.left_out,
+            declined=memory.declined,
+        )
+    return Memory(
+        stale=memory.stale,
+        refused=memory.refused,
+        left_out=memory.left_out,
+        declined=memory.declined | {decline.invitation_id},
+    )
 
 
 def left_out_for(
