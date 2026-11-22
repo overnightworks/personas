@@ -14,6 +14,7 @@ import pytest
 from agents.member import (
     ACCEPT_INVITATION_TOOL,
     CONTINUE_SPEAKING_TOOL,
+    DECLINE_INVITATION_TOOL,
     SET_TURN_STATE_TOOL,
     SPEAK_TOOL,
     STANDING_URI,
@@ -942,6 +943,7 @@ async def test_the_declared_tools_are_the_ones_the_app_lists(app, bearer):
 
     assert {each.name for each in declared} == {
         ACCEPT_INVITATION_TOOL,
+        DECLINE_INVITATION_TOOL,
         SAY_TOOL,
         SPEAK_TOOL,
         CONTINUE_SPEAKING_TOOL,
@@ -992,11 +994,7 @@ async def test_an_invoked_tool_gives_the_outcome_the_app_answered_an_error_one_t
     assert invoked == outcome
 
 
-@pytest.mark.parametrize(
-    "text",
-    ["", "seen"],
-    ids=["a picture alone", "a picture with text"],
-)
+@pytest.mark.parametrize("text", ["", "seen"], ids=["a picture alone", "a picture with text"])
 @pytest.mark.parametrize("is_error", [False, True], ids=["answer", "error"])
 async def test_an_invoked_tool_gives_the_picture_the_app_answered_with_its_text(app, bearer, text, is_error):
     picture = a_picture()

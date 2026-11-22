@@ -146,7 +146,7 @@ async def test_a_line_said_while_a_turn_ran_is_answered_once_that_turn_ends_thou
     first_round = runner.gateway.hold_request(1)
 
     def lets_the_turn_end_once_a_reconciliation_has_passed_it_by(change):
-        if change.event is Event.JOINED:
+        if change.event is Event.INVITATION_DECLINED:
             first_round.set()
 
     runner.on_report = lets_the_turn_end_once_a_reconciliation_has_passed_it_by
@@ -161,7 +161,7 @@ async def test_a_line_said_while_a_turn_ran_is_answered_once_that_turn_ends_thou
     assert runner.gateway.round_sizes() == [3, 3, 5]
     assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[1], [1, 2]]
     await runner.reports.until_a_turn_ended()
-    assert runner.reports.reported()[:2] == [(Event.STARTED, None), (Event.JOINED, None)]
+    assert runner.reports.reported()[:2] == [(Event.STARTED, None), (Event.INVITATION_DECLINED, "busy")]
     assert runner.reports.turn_endings == [refused_turn(RejectionCode.BUSY)]
 
 

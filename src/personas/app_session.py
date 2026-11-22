@@ -15,6 +15,7 @@ import httpx2
 from agents.member import (
     ACCEPT_INVITATION_TOOL,
     CONTINUE_SPEAKING_TOOL,
+    DECLINE_INVITATION_TOOL,
     LISTEN_BOUND_SECONDS,
     SET_TURN_STATE_TOOL,
     SPEAK_TOOL,
@@ -24,6 +25,7 @@ from agents.member import (
     AcceptInvitationRefused,
     ContinueSpeakingRefusal,
     ContinueSpeakingRefused,
+    DeclineInvitationArguments,
     FigureLook,
     MemberResourceRecord,
     MemberStanding,
@@ -66,7 +68,7 @@ from mcp_types import (
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from personas.config import AppTarget
-from personas.decision import Accept, Refusal, UnrecognisedRefusal, jsonrpc_code, status_code
+from personas.decision import Accept, Decline, Refusal, UnrecognisedRefusal, jsonrpc_code, status_code
 from personas.failures import (
     INVALID_ANSWER_CODE,
     LATE_ANSWER_ERRORS,
@@ -118,6 +120,10 @@ class AppSession(Protocol):
 
     async def accept(self, accept: Accept) -> Refusal | None:
         """``None`` when joined, else the refusal; raises ``StatusFailure``, ``Unreachable`` or ``UnusableAnswer``."""
+        ...
+
+    async def decline(self, decline: Decline) -> None:
+        """Declines an invitation; the app's refusal says the invitation is gone, which leaves nothing to decline."""
         ...
 
     async def read_place(self, place: PlaceRef) -> PlaceWindow | None:
@@ -387,6 +393,12 @@ class _McpAppSession:
         ).model_dump(mode="json")
         result = await self._called_declared(ACCEPT_INVITATION_TOOL, arguments, optional=_ACCEPT_OPTIONAL, lists=True)
         return _refusal_of(_text_of(result)) if result.is_error else None
+
+    async def decline(self, decline: Decline) -> None:
+        arguments = DeclineInvitationArguments(
+            place=decline.place, invitation=decline.invitation_id, epoch=decline.epoch, reason=decline.reason
+        ).model_dump(mode="json")
+        await self._called(DECLINE_INVITATION_TOOL, arguments)
 
     async def speak(
         self, place: PlaceRef, sentence: str, style: str | None = None, interrupted: str | None = None

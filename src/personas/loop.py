@@ -25,10 +25,12 @@ from personas.decision import (
     accepts_for,
     active_view_places,
     active_window_places,
+    after_decline,
     after_refusal,
     backoff_delay,
     backoff_states_unavailable,
     decisive_failure,
+    declines_for,
     failure_code,
     failure_reason,
     forget_gone,
@@ -358,18 +360,24 @@ class AgentLoop:
             self._report(Event.RESUMED)
 
     async def _accept_invitations(self, session: AppSession, standings: tuple[Standing, ...]) -> None:
-        voice = self._agent.voice
         takes_turns = self._turn_setup is not None
         self._memory, left_out = left_out_for(standings, self._memory, takes_turns=takes_turns)
         for standing in left_out:
             self._report(Event.INVITATION_LEFT_OUT, NO_TURNS_CODE, place_kind=standing.place.kind)
+        held_elsewhere = self._mind.holds_active_window_elsewhere(self._app.mcp_url)
+        for decline in declines_for(standings, self._memory, held_elsewhere=held_elsewhere):
+            await self._use_current_token(session)
+            await session.decline(decline)
+            self._memory = after_decline(self._memory, decline)
+            self._report(Event.INVITATION_DECLINED, decline.reason.value, place_kind=decline.place.kind)
         for accept in accepts_for(
             standings,
             self._memory,
             takes_turns=takes_turns,
+            held_elsewhere=held_elsewhere,
             figure=self._agent.figure,
             room=self._agent.room,
-            voices=() if voice is None else voice.names,
+            voices=() if self._agent.voice is None else self._agent.voice.names,
         ):
             await self._use_current_token(session)
             refusal = await session.accept(accept)

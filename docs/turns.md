@@ -7,7 +7,11 @@ prose without an ID is context.
 
 ## Joining and reading
 
-- An agent accepts every invitation to a call. To a place of another kind it accepts only in an app where it
+- An agent accepts an invitation to a call only while it holds no active place other than that call, in any of
+  its apps, and one call at a time; any other
+  call invitation is declined once with the reason `busy`, logged as `invitation.declined`, and the inviter invites
+  again once the agent is free. A table or tool reached from the active call is the same session and stays accepted.
+  To a place of another kind it accepts only in an app where it
   can take turns (a persona, the gateway and bound tools); one left out for that is logged once as
   `invitation.left_out` with the reason `no_turns`. Only apps configured to listen can invite it. (TURNS-1)
 - After its own accept it reads the window from `seq` 1. A place whose reading is kept resumes where it

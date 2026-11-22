@@ -26,6 +26,7 @@ from agents.member import (
     SPEAK_TOOL,
     STOP_SPEAKING_TOOL,
     AcceptInvitationRefusal,
+    DeclineInvitationReason,
     PlaceEntry,
     PlaceRef,
     PlaceView,
@@ -128,6 +129,16 @@ class Accept:
 
 
 @dataclass(frozen=True)
+class Decline:
+    """The decline the loop performs of one invitation: the library's reason for a runner that takes no more places."""
+
+    place: PlaceRef
+    invitation_id: str
+    epoch: int
+    reason: DeclineInvitationReason = DeclineInvitationReason.BUSY
+
+
+@dataclass(frozen=True)
 class Token:
     value: Secret = field(repr=False)
     expires_at: float
@@ -136,11 +147,12 @@ class Token:
 @dataclass(frozen=True)
 class Memory:
     """What a loop remembers: invitations refused as stale, the last other refusal of each, and the invitations it
-    reported as left out."""
+    reported as left out or declined."""
 
     stale: frozenset[str] = frozenset()
     refused: Mapping[str, Refusal] = field(default_factory=dict[str, Refusal])
     left_out: frozenset[str] = frozenset()
+    declined: frozenset[str] = frozenset()
 
 
 def _is_call(standing: Standing) -> bool:
@@ -151,6 +163,23 @@ def _is_call(standing: Standing) -> bool:
 def _has_window(standing: Standing) -> bool:
     """A place is read through its window when it is a call or serves a view, whose window holds what happened there."""
     return standing.place.kind == CALL_PLACE_KIND or standing.serves_view
+
+
+def _busy(standings: tuple[Standing, ...], standing: Standing, memory: Memory, *, held_elsewhere: bool) -> bool:
+    """A call invitation while the agent holds an active place other than the invited one, in this app or, as
+    ``held_elsewhere`` says, in another, or while an earlier call invitation of this read is the one to accept; a table
+    or tool reached from the call is not a call place and stays accepted."""
+    if not _is_call(standing):
+        return False
+    if held_elsewhere or any(
+        other.state is StandingState.ACTIVE and other.place != standing.place for other in standings
+    ):
+        return True
+    first = next(
+        (other for other, invitation in _invited(standings) if _is_call(other) and invitation.id not in memory.stale),
+        None,
+    )
+    return first is not None and first.place != standing.place
 
 
 def _accepted(standing: Standing, *, takes_turns: bool) -> bool:
@@ -175,6 +204,7 @@ def accepts_for(
     memory: Memory,
     *,
     takes_turns: bool,
+    held_elsewhere: bool = False,
     figure: FigureRef | None = None,
     voices: tuple[VoiceName, ...] = (),
     room: HttpsFileRef | None = None,
@@ -182,12 +212,32 @@ def accepts_for(
     """One accept for each invited call standing whose invitation was not refused as stale, and, where the loop can
     take turns, for each other invited place, whether or not it serves a view yet: a seated agent that cannot act
     leaves the place waiting. Every accept brings the agent's figure and room and, in his order, the names of his
-    voices, if he has them."""
+    voices, if he has them. At most one call is accepted, the first the standing lists; the others are declined busy, as
+    is every call while ``held_elsewhere`` says the agent holds an active place in another app."""
     return tuple(
         Accept(standing.place, invitation.id, invitation.epoch, figure, voices, room)
         for standing, invitation in _invited(standings)
-        if _accepted(standing, takes_turns=takes_turns) and invitation.id not in memory.stale
+        if _accepted(standing, takes_turns=takes_turns)
+        and invitation.id not in memory.stale
+        and not _busy(standings, standing, memory, held_elsewhere=held_elsewhere)
     )
+
+
+def declines_for(
+    standings: tuple[Standing, ...], memory: Memory, *, held_elsewhere: bool = False
+) -> tuple[Decline, ...]:
+    """One decline for each invitation to a call while the agent holds an active place that was not declined yet: the
+    inviter learns he is busy and invites again once the agent is free."""
+    return tuple(
+        Decline(standing.place, invitation.id, invitation.epoch)
+        for standing, invitation in _invited(standings)
+        if _busy(standings, standing, memory, held_elsewhere=held_elsewhere) and invitation.id not in memory.declined
+    )
+
+
+def after_decline(memory: Memory, decline: Decline) -> Memory:
+    """The memory once the decline went through: a decline that failed stays due."""
+    return Memory(memory.stale, memory.refused, memory.left_out, memory.declined | {decline.invitation_id})
 
 
 def left_out_for(
@@ -211,6 +261,7 @@ def forget_gone(memory: Memory, standings: tuple[Standing, ...]) -> Memory:
         stale=memory.stale,
         refused={invitation: code for invitation, code in memory.refused.items() if invitation in present},
         left_out=memory.left_out & present,
+        declined=memory.declined & present,
     )
 
 
