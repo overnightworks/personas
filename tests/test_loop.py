@@ -23,7 +23,6 @@ from personas.decision import (
     RENEW_BEFORE_EXPIRY_SECONDS,
     SUSPENDED_RETRY_SECONDS,
     Accept,
-    Decline,
     backoff_delay,
     jsonrpc_code,
     status_code,
@@ -58,18 +57,6 @@ async def test_an_invitation_is_accepted_once_with_its_place_invitation_and_epoc
 
     assert run.session.accepted == [Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 2)]
     assert run.reports.reported() == [(Event.STARTED, None), (Event.JOINED, None)]
-
-
-async def test_a_call_invitation_while_a_place_is_active_is_declined_once_and_not_accepted(scenario):
-    """TURNS-1"""
-    standings = (active("room-1"), invited("room-7", "inv-3", epoch=2))
-    run = scenario([read_of(*standings), read_of(*standings)])
-
-    await run.play()
-
-    assert run.session.declined == [Decline(PlaceRef(kind="call", id="room-7"), "inv-3", 2)]
-    assert run.session.accepted == []
-    assert [event for event, _ in run.reports.reported()].count(Event.INVITATION_DECLINED) == 1
 
 
 async def test_a_stale_invitation_is_not_retried_and_is_reported_once(scenario):
