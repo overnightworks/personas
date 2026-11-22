@@ -360,7 +360,6 @@ class AgentLoop:
             self._report(Event.RESUMED)
 
     async def _accept_invitations(self, session: AppSession, standings: tuple[Standing, ...]) -> None:
-        voice = self._agent.voice
         takes_turns = self._turn_setup is not None
         self._memory, left_out = left_out_for(standings, self._memory, takes_turns=takes_turns)
         for standing in left_out:
@@ -378,7 +377,7 @@ class AgentLoop:
             held_elsewhere=held_elsewhere,
             figure=self._agent.figure,
             room=self._agent.room,
-            voices=() if voice is None else voice.names,
+            voices=() if self._agent.voice is None else self._agent.voice.names,
         ):
             await self._use_current_token(session)
             refusal = await session.accept(accept)

@@ -237,7 +237,7 @@ def declines_for(
 
 def after_decline(memory: Memory, decline: Decline) -> Memory:
     """The memory once the decline went through: a decline that failed stays due."""
-    return replace(memory, declined=memory.declined | {decline.invitation_id})
+    return Memory(memory.stale, memory.refused, memory.left_out, memory.declined | {decline.invitation_id})
 
 
 def left_out_for(
