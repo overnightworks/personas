@@ -1,7 +1,7 @@
 # Runbook: release the runner
 
 Task: a change on `main` should reach the deployment. Impact: the image is the runner's release, so a
-release changes the runner, its characters and its figures together. The rules it follows are owned by
+release changes the runner, its characters, their figures and their rooms together. The rules it follows are owned by
 [quality's release path](https://github.com/overnightworks/quality/blob/v0.21.1/docs/release.md).
 
 ## Check
@@ -20,10 +20,10 @@ release changes the runner, its characters and its figures together. The rules i
    `unchanged.` holds nothing, and so does an agents release-note line `fields added: <records>`, since the
    runner reads a standing, window and view with the keys it does not know ignored. A line that says
    `changed` and names nothing (its change is written in prose) is read by hand: it holds when a kept app
-   uses the change its prose describes, judged against the previous release's notes. For each name that holds, keep the served apps from the deployment's
-   runner configuration (`apps/personas/personas.toml` in platform) that use the changed or removed
-   tool, record or field, or every served app for an added tool, then read each kept app's `main` for
-   its agents pin.
+   uses the change its prose describes, judged against the previous release's notes. For each name that
+   holds, keep the served apps from the deployment's runner configuration (`apps/personas/personas.toml`
+   in platform) that use the changed or removed tool, record or field, or every served app for an added
+   tool, then read each kept app's `main` for its agents pin.
 
 ## Fix
 
@@ -31,7 +31,7 @@ release changes the runner, its characters and its figures together. The rules i
    `YYYY.MM.DD.N`, for example `2026.11.08.1`.
 2. Expect quality's gate to refuse a commit whose checks are not green. Otherwise the image is pushed to
    GHCR with an attestation, and the tag `v<version>` is created with the figures `src/characters/*.vrm`
-   as assets.
+   and the rooms `src/characters/*.room.glb` as assets.
 3. The release notes open with the configuration changes, written by
    `scripts/configuration_release_notes.sh`: each field of the runner's file added, removed, newly
    required or changed in what it takes (its type, its bounds, a map's key or value type) or in its
@@ -40,9 +40,10 @@ release changes the runner, its characters and its figures together. The rules i
    changed. They are derived from `src/personas/config.py` at both tags, so no change needs a note of
    its own, and they say what a `<kind>` placeholder asks for. The deployment's bump applies them all
    to its runner configuration.
-4. Then come one `figure` line per agent, written by `scripts/figure_release_notes.sh`: paste it,
-   without the name and its colon, into that agent's `[[agents]]` entry. An app that shows
-   figures fetches them only from the prefix its platform allows (hopin accepts
+4. Then come one `figure` line per agent and one `room` line per agent that has a room, written by
+   `scripts/figure_release_notes.sh`, each with the sha256 of the file the release carries: paste them,
+   without the name and its colon, into that agent's `[[agents]]` entry. An app that shows figures and
+   rooms fetches them only from the prefix its platform allows (hopin accepts
    `https://github.com/overnightworks/personas/releases/download/`).
 
 Rollback: none here; a pushed image and its tag stay, and the deployment in overnightworks/platform

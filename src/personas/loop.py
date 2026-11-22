@@ -376,6 +376,7 @@ class AgentLoop:
             takes_turns=takes_turns,
             held_elsewhere=held_elsewhere,
             figure=self._agent.figure,
+            room=self._agent.room,
             voices=() if voice is None else voice.names,
         ):
             await self._use_current_token(session)

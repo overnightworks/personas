@@ -26,6 +26,7 @@ from agents.member import (
     ContinueSpeakingRefusal,
     ContinueSpeakingRefused,
     DeclineInvitationArguments,
+    FigureLook,
     MemberResourceRecord,
     MemberStanding,
     PlaceRef,
@@ -64,7 +65,7 @@ from mcp_types import (
     Tool,
     jsonrpc_message_adapter,
 )
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from personas.config import AppTarget
 from personas.decision import Accept, Decline, Refusal, UnrecognisedRefusal, jsonrpc_code, status_code
@@ -91,7 +92,8 @@ _MEDIA_TYPE: Final = re.compile(r"[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&
 """A media type as a log line may carry it: a type and a subtype of token characters, no parameters."""
 _TRANSPORT_ERROR_CODES: Final = frozenset({CONNECTION_CLOSED, REQUEST_TIMEOUT})
 """What the SDK answers for a connection that broke or a request that timed out."""
-_ACCEPT_OPTIONAL: Final = frozenset({"figure", "voices"})
+_ACCEPT_OPTIONAL: Final = frozenset({"figure", "voices", "looks", "looks[].room"})
+"""An argument is named by its path: ``looks[].room`` is the ``room`` of each entry of ``looks``."""
 _SPEAK_OPTIONAL: Final = frozenset({"style", "interrupted"})
 _TURN_STATE_OPTIONAL: Final = frozenset({"thinking"})
 """The arguments the runner builds itself that a call may leave out; every other one of the three tools is
@@ -295,8 +297,8 @@ class _McpAppSession:
     not kept."""
     _notices: int = 0
     _kept: tuple[ToolDeclaration, ...] | None = None
-    _declared_arguments: dict[str, frozenset[str]] | None = None
-    """The argument names each tool of the app's latest list declares; a list moves it with the tools notice."""
+    _declared_arguments: dict[str, JsonObject] | None = None
+    """The input schema of each tool of the app's latest list; a list moves it with the tools notice."""
     _left_out: set[tuple[str, str]] = field(default_factory=set[tuple[str, str]])
     """The tool and argument of each left-out argument already reported in this session."""
     app_url: str = ""
@@ -375,7 +377,7 @@ class _McpAppSession:
         except ValidationError:
             raise UnusableAnswer(INVALID_ANSWER_CODE) from None
         if self._list_counter == started:
-            self._declared_arguments = {tool.name: _argument_names_of(tool.parameters) for tool in declared}
+            self._declared_arguments = {tool.name: tool.parameters for tool in declared}
             if self._honoured:
                 self._kept = declared
         return declared
@@ -386,6 +388,7 @@ class _McpAppSession:
             invitation=accept.invitation_id,
             epoch=accept.epoch,
             figure=accept.figure,
+            looks=_looks_of(accept),
             voices=accept.voices or None,
         ).model_dump(mode="json")
         result = await self._called_declared(ACCEPT_INVITATION_TOOL, arguments, optional=_ACCEPT_OPTIONAL, lists=True)
@@ -447,10 +450,10 @@ class _McpAppSession:
             return await self._called(name, arguments)
         if self._declared_arguments is None and lists:
             await self.declared_tools()
-        names = (self._declared_arguments or {}).get(name)
-        if names is None:
+        schema = (self._declared_arguments or {}).get(name)
+        if schema is None:
             return await self._called(name, arguments)
-        sent, left_out = _split_undeclared(arguments, names, optional)
+        sent, left_out = _split_undeclared(arguments, schema, optional)
         for argument in left_out:
             if (name, argument) not in self._left_out:
                 self._left_out.add((name, argument))
@@ -503,18 +506,54 @@ def _record_of[Record: MemberResourceRecord](record: type[Record], result: ReadR
         raise UnusableAnswer(INVALID_ANSWER_CODE) from None
 
 
-def _argument_names_of(schema: JsonObject) -> frozenset[str]:
+def _property_schemas(schema: JsonValue) -> tuple[JsonObject, ...]:
+    """The ``properties`` of every object schema ``schema`` is or reaches through its alternatives and array items.
+    An app's declared schema has every reference inlined, so none is resolved."""
+    if not isinstance(schema, dict):
+        return ()
     properties = schema.get("properties")
-    return frozenset(properties) if isinstance(properties, dict) else frozenset()
+    found = [properties] if isinstance(properties, dict) else []
+    for keyword in ("anyOf", "oneOf", "allOf"):
+        alternatives = schema.get(keyword)
+        if isinstance(alternatives, list):
+            found.extend(each for alternative in alternatives for each in _property_schemas(alternative))
+    found.extend(_property_schemas(schema.get("items")))
+    return tuple(found)
 
 
 def _split_undeclared(
-    arguments: JsonObject, declared: frozenset[str], optional: frozenset[str]
+    arguments: JsonObject, schema: JsonValue, optional: frozenset[str], prefix: str = ""
 ) -> tuple[JsonObject, tuple[str, ...]]:
-    """The arguments to send and the names left out: an ``optional`` argument the tool's ``declared`` names do not
-    include. Every other argument stays, so a required one is never dropped."""
-    left_out = tuple(name for name in arguments if name in optional and name not in declared)
-    return {name: value for name, value in arguments.items() if name not in left_out}, left_out
+    """The arguments to send and the paths left out: an ``optional`` argument, at any depth, that the tool's declared
+    ``schema`` does not name. Every other argument stays, so a required one is never dropped."""
+    declared = _property_schemas(schema)
+    sent: JsonObject = {}
+    left_out: list[str] = []
+    for name, value in arguments.items():
+        path = f"{prefix}{name}"
+        named = next((properties[name] for properties in declared if name in properties), None)
+        if named is None and path in optional:
+            left_out.append(path)
+        elif named is not None and isinstance(value, list):
+            entries = [
+                _split_undeclared(entry, named, optional, f"{path}[].") if isinstance(entry, dict) else (entry, ())
+                for entry in value
+            ]
+            sent[name] = [entry for entry, _ in entries]
+            left_out.extend(path for _, paths in entries for path in paths)
+        else:
+            sent[name] = value
+    return sent, tuple(left_out)
+
+
+def _looks_of(accept: Accept) -> tuple[FigureLook, ...] | None:
+    """The figure look the accept's room belongs to; a room is drawn behind the figure, so one without a figure has
+    no look. The figure travels beside it for an app that reads no looks."""
+    if accept.room is None or accept.figure is None:
+        return None
+    figure = accept.figure
+    look = FigureLook(kind="figure", url=figure.url, sha256=figure.sha256, gestures=figure.gestures, room=accept.room)
+    return (look,)
 
 
 def _declaration_of(tool: Tool) -> ToolDeclaration:

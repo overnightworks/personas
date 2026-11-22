@@ -192,6 +192,29 @@ def test_an_agent_entry_may_name_the_figure_he_brings_and_none_otherwise(files):
     assert digest not in repr(agent)
 
 
+def room_table() -> str:
+    return figure_table().replace("[agents.figure]", "[agents.room]")
+
+
+def test_an_agent_entry_may_name_the_room_he_brings_beside_his_figure(files):
+    """CONFIG-18."""
+    files.text += figure_table() + room_table()
+
+    [agent] = load_config(files.write()).agents
+
+    assert agent.room is not None
+    assert agent.room.url not in repr(agent)
+
+
+def test_a_room_without_a_figure_stops_the_start_and_names_the_field(files, monkeypatch, capsys):
+    """CONFIG-18."""
+    files.text += room_table()
+
+    error = fails_at_start(files.write(), monkeypatch, capsys)
+
+    assert "room: needs a figure" in error
+
+
 @pytest.mark.parametrize(
     ("table", "named"),
     [
