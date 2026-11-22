@@ -1,0 +1,8 @@
+claim_id = "8b46b531fa3b44d5958bf28b100b507b"
+agent = "Claude be7c4026-fca6-4c5a-a1e5-ae2afe22d493"
+role = "builder"
+base = "dd899edd1bae726286db5986cbf45e27a0016471"
+branch = "claude/issue-412-busy-across-apps"
+scope = ["docs/log.md", "docs/turns.md", "src/personas/app_session.py", "src/personas/decision.py", "src/personas/loop.py", "src/personas/mind.py"]
+opened_commit = "c40cf6e6324f35642623ad5bd429c5a99e8a3e53"
+whole_reason = "The busy claim, what counts as held and the rule's wording are one decision about when the agent is in a call."
