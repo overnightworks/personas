@@ -124,7 +124,7 @@ class AppSession(Protocol):
         """``None`` when joined, else the refusal; raises ``StatusFailure``, ``Unreachable`` or ``UnusableAnswer``."""
         ...
 
-    async def decline(self, decline: Decline) -> Declined | DeclineInvitationRefusal:
+    async def decline(self, decline: Decline) -> Declined | DeclineInvitationRefusal | UnrecognisedRefusal:
         """Declines an invitation, unless the app lists no tool to decline with, which leaves the invitation to run out;
         the refusal says the invitation is gone."""
         ...
@@ -397,7 +397,7 @@ class _McpAppSession:
         result = await self._called_declared(ACCEPT_INVITATION_TOOL, arguments, optional=_ACCEPT_OPTIONAL, lists=True)
         return _refusal_of(_text_of(result)) if result.is_error else None
 
-    async def decline(self, decline: Decline) -> Declined | DeclineInvitationRefusal:
+    async def decline(self, decline: Decline) -> Declined | DeclineInvitationRefusal | UnrecognisedRefusal:
         listed = (
             self._declared_arguments.keys()
             if self._declared_arguments is not None
@@ -410,7 +410,7 @@ class _McpAppSession:
         ).model_dump(mode="json")
         result = await self._called(DECLINE_INVITATION_TOOL, arguments)
         if result.is_error:
-            return _refusal_in(DeclineInvitationRefused, result).refused
+            return _decline_refusal_of(_text_of(result))
         return Declined.SENT
 
     async def speak(
@@ -611,6 +611,13 @@ def _picture_of(result: CallToolResult) -> ToolImage | None:
 def _refusal_of(text: str) -> Refusal:
     try:
         return AcceptInvitationRefused.model_validate_json(text).refused
+    except ValidationError:
+        return UnrecognisedRefusal.UNRECOGNISED
+
+
+def _decline_refusal_of(text: str) -> DeclineInvitationRefusal | UnrecognisedRefusal:
+    try:
+        return DeclineInvitationRefused.model_validate_json(text).refused
     except ValidationError:
         return UnrecognisedRefusal.UNRECOGNISED
 

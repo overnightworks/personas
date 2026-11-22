@@ -25,6 +25,7 @@ from personas.decision import (
     Reaction,
     Suspend,
     Token,
+    UnrecognisedRefusal,
     accepts_for,
     active_places,
     active_view_places,
@@ -397,7 +398,7 @@ class AgentLoop:
         await self._use_current_token(session)
         answer = await session.decline(decline)
         self._memory = after_decline(self._memory, decline, answer)
-        if isinstance(answer, DeclineInvitationRefusal):
+        if isinstance(answer, DeclineInvitationRefusal | UnrecognisedRefusal):
             self._report(Event.DECLINE_REFUSED, answer.value, place_kind=decline.place.kind)
         elif answer is Declined.SENT:
             self._report(Event.INVITATION_DECLINED, decline.reason.value, place_kind=decline.place.kind)

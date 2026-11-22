@@ -14,7 +14,7 @@ from agents.member import (
 )
 from agents.tools import ToolOutcome
 
-from personas.decision import Decline
+from personas.decision import Decline, UnrecognisedRefusal
 from personas.reporting import Event
 from tests.support.call import PLACE_ID
 from tests.support.fakes import read_of
@@ -110,16 +110,26 @@ async def test_no_decline_is_sent_to_an_app_that_lists_no_tool_to_decline_with(r
 
     assert DECLINE_INVITATION_TOOL not in other.calls
     assert other.accepted == []
-    assert Event.INVITATION_DECLINED not in [event for event, _ in runner.reports.reported()]
+    events = [event for event, _ in runner.reports.reported()]
+    assert Event.INVITATION_DECLINED not in events
+    assert Event.BACKOFF not in events
+    assert [each.invitation.id for each in other.standings[SUBJECT] if each.invitation] == ["inv-other"]
 
 
-async def test_a_decline_the_app_refuses_is_logged_as_refused_and_not_sent_again(runner, other):
+@pytest.mark.parametrize(
+    ("answer", "reason"),
+    [
+        pytest.param(
+            DeclineInvitationRefused(refused=DeclineInvitationRefusal.STALE_INVITATION).model_dump_json(),
+            DeclineInvitationRefusal.STALE_INVITATION.value,
+            id="a refusal of the library",
+        ),
+        pytest.param("invalid arguments", UnrecognisedRefusal.UNRECOGNISED.value, id="an error that is no refusal"),
+    ],
+)
+async def test_a_decline_the_app_refuses_is_logged_as_refused_and_not_sent_again(runner, other, answer, reason):
     """TURNS-1"""
-    other.decline_outcomes = [
-        ToolOutcome(
-            DeclineInvitationRefused(refused=DeclineInvitationRefusal.STALE_INVITATION).model_dump_json(), is_error=True
-        )
-    ]
+    other.decline_outcomes = [ToolOutcome(answer, is_error=True)]
     runner.app.stand(SUBJECT, active(PLACE_ID))
     runner.start()
     await runner.app.until_standing_read(1)
@@ -129,6 +139,23 @@ async def test_a_decline_the_app_refuses_is_logged_as_refused_and_not_sent_again
     await settled(other)
 
     events = [event for event, _ in runner.reports.reported()]
-    assert (Event.DECLINE_REFUSED, DeclineInvitationRefusal.STALE_INVITATION.value) in runner.reports.reported()
+    assert (Event.DECLINE_REFUSED, reason) in runner.reports.reported()
     assert Event.INVITATION_DECLINED not in events
+    assert Event.BACKOFF not in events
     assert len(other.declined) == 1
+
+
+async def test_after_the_call_ends_a_call_invitation_at_another_app_is_accepted(runner, other):
+    """TURNS-1"""
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    runner.start()
+    await runner.app.until_standing_read(1)
+    await settled(runner.app)
+    runner.app.stand(SUBJECT)
+    await runner.app.until_standing_read(2)
+    await settled(runner.app)
+    other.stand(SUBJECT, invited(OTHER_CALL_ID, "inv-other"))
+    await runner.reports.until(Event.JOINED)
+
+    assert [each.place.id for each in other.accepted] == [OTHER_CALL_ID]
+    assert other.declined == []

@@ -248,10 +248,12 @@ def declines_for(
     )
 
 
-def after_decline(memory: Memory, decline: Decline, answer: Declined | DeclineInvitationRefusal) -> Memory:
+def after_decline(
+    memory: Memory, decline: Decline, answer: Declined | DeclineInvitationRefusal | UnrecognisedRefusal
+) -> Memory:
     """The memory once the decline was answered: a decline the app refused is not remembered as declined, since the
     invitation no longer stands, and one that failed stays due."""
-    if isinstance(answer, DeclineInvitationRefusal):
+    if isinstance(answer, DeclineInvitationRefusal | UnrecognisedRefusal):
         return Memory(
             stale=memory.stale | {decline.invitation_id},
             refused=memory.refused,
