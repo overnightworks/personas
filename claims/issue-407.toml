@@ -1,8 +1,0 @@
-claim_id = "c82c727f8a734891965580cfef2cfc58"
-agent = "Claude be7c4026-fca6-4c5a-a1e5-ae2afe22d493"
-role = "builder"
-base = "c7ebade6838b08f3002b3343efdf0febe9d58760"
-branch = "claude/issue-407-one-call-at-a-time"
-scope = ["docs/log.md", "docs/turns.md", "quality/baseline.toml", "src/personas/app_session.py", "src/personas/decision.py", "src/personas/loop.py", "src/personas/mind.py", "src/personas/reporting.py", "tests/support/fakes.py", "tests/support/hopin.py", "tests/test_app_session.py", "tests/test_decision.py", "tests/test_decision_busy.py", "tests/test_loop.py", "tests/test_loop_busy.py", "tests/test_loop_turn.py", "tests/test_mind.py", "tests/test_reporting.py"]
-opened_commit = "cec7806e26b0cd84222a02dc641ccfc523619b9e"
-whole_reason = "The busy decision, the loop that performs its decline, the app session that sends it and its log event are one rule from decision to wire."
