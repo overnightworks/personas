@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 
 from personas.decision import (
     AppPlace,
-    Paused,
     backoff_delay,
     budget_pause,
     held_apps,
@@ -69,7 +68,7 @@ from personas.speech import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
-    from agents.member import PlaceWindow, Standing
+    from agents.member import PlaceRef, PlaceWindow, Standing
 
     from personas.decision import Checkpoint
     from personas.due import Due
@@ -106,6 +105,8 @@ class Mind:
         self._voice_apps = frozenset[str]()
         self._checkpoints = resumed.checkpoints
         self._placed = frozenset[str]()
+        self._active: dict[str, frozenset[PlaceRef]] = {}
+        self._claimed: dict[str, frozenset[PlaceRef]] = {}
         self._not_granted: dict[str, float] = {}
         self._wake_events: list[asyncio.Event] = []
         self._speech: dict[AppPlace, SpeechRecord] = {}
@@ -296,9 +297,25 @@ class Mind:
             moved[at] = checkpoint
         self._set_checkpoints(moved)
 
-    def holds_active_window_elsewhere(self, app: str) -> bool:
-        """Whether he holds an active window place in an app other than ``app``: a paused place is not active."""
-        return any(at.app != app and not isinstance(checkpoint, Paused) for at, checkpoint in self._checkpoints.items())
+    def hold_places(self, app: str, places: frozenset[PlaceRef]) -> None:
+        """He holds ``places`` active at ``app``, as its loop last read his standing; what it claimed meanwhile is
+        settled by that read."""
+        self._active = {**self._active, app: places}
+        self._claimed = {**self._claimed, app: frozenset()}
+
+    def claim_places(self, app: str, places: frozenset[PlaceRef]) -> None:
+        """He is about to take ``places`` at ``app``: each counts as held at once, before the accept is awaited, until
+        the next standing read of ``app`` or its ``release``."""
+        self._claimed = {**self._claimed, app: self._claimed.get(app, frozenset()) | places}
+
+    def release_places(self, app: str, places: frozenset[PlaceRef]) -> None:
+        """An accept of ``places`` at ``app`` did not take them: they count as held no more."""
+        self._claimed = {**self._claimed, app: self._claimed.get(app, frozenset()) - places}
+
+    def holds_active_place_elsewhere(self, app: str) -> bool:
+        """Whether he holds, or has claimed, an active place of any kind in an app other than ``app``; a parked app's
+        places are recorded as none."""
+        return any(places for each, places in (*self._active.items(), *self._claimed.items()) if each != app)
 
     def sync_checkpoints(self, app: str, standings: tuple[Standing, ...], before: tuple[Standing, ...]) -> None:
         """Keeps the checkpoints of ``app``'s places in line with a standing read there, given the one read before."""

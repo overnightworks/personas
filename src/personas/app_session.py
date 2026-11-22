@@ -26,6 +26,8 @@ from agents.member import (
     ContinueSpeakingRefusal,
     ContinueSpeakingRefused,
     DeclineInvitationArguments,
+    DeclineInvitationRefusal,
+    DeclineInvitationRefused,
     FigureLook,
     MemberResourceRecord,
     MemberStanding,
@@ -68,7 +70,7 @@ from mcp_types import (
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from personas.config import AppTarget
-from personas.decision import Accept, Decline, Refusal, UnrecognisedRefusal, jsonrpc_code, status_code
+from personas.decision import Accept, Decline, Declined, Refusal, UnrecognisedRefusal, jsonrpc_code, status_code
 from personas.failures import (
     INVALID_ANSWER_CODE,
     LATE_ANSWER_ERRORS,
@@ -122,8 +124,9 @@ class AppSession(Protocol):
         """``None`` when joined, else the refusal; raises ``StatusFailure``, ``Unreachable`` or ``UnusableAnswer``."""
         ...
 
-    async def decline(self, decline: Decline) -> None:
-        """Declines an invitation; the app's refusal says the invitation is gone, which leaves nothing to decline."""
+    async def decline(self, decline: Decline) -> Declined | DeclineInvitationRefusal | UnrecognisedRefusal:
+        """Declines an invitation, unless the app lists no tool to decline with, which leaves the invitation to run out;
+        the refusal says the invitation is gone."""
         ...
 
     async def read_place(self, place: PlaceRef) -> PlaceWindow | None:
@@ -394,11 +397,21 @@ class _McpAppSession:
         result = await self._called_declared(ACCEPT_INVITATION_TOOL, arguments, optional=_ACCEPT_OPTIONAL, lists=True)
         return _refusal_of(_text_of(result)) if result.is_error else None
 
-    async def decline(self, decline: Decline) -> None:
+    async def decline(self, decline: Decline) -> Declined | DeclineInvitationRefusal | UnrecognisedRefusal:
+        listed = (
+            self._declared_arguments.keys()
+            if self._declared_arguments is not None
+            else {tool.name for tool in await self.declared_tools()}
+        )
+        if DECLINE_INVITATION_TOOL not in listed:
+            return Declined.NOT_SERVED
         arguments = DeclineInvitationArguments(
             place=decline.place, invitation=decline.invitation_id, epoch=decline.epoch, reason=decline.reason
         ).model_dump(mode="json")
-        await self._called(DECLINE_INVITATION_TOOL, arguments)
+        result = await self._called(DECLINE_INVITATION_TOOL, arguments)
+        if result.is_error:
+            return _decline_refusal_of(_text_of(result))
+        return Declined.SENT
 
     async def speak(
         self, place: PlaceRef, sentence: str, style: str | None = None, interrupted: str | None = None
@@ -598,6 +611,13 @@ def _picture_of(result: CallToolResult) -> ToolImage | None:
 def _refusal_of(text: str) -> Refusal:
     try:
         return AcceptInvitationRefused.model_validate_json(text).refused
+    except ValidationError:
+        return UnrecognisedRefusal.UNRECOGNISED
+
+
+def _decline_refusal_of(text: str) -> DeclineInvitationRefusal | UnrecognisedRefusal:
+    try:
+        return DeclineInvitationRefused.model_validate_json(text).refused
     except ValidationError:
         return UnrecognisedRefusal.UNRECOGNISED
 

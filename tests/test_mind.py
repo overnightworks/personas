@@ -14,8 +14,6 @@ from personas.decision import (
     BACKOFF_CAP_SECONDS,
     TURN_CANCELLED_CODE,
     AppPlace,
-    Joined,
-    Paused,
 )
 from personas.entries import (
     ActDone,
@@ -554,14 +552,30 @@ def test_a_place_becomes_due_once_however_often_it_is_made_due_and_again_after_i
     assert mind.due_for_hold(CALL_AT_B, "generation-1", NOW) is True
 
 
-def test_an_active_window_place_in_another_app_counts_as_held_elsewhere_and_a_paused_one_does_not():
+def test_an_active_place_of_any_kind_in_another_app_counts_as_held_elsewhere_and_a_parked_app_s_does_not():
     """TURNS-1"""
     mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
-    mind.move_checkpoint(AppPlace(OTHER_CALL.app, OTHER_CALL.place), Joined())
+    table = PlaceRef(kind="table", id="table-1")
+    mind.hold_places(OTHER_CALL.app, frozenset({table}))
 
-    assert mind.holds_active_window_elsewhere(CALL.app)
-    assert not mind.holds_active_window_elsewhere(OTHER_CALL.app)
+    assert mind.holds_active_place_elsewhere(CALL.app)
+    assert not mind.holds_active_place_elsewhere(OTHER_CALL.app)
 
-    mind.move_checkpoint(AppPlace(OTHER_CALL.app, OTHER_CALL.place), Paused())
+    mind.hold_places(OTHER_CALL.app, frozenset())
 
-    assert not mind.holds_active_window_elsewhere(CALL.app)
+    assert not mind.holds_active_place_elsewhere(CALL.app)
+
+
+def test_a_place_claimed_in_another_app_counts_as_held_until_released_or_read_again():
+    """TURNS-1"""
+    mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
+
+    mind.claim_places(OTHER_CALL.app, frozenset({OTHER_CALL.place}))
+    assert mind.holds_active_place_elsewhere(CALL.app)
+
+    mind.release_places(OTHER_CALL.app, frozenset({OTHER_CALL.place}))
+    assert not mind.holds_active_place_elsewhere(CALL.app)
+
+    mind.claim_places(OTHER_CALL.app, frozenset({OTHER_CALL.place}))
+    mind.hold_places(OTHER_CALL.app, frozenset())
+    assert not mind.holds_active_place_elsewhere(CALL.app)

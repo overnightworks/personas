@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass, field, replace
-from enum import StrEnum
+from enum import Enum, StrEnum, auto
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Final
 
@@ -27,6 +27,7 @@ from agents.member import (
     STOP_SPEAKING_TOOL,
     AcceptInvitationRefusal,
     DeclineInvitationReason,
+    DeclineInvitationRefusal,
     PlaceEntry,
     PlaceRef,
     PlaceView,
@@ -138,6 +139,14 @@ class Decline:
     reason: DeclineInvitationReason = DeclineInvitationReason.BUSY
 
 
+class Declined(Enum):
+    """How a decline that was not refused ended: sent, or left to run out because the app lists no tool to send it
+    with."""
+
+    SENT = auto()
+    NOT_SERVED = auto()
+
+
 @dataclass(frozen=True)
 class Token:
     value: Secret = field(repr=False)
@@ -165,15 +174,18 @@ def _has_window(standing: Standing) -> bool:
     return standing.place.kind == CALL_PLACE_KIND or standing.serves_view
 
 
+def active_places(standings: tuple[Standing, ...]) -> frozenset[PlaceRef]:
+    """The places of any kind the agent holds active at an app: what counts as held, in this app and in every other."""
+    return frozenset(standing.place for standing in standings if standing.state is StandingState.ACTIVE)
+
+
 def _busy(standings: tuple[Standing, ...], standing: Standing, memory: Memory, *, held_elsewhere: bool) -> bool:
     """A call invitation while the agent holds an active place other than the invited one, in this app or, as
     ``held_elsewhere`` says, in another, or while an earlier call invitation of this read is the one to accept; a table
     or tool reached from the call is not a call place and stays accepted."""
     if not _is_call(standing):
         return False
-    if held_elsewhere or any(
-        other.state is StandingState.ACTIVE and other.place != standing.place for other in standings
-    ):
+    if held_elsewhere or any(place != standing.place for place in active_places(standings)):
         return True
     first = next(
         (other for other, invitation in _invited(standings) if _is_call(other) and invitation.id not in memory.stale),
@@ -226,18 +238,34 @@ def accepts_for(
 def declines_for(
     standings: tuple[Standing, ...], memory: Memory, *, held_elsewhere: bool = False
 ) -> tuple[Decline, ...]:
-    """One decline for each invitation to a call while the agent holds an active place that was not declined yet: the
+    """One decline for each invitation to a call while the agent holds an active place that was not handled yet: the
     inviter learns he is busy and invites again once the agent is free."""
     return tuple(
         Decline(standing.place, invitation.id, invitation.epoch)
         for standing, invitation in _invited(standings)
-        if _busy(standings, standing, memory, held_elsewhere=held_elsewhere) and invitation.id not in memory.declined
+        if _busy(standings, standing, memory, held_elsewhere=held_elsewhere)
+        and invitation.id not in memory.declined | memory.stale
     )
 
 
-def after_decline(memory: Memory, decline: Decline) -> Memory:
-    """The memory once the decline went through: a decline that failed stays due."""
-    return Memory(memory.stale, memory.refused, memory.left_out, memory.declined | {decline.invitation_id})
+def after_decline(
+    memory: Memory, decline: Decline, answer: Declined | DeclineInvitationRefusal | UnrecognisedRefusal
+) -> Memory:
+    """The memory once the decline was answered: a decline the app refused is not remembered as declined, since the
+    invitation no longer stands, and one that failed stays due."""
+    if isinstance(answer, DeclineInvitationRefusal | UnrecognisedRefusal):
+        return Memory(
+            stale=memory.stale | {decline.invitation_id},
+            refused=memory.refused,
+            left_out=memory.left_out,
+            declined=memory.declined,
+        )
+    return Memory(
+        stale=memory.stale,
+        refused=memory.refused,
+        left_out=memory.left_out,
+        declined=memory.declined | {decline.invitation_id},
+    )
 
 
 def left_out_for(

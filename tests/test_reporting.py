@@ -58,6 +58,12 @@ def of(event: Event, code: str | None = None, **fields: object) -> StateChange:
             id="declined",
         ),
         pytest.param(
+            of(Event.DECLINE_REFUSED, "stale_invitation", place_kind="call"),
+            "invitation.decline_refused",
+            {"reason": "stale_invitation", "place_kind": "call"},
+            id="decline refused",
+        ),
+        pytest.param(
             of(Event.PAUSED, "budget_spent", seconds=1.5),
             "turns.paused",
             {"reason": "budget_spent", "pause_ms": 1500},
