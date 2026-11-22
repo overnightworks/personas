@@ -55,6 +55,7 @@ class Event(Enum):
     REFUSED = auto()
     INVITATION_LEFT_OUT = auto()
     INVITATION_DECLINED = auto()
+    DECLINE_REFUSED = auto()
     PAUSED = auto()
     SPEAK_REFUSED = auto()
     SPEECH_DROPPED = auto()
@@ -131,6 +132,7 @@ _LINE_OF: Final = {
     Event.REFUSED: (logging.INFO, "invitation.refused"),
     Event.INVITATION_LEFT_OUT: (logging.INFO, "invitation.left_out"),
     Event.INVITATION_DECLINED: (logging.INFO, "invitation.declined"),
+    Event.DECLINE_REFUSED: (logging.INFO, "invitation.decline_refused"),
     Event.PAUSED: (logging.INFO, "turns.paused"),
     Event.SPEAK_REFUSED: (logging.INFO, "speak.refused"),
     Event.SPEECH_DROPPED: (logging.INFO, "speech.dropped"),
