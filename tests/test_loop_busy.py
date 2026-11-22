@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from http import HTTPStatus
+
 import pytest
 from agents.member import DeclineInvitationReason, PlaceRef
 
@@ -40,3 +42,19 @@ async def test_a_call_invitation_while_a_place_is_active_is_declined_once_and_no
     assert run.session.declined == [Decline(PlaceRef(kind="call", id="room-7"), "inv-3", 2)]
     assert run.session.accepted == []
     assert [event for event, _ in run.reports.reported()].count(Event.INVITATION_DECLINED) == 1
+
+
+async def test_a_decline_that_failed_transiently_is_sent_again_after_the_backoff(runner, other):
+    runner.app.stand(SUBJECT, active(PLACE_ID))
+    runner.start()
+    await runner.app.until_standing_read(1)
+    await settled(runner.app)
+    other.refuse_with = HTTPStatus.SERVICE_UNAVAILABLE
+    other.refused_tool = "decline_invitation"
+    other.stand(SUBJECT, invited(OTHER_CALL_ID, "inv-other"))
+    await runner.reports.until(Event.BACKOFF)
+    other.refuse_with = None
+    await runner.reports.until(Event.RESUMED)
+    await runner.reports.until(Event.INVITATION_DECLINED)
+
+    assert [each.place.id for each in other.declined] == [OTHER_CALL_ID]

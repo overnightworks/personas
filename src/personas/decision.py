@@ -225,15 +225,19 @@ def accepts_for(
 
 def declines_for(
     standings: tuple[Standing, ...], memory: Memory, *, held_elsewhere: bool = False
-) -> tuple[Memory, tuple[Decline, ...]]:
-    """One decline, once, for each invitation to a call while the agent holds an active place, and the memory that
-    holds them declined: the inviter learns he is busy and invites again once the agent is free."""
-    news = tuple(
+) -> tuple[Decline, ...]:
+    """One decline for each invitation to a call while the agent holds an active place that was not declined yet: the
+    inviter learns he is busy and invites again once the agent is free."""
+    return tuple(
         Decline(standing.place, invitation.id, invitation.epoch)
         for standing, invitation in _invited(standings)
         if _busy(standings, standing, memory, held_elsewhere=held_elsewhere) and invitation.id not in memory.declined
     )
-    return replace(memory, declined=memory.declined | {decline.invitation_id for decline in news}), news
+
+
+def after_decline(memory: Memory, decline: Decline) -> Memory:
+    """The memory once the decline went through: a decline that failed stays due."""
+    return replace(memory, declined=memory.declined | {decline.invitation_id})
 
 
 def left_out_for(
