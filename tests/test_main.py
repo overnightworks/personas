@@ -38,8 +38,7 @@ from personas.reporting import Event, log_state_change
 from personas.tokens import HttpTokenSource
 from tests.support.fakes import FakeClock, credentials
 from tests.support.gateway import Gateway, says
-from tests.support.hopin import FakeApp
-from tests.support.logs import trace_of
+from tests.support.hopin import FakeApp, trace_id_of
 from tests.support.ownership import AllAgentsOwned
 from tests.support.realm import FakeRealm
 from tests.support.standings import AGENT_SUBJECT, active, invited
@@ -454,7 +453,7 @@ def test_the_real_boundaries_send_the_current_trace_to_the_realm_and_none_outsid
     inside = asyncio.run(fetched_twice())
 
     assert inside is not None
-    assert [seen[0], seen[1] and trace_of(seen[1])] == [None, trace_of(inside)]
+    assert [seen[0], seen[1] and trace_id_of(seen[1])] == [None, trace_id_of(inside)]
 
 
 def test_an_addressed_line_gets_one_say_through_the_entry_point_and_nothing_secret_or_said_reaches_the_log(
