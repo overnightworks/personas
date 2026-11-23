@@ -8,9 +8,9 @@ from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL, VoiceState
 
 from personas.reporting import Event
+from tests.support.app_driving import settled
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, say_in_the_call
 from tests.support.gateway import says
-from tests.support.history import settled
 from tests.support.hopin import SAY_TOOL
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active

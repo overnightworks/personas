@@ -26,6 +26,7 @@ from personas.reporting import MCP_CLIENT_LOGGER, carry_trace, log_state_change
 from personas.secret import Secret
 from personas.tokens import HttpTokenSource
 from tests.support.configfiles import MAX_TOOL_CALLS, PERSONA_MAX_DURATION_SECONDS, Files
+from tests.support.entry_logs import configure_logging_into
 from tests.support.fakes import (
     FakeClock,
     FakeReadyMarker,
@@ -40,7 +41,7 @@ from tests.support.fakes import (
 from tests.support.gateway import Gateway, RoundBackend
 from tests.support.hopin import PLAY_TOOL, FakeApp
 from tests.support.hopin_places import ISSUER
-from tests.support.logs import configure_logging_into, formatted
+from tests.support.logs import formatted
 from tests.support.ownership import AllAgentsOwned, KeptHistories
 from tests.support.realm import TOKEN_ENDPOINT, FakeRealm
 from tests.support.songmaker import CALLS, ToolsOnlyApp

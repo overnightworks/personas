@@ -11,10 +11,11 @@ from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL, SpeakRefus
 from agents.tools import ToolOutcome
 
 from personas.reporting import Event
+from tests.support.app_driving import settled
 from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
 from tests.support.gateway import Gateway, say
-from tests.support.history import at_table, settled
+from tests.support.history import at_table
 from tests.support.hopin import CALL, LIMIT_SECONDS
 from tests.support.standings import AGENT_SUBJECT, active
 from tests.support.wire import hangs_once_entered

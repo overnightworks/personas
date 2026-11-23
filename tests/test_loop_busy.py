@@ -16,9 +16,9 @@ from agents.tools import ToolOutcome
 
 from personas.decision import Decline, UnrecognisedRefusal
 from personas.reporting import Event
+from tests.support.app_driving import settled
 from tests.support.call import PLACE_ID
 from tests.support.fakes import read_of
-from tests.support.history import settled
 from tests.support.hopin import PLAY_TOOL, FakeApp
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, invited

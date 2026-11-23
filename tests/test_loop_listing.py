@@ -8,10 +8,11 @@ import pytest
 from agents.backend.fake_gateway import completion
 
 from personas.failures import leaves_of
+from tests.support.app_driving import settled
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import CANCELLED_TURN
 from tests.support.gateway import Gateway, says
-from tests.support.history import HistoriesHoldingTheAddressedLine, settled
+from tests.support.history import HistoriesHoldingTheAddressedLine
 from tests.support.hopin import LIMIT_SECONDS, LIST_TOOLS
 from tests.support.logs import lines_of
 from tests.support.standings import AGENT_SUBJECT as SUBJECT

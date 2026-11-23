@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
 
+from tests.support.app_driving import said_and_taken, settled, waits
 from tests.support.call import ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway
 from tests.support.history import (
@@ -12,12 +13,9 @@ from tests.support.history import (
     REMARK,
     TABLE,
     at_table,
-    said_and_taken,
-    settled,
     turn_order,
     url_of,
     wait_reasons,
-    waits,
     woke_at_table,
 )
 from tests.support.hopin import PLAY_TOOL, SAY_TOOL

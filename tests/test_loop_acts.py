@@ -24,6 +24,7 @@ from personas.decision import (
 )
 from personas.failures import INVALID_ANSWER_CODE, Unreachable
 from personas.reporting import Event
+from tests.support.app_driving import said_and_taken, settled, waits
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import CANCELLED_TURN
 from tests.support.gateway import Gateway, says_after_a_hold
@@ -38,14 +39,11 @@ from tests.support.history import (
     bounded_history,
     entry,
     history_of,
-    said_and_taken,
-    settled,
     told_line_bytes,
     unanswered,
     url_of,
     view_entry,
     view_turns,
-    waits,
     written_turns,
 )
 from tests.support.hopin import CALL, LISTEN, PLAY_TOOL, READ, SAY_TOOL
