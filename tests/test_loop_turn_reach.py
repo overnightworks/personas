@@ -293,7 +293,7 @@ async def test_a_tools_only_call_that_fails_shows_the_model_an_error_and_the_tur
 
 
 async def test_a_session_of_a_tools_only_call_whose_sdk_child_is_lost_shows_the_model_an_error_and_the_runner_goes_on(
-    runner, songmaker, monkeypatch
+    runner, songmaker
 ):
     failing = asyncio.Event()
     runner.open_session = opener_whose_session_loses_a_child(failing, nth=2, of_url=songmaker_url(runner))
@@ -342,7 +342,7 @@ async def a_loss_while_the_app_session_opens_and_a_turn_that_answers(runner, son
 
 
 async def test_a_child_lost_while_the_listing_session_discovers_leaves_the_app_absent_and_the_runner_goes_on(
-    runner, songmaker, monkeypatch
+    runner, songmaker
 ):
     failing = asyncio.Event()
 
@@ -357,7 +357,7 @@ async def test_a_child_lost_while_the_listing_session_discovers_leaves_the_app_a
 
 
 async def test_a_child_lost_while_a_calls_session_discovers_shows_the_model_an_error_and_the_runner_goes_on(
-    runner, songmaker, monkeypatch
+    runner, songmaker
 ):
     failing = asyncio.Event()
     runner.open_session = opener_whose_session_loses_a_child(failing, nth=2, of_url=songmaker_url(runner))
@@ -437,7 +437,7 @@ async def test_a_turn_whose_place_left_during_a_tools_only_call_stops_with_no_fu
 
 
 async def test_a_defect_in_a_tools_only_request_whose_place_then_leaves_while_it_closes_ends_the_runner_loud(
-    runner, songmaker, monkeypatch
+    runner, songmaker
 ):
     defect = ValueError("a defect")
     runner.open_session = opener_whose_request_raises("invoke", defect)
@@ -468,7 +468,7 @@ def raising_in_the_tools_only_request(runner, where, defect):
 
 @pytest.mark.parametrize("where", ["listing", "call"])
 async def test_a_defect_in_a_tools_only_request_whose_close_outlasts_the_apps_call_time_ends_the_runner_loud(
-    runner, songmaker, monkeypatch, where
+    runner, songmaker, where
 ):
     defect = ValueError("a defect")
     raising_in_the_tools_only_request(runner, where, defect)
@@ -524,7 +524,7 @@ async def test_a_timeout_the_token_source_raises_itself_before_the_call_time_is_
 
 
 async def test_a_defect_in_a_tools_only_call_whose_close_outlasts_the_turns_duration_ends_the_runner_loud(
-    runner, songmaker, monkeypatch
+    runner, songmaker
 ):
     runner.files.persona_path.write_text(runner.files.persona_text(max_duration_seconds=1), encoding="utf-8")
     runner.config = load_config(runner.files.write())
@@ -549,7 +549,7 @@ async def test_a_defect_in_a_tools_only_call_whose_close_outlasts_the_turns_dura
 
 
 async def test_a_tools_only_call_whose_cancelled_session_leaves_as_a_failure_still_stops_the_turn(
-    runner, songmaker, monkeypatch
+    runner, songmaker
 ):
     runner.open_session = opener_whose_cancelled_close_fails(only_close=1)
     await a_turn_inside_a_tools_only_call(runner, songmaker)
@@ -710,7 +710,7 @@ async def test_a_second_defect_of_the_turns_session_body_leaves_beside_the_first
 
 
 async def test_a_tools_only_call_that_fails_whose_close_adds_a_defect_ends_the_runner_with_each_leaf_once(
-    runner, songmaker, monkeypatch
+    runner, songmaker
 ):
     songmaker.script(CALL, refuses_with_a_server_error)
     runner.open_session = opener_whose_close_adds_a_defect(RuntimeError, only_close=1)
