@@ -672,10 +672,8 @@ async def test_late_answers_alone_after_a_session_body_was_left_by_a_cancellatio
 async def test_a_defect_beside_late_answers_after_a_cancellation_stays_with_them_as_the_errors_they_are(
     app, bearer, monkeypatch
 ):
-    defect = ValueError("a defect")
-    monkeypatch.setattr(
-        app_session, "streamable_http_client", transport_closing_with_leaves(defect, anyio.BrokenResourceError())
-    )
+    leaves = transport_closing_with_leaves(ValueError("a defect"), anyio.BrokenResourceError())
+    monkeypatch.setattr(app_session, "streamable_http_client", leaves)
 
     ended = await cancelled_in_the_stream_body(app, bearer)
 
