@@ -37,7 +37,6 @@ events and their fields. A test cites each rule by its ID at the start of its do
 - LOG-11: `invitation.left_out`; written when: an invitation the agent cannot take turns at; fields beyond the ids: `place_kind`, `reason` `no_turns`
   - `invitation.declined`; written when: an invitation to a call declined as busy while the agent held an active place; fields beyond the ids: `place_kind`, `reason` `busy`
   - `invitation.decline_refused`; written when: a decline of a call invitation the app refused; fields beyond the ids: `place_kind`, `reason` the refusal's code, or `unrecognised` for an error answer that is none of the app's refusals
-- `turn.fell_due`; written when: a pass made a place due that was not due; fields beyond the ids: `occasion` (`line`, `view` or `hold`), `spoken` (whether its turn would be spoken), `read_ms` (LOG-37)
 - LOG-12: `turn.ended`; written when: every turn, however it ends; fields beyond the ids: see below
 - LOG-13: `turn_wait.ended`, `claim_write.ended`, `thinking.ended`, `session_open.ended`, `tool_list.ended`, `turn_setup.ended`; written when: each step of a turn; fields beyond the ids: `duration_ms`, `outcome`; `reason` and `error_type` of a failed `session_open`, `tool_list` or `turn_setup` (`session_open` is a session the turn opens to another app, since the turn's own app is served on the loop's session; a place's own app that does not list its tools within its `call_seconds` fails the `tool_list` step and the turn goes on without them, and `tool_list` is written only for a listing that was sent, so a turn that uses the list its app's stream kept writes none; `turn_wait` ends when the turn starts and `claim_write` only waits for the store's writer, so neither fails; `thinking` is the statement that the turn is thinking, answered by the app; `turn_setup` is what the turn still waited for after its thinking was answered); `wait_reason` on `turn_wait.ended`
 - LOG-14: `token_request.ended`; written when: each token request; fields beyond the ids: `duration_ms`, `outcome`; `reason` and `error_type` of a failed request
@@ -87,6 +86,7 @@ events and their fields. A test cites each rule by its ID at the start of its do
   its event has none. A line that joins a place already due, a wake that makes nothing due, a place due again after
   a turn without an answer and a place a pod resumes write none. The event carries no line's kind, text or
   name.
+  - `turn.fell_due`; written when: a pass made a place due that was not due; fields beyond the ids: `occasion` (`line`, `view` or `hold`), `spoken` (whether its turn would be spoken), `read_ms`
 
 ## `turn.ended`
 
