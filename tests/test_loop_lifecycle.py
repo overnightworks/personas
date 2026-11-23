@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from functools import partial
 from http import HTTPStatus
 
-import anyio
 import pytest
 from agents.member import (
     STANDING_URI,
@@ -31,19 +31,19 @@ from mcp_types import (
     TextResourceContents,
 )
 
-from personas import app_session
+from personas.app_session import open_mcp_session
 from personas.decision import NETWORK_FAILURE_CODE, SUSPENDED_RETRY_SECONDS, backoff_delay
 from personas.failures import leaves_of
 from personas.reporting import Event
 from tests.support.call import CALL_PLACE
 from tests.support.hopin import ACKNOWLEDGED, CALL, DISCOVER, INITIALIZE, LIMIT_SECONDS, LISTEN, READ
+from tests.support.openers import (
+    opener_whose_close_adds_a_late_answer,
+    opener_whose_close_loses_a_child,
+    opener_whose_request_raises,
+)
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, invited
-from tests.support.transport import (
-    opener_whose_request_raises,
-    transport_closing_with_late_answers,
-    transport_whose_close_loses_a_child,
-)
 
 pytestmark = pytest.mark.anyio
 
@@ -146,14 +146,10 @@ async def test_a_stream_that_never_completes_is_cut_at_the_runners_deadline_and_
     assert backoff_delay(1) in runner.clock.slept
 
 
-@pytest.mark.parametrize(
-    "echo", [anyio.BrokenResourceError, anyio.ClosedResourceError], ids=["broken stream", "closed stream"]
-)
-async def test_an_answer_that_lands_after_the_session_closed_backs_off_and_does_not_end_the_runner(
-    runner, monkeypatch, echo
-):
-    failing = transport_closing_with_late_answers(echo=echo, only_close=1)
-    monkeypatch.setattr(app_session, "streamable_http_client", failing)
+async def test_an_answer_that_lands_after_the_session_closed_backs_off_and_does_not_end_the_runner(runner):
+    runner.open_session = opener_whose_close_adds_a_late_answer(
+        only_close=1, inner=partial(open_mcp_session, stream_seconds=SHORT_STREAM_SECONDS)
+    )
     runner.app.pulses_on_read = True
     runner.start(stream_seconds=SHORT_STREAM_SECONDS)
     await runner.reports.until(Event.BACKOFF)
@@ -493,12 +489,11 @@ async def test_a_programming_error_in_a_reconciliation_ends_the_runner_loud(runn
             await runner.task
 
 
-async def test_a_defect_in_the_lifecycle_sessions_body_whose_close_loses_a_child_ends_the_runner_loud(
-    runner, monkeypatch
-):
+async def test_a_defect_in_the_lifecycle_sessions_body_whose_close_loses_a_child_ends_the_runner_loud(runner):
     defect = ValueError("a defect")
-    runner.open_session = opener_whose_request_raises("read_standing", defect, once=True)
-    monkeypatch.setattr(app_session, "streamable_http_client", transport_whose_close_loses_a_child(OSError))
+    runner.open_session = opener_whose_close_loses_a_child(
+        inner=opener_whose_request_raises("read_standing", defect, once=True)
+    )
     runner.start()
 
     with pytest.RaisesGroup(ValueError, Unreachable, flatten_subgroups=True) as ended:

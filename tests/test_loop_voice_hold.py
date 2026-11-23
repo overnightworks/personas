@@ -15,7 +15,6 @@ from agents.tools import ToolOutcome
 from agents.turn import FailureCode
 from anyio import BrokenResourceError
 
-from personas import app_session
 from personas.failures import leaves_of
 from personas.reporting import Event
 from tests.support.app_driving import settled
@@ -24,7 +23,7 @@ from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
 from tests.support.fakes import COMPLETED_TURN, failed_turn
 from tests.support.gateway import BUDGET_SPENT, say, speaks_and_says
 from tests.support.hopin import CALL, LIMIT_SECONDS, SAY_TOOL
-from tests.support.transport import opener_whose_requests_raise_together, transport_closing_with_late_answers
+from tests.support.openers import opener_whose_close_adds_a_defect, opener_whose_requests_raise_together
 from tests.support.voice import (
     FIRST,
     HOLD_ID,
@@ -481,12 +480,8 @@ async def test_a_decision_the_app_could_not_take_in_the_round_is_told_to_him_as_
     assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
 
 
-async def test_a_decision_of_the_round_whose_call_fails_beside_a_defect_ends_the_runner_loud_with_both(
-    runner, monkeypatch
-):
-    monkeypatch.setattr(
-        app_session, "streamable_http_client", transport_closing_with_late_answers(echo=RuntimeError, only_close=1)
-    )
+async def test_a_decision_of_the_round_whose_call_fails_beside_a_defect_ends_the_runner_loud_with_both(runner):
+    runner.open_session = opener_whose_close_adds_a_defect(RuntimeError, only_close=1)
     deciding_round = await calling_while_held(runner, deciding(CONTINUE_SPEAKING_TOOL), hold_round=True)
     runner.app.script(CALL, cuts)
     deciding_round.set()
@@ -499,10 +494,8 @@ async def test_a_decision_of_the_round_whose_call_fails_beside_a_defect_ends_the
     assert runner.reports.codes_of(Event.HOLD_DECIDED) == []
 
 
-async def test_a_decision_whose_call_fails_beside_a_defect_ends_the_runner_loud_with_both(runner, monkeypatch):
-    monkeypatch.setattr(
-        app_session, "streamable_http_client", transport_closing_with_late_answers(echo=RuntimeError, only_close=1)
-    )
+async def test_a_decision_whose_call_fails_beside_a_defect_ends_the_runner_loud_with_both(runner):
+    runner.open_session = opener_whose_close_adds_a_defect(RuntimeError, only_close=1)
     await held_in_the_first_sentence(runner, completion(TWO_SENTENCES), deciding(CONTINUE_SPEAKING_TOOL))
     runner.app.script(CALL, cuts)
 

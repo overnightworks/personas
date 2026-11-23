@@ -6,14 +6,13 @@ import asyncio
 
 import pytest
 
-from personas import app_session
 from personas.failures import leaves_of
 from personas.task_record import UnrequestedCancellationError
 from tests.support.call import PLACE_ID
 from tests.support.hopin import LIMIT_SECONDS
+from tests.support.openers import opener_cancelled_once
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active
-from tests.support.transport import transport_cancelled_once
 
 pytestmark = pytest.mark.anyio
 
@@ -27,9 +26,9 @@ async def ended_by(task):
     return ended
 
 
-async def test_a_loop_cancelled_by_nobody_ends_the_runner_loud_and_adds_no_other_leaf(runner, monkeypatch):
+async def test_a_loop_cancelled_by_nobody_ends_the_runner_loud_and_adds_no_other_leaf(runner):
     runner.add_agent(SECOND_AGENT, SECOND_SUBJECT)
-    monkeypatch.setattr(app_session, "streamable_http_client", transport_cancelled_once())
+    runner.open_session = opener_cancelled_once()
     runner.app.stand(SUBJECT, active(PLACE_ID))
     runner.app.stand(SECOND_SUBJECT, active(PLACE_ID))
 
