@@ -7,8 +7,10 @@ import asyncio
 from functools import partial
 from typing import TYPE_CHECKING
 
+from agents.member_outcomes import CallFailure
+
 from personas.decision import failure_code, is_not_granted
-from personas.failures import CallFailure, CallTimedOut, within_call_time
+from personas.failures import CallTimedOut, within_call_time
 from personas.reporting import Event, failure_event, step_timer, stepping
 
 if TYPE_CHECKING:

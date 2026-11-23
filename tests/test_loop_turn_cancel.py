@@ -10,11 +10,11 @@ from typing import TYPE_CHECKING
 import anyio
 import pytest
 from agents.member import STANDING_URI, place_window_uri
+from agents.member_outcomes import Unreachable, status_code
 from agents.turn import StopOutcome
 
 from personas import app_session
-from personas.decision import status_code
-from personas.failures import Unreachable, leaves_of
+from personas.failures import leaves_of
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import CANCELLED_TURN, COMPLETED_TURN, TurnEnded

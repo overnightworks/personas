@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass, field, replace
-from enum import Enum, StrEnum, auto
+from enum import StrEnum
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Final
 
@@ -25,9 +25,12 @@ from agents.member import (
     SET_TURN_STATE_TOOL,
     SPEAK_TOOL,
     STOP_SPEAKING_TOOL,
+    AcceptInvitationArguments,
     AcceptInvitationRefusal,
+    DeclineInvitationArguments,
     DeclineInvitationReason,
     DeclineInvitationRefusal,
+    FigureLook,
     PlaceEntry,
     PlaceRef,
     PlaceView,
@@ -37,6 +40,14 @@ from agents.member import (
     Standing,
     StandingState,
     VoiceState,
+)
+from agents.member_outcomes import (
+    CallFailure,
+    DeclineOutcome,
+    StatusFailure,
+    UnrecognisedRefusal,
+    UnusableAnswer,
+    status_code,
 )
 from agents.turn import FailureCode, RejectionCode, StopOutcome, outcome_of_stop
 from logline import Outcome
@@ -50,7 +61,7 @@ from personas.entries import (
     SpeechOutcome,
     Unanswered,
 )
-from personas.failures import CallFailure, StatusFailure, TokenStatusFailure, UnusableAnswer, leaves_of
+from personas.failures import TokenStatusFailure, leaves_of
 from personas.recall import RECALL_TOOL
 
 if TYPE_CHECKING:
@@ -98,12 +109,6 @@ NO_FINAL_EVENT_REASON: Final = "no_final_event"
 """The reason of a turn whose events ended without a final event and without an error."""
 
 
-class UnrecognisedRefusal(StrEnum):
-    """A refusal outside the library's record: an app's own code, or an error text that is no such JSON."""
-
-    UNRECOGNISED = "unrecognised"
-
-
 type Refusal = AcceptInvitationRefusal | UnrecognisedRefusal
 
 
@@ -139,12 +144,29 @@ class Decline:
     reason: DeclineInvitationReason = DeclineInvitationReason.BUSY
 
 
-class Declined(Enum):
-    """How a decline that was not refused ended: sent, or left to run out because the app lists no tool to send it
-    with."""
+def accept_arguments(accept: Accept) -> AcceptInvitationArguments:
+    """The accept tool's arguments. A room is drawn behind the figure, so a room without a figure gives no look; the
+    figure travels beside the look for an app that reads no looks."""
+    looks = None
+    if accept.room is not None and accept.figure is not None:
+        figure = accept.figure
+        looks = (
+            FigureLook(kind="figure", url=figure.url, sha256=figure.sha256, gestures=figure.gestures, room=accept.room),
+        )
+    return AcceptInvitationArguments(
+        place=accept.place,
+        invitation=accept.invitation_id,
+        epoch=accept.epoch,
+        figure=accept.figure,
+        looks=looks,
+        voices=accept.voices or None,
+    )
 
-    SENT = auto()
-    NOT_SERVED = auto()
+
+def decline_arguments(decline: Decline) -> DeclineInvitationArguments:
+    return DeclineInvitationArguments(
+        place=decline.place, invitation=decline.invitation_id, epoch=decline.epoch, reason=decline.reason
+    )
 
 
 @dataclass(frozen=True)
@@ -249,7 +271,7 @@ def declines_for(
 
 
 def after_decline(
-    memory: Memory, decline: Decline, answer: Declined | DeclineInvitationRefusal | UnrecognisedRefusal
+    memory: Memory, decline: Decline, answer: DeclineOutcome | DeclineInvitationRefusal | UnrecognisedRefusal
 ) -> Memory:
     """The memory once the decline was answered: a decline the app refused is not remembered as declined, since the
     invitation no longer stands, and one that failed stays due."""
@@ -320,14 +342,6 @@ def budget_pause(refusals: int, cap_seconds: float) -> float:
     """The wait before his next turn after the ``refusals``-th turn in a row the gateway refused for a spent budget
     (from one): doubling from the backoff base up to ``cap_seconds``."""
     return _doubling_wait(refusals, cap_seconds)
-
-
-def status_code(status: int) -> str:
-    return f"http_{status}"
-
-
-def jsonrpc_code(code: int) -> str:
-    return f"jsonrpc_{code}"
 
 
 def failure_code(failure: CallFailure) -> str:

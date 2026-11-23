@@ -26,6 +26,7 @@ from agents.member import (
     VoiceState,
     Written,
 )
+from agents.member_outcomes import StatusFailure, Unreachable, UnrecognisedRefusal, UnusableAnswer, jsonrpc_code
 from agents.tools import ToolDeclaration, ToolOutcome
 from agents.turn import FailureCode, RejectionCode
 from logline import Outcome
@@ -49,7 +50,6 @@ from personas.decision import (
     Suspend,
     Token,
     TurnEnding,
-    UnrecognisedRefusal,
     accepts_for,
     act_outcome,
     active_view_places,
@@ -66,7 +66,6 @@ from personas.decision import (
     holds_a_place,
     is_not_granted,
     is_voice_app,
-    jsonrpc_code,
     left_out_for,
     lends_tools,
     offered_declarations,
@@ -86,7 +85,7 @@ from personas.decision import (
     waking_line,
 )
 from personas.entries import Answered, Lines, Reading, Unanswered, Waiting
-from personas.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer
+from personas.failures import TokenStatusFailure
 from personas.recall import RECALL_TOOL
 from personas.secret import Secret
 from tests.support.history import MORNING, OTHER_TABLE, TABLE, a_view

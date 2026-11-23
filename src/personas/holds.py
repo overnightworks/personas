@@ -10,12 +10,12 @@ from typing import TYPE_CHECKING, Final
 
 from agents.backend import TurnPerson, TurnStopped
 from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL
+from agents.member_outcomes import CallFailure
 from agents.tools import HandTool, ToolDeclaration, ToolEffect, ToolOutcome
 from agents.turn import Turn, TurnMessage, TurnRole
 
 from personas.decision import TURN_ROLE, AppPlace, failure_code, round_seconds
 from personas.entries import TurnTold, told_hold, told_stop
-from personas.failures import CallFailure
 from personas.present import turn_messages
 from personas.reporting import Event, failure_event
 from personas.speech import (

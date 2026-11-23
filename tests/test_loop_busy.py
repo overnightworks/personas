@@ -12,9 +12,10 @@ from agents.member import (
     DeclineInvitationRefused,
     PlaceRef,
 )
+from agents.member_outcomes import UnrecognisedRefusal
 from agents.tools import ToolOutcome
 
-from personas.decision import Decline, UnrecognisedRefusal
+from personas.decision import Decline
 from personas.reporting import Event
 from tests.support.app_driving import settled
 from tests.support.call import PLACE_ID

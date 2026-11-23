@@ -9,10 +9,11 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Final, Protocol
 
 import httpx2
+from agents.member_outcomes import INVALID_ANSWER_CODE, Unreachable, UnusableAnswer
 from agents.turn import NonEmptyUnicodeText, Principal
 from pydantic import BaseModel, ConfigDict
 
-from personas.failures import INVALID_ANSWER_CODE, TokenStatusFailure, Unreachable, UnusableAnswer
+from personas.failures import TokenStatusFailure
 from personas.reporting import step_timer, stepping
 from personas.secret import Secret
 

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Final
 
 from agents.backend import TurnStopKind, TurnStopped
 from agents.member import SpeakRefusal, Spoken, Written
+from agents.member_outcomes import CallFailure
 from agents.tools import ToolOutcome
 from agents.turn import FailureCode
 from agents.turn_events import FinalEvent, ToolCallEvent
@@ -18,7 +19,7 @@ from agents.voice.reply import ReplyReader
 
 from personas.decision import AppPlace, failure_code, speech_outcome
 from personas.entries import SaidAloud
-from personas.failures import CallFailure, task_is_being_cancelled
+from personas.failures import task_is_being_cancelled
 from personas.holds import APP_FAILED_TEXT, CONTINUED_TEXT, GONE_TEXT, LINE_ARGUMENT, STYLE_ARGUMENT
 from personas.reporting import Event, failure_event
 from personas.speech import Answered, DropReason, HoldOutcome, answered_as

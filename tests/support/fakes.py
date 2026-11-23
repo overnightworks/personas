@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Literal, NamedTuple, overload
 
 from agents.member import DeclineInvitationRefusal, MemberStanding, Standing
+from agents.member_outcomes import CallFailure, DeclineOutcome
 
 from personas.config import (
     DEFAULT_BUDGET_PAUSE_CAP_SECONDS,
@@ -21,8 +22,7 @@ from personas.config import (
     AppTarget,
     MemoryTarget,
 )
-from personas.decision import Accept, Decline, Declined, Refusal
-from personas.failures import CallFailure
+from personas.decision import Accept, Decline, Refusal
 from personas.mind import Mind
 from personas.reporting import Event
 from personas.secret import Secret
@@ -228,9 +228,9 @@ class FakeSession(BareSession):
             raise step
         return step
 
-    async def decline(self, decline: Decline) -> Declined | DeclineInvitationRefusal:
+    async def decline(self, decline: Decline) -> DeclineOutcome | DeclineInvitationRefusal:
         self.declined.append(decline)
-        return Declined.SENT
+        return DeclineOutcome.SENT
 
     @asynccontextmanager
     async def open(self, app: AppTarget, token: Secret, agent_id: str):

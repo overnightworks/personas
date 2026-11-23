@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import pytest
 from agents.member import DeclineInvitationReason, DeclineInvitationRefusal, PlaceRef
+from agents.member_outcomes import DeclineOutcome
 
-from personas.decision import Decline, Declined, Memory, accepts_for, after_decline, declines_for, forget_gone
+from personas.decision import Decline, Memory, accepts_for, after_decline, declines_for, forget_gone
 from tests.support.standings import active, invited, paused
 
 
@@ -60,7 +61,7 @@ def test_a_decline_is_made_once_and_forgotten_with_its_invitation():
     standings = (active("room-1"), invited("room-7", "inv-3", epoch=2))
 
     first = declines_for(standings, Memory())
-    memory = after_decline(Memory(), first[0], Declined.SENT)
+    memory = after_decline(Memory(), first[0], DeclineOutcome.SENT)
     again = declines_for(standings, memory)
 
     assert first == (Decline(PlaceRef(kind="call", id="room-7"), "inv-3", 2),)
@@ -70,7 +71,7 @@ def test_a_decline_is_made_once_and_forgotten_with_its_invitation():
 
 @pytest.mark.parametrize(
     "answer",
-    [Declined.SENT, Declined.NOT_SERVED, DeclineInvitationRefusal.STALE_INVITATION],
+    [DeclineOutcome.SENT, DeclineOutcome.NOT_SERVED, DeclineInvitationRefusal.STALE_INVITATION],
     ids=lambda each: str(each),
 )
 def test_a_decline_is_not_made_again_whether_it_was_sent_left_to_run_out_or_refused(answer):

@@ -14,9 +14,10 @@ from personas.task_record import ending_loud_when_cancelled, unreachable_unless_
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    from agents.member_outcomes import CallFailure
+
     from personas.app_session import AppSession, SessionOpener
     from personas.config import AgentCredentials, AppTarget
-    from personas.failures import CallFailure
     from personas.secret import Secret
     from personas.task_record import TaskRecord
     from personas.tokens import TokenSource

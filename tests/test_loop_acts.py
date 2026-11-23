@@ -9,20 +9,13 @@ from http import HTTPStatus
 
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
+from agents.member_outcomes import INVALID_ANSWER_CODE, Unreachable, jsonrpc_code, status_code
 from agents.tools import ToolOutcome
 from agents.turn import TOOL_IMAGE_MEDIA_TYPE, Principal, person_fingerprint
 from mcp_types import INVALID_PARAMS, CallToolResult, TextContent
 
 from personas.app_session import READ_SECONDS, open_mcp_session
-from personas.decision import (
-    BACKOFF_BASE_SECONDS,
-    NETWORK_FAILURE_CODE,
-    SUSPENDED_RETRY_SECONDS,
-    TURN_CANCELLED_CODE,
-    jsonrpc_code,
-    status_code,
-)
-from personas.failures import INVALID_ANSWER_CODE, Unreachable
+from personas.decision import BACKOFF_BASE_SECONDS, NETWORK_FAILURE_CODE, SUSPENDED_RETRY_SECONDS, TURN_CANCELLED_CODE
 from personas.reporting import Event
 from tests.support.app_driving import said_and_taken, settled, waits
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call

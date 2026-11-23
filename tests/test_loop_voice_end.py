@@ -9,11 +9,12 @@ import anyio
 import pytest
 from agents.backend.fake_gateway import completion
 from agents.member import SPEAK_TOOL
+from agents.member_outcomes import INVALID_ANSWER_CODE, status_code
 from agents.tools import ToolOutcome
 from agents.turn import FailureCode
 
-from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE, status_code
-from personas.failures import INVALID_ANSWER_CODE, leaves_of
+from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE
+from personas.failures import leaves_of
 from personas.reporting import Event
 from personas.speech import DropReason
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, pulses_the_window_once, say_in_the_call

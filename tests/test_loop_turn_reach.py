@@ -10,13 +10,14 @@ import httpx2
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.member import ACCEPT_INVITATION_TOOL, SPEAK_TOOL
+from agents.member_outcomes import Unreachable, jsonrpc_code, status_code
 from agents.tools import ToolOutcome
 from mcp_types import INVALID_PARAMS, UNSUPPORTED_PROTOCOL_VERSION, ListToolsResult, Tool
 
 from personas import app_session
 from personas.config import load_config
-from personas.decision import NETWORK_FAILURE_CODE, jsonrpc_code, status_code
-from personas.failures import Unreachable, leaves_of
+from personas.decision import NETWORK_FAILURE_CODE
+from personas.failures import leaves_of
 from personas.recall import RECALL_TOOL
 from personas.reporting import Event
 from personas.tokens import HttpTokenSource

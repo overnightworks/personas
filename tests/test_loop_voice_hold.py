@@ -10,13 +10,13 @@ from http import HTTPStatus
 import pytest
 from agents.backend.fake_gateway import completion, tool_round
 from agents.member import CONTINUE_SPEAKING_TOOL, SPEAK_TOOL, STOP_SPEAKING_TOOL, VoiceState
+from agents.member_outcomes import Unreachable, status_code
 from agents.tools import ToolOutcome
 from agents.turn import FailureCode
 from anyio import BrokenResourceError
 
 from personas import app_session
-from personas.decision import status_code
-from personas.failures import Unreachable, leaves_of
+from personas.failures import leaves_of
 from personas.reporting import Event
 from tests.support.app_driving import settled
 from tests.support.call import ADDRESSED, PLACE_ID, say_in_the_call

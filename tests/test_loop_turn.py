@@ -13,6 +13,7 @@ from agents.member import (
     STANDING_URI,
     place_window_uri,
 )
+from agents.member_outcomes import Unreachable, jsonrpc_code
 from agents.tools import ToolOutcome
 from agents.turn import FailureCode, RejectionCode, person_fingerprint
 from mcp_types import (
@@ -22,11 +23,8 @@ from mcp_types import (
 
 from personas import app_session
 from personas.config import load_config
-from personas.decision import BACKOFF_BASE_SECONDS, NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE, jsonrpc_code
-from personas.failures import (
-    Unreachable,
-    leaves_of,
-)
+from personas.decision import BACKOFF_BASE_SECONDS, NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE
+from personas.failures import leaves_of
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import SweepClock, failed_turn, refused_turn

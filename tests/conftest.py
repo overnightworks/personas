@@ -54,12 +54,12 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from agents.member import MemberStanding
+    from agents.member_outcomes import CallFailure
     from agents.tools import HandTool
 
     from personas.app_session import SessionOpener
     from personas.config import DatabaseTarget
     from personas.decision import Refusal
-    from personas.failures import CallFailure
     from personas.remembering import LineStore
     from personas.reporting import StateChange
     from personas.sweep import SweptStore
