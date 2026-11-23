@@ -1,7 +1,0 @@
-claim_id = "3d0c29c73fe242b98587feed40d72cdc"
-agent = "Claude 349d430f-f935-4f94-8152-3bf04ab41b88"
-role = "builder"
-base = "d5fead7c2b5ce7eaff63aff073b31e0640f21752"
-branch = "claude/issue-417-personas-pins-quality-v0-24-0"
-scope = [".github/workflows/ci.yml", ".github/workflows/code-scanning.yml", ".github/workflows/release.yml"]
-opened_commit = "1be487d08e150b2c22ae7762c1989f08c57952ae"
