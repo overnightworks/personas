@@ -1,0 +1,8 @@
+claim_id = "f883f08d88134dd59afb5aa8474c7408"
+agent = "Claude 349d430f-f935-4f94-8152-3bf04ab41b88"
+role = "builder"
+base = "fed36df5de8480014b269b0c4e8120723eccdf15"
+branch = "claude/issue-413-a-spoken-and-a-written-turn-share-one-pr"
+scope = ["docs/turns.md", "pyproject.toml", "src/personas/holds.py", "src/personas/turning.py", "tests/test_loop_voice.py", "tests/test_loop_voice_hold.py", "uv.lock"]
+opened_commit = "ea343537145d1d8d4314059204270b8e6cd5b92a"
+whole_reason = "The runner-owned front of a turn, the agents release it rests on and the rules that state it are one prefix."
