@@ -24,6 +24,25 @@ if TYPE_CHECKING:
     from personas.secret import Secret
 
 
+def _of_app(of_url: str | None, app: AppTarget) -> bool:
+    return of_url in (None, str(app.mcp_url))
+
+
+def _the_nth_session(nth: int, of_url: str | None) -> Callable[[AppTarget], bool]:
+    """A test that, called once per session, counts those at ``of_url`` (all without it) and says whether this is the
+    ``nth``."""
+    counted = 0
+
+    def is_nth(app: AppTarget) -> bool:
+        nonlocal counted
+        if not _of_app(of_url, app):
+            return False
+        counted += 1
+        return counted == nth
+
+    return is_nth
+
+
 def a_late_answer() -> Unreachable:
     """What the client's fold makes of an answer that lands after the session ended, beside another failure."""
     return Unreachable("an answer landed after the session closed")
@@ -72,19 +91,16 @@ class ClosingHold:
         ``closing`` is set when that session starts to leave and ``cancelled`` when the task was cancelled while it
         waited. With ``of_url`` only the sessions at that URL are counted; ``inner`` opens the session that leaves.
         """
-        leaves = 0
+        is_nth = _the_nth_session(nth, of_url)
 
         @asynccontextmanager
         async def waiting(app: AppTarget, token: Secret, agent_id: str) -> AsyncGenerator[AppSession]:
-            nonlocal leaves
             try:
                 async with inner(app, token, agent_id) as session:
                     yield session
             finally:
-                if of_url in (None, str(app.mcp_url)):
-                    leaves += 1
-                    if leaves == nth:
-                        await self._held()
+                if is_nth(app):
+                    await self._held()
 
         return waiting
 
@@ -120,7 +136,7 @@ def _opener_arounds(arounds: dict[str, _Around], *, of_url: str | None) -> Sessi
     @asynccontextmanager
     async def opened(app: AppTarget, token: Secret, agent_id: str) -> AsyncGenerator[AppSession]:
         async with open_mcp_session(app, token, agent_id) as session:
-            if of_url in (None, str(app.mcp_url)):
+            if _of_app(of_url, app):
                 yield cast("AppSession", _AroundSession(session, arounds))
             else:
                 yield session
@@ -271,14 +287,11 @@ def opener_whose_close_loses_a_child(
 
     With ``of_url`` only the sessions at that URL are counted.
     """
-    opens = 0
+    is_nth = _the_nth_session(nth, of_url)
 
     @asynccontextmanager
     async def losing(app: AppTarget, token: Secret, agent_id: str) -> AsyncGenerator[AppSession]:
-        nonlocal opens
-        counted = of_url in (None, str(app.mcp_url))
-        opens += counted
-        if not (counted and opens == nth):
+        if not is_nth(app):
             async with inner(app, token, agent_id) as session:
                 yield session
             return
@@ -309,14 +322,11 @@ def opener_whose_session_loses_a_child(
     only the sessions at that URL are counted, so a scenario names the app's own open and not its place among the
     others.
     """
-    opens = 0
+    is_nth = _the_nth_session(nth, of_url)
 
     @asynccontextmanager
     async def losing(app: AppTarget, token: Secret, agent_id: str) -> AsyncGenerator[AppSession]:
-        nonlocal opens
-        counted = of_url in (None, str(app.mcp_url))
-        opens += counted
-        if not (counted and opens == nth):
+        if not is_nth(app):
             async with inner(app, token, agent_id) as session:
                 yield session
             return

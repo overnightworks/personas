@@ -548,9 +548,7 @@ async def test_a_defect_in_a_tools_only_call_whose_close_outlasts_the_turns_dura
     assert runner.app.said == []
 
 
-async def test_a_tools_only_call_whose_cancelled_session_leaves_as_a_failure_still_stops_the_turn(
-    runner, songmaker
-):
+async def test_a_tools_only_call_whose_cancelled_session_leaves_as_a_failure_still_stops_the_turn(runner, songmaker):
     runner.open_session = opener_whose_cancelled_close_fails(only_close=1)
     await a_turn_inside_a_tools_only_call(runner, songmaker)
 
