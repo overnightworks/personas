@@ -51,3 +51,8 @@ def written_by_the_runner(written: io.StringIO) -> list[dict[str, object]]:
     """The runner's lines among what the entry point's handler wrote into ``written``, as their JSON holds them."""
     lines = map(json.loads, written.getvalue().splitlines())
     return [line for line in lines if line["logger"] == "personas"]
+
+
+def trace_of(traceparent: str) -> str:
+    """The trace id of a W3C traceparent; a request made inside a unit has a span of its own."""
+    return traceparent.split("-")[1]

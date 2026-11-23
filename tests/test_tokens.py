@@ -18,7 +18,7 @@ from personas.secret import Secret
 from personas.tokens import HttpTokenSource, facts_of
 from tests.support.fakes import credentials
 from tests.support.hopin_places import ISSUER
-from tests.support.logs import lines_of
+from tests.support.logs import lines_of, trace_of
 from tests.support.realm import jwt_of
 
 pytestmark = pytest.mark.anyio
@@ -140,8 +140,8 @@ async def test_the_request_to_the_realm_carries_the_current_trace_and_none_outsi
         inside = current_traceparent()
         await source.fetch(agent, "mcp-app")
 
-    assert (seen[0], seen[1]) == (None, inside)
     assert inside is not None
+    assert (seen[0], seen[1] and trace_of(seen[1])) == (None, trace_of(inside))
 
 
 def _claims(**changes: object) -> dict[str, object]:
