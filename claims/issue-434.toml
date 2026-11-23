@@ -1,8 +1,0 @@
-claim_id = "427f43df6d974beeba703fc1467eabb4"
-agent = "Claude 349d430f-f935-4f94-8152-3bf04ab41b88"
-role = "builder"
-base = "0adb848f2eabc34732189d9410b517d0c81ca2ac"
-branch = "claude/issue-434-core-test-support-imports-no-adapter"
-scope = ["quality/baseline.toml", "tests"]
-opened_commit = "e92d8a995da91588503da2d1f31764b0264d0f6d"
-whole_reason = "One mechanical move of five helpers and the imports of about twenty test modules; split further would leave history.py importing a module that moved halfway."
