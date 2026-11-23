@@ -423,6 +423,8 @@ class _McpAppSession:
 
     async def read_skill(self, uri: str) -> Skill:
         entry = (await self._asked(get_skill(self.session, uri))).skill
+        if entry.uri != uri:
+            raise UnusableAnswer(INVALID_ANSWER_CODE)
         result = await self._asked(self._read(entry.uri))
         content = "".join(block.text for block in result.contents if isinstance(block, TextResourceContents))
         return read_skill(self.app_url, entry, content.encode())
@@ -437,8 +439,11 @@ class _McpAppSession:
 
     async def _implicit_skill(self, instructions: str | None) -> Skill:
         tools = [tool.name for tool in await self.declared_tools()]
-        name = implicit_skill(self.app_url, self.app_url, instructions, tools, _NAMING_DESCRIPTION).name
-        return implicit_skill(self.app_url, self.app_url, instructions, tools, _IMPLICIT_DESCRIPTION.format(name))
+        try:
+            name = implicit_skill(self.app_url, self.app_url, instructions, tools, _NAMING_DESCRIPTION).name
+            return implicit_skill(self.app_url, self.app_url, instructions, tools, _IMPLICIT_DESCRIPTION.format(name))
+        except ValueError:
+            raise UnusableAnswer(INVALID_ANSWER_CODE) from None
 
     async def accept(self, accept: Accept) -> Refusal | None:
         arguments = AcceptInvitationArguments(

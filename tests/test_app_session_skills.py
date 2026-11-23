@@ -7,11 +7,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 from agents.skills import SKILLS_EXTENSION, Skill, SkillEntry, SkillRefusal, SkillRefused, skill_digest, skill_uri
-from mcp_types import ReadResourceResult, TextResourceContents
+from mcp_types import ListToolsResult, ReadResourceResult, TextResourceContents, Tool
 
 from personas.failures import INVALID_ANSWER_CODE, UnusableAnswer
 from tests.support.app_session import opened
-from tests.support.hopin import DISCOVER, READ, SKILLS_GET, SKILLS_LIST, discovering
+from tests.support.hopin import DISCOVER, LIST_TOOLS, READ, SKILLS_GET, SKILLS_LIST, discovering
 
 if TYPE_CHECKING:
     from tests.support.wire import Handler
@@ -174,3 +174,34 @@ async def test_a_skill_whose_file_differs_from_its_entry_is_refused_with_its_cod
             await session.read_skill(entry["uri"])
 
     assert refused.value.refusal == SkillRefusal.DIGEST_MISMATCH
+
+
+async def test_an_app_that_lists_a_tool_twice_fails_its_implicit_skill_as_an_unusable_answer(app, bearer):
+    marker = f"tool_{secrets.token_hex(8)}"
+
+    async def lists_a_tool_twice(reply):
+        tool = Tool(name=marker, description="Does a thing.", input_schema={"type": "object"})
+        await reply.result(ListToolsResult(tools=[tool, tool]))
+
+    app.script(DISCOVER, discovering())
+    app.script(LIST_TOOLS, lists_a_tool_twice)
+
+    async with opened(app, bearer) as session:
+        with pytest.raises(UnusableAnswer) as failure:
+            await session.read_skills()
+
+    assert failure.value.code == INVALID_ANSWER_CODE
+    assert marker not in f"{failure.value} {failure.value!r} {failure.value.answer}"
+
+
+async def test_an_answer_for_another_skill_than_the_one_asked_for_is_refused_unread(app, bearer):
+    content = a_skill_file("other")
+    app.script(SKILLS_GET, a_skill_answer(an_entry("other", content)))
+    app.script(READ, serving_file(content, skill_uri("other")))
+
+    async with opened(app, bearer) as session:
+        with pytest.raises(UnusableAnswer) as failure:
+            await session.read_skill(skill_uri("greeting"))
+
+    assert failure.value.code == INVALID_ANSWER_CODE
+    assert app.log.count(READ) == 0
