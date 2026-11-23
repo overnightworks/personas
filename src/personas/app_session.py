@@ -69,8 +69,9 @@ from mcp_types import (
     Tool,
     jsonrpc_message_adapter,
 )
-from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
+from personas.app_arguments import split_undeclared
 from personas.config import AppTarget
 from personas.decision import Accept, Decline, Declined, Refusal, UnrecognisedRefusal, jsonrpc_code, status_code
 from personas.failures import (
@@ -526,7 +527,7 @@ class _McpAppSession:
         schema = (self._declared_arguments or {}).get(name)
         if schema is None:
             return await self._called(name, arguments)
-        sent, left_out = _split_undeclared(arguments, schema, optional)
+        sent, left_out = split_undeclared(arguments, schema, optional)
         for argument in left_out:
             if (name, argument) not in self._left_out:
                 self._left_out.add((name, argument))
@@ -586,46 +587,6 @@ def _record_of[Record: MemberResourceRecord](record: type[Record], result: ReadR
         return member_resource_from_json(record, text)
     except ValidationError:
         raise UnusableAnswer(INVALID_ANSWER_CODE) from None
-
-
-def _property_schemas(schema: JsonValue) -> tuple[JsonObject, ...]:
-    """The ``properties`` of every object schema ``schema`` is or reaches through its alternatives and array items.
-    An app's declared schema has every reference inlined, so none is resolved."""
-    if not isinstance(schema, dict):
-        return ()
-    properties = schema.get("properties")
-    found = [properties] if isinstance(properties, dict) else []
-    for keyword in ("anyOf", "oneOf", "allOf"):
-        alternatives = schema.get(keyword)
-        if isinstance(alternatives, list):
-            found.extend(each for alternative in alternatives for each in _property_schemas(alternative))
-    found.extend(_property_schemas(schema.get("items")))
-    return tuple(found)
-
-
-def _split_undeclared(
-    arguments: JsonObject, schema: JsonValue, optional: frozenset[str], prefix: str = ""
-) -> tuple[JsonObject, tuple[str, ...]]:
-    """The arguments to send and the paths left out: an ``optional`` argument, at any depth, that the tool's declared
-    ``schema`` does not name. Every other argument stays, so a required one is never dropped."""
-    declared = _property_schemas(schema)
-    sent: JsonObject = {}
-    left_out: list[str] = []
-    for name, value in arguments.items():
-        path = f"{prefix}{name}"
-        named = next((properties[name] for properties in declared if name in properties), None)
-        if named is None and path in optional:
-            left_out.append(path)
-        elif named is not None and isinstance(value, list):
-            entries = [
-                _split_undeclared(entry, named, optional, f"{path}[].") if isinstance(entry, dict) else (entry, ())
-                for entry in value
-            ]
-            sent[name] = [entry for entry, _ in entries]
-            left_out.extend(path for _, paths in entries for path in paths)
-        else:
-            sent[name] = value
-    return sent, tuple(left_out)
 
 
 def _looks_of(accept: Accept) -> tuple[FigureLook, ...] | None:
