@@ -1,0 +1,8 @@
+claim_id = "9f23c24826b14bbeb3b973c8df253778"
+agent = "Claude 349d430f-f935-4f94-8152-3bf04ab41b88"
+role = "builder"
+base = "2dbcbc9eab2eb1057e559c0e6e0ebc44af33fb85"
+branch = "claude/issue-438-personas-pins-quality-v0-26-0"
+scope = [".github/workflows/ci.yml", ".github/workflows/code-scanning.yml", ".github/workflows/release.yml", "docs", "quality/baseline.toml", "quality/config.toml", "tests"]
+opened_commit = "88356b7ecec4d766ac86f1defdf85e95d93fc2d0"
+whole_reason = "the pin does not move before the list is recorded, so the pin, the conversion of documents and citations and the recorded list move in one pull request."
