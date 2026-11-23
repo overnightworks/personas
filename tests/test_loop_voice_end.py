@@ -22,9 +22,9 @@ from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
 from tests.support.fakes import COMPLETED_TURN, failed_turn
 from tests.support.gateway import Gateway, speaks_and_says
 from tests.support.hopin import CALL, LISTEN, READ, SAY_TOOL
+from tests.support.openers import opener_whose_request_raises
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, paused
-from tests.support.transport import opener_whose_request_raises
 from tests.support.voice import (
     TWO_SENTENCES,
     a_turn_whose_speak_is_in_flight,

@@ -15,8 +15,8 @@ from tests.support.gateway import Gateway, says
 from tests.support.history_holding import HistoriesHoldingTheAddressedLine
 from tests.support.hopin import LIMIT_SECONDS, LIST_TOOLS
 from tests.support.logs import lines_of
+from tests.support.openers import opener_whose_request_raises
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
-from tests.support.transport import opener_whose_request_raises
 from tests.support.wire import hangs
 
 pytestmark = pytest.mark.anyio

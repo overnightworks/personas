@@ -14,7 +14,7 @@ import anyio
 from agents.member_outcomes import Unreachable
 
 from personas.app_session import open_mcp_session
-from personas.failures import leaves_of
+from personas.failures import leaves_of, task_is_being_cancelled
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable
@@ -299,12 +299,13 @@ def opener_whose_session_loses_a_child(
     *,
     nth: int = 2,
     of_url: str | None = None,
+    error: Callable[[], Exception] = anyio.BrokenResourceError,
     inner: SessionOpener = open_mcp_session,
 ) -> SessionOpener:
-    """A session opener whose ``nth`` session runs beside a child that fails once ``failing`` is set.
+    """A session opener whose ``nth`` session runs beside a child that fails with ``error`` once ``failing`` is set.
 
     The child fails as the SDK's request task does, so anyio cancels the session's own task with no one else having
-    done so, and the real client meets that cancellation; the session then leaves as ``Unreachable``. With ``of_url``
+    done so, and the real client meets that cancellation; the session then leaves as the fold gives it. With ``of_url``
     only the sessions at that URL are counted, so a scenario names the app's own open and not its place among the
     others.
     """
@@ -322,11 +323,22 @@ def opener_whose_session_loses_a_child(
 
         async def child() -> None:
             await failing.wait()
-            raise Unreachable("the transport lost a child")
+            raise error()
 
-        async with anyio.create_task_group() as group, inner(app, token, agent_id) as session:
-            group.start_soon(child)
-            yield session
+        try:
+            async with anyio.create_task_group() as group:
+                group.start_soon(child)
+                async with inner(app, token, agent_id) as session:
+                    yield session
+        except ExceptionGroup as lost:
+            # The client's fold gives the session's own cancellation by the group alone, or late answers alone, as
+            # the cancellation; a lost child while another cancellation is pending is unreachable.
+            late = all(
+                isinstance(leaf, anyio.BrokenResourceError | anyio.ClosedResourceError) for leaf in leaves_of(lost)
+            )
+            if late or not task_is_being_cancelled():
+                raise asyncio.CancelledError from None
+            raise Unreachable("the transport lost a child") from None
 
     return losing
 

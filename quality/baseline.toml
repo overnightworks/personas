@@ -4,7 +4,7 @@
 "open_mcp_session" = 16
 
 [file_lines]
-"tests/test_app_session.py" = 1112
+"tests/test_app_session.py" = 1109
 "tests/test_decision.py" = 975
 "tests/test_loop.py" = 813
 

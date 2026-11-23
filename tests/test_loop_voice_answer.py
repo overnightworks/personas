@@ -13,7 +13,7 @@ from personas.speech import DropReason
 from tests.support.app_driving import settled
 from tests.support.call import PLACE_ID
 from tests.support.hopin import CALL
-from tests.support.transport import opener_whose_request_raises
+from tests.support.openers import opener_whose_request_raises
 from tests.support.voice import (
     FIRST,
     HOLD_ID,
