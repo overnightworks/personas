@@ -47,7 +47,15 @@ from agents.member import (
     place_view_uri,
     place_window_uri,
 )
-from agents.skills import SKILLS_EXTENSION, Skill, SkillEntry, SkillListing, implicit_skill, read_skill
+from agents.skills import (
+    SKILLS_EXTENSION,
+    Skill,
+    SkillEntry,
+    SkillListing,
+    implicit_skill,
+    implicit_skill_name,
+    read_skill,
+)
 from agents.tools import JsonObject, ToolDeclaration, ToolEffect, ToolImage, ToolOutcome
 from agents.turn import TOOL_IMAGE_MEDIA_TYPE
 from mcp import ClientSession
@@ -103,8 +111,6 @@ _SPEAK_OPTIONAL: Final = frozenset({"style", "interrupted"})
 _TURN_STATE_OPTIONAL: Final = frozenset({"thinking"})
 """The arguments the runner builds itself that a call may leave out; every other one of the three tools is
 required."""
-_NAMING_DESCRIPTION: Final = "-"
-"""The description that builds an implicit skill only to read the name its app's URL gives it."""
 _IMPLICIT_DESCRIPTION: Final = "What the app {} says of itself, and the tools it offers."
 
 
@@ -441,8 +447,8 @@ class _McpAppSession:
     async def _implicit_skill(self, instructions: str | None) -> Skill:
         tools = [tool.name for tool in await self.declared_tools()]
         try:
-            name = implicit_skill(self.app_url, self.app_url, instructions, tools, _NAMING_DESCRIPTION).name
-            return implicit_skill(self.app_url, self.app_url, instructions, tools, _IMPLICIT_DESCRIPTION.format(name))
+            description = _IMPLICIT_DESCRIPTION.format(implicit_skill_name(self.app_url))
+            return implicit_skill(self.app_url, self.app_url, instructions, tools, description)
         except ValueError:
             raise UnusableAnswer(INVALID_ANSWER_CODE) from None
 
