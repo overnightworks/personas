@@ -53,7 +53,7 @@ async def test_an_addressed_line_gets_exactly_one_say_under_the_agents_own_finge
     assert runner.app.said == [(SUBJECT, PLACE_ID, ANSWER)]
     assert len(runner.gateway.requests) == 2
     assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[1]]
-    assert runner.gateway.openings()[0].system == runner.files.persona_prompt
+    assert runner.gateway.openings()[0].system.startswith(runner.files.persona_prompt)
     assert runner.gateway.users() == {person_fingerprint(runner.app_principal)}
     assert runner.reports.reported() == [(Event.STARTED, None)]
 

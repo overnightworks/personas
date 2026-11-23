@@ -324,7 +324,7 @@ async def test_a_hold_joins_the_lines_already_due_into_one_written_turn_that_is_
     (number,) = runner.gateway.rounds()
     assert number == 2
     assert "Are you still there?" in runner.gateway.told_in(number)
-    assert {CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL} <= set(runner.gateway.offered_tools(number))
+    assert {CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL} <= set(runner.gateway.offered_tools(number, speaking=True))
     assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
 
 

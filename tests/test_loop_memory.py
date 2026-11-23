@@ -10,6 +10,7 @@ from dataclasses import replace
 
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
+from agents.member import CONTINUE_SPEAKING_TOOL
 from agents.tools import ToolEffect
 from agents.turn import FailureCode
 from mcp_types import ListToolsResult
@@ -62,6 +63,7 @@ from tests.support.logs import formatted, lines_of
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active
 from tests.support.store import ScriptedStore
+from tests.support.voice import deciding
 
 pytestmark = pytest.mark.anyio
 
@@ -238,6 +240,7 @@ async def test_a_turns_call_total_is_his_apps_bounds_plus_his_lookups_and_the_on
     total = [
         *(tool_round(recalling()) for _ in range(lookups + 1)),
         *(tool_round(say(secrets.token_hex(4))) for _ in range(own_calls)),
+        deciding(CONTINUE_SPEAKING_TOOL),
     ]
     runner.gateway = Gateway(*total, tool_round(recalling()), completion("done"))
     await restarted_in_the_call(runner)

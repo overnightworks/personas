@@ -11,6 +11,7 @@ from http import HTTPStatus
 
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
+from agents.member import CONTINUE_SPEAKING_TOOL
 from agents.tools import ToolOutcome
 from agents.turn import FailureCode, Principal, person_fingerprint
 from mcp_types import ListToolsResult
@@ -38,7 +39,7 @@ from tests.support.hopin_places import ISSUER
 from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active
-from tests.support.voice import HeldSleeps, a_voice_call, holding_sentence_ends
+from tests.support.voice import HeldSleeps, a_voice_call, deciding, holding_sentence_ends
 from tests.support.wire import answers_with, cuts, hangs, hangs_once_entered, refuses_with_a_server_error
 
 pytestmark = pytest.mark.anyio
@@ -281,13 +282,14 @@ async def test_a_failed_call_to_his_own_apps_tool_ends_the_turn_into_that_loops_
 def rounds_spending_every_bound(runner) -> list[object]:
     """One call a round until every app's bound is spent: the held app's bound plus one, the last of which its own
     bound refuses, then the place's and the tools-only app's. Their calls number the turn's bound, the sum of the
-    apps' bounds plus one, so the call after them is past it."""
+    apps' bounds plus one for the speaking tools and one for the held call, so the call after them is past it."""
     held_bound = runner.config.apps[1].max_tool_calls
     own_bound = runner.config.apps[0].max_tool_calls
     return [
         *(tool_round(play(words(1)[0])) for _ in range(held_bound + 1)),
         *(tool_round(say(words(1)[0])) for _ in range(own_bound)),
         *(tool_round(tool_call(secrets.token_hex(4), CREATE_SONG, {"title": "t"})) for _ in range(CALLS)),
+        deciding(CONTINUE_SPEAKING_TOOL),
     ]
 
 

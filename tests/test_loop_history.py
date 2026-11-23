@@ -571,7 +571,7 @@ async def test_a_line_that_names_him_starts_his_written_turn_for_it_and_the_next
         "history": history_of([entry(url_of(runner, 0), PLACE_ID, ADDRESSED)]),
         "woke": woke_at_lines(url_of(runner, 0), PLACE_ID, [1]),
     }
-    assert written.system == runner.files.persona_prompt
+    assert written.system.startswith(runner.files.persona_prompt)
     (told,) = histories(runner)
     assert told["entries"][0] == entry(url_of(runner, 0), PLACE_ID, ADDRESSED)
 

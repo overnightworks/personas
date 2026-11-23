@@ -99,6 +99,7 @@ _CALL_BOUND_TEXT: Final = "this app takes no more calls in this turn"
 _APART_TEXT: Final = (
     "a hold is decided in a round of its own when one starts: nothing is held now, so there is nothing to decide"
 )
+_WRITTEN_TURN_TEXT: Final = "this turn is not spoken: continue_speaking and stop_speaking act only in a spoken turn"
 
 
 async def _final_event_of(events: AsyncIterator[TurnEvent], tally: TurnTally) -> FinalEvent | None:
@@ -365,7 +366,7 @@ class Turning:
             self._mind.answered(turn)
 
     def _request_of(self, setup: TurnSetup, admitted: Admitted, told: tuple[str, ...], held: HeldTools) -> TurnRequest:
-        system = f"{setup.persona.prompt}\n\n{REPLY_RULES}" if admitted.aloud else setup.persona.prompt
+        system = f"{setup.persona.prompt}\n\n{REPLY_RULES}"
         return TurnRequest(
             agent=setup.persona.name,
             turn=Turn(system=system, messages=[TurnMessage(role=TurnRole.USER, text=each) for each in told]),
@@ -478,8 +479,9 @@ class Turning:
                 for each in DECISION_DECLARATIONS
             )
             bounds.append(DECISION_CALLS)
-        elif inbox is not None:
-            tools.extend(HandTool(each, self._decided_apart) for each in DECISION_DECLARATIONS)
+        else:
+            apart = partial(self._answered_apart, _APART_TEXT if admitted.aloud else _WRITTEN_TURN_TEXT)
+            tools.extend(HandTool(each, apart) for each in DECISION_DECLARATIONS)
             bounds.append(DECISION_CALLS)
         return HeldTools(tuple(tools), turn_call_bound(bounds), inbox, deciding)
 
@@ -541,10 +543,10 @@ class Turning:
             return ToolOutcome(STORE_DID_NOT_ANSWER_TEXT, is_error=True)
         return ToolOutcome(lookup_result(found, lookup.result_bytes), is_error=False)
 
-    async def _decided_apart(  # NOSONAR(S7503) HandToolHandler is async
-        self, _principal: Principal, _arguments: JsonObject
+    async def _answered_apart(  # NOSONAR(S7503) HandToolHandler is async
+        self, text: str, _principal: Principal, _arguments: JsonObject
     ) -> ToolOutcome:
-        return ToolOutcome(_APART_TEXT, is_error=True)
+        return ToolOutcome(text, is_error=True)
 
     def _held(self, hold: HoldBack) -> ToolOutcome | None:
         """The result of a call that is not sent, or ``None`` when the call goes on."""
