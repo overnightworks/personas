@@ -21,7 +21,9 @@ events and their fields. A test cites each rule by its ID at the start of its do
 - A turn writes every line it causes in one trace (`trace_id`): that of the newest line that made it due,
   or of the view revision, or its own when the app gives none or one that cannot be read. Every request to
   an app, the realm and the gateway carries that trace's `traceparent`. agents adds `model_request.ended`
-  and `tool_call.ended` in the same trace; its `docs/connector.md` lists them. (LOG-4)
+  and `tool_call.ended` in the same trace; its `docs/connector.md` lists them. Every step line (`turn.ended`,
+  `turn_wait.ended` and the other timed lines) also carries `span_id` and `parent_span_id`, so a turn's
+  lines form a tree. (LOG-4)
 - `personas migrate` and `personas memory` write no JSON line. `personas memory` prints its result on stdout;
   `personas migrate` prints nothing on success and exits 0, which is its result. (LOG-5)
 
