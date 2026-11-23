@@ -569,8 +569,8 @@ wheels = [
 
 [[package]]
 name = "overnightworks-agents"
-version = "0.71.0"
-source = { git = "https://github.com/overnightworks/agents?rev=v0.71.0#547eb81ae58c9c3041c5b5cb3741b8623925f7cf" }
+version = "0.74.0"
+source = { git = "https://github.com/overnightworks/agents?rev=v0.74.0#3cdde307ade7f8c0910412cfd476e214510a6a54" }
 dependencies = [
     { name = "pydantic" },
     { name = "ruamel-yaml" },
@@ -580,6 +580,9 @@ dependencies = [
 backend = [
     { name = "httpx2" },
     { name = "overnightworks-logline" },
+]
+mcp-client = [
+    { name = "mcp" },
 ]
 mcp-server = [
     { name = "anyio" },
@@ -610,7 +613,7 @@ dependencies = [
     { name = "httpx2" },
     { name = "mcp" },
     { name = "mcp-types" },
-    { name = "overnightworks-agents", extra = ["backend", "voice"] },
+    { name = "overnightworks-agents", extra = ["backend", "mcp-client", "voice"] },
     { name = "overnightworks-logline" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
@@ -638,7 +641,7 @@ requires-dist = [
     { name = "httpx2", specifier = ">=2.16.0" },
     { name = "mcp", specifier = ">=2.3.0" },
     { name = "mcp-types", specifier = ">=2.3.0" },
-    { name = "overnightworks-agents", extras = ["backend", "voice"], git = "https://github.com/overnightworks/agents?rev=v0.71.0" },
+    { name = "overnightworks-agents", extras = ["backend", "voice", "mcp-client"], git = "https://github.com/overnightworks/agents?rev=v0.74.0" },
     { name = "overnightworks-logline", git = "https://github.com/overnightworks/logline?rev=v1.9.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.12" },
@@ -648,7 +651,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "anyio", specifier = ">=4.16.0" },
-    { name = "overnightworks-agents", extras = ["mcp-server"], git = "https://github.com/overnightworks/agents?rev=v0.71.0" },
+    { name = "overnightworks-agents", extras = ["mcp-server"], git = "https://github.com/overnightworks/agents?rev=v0.74.0" },
     { name = "pyright", specifier = ">=1.1.414" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-cov", specifier = ">=7.0.0" },

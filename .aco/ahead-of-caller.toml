@@ -1,0 +1,9 @@
+[[code]]
+path = "src/personas/app_session.py"
+item = "#427"
+reason = "The skills read and the skill read of an app session; S8b calls the first at a join and S8c the second from read_skill."
+
+[[code]]
+path = "src/personas/entries.py"
+item = "#427"
+reason = "The skill entry and the load entry the history reads back; S8b is the next row and writes them."

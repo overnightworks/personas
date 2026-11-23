@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 from personas.entries import HistoryDelta, KeptHistory, Lines, TurnTold, entry_size
-from personas.present import EMPTY_PRESENT, Present, answered_into, history_delta, present_of, taken_into, turn_messages
-from tests.support.history import APP, LATER, MORNING, ROOMY_BYTES, an_act, said
+from personas.present import (
+    EMPTY_PRESENT,
+    Present,
+    answered_into,
+    arrived_since,
+    history_delta,
+    present_of,
+    taken_into,
+    turn_messages,
+)
+from tests.support.history import APP, LATER, MORNING, ROOMY_BYTES, a_skill_read, a_tools_load, an_act, said
 
 if TYPE_CHECKING:
     from personas.entries import Entry
@@ -81,3 +91,30 @@ def test_the_first_delta_after_a_resume_continues_the_ordinals_of_the_kept_histo
     grown = answered_through(took(resumed, said(4, "four")), 4)
 
     assert history_delta(resumed, grown) == HistoryDelta(3, (said(4, "four"),), 2, grown.told[-1:], 1)
+
+
+def test_a_turn_is_told_a_history_holding_a_skill_and_a_load_without_them():
+    held = took(EMPTY_PRESENT, said(1, "one"), a_skill_read(), a_tools_load(), said(2, "two"))
+    turn = TurnTold(LATER, APP, MORNING.place, Lines(MORNING.generation, frozenset({1, 2}), missed=False), False, 4)
+
+    *_, message = (json.loads(each) for each in turn_messages("Mozart", held, turn))
+
+    assert [entry["entry"] for entry in message["entries"]] == ["line", "line"]
+
+
+def test_a_skill_and_a_load_taken_since_the_admission_hold_back_no_call():
+    admitted = took(EMPTY_PRESENT, said(1, "one")).history
+
+    taken = took(EMPTY_PRESENT, said(1, "one"), a_skill_read(), a_tools_load()).history
+
+    assert arrived_since(taken, admitted) is None
+
+
+def test_the_cut_counts_a_skill_by_its_body_and_tool_names():
+    skill = a_skill_read(body="x" * 100, tools=("say", "play"))
+    bound = entry_size(skill) + entry_size(said(2, "two"))
+
+    present = took(took(EMPTY_PRESENT, said(1, "one"), skill), said(2, "two"), bound=bound)
+
+    assert entry_size(skill) == 100 + len("say") + len("play")
+    assert present.history.entries == (skill, said(2, "two"))

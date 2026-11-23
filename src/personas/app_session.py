@@ -12,6 +12,7 @@ from http import HTTPStatus
 from typing import Final, Protocol, cast, override
 
 import httpx2
+from agents.mcp_client import get_skill, list_skills
 from agents.member import (
     ACCEPT_INVITATION_TOOL,
     CONTINUE_SPEAKING_TOOL,
@@ -46,6 +47,7 @@ from agents.member import (
     place_view_uri,
     place_window_uri,
 )
+from agents.skills import SKILLS_EXTENSION, Skill, SkillEntry, SkillListing, implicit_skill, read_skill
 from agents.tools import JsonObject, ToolDeclaration, ToolEffect, ToolImage, ToolOutcome
 from agents.turn import TOOL_IMAGE_MEDIA_TYPE
 from mcp import ClientSession
@@ -100,6 +102,13 @@ _SPEAK_OPTIONAL: Final = frozenset({"style", "interrupted"})
 _TURN_STATE_OPTIONAL: Final = frozenset({"thinking"})
 """The arguments the runner builds itself that a call may leave out; every other one of the three tools is
 required."""
+_NAMING_DESCRIPTION: Final = "-"
+"""The description that builds an implicit skill only to read the name its app's URL gives it."""
+_IMPLICIT_DESCRIPTION: Final = "What the app {} says of itself, and the tools it offers."
+
+
+type AppSkill = Skill | SkillEntry
+"""A skill the app serves as a listing entry, which proves nothing of its file, or its one implicit skill."""
 
 
 class AppSession(Protocol):
@@ -182,6 +191,20 @@ class AppSession(Protocol):
 
     async def invoke(self, name: str, arguments: JsonObject) -> ToolOutcome:
         """The tool's outcome, an error one included; raises ``StatusFailure``, ``Unreachable``, ``UnusableAnswer``."""
+        ...
+
+    async def read_skills(self) -> tuple[AppSkill, ...]:
+        """The app's skills: its one implicit skill when it declares no skills extension, else every entry of its
+        listing in its order, however many pages. An empty listing is no skills. No skill file is read.
+
+        A listing that breaks a rule fails whole as an ``UnusableAnswer`` that carries the entry's index; raises
+        ``StatusFailure``, ``Unreachable`` or ``UnusableAnswer`` otherwise.
+        """
+        ...
+
+    async def read_skill(self, uri: str) -> Skill:
+        """The skill whose ``SKILL.md`` is at ``uri``, once the file proves to be what the app's entry promised; raises
+        ``SkillRefused`` for a file that is not, and as ``read_skills`` does otherwise."""
         ...
 
 
@@ -385,6 +408,38 @@ class _McpAppSession:
                 self._kept = declared
         return declared
 
+    async def read_skills(self) -> tuple[AppSkill, ...]:
+        discovered = await self.session.discover()
+        if SKILLS_EXTENSION not in (discovered.capabilities.extensions or {}):
+            return (await self._implicit_skill(discovered.instructions),)
+        skills: list[AppSkill] = []
+        cursor: str | None = None
+        while True:
+            page = await self._asked(self._skills_page(cursor, len(skills)))
+            skills.extend(page.skills)
+            cursor = page.next_cursor
+            if cursor is None:
+                return tuple(skills)
+
+    async def read_skill(self, uri: str) -> Skill:
+        entry = (await self._asked(get_skill(self.session, uri))).skill
+        result = await self._asked(self._read(entry.uri))
+        content = "".join(block.text for block in result.contents if isinstance(block, TextResourceContents))
+        return read_skill(self.app_url, entry, content.encode())
+
+    async def _skills_page(self, cursor: str | None, listed: int) -> SkillListing:
+        """One page of the listing; a page that breaks a rule names the index, among all entries listed, of the entry
+        that did."""
+        try:
+            return await list_skills(self.session, cursor)
+        except ValidationError as error:
+            raise UnusableAnswer(INVALID_ANSWER_CODE, entry=_listed_index(error, listed)) from None
+
+    async def _implicit_skill(self, instructions: str | None) -> Skill:
+        tools = [tool.name for tool in await self.declared_tools()]
+        name = implicit_skill(self.app_url, self.app_url, instructions, tools, _NAMING_DESCRIPTION).name
+        return implicit_skill(self.app_url, self.app_url, instructions, tools, _IMPLICIT_DESCRIPTION.format(name))
+
     async def accept(self, accept: Accept) -> Refusal | None:
         arguments = AcceptInvitationArguments(
             place=accept.place,
@@ -509,6 +564,15 @@ async def _wakes_of(
                 yield wake
     except SubscriptionLost as lost:
         raise _failure_of(lost, auth.last_answer) from None
+
+
+def _listed_index(error: ValidationError, listed: int) -> int | None:
+    """The index, among all entries listed so far and on this page, of the first entry the error names."""
+    for detail in error.errors():
+        location = detail["loc"]
+        if len(location) > 1 and location[0] == "skills" and isinstance(location[1], int):
+            return listed + location[1]
+    return None
 
 
 def _record_of[Record: MemberResourceRecord](record: type[Record], result: ReadResourceResult) -> Record:

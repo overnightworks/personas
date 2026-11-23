@@ -27,6 +27,7 @@ from personas.entries import (
     ViewSeen,
     Visit,
     entry_size,
+    is_told,
     newest_that_fit,
     told_bytes,
     told_entry,
@@ -49,7 +50,11 @@ def _holds_revision(entries: Iterable[Entry], view: ViewSeen) -> bool:
 
 
 def _not_his_own(entry: Entry) -> bool:
-    return not isinstance(entry, ActDone | SaidAloud) and not (isinstance(entry, KeptLine) and entry.own)
+    return (
+        is_told(entry)
+        and not isinstance(entry, ActDone | SaidAloud)
+        and not (isinstance(entry, KeptLine) and entry.own)
+    )
 
 
 @dataclass(frozen=True)
@@ -149,7 +154,7 @@ def _entered_since(current: History, taken: int) -> tuple[Entry, ...]:
 
 def arrived_since(current: History, admitted: History) -> Arrived | None:
     """What entered ``current`` since ``admitted``, an earlier value of the same history, when any of it is not his own;
-    otherwise ``None``. His own lines, his acts and his spoken sentences alone arrive as nothing."""
+    otherwise ``None``. His own lines, his acts, his spoken sentences and his skills alone arrive as nothing."""
     if current.heard == admitted.heard:
         return None
     return Arrived(_entered_since(current, admitted.taken), current.left_out > admitted.taken)
@@ -172,7 +177,7 @@ class WakeReason(StrEnum):
 def held_told(arrived: Arrived) -> str:
     """The result of a call that was not sent: that it was not, and the entries that arrived. When their text would
     pass ``MAX_EVENT_BYTES`` the oldest are left out, and so is an entry that alone does not fit."""
-    told = [told_entry(entry) for entry in arrived.entries]
+    told = [told_entry(entry) for entry in arrived.entries if is_told(entry)]
     empty = _held_json([], older_dropped=False)
     separator = len(", ")
     sizes = reversed([told_bytes(each) + separator for each in told])
@@ -215,7 +220,11 @@ def told_header(you: str, history: History) -> str:
 def told_turn(turn: TurnTold, entries: Iterable[Entry]) -> str:
     """The message of a turn: when it was admitted, what woke him and every entry taken since the message before it,
     the facts in the order things happened. A turn for lines is told when its answer is heard aloud."""
-    told = {"at": told_time(turn.at), "woke": _told_wake(turn), "entries": [told_entry(entry) for entry in entries]}
+    told = {
+        "at": told_time(turn.at),
+        "woke": _told_wake(turn),
+        "entries": [told_entry(entry) for entry in entries if is_told(entry)],
+    }
     return json.dumps(told, ensure_ascii=False)
 
 

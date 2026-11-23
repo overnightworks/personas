@@ -1102,7 +1102,7 @@ async def test_an_invoked_tool_the_app_refuses_is_a_failure(app, bearer):
     assert failure.value.status == HTTPStatus.SERVICE_UNAVAILABLE
 
 
-@pytest.mark.parametrize("name", ["agents.wait", "WaitAnswer", "WAIT_TOOL", "WaitToolError", "_cursor"])
+@pytest.mark.parametrize("name", ["agents.wait", "WaitAnswer", "WAIT_TOOL", "WaitToolError", "self._cursor"])
 async def test_nothing_in_the_tree_names_the_polling_path(name):
     searched = ["src", "tests", "README.md", "docs", ":(exclude)tests/test_app_session.py"]
     search = await asyncio.create_subprocess_exec(

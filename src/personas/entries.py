@@ -7,7 +7,7 @@ import itertools
 import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Final, cast
+from typing import TYPE_CHECKING, Final, TypeIs, cast
 
 from agents.member import (
     PartialSpeech,
@@ -122,7 +122,40 @@ class SaidAloud:
     at: datetime
 
 
-type Entry = KeptLine | ViewSeen | ActDone | SaidAloud
+@dataclass(frozen=True)
+class SkillRead:
+    """A skill of the app at ``app`` an agent loaded: its name and uri, its body, the tools it loads and the wall time.
+    The round that loaded it is told under ``body_call_id``, the skill's body, and ``load_call_id``, the load of its
+    tools; the runner minted both when it wrote the entry, so a replay tells the round under the same ids."""
+
+    app: str
+    name: str
+    uri: str
+    body: str = field(repr=False)
+    tools: tuple[str, ...]
+    at: datetime
+    body_call_id: str
+    load_call_id: str
+
+
+@dataclass(frozen=True)
+class ToolsLoaded:
+    """Tools of the app at ``app`` an agent loaded without a skill, and the wall time. The round that loaded them is
+    told under ``call_id``, which the runner minted when it wrote the entry."""
+
+    app: str
+    tools: tuple[str, ...]
+    at: datetime
+    call_id: str
+
+
+type ToldEntry = KeptLine | ViewSeen | ActDone | SaidAloud
+type Entry = ToldEntry | SkillRead | ToolsLoaded
+
+
+def is_told(entry: Entry) -> TypeIs[ToldEntry]:
+    """Whether a turn's message tells the entry; a skill and a load are told by their round, never by a message."""
+    return not isinstance(entry, SkillRead | ToolsLoaded)
 
 
 @dataclass(frozen=True)
@@ -237,7 +270,14 @@ class KeptHistory:
 
 STORED_KIND_KEY: Final = "entry"
 """The key of a stored entry that names its kind."""
-_ENTRY_KINDS: Final = (("line", KeptLine), ("view", ViewSeen), ("act", ActDone), ("speech", SaidAloud))
+_ENTRY_KINDS: Final = (
+    ("line", KeptLine),
+    ("view", ViewSeen),
+    ("act", ActDone),
+    ("speech", SaidAloud),
+    ("skill", SkillRead),
+    ("load", ToolsLoaded),
+)
 _STORED_ENTRIES: Final = {kind: TypeAdapter(of_kind) for kind, of_kind in _ENTRY_KINDS}
 _KIND_OF_ENTRY: Final = {of_kind: kind for kind, of_kind in _ENTRY_KINDS}
 _ANY_ENTRY: Final = TypeAdapter[Entry](Entry)
@@ -318,9 +358,17 @@ def picture_bytes(image: ToolImage | None) -> int:
     return 0 if image is None else len(image.content)
 
 
+def _names_bytes(names: Iterable[str]) -> int:
+    return sum(len(name.encode()) for name in names)
+
+
 def entry_size(entry: Entry) -> int:
     """A view counts the bytes of its state's JSON; a line, an act and a spoken sentence count the bytes of the JSON
-    they are told as."""
+    they are told as; a skill the bytes of its body and tool names, a load those of its tool names."""
+    if isinstance(entry, SkillRead):
+        return len(entry.body.encode()) + _names_bytes(entry.tools)
+    if isinstance(entry, ToolsLoaded):
+        return _names_bytes(entry.tools)
     if isinstance(entry, ViewSeen):
         return len(json.dumps(entry.view.state, ensure_ascii=False).encode())
     return told_bytes(told_entry(entry))
@@ -400,7 +448,7 @@ def told_speech_outcome(outcome: SpeechOutcome) -> dict[str, object]:
     return {"answered": False, "code": outcome.code}
 
 
-def told_entry(entry: Entry) -> dict[str, object]:
+def told_entry(entry: ToldEntry) -> dict[str, object]:
     if isinstance(entry, SaidAloud):
         return {
             "entry": "speech",

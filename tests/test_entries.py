@@ -23,6 +23,7 @@ from personas.entries import (
     ViewSeen,
     Waiting,
     entry_from_stored,
+    is_told,
     stored_entry,
     stored_turn,
     taken_lines,
@@ -38,6 +39,8 @@ from tests.support.history import (
     NOON,
     TABLE,
     a_sentence,
+    a_skill_read,
+    a_tools_load,
     an_act,
     history_holding,
     said,
@@ -129,6 +132,8 @@ def test_a_spoken_sentence_shows_no_text_in_its_repr_nor_in_the_history_that_hol
         a_sentence(outcome=Written(written=True)),
         a_sentence(outcome=SpeakRefusal.HELD),
         a_sentence(outcome=Unanswered("network")),
+        a_skill_read(),
+        a_tools_load(),
     ],
     ids=[
         "line with every mark",
@@ -140,6 +145,8 @@ def test_a_spoken_sentence_shows_no_text_in_its_repr_nor_in_the_history_that_hol
         "sentence written",
         "sentence refused",
         "sentence unanswered",
+        "skill read",
+        "tools loaded",
     ],
 )
 def test_every_entry_kind_comes_back_from_its_stored_json_as_it_went_in(entry):
@@ -149,7 +156,23 @@ def test_every_entry_kind_comes_back_from_its_stored_json_as_it_went_in(entry):
 
     assert back == entry
     assert json.dumps(stored_entry(back)) == stored
-    assert json.dumps(told_entry(back)) == json.dumps(told_entry(entry))
+    if is_told(entry):
+        assert json.dumps(told_entry(back)) == json.dumps(told_entry(entry))
+
+
+def test_a_skill_read_and_a_tools_load_keep_the_call_ids_their_round_is_told_under():
+    skill = entry_from_stored(stored_entry(a_skill_read()))
+    load = entry_from_stored(stored_entry(a_tools_load()))
+
+    assert (skill.body_call_id, skill.load_call_id, load.call_id) == ("call-body", "call-load", "call-load")
+
+
+def test_a_skill_read_shows_no_body_in_its_repr_nor_in_the_history_that_holds_it():
+    marker = secrets.token_hex(8)
+    skill = a_skill_read(body=marker)
+
+    assert marker not in repr(skill)
+    assert marker not in repr(history_holding((skill,)))
 
 
 @pytest.mark.parametrize(
