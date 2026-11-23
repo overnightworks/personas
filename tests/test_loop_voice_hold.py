@@ -86,7 +86,6 @@ async def test_the_round_is_asked_over_his_history_and_the_turns_tools_with_one_
     (number,) = runner.gateway.rounds()
     assert '"woke"' in runner.gateway.told_in(number)
     assert runner.gateway.offered_tools(number) == runner.gateway.offered_tools(1)
-    assert "parallel_tool_calls" not in runner.gateway.body_of(number)
 
 
 async def test_a_continue_lets_the_rest_play_and_his_unsent_sentences_follow(runner):

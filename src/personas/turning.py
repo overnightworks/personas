@@ -480,7 +480,7 @@ class Turning:
             )
             bounds.append(DECISION_CALLS)
         else:
-            apart = partial(self._answered_apart, _APART_TEXT if inbox is not None else _WRITTEN_TURN_TEXT)
+            apart = partial(self._answered_apart, _APART_TEXT if admitted.aloud else _WRITTEN_TURN_TEXT)
             tools.extend(HandTool(each, apart) for each in DECISION_DECLARATIONS)
             bounds.append(DECISION_CALLS)
         return HeldTools(tuple(tools), turn_call_bound(bounds), inbox, deciding)
