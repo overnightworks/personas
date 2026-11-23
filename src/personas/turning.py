@@ -480,7 +480,7 @@ class Turning:
             )
             bounds.append(DECISION_CALLS)
         else:
-            apart = self._decided_apart if inbox is not None else self._speaking_only_aloud
+            apart = partial(self._answered_apart, _APART_TEXT if inbox is not None else _WRITTEN_TURN_TEXT)
             tools.extend(HandTool(each, apart) for each in DECISION_DECLARATIONS)
             bounds.append(DECISION_CALLS)
         return HeldTools(tuple(tools), turn_call_bound(bounds), inbox, deciding)
@@ -543,15 +543,10 @@ class Turning:
             return ToolOutcome(STORE_DID_NOT_ANSWER_TEXT, is_error=True)
         return ToolOutcome(lookup_result(found, lookup.result_bytes), is_error=False)
 
-    async def _decided_apart(  # NOSONAR(S7503) HandToolHandler is async
-        self, _principal: Principal, _arguments: JsonObject
+    async def _answered_apart(  # NOSONAR(S7503) HandToolHandler is async
+        self, text: str, _principal: Principal, _arguments: JsonObject
     ) -> ToolOutcome:
-        return ToolOutcome(_APART_TEXT, is_error=True)
-
-    async def _speaking_only_aloud(  # NOSONAR(S7503) HandToolHandler is async
-        self, _principal: Principal, _arguments: JsonObject
-    ) -> ToolOutcome:
-        return ToolOutcome(_WRITTEN_TURN_TEXT, is_error=True)
+        return ToolOutcome(text, is_error=True)
 
     def _held(self, hold: HoldBack) -> ToolOutcome | None:
         """The result of a call that is not sent, or ``None`` when the call goes on."""
