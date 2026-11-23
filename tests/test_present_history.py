@@ -5,12 +5,16 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+import pytest
+
 from personas.entries import HistoryDelta, KeptHistory, Lines, TurnTold, entry_size
 from personas.present import (
     EMPTY_PRESENT,
+    Arrived,
     Present,
     answered_into,
     arrived_since,
+    held_told,
     history_delta,
     present_of,
     taken_into,
@@ -110,11 +114,25 @@ def test_a_skill_and_a_load_taken_since_the_admission_hold_back_no_call():
     assert arrived_since(taken, admitted) is None
 
 
-def test_the_cut_counts_a_skill_by_its_body_and_tool_names():
-    skill = a_skill_read(body="x" * 100, tools=("say", "play"))
-    bound = entry_size(skill) + entry_size(said(2, "two"))
+@pytest.mark.parametrize(
+    ("kept", "size"),
+    [
+        pytest.param(a_skill_read(body="x" * 100, tools=("say", "play")), 100 + len("say") + len("play"), id="a skill"),
+        pytest.param(a_tools_load(tools=("say", "play")), len("say") + len("play"), id="a load"),
+    ],
+)
+def test_the_cut_counts_a_skill_by_its_body_and_tool_names_and_a_load_by_its_tool_names(kept, size):
+    bound = entry_size(kept) + entry_size(said(2, "two"))
 
-    present = took(took(EMPTY_PRESENT, said(1, "one"), skill), said(2, "two"), bound=bound)
+    present = took(took(EMPTY_PRESENT, said(1, "one"), kept), said(2, "two"), bound=bound)
 
-    assert entry_size(skill) == 100 + len("say") + len("play")
-    assert present.history.entries == (skill, said(2, "two"))
+    assert entry_size(kept) == size
+    assert present.history.entries == (kept, said(2, "two"))
+
+
+def test_a_held_call_is_told_no_skill_and_no_load_that_arrived_beside_a_line():
+    arrived = Arrived((a_skill_read(), a_tools_load(), said(1, "one")), older_dropped=False)
+
+    told = json.loads(held_told(arrived))
+
+    assert [each["entry"] for each in told["arrived"]["entries"]] == ["line"]
