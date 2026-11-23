@@ -6,12 +6,8 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
-from personas.main import configure_logging
-
 if TYPE_CHECKING:
     import io
-
-    import pytest
 
 
 _RECORD_ATTRIBUTES = frozenset(vars(logging.makeLogRecord({}))) | {"message", "asctime"}
@@ -22,22 +18,14 @@ def fields_of(record: logging.LogRecord) -> dict[str, object]:
     return {key: value for key, value in vars(record).items() if key not in _RECORD_ATTRIBUTES}
 
 
-class _FormatterWithFields(logging.Formatter):
+class FormatterWithFields(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         return f"{super().format(record)} {json.dumps(fields_of(record), default=str, sort_keys=True)}"
 
 
-def configure_logging_into(caplog: pytest.LogCaptureFixture) -> None:
-    """The entry point's logging, with the lines of every logger also in ``caplog`` and its fields in their text."""
-    configure_logging()
-    caplog.handler.setFormatter(_FormatterWithFields())
-    logging.getLogger().addHandler(caplog.handler)
-    caplog.set_level(logging.DEBUG)
-
-
 def formatted(records: list[logging.LogRecord]) -> str:
     """The records as a handler writes them, with the fields and the traceback of each."""
-    formatter = _FormatterWithFields()
+    formatter = FormatterWithFields()
     return "\n".join(formatter.format(record) for record in records)
 
 

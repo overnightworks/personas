@@ -67,8 +67,9 @@ from personas.failures import (
 )
 from personas.secret import Secret
 from tests.support.app_session import opened
+from tests.support.entry_logs import configure_logging_into
 from tests.support.hopin import CALL, LIMIT_SECONDS, LIST_TOOLS, LISTEN, NO_METHOD, READ, SAY_TOOL
-from tests.support.logs import configure_logging_into, formatted
+from tests.support.logs import formatted
 from tests.support.loopback import serving
 from tests.support.pictures import a_picture, base64_of
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
@@ -671,10 +672,8 @@ async def test_late_answers_alone_after_a_session_body_was_left_by_a_cancellatio
 async def test_a_defect_beside_late_answers_after_a_cancellation_stays_with_them_as_the_errors_they_are(
     app, bearer, monkeypatch
 ):
-    defect = ValueError("a defect")
-    monkeypatch.setattr(
-        app_session, "streamable_http_client", transport_closing_with_leaves(defect, anyio.BrokenResourceError())
-    )
+    leaves = transport_closing_with_leaves(ValueError("a defect"), anyio.BrokenResourceError())
+    monkeypatch.setattr(app_session, "streamable_http_client", leaves)
 
     ended = await cancelled_in_the_stream_body(app, bearer)
 

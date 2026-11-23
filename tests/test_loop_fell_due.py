@@ -9,10 +9,11 @@ from agents.backend.fake_gateway import completion
 
 from personas.decision import BACKOFF_BASE_SECONDS
 from personas.reporting import Event
+from tests.support.app_driving import said_and_taken, settled, shows
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import SweepClock
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
-from tests.support.history import OTHER_CALL_ID, REMARK, SPEAKER, TABLE, at_table, said_and_taken, settled, shows
+from tests.support.history import OTHER_CALL_ID, REMARK, SPEAKER, TABLE, at_table
 from tests.support.hopin import a_traceparent, trace_id_of
 from tests.support.logs import written_by_the_runner
 from tests.support.standings import AGENT_SUBJECT as SUBJECT

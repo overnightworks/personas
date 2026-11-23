@@ -18,11 +18,11 @@ from personas import app_session
 from personas.decision import status_code
 from personas.failures import Unreachable, leaves_of
 from personas.reporting import Event
+from tests.support.app_driving import settled
 from tests.support.call import ADDRESSED, PLACE_ID, say_in_the_call
 from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
 from tests.support.fakes import COMPLETED_TURN, failed_turn
 from tests.support.gateway import BUDGET_SPENT, say, speaks_and_says
-from tests.support.history import settled
 from tests.support.hopin import CALL, LIMIT_SECONDS, SAY_TOOL
 from tests.support.transport import opener_whose_requests_raise_together, transport_closing_with_late_answers
 from tests.support.voice import (

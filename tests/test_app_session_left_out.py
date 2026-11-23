@@ -20,8 +20,9 @@ from personas.decision import Accept, jsonrpc_code
 from personas.failures import UnusableAnswer
 from personas.secret import Secret
 from tests.support.app_session import opened, served
+from tests.support.entry_logs import configure_logging_into
 from tests.support.hopin import LIST_TOOLS, FakeApp
-from tests.support.logs import configure_logging_into, fields_of
+from tests.support.logs import fields_of
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 
 pytestmark = pytest.mark.anyio

@@ -22,10 +22,10 @@ from agents.tools import ToolOutcome
 from personas.recall import RECALL_TOOL
 from personas.reporting import Event
 from personas.speech import DropReason
+from tests.support.app_driving import settled
 from tests.support.call import ADDRESSED, PLACE_ID, say_in_the_call
 from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
 from tests.support.gateway import BUDGET_SPENT, say
-from tests.support.history import settled
 from tests.support.hopin import CALL, SAY_TOOL
 from tests.support.store import ScriptedStore
 from tests.support.voice import TWO_SENTENCES, a_voice_call, holding_sentence_ends, sentences_spoken
