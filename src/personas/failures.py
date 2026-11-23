@@ -75,13 +75,17 @@ async def within_call_time(call_seconds: float) -> AsyncGenerator[None]:
 
 
 class UnusableAnswer(CallFailure):
-    """The server answered, but with an error or a body the loop cannot use; ``code`` says which."""
+    """The server answered, but with an error or a body the loop cannot use; ``code`` says which. ``entry`` is the index
+    of the entry of a listing that broke its rules, never any text of it."""
 
-    def __init__(self, code: str, method: str | None = None, answer: str | None = None) -> None:
+    def __init__(
+        self, code: str, method: str | None = None, answer: str | None = None, entry: int | None = None
+    ) -> None:
         super().__init__(code)
         self.code = code
         self.method = method
         self.answer = answer
+        self.entry = entry
 
 
 # Named for the state of the store, as Unreachable is; a suffix would repeat it.

@@ -10,7 +10,19 @@ from typing import TYPE_CHECKING
 
 from agents.member import STANDING_URI, PlaceRef, PlaceView, Spoken
 
-from personas.entries import ActDone, Answered, History, HistoryDelta, KeptLine, KeptTurns, SaidAloud, ViewSeen, Visit
+from personas.entries import (
+    ActDone,
+    Answered,
+    History,
+    HistoryDelta,
+    KeptLine,
+    KeptTurns,
+    SaidAloud,
+    SkillRead,
+    ToolsLoaded,
+    ViewSeen,
+    Visit,
+)
 from personas.present import EMPTY_PRESENT, Present, taken_into
 from tests.support.call import ADDRESSED, PERSON
 from tests.support.logs import lines_of
@@ -269,6 +281,14 @@ def an_act(*, arguments=None, outcome=None, tool="say", app=APP, at=LATER - time
 
 def a_sentence(*, text="Guten Tag.", outcome=None, at=LATER - timedelta(seconds=9)) -> SaidAloud:
     return SaidAloud(APP, MORNING.place, text, Spoken(spoken=True) if outcome is None else outcome, at)
+
+
+def a_skill_read(*, body="Greet people by name.", tools=("say",), at=LATER - timedelta(seconds=9)) -> SkillRead:
+    return SkillRead(APP, "greeting", "skill://greeting/SKILL.md", body, tools, at, "call-body", "call-load")
+
+
+def a_tools_load(*, tools=("say", "play"), at=LATER - timedelta(seconds=9)) -> ToolsLoaded:
+    return ToolsLoaded(APP, tools, at, "call-load")
 
 
 def a_marked_present() -> tuple[str, Present]:

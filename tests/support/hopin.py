@@ -18,7 +18,7 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 
 from agents.mcp_server import McpPersonFront, PersonRequest, PersonTool
-from agents.mcp_wire import MCP_ENDPOINT_PATH
+from agents.mcp_wire import MCP_ENDPOINT_PATH, PROTOCOL_VERSION
 from agents.member import (
     ACCEPT_INVITATION_TOOL,
     DECLINE_INVITATION_TOOL,
@@ -46,6 +46,7 @@ from agents.member import (
 )
 from agents.tools import ToolDeclaration, ToolEffect, ToolOutcome, tool_parameters
 from agents.turn import JsonObject, Principal
+from mcp_types import DiscoverResult, ServerCapabilities
 
 from tests.support.hopin_places import ACCEPTED_NAME, ISSUER
 from tests.support.hopin_voice import CONTINUE_DECLARATION, SPEAK_DECLARATION, STOP_DECLARATION, AppVoice
@@ -66,6 +67,8 @@ LISTEN = "subscriptions/listen"
 READ = "resources/read"
 CALL = "tools/call"
 LIST_TOOLS = "tools/list"
+SKILLS_LIST = "skills/list"
+SKILLS_GET = "skills/get"
 NO_METHOD = ""
 """The key a request that carries no JSON-RPC message, a stream reconnect, is scripted and logged under."""
 INITIALIZE = "initialize"
@@ -606,6 +609,20 @@ class FakeApp(AppVoice):
             await send(message)
 
         return noting
+
+
+def discovering(*, instructions: str | None = None, extensions: dict[str, dict[str, Any]] | None = None) -> Handler:
+    """The answer to ``server/discover`` of an app with these instructions that declares these extensions."""
+
+    async def discovers(reply: Reply) -> None:
+        capabilities = ServerCapabilities(extensions=extensions)
+        await reply.result(
+            DiscoverResult(
+                supported_versions=[PROTOCOL_VERSION], capabilities=capabilities, instructions=instructions, ttl_ms=0
+            )
+        )
+
+    return discovers
 
 
 @dataclass
