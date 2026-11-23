@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 import httpx2
 from agents.backend.fake_gateway import FakeGateway, Reply, completion, tool_call, tool_round
+from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL
 
 from tests.support.call import PLACE_ID
 from tests.support.history import TABLE
@@ -424,11 +425,15 @@ class Gateway(FakeGateway):
         read them."""
         return [json.loads(each) for each in self.held_result_texts(request_number)]
 
-    def offered_tools(self, request_number: int = 1) -> list[str]:
-        """The names of the tools the request that arrived as this number (from one) offered, in the order offered."""
-        return [
+    def offered_tools(self, request_number: int = 1, *, speaking: bool = False) -> list[str]:
+        """The names of the tools the request that arrived as this number (from one) offered, in the order offered;
+        the two speaking tools every request holds only when asked for."""
+        names = [
             tool["function"]["name"] for tool in json.loads(self.requests[request_number - 1].content).get("tools", [])
         ]
+        return (
+            names if speaking else [name for name in names if name not in {CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL}]
+        )
 
     def round_sizes(self) -> list[int]:
         """The number of messages of each request in arrival order: a turn's rounds grow, a new turn starts at two."""

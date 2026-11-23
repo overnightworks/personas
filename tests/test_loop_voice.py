@@ -75,7 +75,7 @@ async def test_a_line_at_a_voice_place_makes_a_turn_told_aloud_that_holds_every_
     (turn,) = runner.gateway.turns()
     assert turn.aloud
     assert turn.woke_seqs == [1]
-    assert set(runner.gateway.offered_tools()) == {
+    assert set(runner.gateway.offered_tools(speaking=True)) == {
         SAY_TOOL,
         CREATE_SONG,
         GENERATE_SONG,
@@ -206,20 +206,24 @@ async def test_a_turn_that_stays_silent_says_nothing_relays_nothing_and_logs_not
     assert runner.reports.reported() == [(Event.STARTED, None)]
 
 
-async def test_an_aloud_turns_system_text_ends_with_the_reply_rules_and_a_written_turns_lacks_them(runner, quiet):
-    await a_voice_call(runner, completion(ANSWER))
+async def test_a_written_turn_after_a_spoken_one_sends_the_spoken_turns_front_and_messages_byte_for_byte(runner):
+    """TURNS-9, TURNS-15, TURNS-18."""
+    await a_voice_call(runner, completion(ANSWER), completion(WRITTEN))
     say_in_the_call(runner, ADDRESSED)
     await runner.app.spoken_count(1)
-    await quiet.until_window_read(QUIET_PLACE_ID)
-    quiet.speak(QUIET_PLACE_ID, PERSON, "Ada", ADDRESSED)
+    runner.app.state_voice(PLACE_ID, VoiceState.UNAVAILABLE)
+    say_in_the_call(runner, f"{ADDRESSED} Again.")
     await runner.gateway.until_turns(2)
 
     aloud, written = runner.gateway.turns()
+    first, second = (runner.gateway.body_of(number) for number in (1, 2))
     assert aloud.aloud
     assert not written.aloud
     assert aloud.system.endswith(REPLY_RULES)
-    assert aloud.system.startswith(runner.files.persona_prompt)
-    assert REPLY_RULES not in written.system
+    assert written.system == aloud.system
+    assert second["tools"] == first["tools"]
+    assert second["messages"][: len(first["messages"])] == first["messages"]
+    assert not any("parallel_tool_calls" in body for body in (first, second))
 
 
 async def test_a_line_at_an_app_that_declares_no_speak_makes_a_turn_not_told_aloud_and_its_text_is_not_spoken(

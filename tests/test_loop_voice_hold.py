@@ -86,7 +86,7 @@ async def test_the_round_is_asked_over_his_history_and_the_turns_tools_with_one_
     (number,) = runner.gateway.rounds()
     assert '"woke"' in runner.gateway.told_in(number)
     assert runner.gateway.offered_tools(number) == runner.gateway.offered_tools(1)
-    assert runner.gateway.body_of(number)["parallel_tool_calls"] is False
+    assert "parallel_tool_calls" not in runner.gateway.body_of(number)
 
 
 async def test_a_continue_lets_the_rest_play_and_his_unsent_sentences_follow(runner):
@@ -361,19 +361,32 @@ async def test_his_own_call_to_either_decision_outside_a_round_is_answered_local
     await runner.gateway.until_answered(3)
 
     assert runner.app.hold_calls == []
-    assert {CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL} <= set(runner.gateway.offered_tools(1))
+    assert {CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL} <= set(runner.gateway.offered_tools(1, speaking=True))
     assert len(runner.gateway.tool_results(3)) == 2
 
 
-@pytest.mark.parametrize(("aloud", "asked"), [(True, False), (False, None)], ids=["spoken", "written"])
-async def test_every_spoken_request_asks_for_one_call_per_reply_and_a_written_one_does_not(runner, aloud, asked):
+@pytest.mark.parametrize("aloud", [True, False], ids=["spoken", "written"])
+async def test_no_request_carries_parallel_tool_calls(runner, aloud):
     runner.app.state_voice(PLACE_ID, VoiceState.AVAILABLE if aloud else VoiceState.UNAVAILABLE)
     await a_voice_call(runner, completion("done"))
     say_in_the_call(runner, ADDRESSED)
 
     await runner.gateway.until_turns(1)
 
-    assert runner.gateway.body_of(1).get("parallel_tool_calls") is asked
+    assert "parallel_tool_calls" not in runner.gateway.body_of(1)
+
+
+async def test_a_speaking_tool_called_in_a_written_turn_is_answered_apart_and_never_sent(runner):
+    runner.app.state_voice(PLACE_ID, VoiceState.UNAVAILABLE)
+    await a_voice_call(runner, deciding(CONTINUE_SPEAKING_TOOL), completion("done"))
+    say_in_the_call(runner, ADDRESSED)
+
+    await runner.gateway.until_answered(2)
+
+    assert runner.app.hold_calls == []
+    assert {CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL} <= set(runner.gateway.offered_tools(1, speaking=True))
+    (result,) = runner.gateway.tool_results(2)
+    assert "spoken turn" in result
 
 
 @pytest.mark.parametrize("hold_model", ["text/hold-low", None], ids=["set", "unset"])

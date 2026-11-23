@@ -212,7 +212,7 @@ async def test_a_view_that_moves_to_a_revision_waiting_for_him_gets_one_turn_tol
         ),
         "woke": woke_at_table(app_url, 2),
     }
-    assert opening.system == runner.files.persona_prompt
+    assert opening.system.startswith(runner.files.persona_prompt)
     assert sorted(runner.gateway.offered_tools()) == sorted([SAY_TOOL, CREATE_SONG, GENERATE_SONG])
     assert len(runner.gateway.requests) == 1
 

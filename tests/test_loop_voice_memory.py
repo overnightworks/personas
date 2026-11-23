@@ -104,5 +104,10 @@ async def test_a_spoken_turn_with_a_memory_is_handed_the_lookup_first_declared_r
     await store.close()
 
     (handed,) = runner.handed
-    assert runner.gateway.offered_tools() == [RECALL_TOOL, SAY_TOOL, CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL]
+    assert runner.gateway.offered_tools(speaking=True) == [
+        RECALL_TOOL,
+        SAY_TOOL,
+        CONTINUE_SPEAKING_TOOL,
+        STOP_SPEAKING_TOOL,
+    ]
     assert (handed[0].declaration.name, handed[0].declaration.effect) == (RECALL_TOOL, ToolEffect.READ_ONLY)

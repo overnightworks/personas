@@ -52,11 +52,13 @@ seat, its lease or its client.
 
 ## What a turn is told
 
-Every turn, written, aloud or at a view, is sent the persona and then user messages, none an instruction:
+Every turn, written, aloud or at a view, is sent the same front: the persona followed by the reply rules in
+the system text, and the runner's own tools, `continue_speaking` and `stop_speaking` among them. The rest is
+user messages, none an instruction:
 
 1. A header: his name (`you`) and whether older entries have left his history (`older_dropped`).
 2. One message for each earlier answered turn whose entries his history still holds.
-3. The turn's own message. (TURNS-9)
+3. The turn's own message, which alone says whether the turn is aloud. (TURNS-9)
 
 A turn's message holds when it was admitted (`at`, UTC to the whole second), what woke him (`woke`), and
 every entry he took since the message before it (`entries`), each told once, in the order he took them.
@@ -86,7 +88,10 @@ An entry has its app and the time he took it (`at`), and is one of:
   turn's start when that stream carries no notice, the tools of every other app where he holds an
   active place, and those of the tools-only apps, declared in the configuration's order. A name two apps
   offer goes to the first; `accept_invitation`, `speak`, `recall`, `continue_speaking`, `stop_speaking` and
-  `set_turn_state` are the runner's own and never taken from an app. (TURNS-18)
+  `set_turn_state` are the runner's own and never taken from an app. `continue_speaking` and `stop_speaking`
+  are held in every turn, written or aloud, so a switch between them leaves the front as it was; called in a turn
+  that is not aloud they do nothing, and the model is told they act only in a spoken turn. No request asks the
+  gateway for `parallel_tool_calls`. (TURNS-18)
 - The turn's own app's list is kept on the loop's session for the stream and listed again after a tools notice, a
   new stream or a stream's end. The turn's relayed calls and `speak` go on the loop's session of that app, under the
   token the loop holds; a hold's decision and every call to another app go in a session of their own under a
@@ -99,7 +104,7 @@ An entry has its app and the time he took it (`at`), and is one of:
 - Every relayed call enters his history when the app answers or the relay ends without an answer, with the
   failure's code or `cancelled`; a call past an app's bound was never sent and does not enter. (TURNS-21)
 - A call past an app's bound is answered with an error and the model may go on. The turn's total is the sum
-  of the apps' bounds plus one for the held call, plus `lookup_calls` with `[memory]`, so a model that keeps
+  of the apps' bounds plus one for the held call and one for the speaking tools, plus `lookup_calls` with `[memory]`, so a model that keeps
   calling past a bound can spend it and end the turn without its `say`. (TURNS-22)
 - In a call and at a table at once, a turn at either can answer in the call and act at the table, also
   when it is not his move; the table refuses what its rules do not allow. (TURNS-23)
