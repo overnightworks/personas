@@ -1,8 +1,0 @@
-claim_id = "130c12e64aa4444ab9d5a4b78ca7ce43"
-agent = "Claude 349d430f-f935-4f94-8152-3bf04ab41b88"
-role = "builder"
-base = "28e14f35fd232621ed0eb431d65895b470f2853a"
-branch = "claude/issue-428-read-an-app-s-skills-and-the-stored-skil"
-scope = [".aco/ahead-of-caller.toml", "pyproject.toml", "src/personas/app_arguments.py", "src/personas/app_session.py", "src/personas/entries.py", "src/personas/failures.py", "src/personas/present.py", "tests/support/history.py", "tests/support/hopin.py", "tests/test_app_session.py", "tests/test_app_session_skills.py", "tests/test_entries.py", "tests/test_present_history.py", "uv.lock"]
-opened_commit = "d683153ca610dbd4ff3b234f30659281329fc067"
-whole_reason = "The read side S8b calls, as one review: the pin, the skills and skill reads and the reader of the entry kinds S8b writes, about 200 production lines in five production files."
