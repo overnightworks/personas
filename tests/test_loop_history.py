@@ -32,7 +32,6 @@ from tests.support.history import (
     SPEAKER,
     STATE_BYTES,
     TABLE,
-    HistoriesHoldingTheAddressedLine,
     act_entry,
     after_start,
     answered,
@@ -49,6 +48,7 @@ from tests.support.history import (
     woke_at_table,
     written_turns,
 )
+from tests.support.history_holding import HistoriesHoldingTheAddressedLine
 from tests.support.hopin import LIMIT_SECONDS, PLAY_TOOL
 from tests.support.hopin_places import ACCEPTED_NAME, ISSUER
 from tests.support.ownership import KeptHistories
