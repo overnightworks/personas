@@ -11,7 +11,7 @@ from http import HTTPStatus
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.member_outcomes import INVALID_ANSWER_CODE, status_code
-from agents.skills import SkillRefusal
+from agents.skills import SkillRefusal, implicit_skill_name
 from agents.turn import MAX_EVENT_BYTES
 from agents.voice.reply import REPLY_RULES
 from mcp_types import ListToolsResult, Tool
@@ -21,7 +21,7 @@ from personas.entries import ActDone, SkillRead
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway
-from tests.support.hopin import CALL, LIST_TOOLS, SKILLS_GET, SKILLS_LIST
+from tests.support.hopin import CALL, LIST_TOOLS, READ, SKILLS_GET, SKILLS_LIST
 from tests.support.logs import formatted, lines_of
 from tests.support.realm import LIFETIME_SECONDS
 from tests.support.skills import Shelf, a_skill_file, an_entry
@@ -445,3 +445,23 @@ async def test_a_skill_listing_an_app_refuses_leaves_the_app_out_of_the_turn_and
     assert not {CREATE_SONG, GENERATE_SONG} & set(runner.gateway.offered_tools(1))
     assert SONG_DESCRIPTION not in runner.gateway.system_of(1)
     assert HOPIN_DESCRIPTION in runner.gateway.system_of(1)
+
+
+async def test_read_skill_answers_the_instructions_of_an_app_without_the_extension_and_sends_nothing(runner, songmaker):
+    instructions = f"Instructions {secrets.token_hex(6)}."
+    songmaker.shelf = Shelf(instructions=instructions, declares=False)
+    runner.app.shelf = Shelf({HOPIN: a_skill_file(HOPIN, description=HOPIN_DESCRIPTION)})
+    implicit = implicit_skill_name(songmaker_url(runner))
+    runner.gateway = Gateway(tool_round(reading(implicit)), completion("done"), completion("again"))
+    await restarted_in_the_call(runner)
+
+    await a_turn(runner, 1)
+    await runner.gateway.until_requested(2)
+    await a_turn(runner, 3)
+
+    (shown,) = runner.gateway.tool_results(2)
+    assert instructions in shown
+    assert not {SKILLS_GET, READ} & set(songmaker.log.entries)
+    ((assistant, _),) = rounds_in(runner, 3)
+    assert [call["function"]["name"] for call in assistant["tool_calls"]] == [READ_SKILL_TOOL]
+    assert len(skill_reads(runner)) == 1
