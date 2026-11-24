@@ -3,5 +3,6 @@ agent = "Claude 94207f40-f773-4b39-81c0-3931eea96ec0"
 role = "builder"
 base = "7ebcda718a04150d6cb928e417687ae26a72b672"
 branch = "claude/issue-437-one-entry-per-skill-round"
-scope = ["src/personas/entries.py", "tests/support/history.py", "tests/test_entries.py"]
+scope = ["src/personas/entries.py", "tests/support/history.py", "tests/test_entries.py", "tests/test_present_history.py"]
 opened_commit = "0cfa163c7fc06a21e58b7e05a4e7c93b12466692"
+whole_reason = "One shape change of two frozen entry kinds with the builders and the two test modules that pin them."
