@@ -17,7 +17,7 @@ from agents.voice.reply import REPLY_RULES
 from mcp_types import ListToolsResult, Tool
 
 from personas.decision import READ_SKILL_CALLS, READ_SKILL_TOOL
-from personas.entries import ActDone, SkillRead
+from personas.entries import ActDone, SkillRead, told_bytes
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway
@@ -36,6 +36,7 @@ ERROR_MARK = "Error: "
 SONGMAKER = "songmaker"
 HOPIN = "hopin"
 SONG_BODY = f"Make songs {secrets.token_hex(6)}."
+LARGE_BODY_BYTES = 5000
 SONG_DESCRIPTION = f"Makes songs {secrets.token_hex(4)}."
 HOPIN_DESCRIPTION = f"Plays at the table {secrets.token_hex(4)}."
 
@@ -137,6 +138,46 @@ async def test_read_skill_answers_a_listed_skills_body_and_the_next_turn_tells_i
     assert (result["tool_call_id"], result["content"]) == (call["id"], shown)
     assert call["id"] != "model-read"
     assert rounds_in(runner, 5) == [[assistant, result]]
+
+
+async def the_turn_ended_lines_around_a_read_of(runner, songmaker, caplog, body: str) -> list[dict[str, object]]:
+    """The `turn.ended` lines of a turn that reads songmaker's skill, whose body is ``body``, and of the next turn."""
+    skilled(runner, songmaker)
+    songmaker.shelf = Shelf({SONGMAKER: a_skill_file(SONGMAKER, tools=f"{CREATE_SONG} {GENERATE_SONG}", body=body)})
+    runner.gateway = Gateway(tool_round(reading(SONGMAKER)), completion("done"), completion("again"))
+    await restarted_in_the_call(runner)
+    await a_turn(runner, 1)
+    await runner.reports.until_a_turn_completed()
+    await a_turn(runner, 3)
+    await runner.reports.until_a_turn_completed(count=2)
+    return lines_of(caplog.get_records("call"), "turn.ended")
+
+
+async def test_a_read_counts_its_answer_in_the_results_bytes_of_its_turn(runner, songmaker, caplog):
+    first, _ = await the_turn_ended_lines_around_a_read_of(runner, songmaker, caplog, "y" * LARGE_BODY_BYTES)
+
+    assert first["results_bytes"] >= LARGE_BODY_BYTES
+
+
+async def test_the_next_turn_counts_a_read_skills_round_in_its_told_bytes(runner, songmaker, caplog):
+    first, second = await the_turn_ended_lines_around_a_read_of(runner, songmaker, caplog, "y" * LARGE_BODY_BYTES)
+
+    assert second["told_bytes"] - first["told_bytes"] >= LARGE_BODY_BYTES
+
+
+async def test_the_tools_bytes_of_a_turn_cover_every_tool_its_request_offers_read_skill_included(
+    runner, songmaker, caplog
+):
+    skilled(runner, songmaker)
+    await restarted_in_the_call(runner)
+
+    await a_turn(runner, 1)
+    await runner.reports.until_a_turn_completed()
+
+    (ended,) = lines_of(caplog.get_records("call"), "turn.ended")
+    offered = runner.gateway.body_of(1)["tools"]
+    assert READ_SKILL_TOOL in {each["function"]["name"] for each in offered}
+    assert ended["tools_bytes"] == sum(told_bytes(each["function"]) for each in offered)
 
 
 async def test_a_read_skills_round_is_byte_equal_after_a_restart(runner, songmaker):
