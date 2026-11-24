@@ -13,7 +13,7 @@ import httpx2
 from agents.backend.fake_gateway import FakeGateway, Reply, completion, tool_call, tool_round
 from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL
 
-from personas.decision import READ_SKILL_TOOL
+from personas.decision import READ_SKILL_CALLS, READ_SKILL_TOOL
 from tests.support.call import PLACE_ID
 from tests.support.history import TABLE
 from tests.support.hopin import LIMIT_SECONDS, PLAY_TOOL, SAY_TOOL
@@ -87,6 +87,14 @@ def say(text: str, place_id: str = PLACE_ID, tool: str = SAY_TOOL):
 def play(text: str):
     """A call of the line tool of the table, at his table."""
     return say(text, TABLE.id, PLAY_TOOL)
+
+
+def reads_of_every_skill_the_bound_allows() -> list[Reply]:
+    """The rounds of a model that calls ``read_skill`` once a round until the turn's bound for it is spent; a name no
+    line holds takes a call as a skill does."""
+    return [
+        tool_round(tool_call(secrets.token_hex(4), READ_SKILL_TOOL, {"skill": "none"})) for _ in range(READ_SKILL_CALLS)
+    ]
 
 
 def says_after_a_hold(place_id: str, text: str, *, tool: str = SAY_TOOL) -> list[Reply]:

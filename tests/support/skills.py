@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from agents.front_matter import parse_front_matter, split_front_matter
 from agents.skills import SKILLS_EXTENSION, skill_digest, skill_uri
 from mcp_types import ReadResourceResult, TextResourceContents
 
@@ -16,15 +17,19 @@ if TYPE_CHECKING:
 DESCRIPTION = "Greets."
 
 
-def a_skill_file(name: str, *, tools: str = "say play", body: str = "Greet people by name.") -> bytes:
-    return f"---\nname: {name}\ndescription: {DESCRIPTION}\nmetadata:\n  tools: {tools}\n---\n{body}\n".encode()
+def a_skill_file(
+    name: str, *, tools: str = "say play", body: str = "Greet people by name.", description: str = DESCRIPTION
+) -> bytes:
+    return f"---\nname: {name}\ndescription: {description}\nmetadata:\n  tools: {tools}\n---\n{body}\n".encode()
 
 
-def an_entry(name: str, content: bytes, *, description: str = DESCRIPTION) -> dict:
+def an_entry(name: str, content: bytes) -> dict:
+    """The listing entry that promises this file: its front matter and its digest."""
     uri = skill_uri(name)
+    front_matter, _ = split_front_matter(content.decode())
     return {
         "uri": uri,
-        "frontmatter": {"name": name, "description": description, "metadata": {"tools": "say play"}},
+        "frontmatter": parse_front_matter(front_matter),
         "resources": [{"uri": uri, "digest": skill_digest(content), "size": len(content)}],
     }
 
@@ -39,7 +44,6 @@ class Shelf:
     instructions: str | None = None
     declares: bool = True
     tampered: set[str] = field(default_factory=set[str])
-    descriptions: dict[str, str] = field(default_factory=dict[str, str])
 
     def answers(self, rpc: Rpc) -> Handler | None:
         """The handler for a request of the shelf's, or ``None`` for any other request."""
@@ -61,10 +65,7 @@ class Shelf:
         return next((name for name in self.files if skill_uri(name) == uri), None)
 
     def _entries(self) -> dict[str, dict]:
-        return {
-            name: an_entry(name, content, description=self.descriptions.get(name, DESCRIPTION))
-            for name, content in self.files.items()
-        }
+        return {name: an_entry(name, content) for name, content in self.files.items()}
 
     async def _listing(self, reply) -> None:
         await reply.raw_result({"skills": list(self._entries().values())})

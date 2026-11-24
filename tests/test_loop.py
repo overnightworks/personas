@@ -553,7 +553,8 @@ class _TurnThatEnds:
 
     async def run(self, request, person):
         if self._relays:
-            await self._tools[0].handler(person.principal, {})
+            relayed = next(each for each in self._tools if each.declaration.name == "say")
+            await relayed.handler(person.principal, {})
         for event in ():
             yield event
 

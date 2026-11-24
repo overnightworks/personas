@@ -17,12 +17,12 @@ from agents.tools import ToolOutcome
 from agents.turn import FailureCode, Principal, person_fingerprint
 from mcp_types import ListToolsResult
 
-from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE
+from personas.decision import NETWORK_FAILURE_CODE, READ_SKILL_CALLS, TURN_CANCELLED_CODE
 from personas.reporting import Event
 from tests.support.app_driving import said_and_taken, settled, shows, waits
 from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import CANCELLED_TURN, failed_turn
-from tests.support.gateway import Gateway, play, say, words
+from tests.support.gateway import Gateway, play, reads_of_every_skill_the_bound_allows, say, words
 from tests.support.history import REMARK, TABLE, act_entry, answered, at_table, unanswered, url_of
 from tests.support.hopin import CALL, LIST_TOOLS, PLAY_TOOL, READ, SAY_TOOL
 from tests.support.hopin_places import ISSUER
@@ -270,12 +270,13 @@ async def test_a_failed_call_to_his_own_apps_tool_ends_the_turn_into_that_loops_
 
 
 def rounds_spending_every_bound(runner) -> list[object]:
-    """One call a round until every app's bound is spent: the held app's bound plus one, the last of which its own
-    bound refuses, then the place's and the tools-only app's. Their calls number the turn's bound, the sum of the
-    apps' bounds plus one for the speaking tools and one for the held call, so the call after them is past it."""
+    """One call a round until every bound is spent: the skills', the held app's bound plus one, the last of which its
+    own bound refuses, then the place's and the tools-only app's. Their calls number the turn's bound, the sum of the
+    bounds plus one for the speaking tools and one for the held call, so the call after them is past it."""
     held_bound = runner.config.apps[1].max_tool_calls
     own_bound = runner.config.apps[0].max_tool_calls
     return [
+        *reads_of_every_skill_the_bound_allows(),
         *(tool_round(play(words(1)[0])) for _ in range(held_bound + 1)),
         *(tool_round(say(words(1)[0])) for _ in range(own_bound)),
         *(tool_round(tool_call(secrets.token_hex(4), CREATE_SONG, {"title": "t"})) for _ in range(CALLS)),
@@ -298,7 +299,7 @@ async def test_every_apps_bound_of_a_turn_is_spent_in_full_and_the_call_past_a_h
     assert other.calls == [PLAY_TOOL] * held_bound
     assert len(runner.app.said) == own_bound
     assert len(songmaker.called) == CALLS
-    assert runner.gateway.tool_results(final_request)[held_bound].startswith("Error")
+    assert runner.gateway.tool_results(final_request)[READ_SKILL_CALLS + held_bound].startswith("Error")
     assert runner.reports.reported(apps=True, started=False) == []
 
 

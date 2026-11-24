@@ -46,7 +46,7 @@ from agents.member import (
 )
 from agents.tools import ToolDeclaration, ToolEffect, ToolOutcome, tool_parameters
 from agents.turn import JsonObject, Principal
-from mcp_types import DiscoverResult, ServerCapabilities
+from mcp_types import DiscoverResult, ResourcesCapability, ServerCapabilities, ToolsCapability
 
 from tests.support.hopin_places import ACCEPTED_NAME, ISSUER
 from tests.support.hopin_voice import CONTINUE_DECLARATION, SPEAK_DECLARATION, STOP_DECLARATION, AppVoice
@@ -621,10 +621,15 @@ class FakeApp(AppVoice):
 
 
 def discovering(*, instructions: str | None = None, extensions: dict[str, dict[str, Any]] | None = None) -> Handler:
-    """The answer to ``server/discover`` of an app with these instructions that declares these extensions."""
+    """The answer to ``server/discover`` of an app with these instructions that declares these extensions, and the
+    tools and subscribable resources the front serves."""
 
     async def discovers(reply: Reply) -> None:
-        capabilities = ServerCapabilities(extensions=extensions)
+        capabilities = ServerCapabilities(
+            tools=ToolsCapability(list_changed=False),
+            resources=ResourcesCapability(subscribe=True, list_changed=False),
+            extensions=extensions,
+        )
         await reply.result(
             DiscoverResult(
                 supported_versions=[PROTOCOL_VERSION], capabilities=capabilities, instructions=instructions, ttl_ms=0
