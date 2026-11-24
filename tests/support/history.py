@@ -227,12 +227,12 @@ def a_sentence(*, text="Guten Tag.", outcome=None, at=LATER - timedelta(seconds=
     return SaidAloud(APP, MORNING.place, text, Spoken(spoken=True) if outcome is None else outcome, at)
 
 
-def a_skill_read(*, body="Greet people by name.", tools=("say",), at=LATER - timedelta(seconds=9)) -> SkillRead:
-    return SkillRead(APP, "greeting", "skill://greeting/SKILL.md", body, tools, at, "call-body", "call-load")
+def a_skill_read(*, body="Greet people by name.", at=LATER - timedelta(seconds=9)) -> SkillRead:
+    return SkillRead(APP, "greeting", "skill://greeting/SKILL.md", body, at, "call-body")
 
 
 def a_tools_load(*, tools=("say", "play"), at=LATER - timedelta(seconds=9)) -> ToolsLoaded:
-    return ToolsLoaded(APP, tools, at, "call-load")
+    return ToolsLoaded(APP, "greeting", tools, at, "call-load")
 
 
 def a_marked_present() -> tuple[str, Present]:
