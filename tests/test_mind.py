@@ -32,7 +32,7 @@ from personas.entries import (
     entry_size,
 )
 from personas.mind import Mind
-from personas.present import turn_messages
+from personas.present import skill_call_id, turn_messages
 from personas.speech import Answered, HoldKey
 from tests.support.history import message_texts
 
@@ -585,16 +585,19 @@ def test_a_place_claimed_in_another_app_counts_as_held_until_released_or_read_ag
 
 
 def test_a_read_after_a_cut_gets_a_call_id_no_kept_entry_holds():
-    mind = Mind(1_000, 100, BUDGET_PAUSE_CAP_SECONDS)
+    mind = Mind(600, 500, BUDGET_PAUSE_CAP_SECONDS)
     read = partial(mind.skill_read, CALL.app, "greeting", "skill://greeting/SKILL.md", "Greet people by name.", READ_AT)
-    mind.take((said(CALL, 1, "first"),))
+    mind.take((said(CALL, 1, "a" * 150),))
     read()
-    mind.take((said(CALL, 2, "x" * 2_000),))
+    mind.take((said(CALL, 2, "b" * 150),))
     read()
-    mind.take((said(CALL, 3, "x" * 2_000),))
+    mind.take((said(CALL, 3, "c" * 150),))
+    kept_before = len(mind.history.entries)
     read()
 
     ids = [entry.call_id for entry in mind.history.entries if isinstance(entry, SkillRead)]
 
     assert mind.history.left_out > 0
-    assert len(ids) == len(set(ids))
+    assert len(ids) == 2
+    assert len(set(ids)) == len(ids)
+    assert ids[-1] != skill_call_id(kept_before)
