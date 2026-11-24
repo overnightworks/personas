@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager, suppress
 import pytest
 from agents.backend import TurnStopKind, TurnStopped
 from agents.backend.gateway import GatewayBackend
-from agents.member import AcceptInvitationRefusal
+from agents.member import AcceptInvitationRefusal, PlaceRef
 from agents.member_outcomes import StatusFailure, Unreachable, UnusableAnswer, jsonrpc_code, status_code
 from agents.tools import ToolDeclaration, ToolEffect
 from agents.turn import RejectionCode
@@ -23,6 +23,8 @@ from personas.decision import (
     NO_FINAL_EVENT_REASON,
     RENEW_BEFORE_EXPIRY_SECONDS,
     SUSPENDED_RETRY_SECONDS,
+    Accept,
+    accept_arguments,
     backoff_delay,
 )
 from personas.failures import TokenStatusFailure, leaves_of
@@ -53,7 +55,7 @@ async def test_an_invitation_is_accepted_once_with_its_place_invitation_and_epoc
 
     await run.play()
 
-    assert [(each.place.id, each.invitation, each.epoch) for each in run.session.accepted] == [("room-7", "inv-3", 2)]
+    assert run.session.accepted == [accept_arguments(Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 2))]
     assert run.reports.reported() == [(Event.STARTED, None), (Event.JOINED, None)]
 
 
@@ -173,7 +175,7 @@ async def test_a_loop_resumed_after_a_suspension_joins_only_when_invited_anew(sc
         (Event.RESUMED, None),
         (Event.JOINED, None),
     ]
-    assert [(each.place.id, each.invitation, each.epoch) for each in run.session.accepted] == [("room-7", "inv-9", 0)]
+    assert run.session.accepted == [accept_arguments(Accept(PlaceRef(kind="call", id="room-7"), "inv-9", 0))]
 
 
 @pytest.mark.parametrize(
