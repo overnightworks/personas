@@ -3,6 +3,6 @@ agent = "Claude 94207f40-f773-4b39-81c0-3931eea96ec0"
 role = "builder"
 base = "55b5c12e2ae6bdd923e65792ba306bc1fe29374c"
 branch = "claude/issue-426-personas-runs-on-agents-member-client"
-scope = [".aco/ahead-of-caller.toml", "docs/ARCHITECTURE.md", "docs/log.md", "pyproject.toml", "quality/baseline.toml", "src/personas/app_arguments.py", "src/personas/app_session.py", "src/personas/loop.py", "src/personas/main.py", "src/personas/reporting.py", "src/personas/tool_lists.py", "src/personas/turn_sessions.py", "src/personas/turn_states.py", "src/personas/turning.py", "src/personas/voice.py", "tests", "uv.lock"]
+scope = [".aco/ahead-of-caller.toml", "docs/ARCHITECTURE.md", "docs/log.md", "pyproject.toml", "quality/baseline.toml", "src/personas/app_arguments.py", "src/personas/app_session.py", "src/personas/decision.py", "src/personas/loop.py", "src/personas/main.py", "src/personas/reporting.py", "src/personas/tool_lists.py", "src/personas/turn_sessions.py", "src/personas/turn_states.py", "src/personas/turning.py", "src/personas/voice.py", "tests", "uv.lock"]
 opened_commit = "2700d89195c98974ae4236e6efd34bfd6b89c321"
 whole_reason = "The MCP half of one client goes whole in the change that moves every session user to MemberSession, so no second client path stays."
