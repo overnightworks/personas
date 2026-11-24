@@ -28,6 +28,7 @@ class Calls:
 
     bound: int
     made: int = 0
+    closed: bool = False
 
     def take(self) -> bool:
         if not call_within_bound(self.made, self.bound):
@@ -38,6 +39,7 @@ class Calls:
     def close(self) -> None:
         """The app takes no more calls in this turn."""
         self.made = self.bound
+        self.closed = True
 
 
 @dataclass

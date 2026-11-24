@@ -617,19 +617,22 @@ class Turning:
         result of a read that failed or was refused."""
         if isinstance(skill, Skill):
             return skill
-        try:
-            with hold.sending():
-                if app.mcp_url == self._app.mcp_url:
+        if app.mcp_url == self._app.mcp_url:
+            try:
+                with hold.sending():
                     await self._renew_token()
                     answer = await _got_skill(session, skill.uri)
-                else:
-                    answer = await self._sessions.ask_elsewhere(app, partial(_got_skill, uri=skill.uri), record)
-        except Exception as error:
-            raise RelayFailed(error) from None
-        if isinstance(answer, CallFailure):
-            app_calls.close()
-            self._report(failure_event(app), failure_code(answer), app, answer)
-            return ToolOutcome(APP_FAILED_TEXT, is_error=True)
+            except Exception as error:
+                raise RelayFailed(error) from None
+        else:
+            answer = await self._asked_elsewhere(
+                app,
+                app_calls,
+                hold,
+                partial(self._sessions.ask_elsewhere, app, partial(_got_skill, uri=skill.uri), record),
+            )
+            if isinstance(answer, ToolOutcome):
+                return answer
         if isinstance(answer, SkillRefused):
             self._report(Event.SKILL_REFUSED, answer.refusal.value, app)
             return ToolOutcome(_SKILL_REFUSED_TEXT, is_error=True)
@@ -688,14 +691,28 @@ class Turning:
             return held
         if not calls.take():
             return ToolOutcome(_CALL_BOUND_TEXT, is_error=True)
+        return await self._asked_elsewhere(
+            app,
+            calls,
+            hold,
+            lambda: self._recorded_as_act(
+                app,
+                name,
+                arguments,
+                self._sessions.ask_elsewhere(app, lambda session: session.invoke(name, arguments), record),
+            ),
+        )
+
+    async def _asked_elsewhere[Answer](
+        self, app: AppTarget, calls: Calls, hold: HoldBack, asking: Callable[[], Awaitable[Answer | CallFailure]]
+    ) -> Answer | ToolOutcome:
+        """What a call to another app answers, or the error result of a call it refuses or that failed. An app whose
+        calls are closed is sent nothing; a failed call closes them for the rest of the turn."""
+        if calls.closed:
+            return ToolOutcome(_CALL_BOUND_TEXT, is_error=True)
         try:
             with hold.sending():
-                answer = await self._recorded_as_act(
-                    app,
-                    name,
-                    arguments,
-                    self._sessions.ask_elsewhere(app, lambda session: session.invoke(name, arguments), record),
-                )
+                answer = await asking()
         except Exception as error:
             raise RelayFailed(error) from None
         if isinstance(answer, CallFailure):

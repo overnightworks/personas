@@ -21,7 +21,7 @@ from personas.entries import ActDone, SkillRead
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway
-from tests.support.hopin import LIST_TOOLS, SKILLS_GET, SKILLS_LIST
+from tests.support.hopin import CALL, LIST_TOOLS, SKILLS_GET, SKILLS_LIST
 from tests.support.logs import formatted, lines_of
 from tests.support.skills import Shelf, a_skill_file, an_entry
 from tests.support.songmaker import CREATE_SONG, GENERATE_SONG
@@ -350,6 +350,33 @@ async def test_a_read_that_fails_at_another_app_is_its_failed_call_and_that_app_
     assert runner.reports.reported(apps=True, started=False) == [
         (Event.TOOLS_ONLY_APP_FAILED, status_code(HTTPStatus.INTERNAL_SERVER_ERROR), songmaker_url(runner))
     ]
+    assert skill_reads(runner) == []
+
+
+@pytest.mark.parametrize(
+    ("failing", "first_round", "reads_sent"),
+    [
+        (SKILLS_GET, reading(SONGMAKER, "model-read-1"), 1),
+        (CALL, a_song("model-song"), 0),
+    ],
+    ids=["a failed read", "a failed relayed call"],
+)
+async def test_a_read_at_an_app_that_takes_no_more_calls_is_not_sent_and_answers_an_error(
+    runner, songmaker, failing, first_round, reads_sent
+):
+    skilled(runner, songmaker)
+    songmaker.script(failing, refuses_with_a_server_error)
+    runner.gateway = Gateway(
+        tool_round(first_round), tool_round(reading(SONGMAKER, "model-read-2")), completion("done")
+    )
+    await restarted_in_the_call(runner)
+
+    await a_turn(runner, 1)
+    await runner.gateway.until_requested(3)
+
+    assert runner.gateway.tool_results(2)[-1].startswith(ERROR_MARK)
+    assert runner.gateway.tool_results(3)[-1].startswith(ERROR_MARK)
+    assert songmaker.log.count(SKILLS_GET) == reads_sent
     assert skill_reads(runner) == []
 
 
