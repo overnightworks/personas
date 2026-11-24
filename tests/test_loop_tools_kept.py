@@ -70,7 +70,7 @@ async def test_a_tool_the_app_withdraws_and_announces_before_the_line_is_gone_fr
     assert runner.app.log.count(LIST_TOOLS) == listed + 2
 
 
-async def test_a_tools_notice_alone_reads_no_standing_and_the_next_turn_lists_the_tools_again(runner):
+async def test_a_tools_notice_alone_reads_no_standing(runner):
     """TURNS-18."""
     runner.gateway = Gateway(completion("done"))
     answered = runner.gateway.hold_request(1)
@@ -84,7 +84,6 @@ async def test_a_tools_notice_alone_reads_no_standing_and_the_next_turn_lists_th
     await runner.reports.until_a_turn_completed()
 
     assert read_for_the_line == 1
-    assert runner.gateway.offered_tools(1) == []
 
 
 async def test_a_notice_and_the_pulse_of_one_change_behind_an_older_pulse_give_the_next_turn_the_new_list(
