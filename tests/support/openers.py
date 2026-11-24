@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import anyio
 from agents.mcp_client.exchange import BearerAuth
-from agents.mcp_client.fold import LATE_ANSWER_ERRORS, folded
+from agents.mcp_client.fold import folded
 from agents.member_outcomes import Unreachable
 from pydantic import SecretStr
 
@@ -356,12 +356,10 @@ def opener_whose_session_loses_a_child(
                 async with inner(app, bearer, agent_id) as session:
                     yield session
         except ExceptionGroup as lost:
-            # The client gives the session's own cancellation by the group alone, or late answers alone, as the
-            # cancellation; a lost child while another cancellation is pending is unreachable.
-            leaves = list(leaves_of(lost))
-            if all(isinstance(leaf, LATE_ANSWER_ERRORS) for leaf in leaves) or not task_is_being_cancelled():
+            # The scenario's own group cancelling the body is the one choice kept; the client's fold gives the rest.
+            if not task_is_being_cancelled():
                 raise asyncio.CancelledError from None
-            raise _folded_close(leaves, None, cancelled_in_body=True) from None
+            raise _folded_close(list(leaves_of(lost)), None, cancelled_in_body=True) from None
 
     return losing
 
