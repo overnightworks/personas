@@ -23,6 +23,7 @@ from tests.support.call import ADDRESSED, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway
 from tests.support.hopin import CALL, LIST_TOOLS, SKILLS_GET, SKILLS_LIST
 from tests.support.logs import formatted, lines_of
+from tests.support.realm import LIFETIME_SECONDS
 from tests.support.skills import Shelf, a_skill_file, an_entry
 from tests.support.songmaker import CREATE_SONG, GENERATE_SONG
 from tests.support.voice import a_voice_call
@@ -275,6 +276,27 @@ async def test_the_own_apps_declared_skills_are_listed_on_the_loops_session_with
     assert runner.app.log.count(SKILLS_LIST) == listings + 2
     assert HOPIN_DESCRIPTION in runner.gateway.system_of(2)
     assert lines_of(caplog.get_records("call"), "session_open.ended") == []
+
+
+async def test_a_refused_renewal_of_the_loops_token_does_not_hold_back_an_app_whose_skills_are_listed(
+    runner, songmaker
+):
+    skilled(runner, songmaker)
+    loops_scope = runner.config.apps[0].scope
+
+    async def lets_the_loops_token_expire_and_be_refused(reply) -> None:
+        runner.clock.time += LIFETIME_SECONDS
+        runner.realm.refused_scopes.add(loops_scope)
+        await reply.raw_result({"skills": []})
+
+    runner.app.script(SKILLS_LIST, lets_the_loops_token_expire_and_be_refused)
+    await restarted_in_the_call(runner)
+
+    await a_turn(runner, 1)
+
+    assert {CREATE_SONG, GENERATE_SONG} <= set(runner.gateway.offered_tools(1))
+    assert SONG_DESCRIPTION in runner.gateway.system_of(1)
+    assert runner.reports.changes_of(Event.SUSPENDED) == []
 
 
 async def test_a_skill_name_two_apps_share_goes_to_the_first(runner, songmaker):

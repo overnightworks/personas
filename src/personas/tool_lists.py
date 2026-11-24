@@ -159,8 +159,10 @@ class ToolLists:
 
     @asynccontextmanager
     async def _listing_skills(self, app: AppTarget) -> AsyncGenerator[None]:
-        """A ``skills/list`` that is sent: a step of its own, within the app's call time."""
+        """A ``skills/list`` that is sent: a step of its own, within the app's call time. The loop's token is renewed
+        for its own app alone; another app's listing runs under that app's own token."""
         with stepping(step_timer("skill_list.ended", self._agent.client_id, app.mcp_url), turn_goes_on=True):
             async with within_call_time(app.call_seconds):
-                await self._renew_token()
+                if app.mcp_url == self._app.mcp_url:
+                    await self._renew_token()
                 yield
