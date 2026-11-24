@@ -6,10 +6,10 @@ import secrets
 from typing import TYPE_CHECKING
 
 import pytest
+from agents.member_outcomes import INVALID_ANSWER_CODE, UnusableAnswer
 from agents.skills import SKILLS_EXTENSION, Skill, SkillEntry, SkillRefusal, SkillRefused, skill_digest, skill_uri
 from mcp_types import ListToolsResult, ReadResourceResult, TextResourceContents, Tool
 
-from personas.failures import INVALID_ANSWER_CODE, UnusableAnswer
 from tests.support.app_session import opened
 from tests.support.hopin import DISCOVER, LIST_TOOLS, READ, SKILLS_GET, SKILLS_LIST, discovering
 

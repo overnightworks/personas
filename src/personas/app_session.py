@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from http import HTTPStatus
 from typing import Final, Protocol, cast, override
 
+import anyio
 import httpx2
 from agents.mcp_client import get_skill, list_skills
 from agents.member import (
@@ -22,14 +23,11 @@ from agents.member import (
     SPEAK_TOOL,
     STANDING_URI,
     STOP_SPEAKING_TOOL,
-    AcceptInvitationArguments,
     AcceptInvitationRefused,
     ContinueSpeakingRefusal,
     ContinueSpeakingRefused,
-    DeclineInvitationArguments,
     DeclineInvitationRefusal,
     DeclineInvitationRefused,
-    FigureLook,
     MemberResourceRecord,
     MemberStanding,
     PlaceRef,
@@ -46,6 +44,19 @@ from agents.member import (
     member_resource_from_json,
     place_view_uri,
     place_window_uri,
+)
+from agents.member_outcomes import (
+    INVALID_ANSWER_CODE,
+    LISTEN_NOT_HONORED_CODE,
+    UNSUPPORTED_VERSION_CODE,
+    CallFailure,
+    DeclineOutcome,
+    StatusFailure,
+    Unreachable,
+    UnrecognisedRefusal,
+    UnusableAnswer,
+    jsonrpc_code,
+    status_code,
 )
 from agents.skills import (
     SKILLS_EXTENSION,
@@ -81,19 +92,8 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from personas.app_arguments import split_undeclared
 from personas.config import AppTarget
-from personas.decision import Accept, Decline, Declined, Refusal, UnrecognisedRefusal, jsonrpc_code, status_code
-from personas.failures import (
-    INVALID_ANSWER_CODE,
-    LATE_ANSWER_ERRORS,
-    LISTEN_NOT_HONORED_CODE,
-    UNSUPPORTED_VERSION_CODE,
-    CallFailure,
-    StatusFailure,
-    Unreachable,
-    UnusableAnswer,
-    leaves_of,
-    task_is_being_cancelled,
-)
+from personas.decision import Accept, Decline, Refusal, accept_arguments, decline_arguments
+from personas.failures import leaves_of, task_is_being_cancelled
 from personas.reporting import carry_trace, report_argument_left_out
 from personas.secret import Secret
 
@@ -103,6 +103,8 @@ READ_SECONDS: Final = 2 * LISTEN_BOUND_SECONDS
 _SPEAK_ANSWER: Final = TypeAdapter(SpeakAnswer)
 _MEDIA_TYPE: Final = re.compile(r"[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*")
 """A media type as a log line may carry it: a type and a subtype of token characters, no parameters."""
+_LATE_ANSWER_ERRORS: Final = (anyio.BrokenResourceError, anyio.ClosedResourceError)
+"""What the transport's task raises when an answer lands after its session ended."""
 _TRANSPORT_ERROR_CODES: Final = frozenset({CONNECTION_CLOSED, REQUEST_TIMEOUT})
 """What the SDK answers for a connection that broke or a request that timed out."""
 _ACCEPT_OPTIONAL: Final = frozenset({"figure", "voices", "looks", "looks[].room"})
@@ -140,7 +142,7 @@ class AppSession(Protocol):
         """``None`` when joined, else the refusal; raises ``StatusFailure``, ``Unreachable`` or ``UnusableAnswer``."""
         ...
 
-    async def decline(self, decline: Decline) -> Declined | DeclineInvitationRefusal | UnrecognisedRefusal:
+    async def decline(self, decline: Decline) -> DeclineOutcome | DeclineInvitationRefusal | UnrecognisedRefusal:
         """Declines an invitation, unless the app lists no tool to decline with, which leaves the invitation to run out;
         the refusal says the invitation is gone."""
         ...
@@ -453,32 +455,23 @@ class _McpAppSession:
             raise UnusableAnswer(INVALID_ANSWER_CODE) from None
 
     async def accept(self, accept: Accept) -> Refusal | None:
-        arguments = AcceptInvitationArguments(
-            place=accept.place,
-            invitation=accept.invitation_id,
-            epoch=accept.epoch,
-            figure=accept.figure,
-            looks=_looks_of(accept),
-            voices=accept.voices or None,
-        ).model_dump(mode="json")
+        arguments = accept_arguments(accept).model_dump(mode="json")
         result = await self._called_declared(ACCEPT_INVITATION_TOOL, arguments, optional=_ACCEPT_OPTIONAL, lists=True)
         return _refusal_of(_text_of(result)) if result.is_error else None
 
-    async def decline(self, decline: Decline) -> Declined | DeclineInvitationRefusal | UnrecognisedRefusal:
+    async def decline(self, decline: Decline) -> DeclineOutcome | DeclineInvitationRefusal | UnrecognisedRefusal:
         listed = (
             self._declared_arguments.keys()
             if self._declared_arguments is not None
             else {tool.name for tool in await self.declared_tools()}
         )
         if DECLINE_INVITATION_TOOL not in listed:
-            return Declined.NOT_SERVED
-        arguments = DeclineInvitationArguments(
-            place=decline.place, invitation=decline.invitation_id, epoch=decline.epoch, reason=decline.reason
-        ).model_dump(mode="json")
+            return DeclineOutcome.NOT_SERVED
+        arguments = decline_arguments(decline).model_dump(mode="json")
         result = await self._called(DECLINE_INVITATION_TOOL, arguments)
         if result.is_error:
             return _decline_refusal_of(_text_of(result))
-        return Declined.SENT
+        return DeclineOutcome.SENT
 
     async def speak(
         self, place: PlaceRef, sentence: str, style: str | None = None, interrupted: str | None = None
@@ -593,16 +586,6 @@ def _record_of[Record: MemberResourceRecord](record: type[Record], result: ReadR
         return member_resource_from_json(record, text)
     except ValidationError:
         raise UnusableAnswer(INVALID_ANSWER_CODE) from None
-
-
-def _looks_of(accept: Accept) -> tuple[FigureLook, ...] | None:
-    """The figure look the accept's room belongs to; a room is drawn behind the figure, so one without a figure has
-    no look. The figure travels beside it for an app that reads no looks."""
-    if accept.room is None or accept.figure is None:
-        return None
-    figure = accept.figure
-    look = FigureLook(kind="figure", url=figure.url, sha256=figure.sha256, gestures=figure.gestures, room=accept.room)
-    return (look,)
 
 
 def _declaration_of(tool: Tool) -> ToolDeclaration:
@@ -720,7 +703,7 @@ def _settled(leaf: BaseException, from_body: set[int], auth: _BearerAuth, *, bes
         return leaf
     if isinstance(leaf, _CALL_ERRORS):
         return _failure_of(leaf, auth.last_answer)
-    if beside_no_echo and isinstance(leaf, LATE_ANSWER_ERRORS):
+    if beside_no_echo and isinstance(leaf, _LATE_ANSWER_ERRORS):
         return Unreachable("an answer landed after the session closed")
     return leaf
 
@@ -771,9 +754,9 @@ async def open_mcp_session(
         # close met, so that of equal ranks a call's own failure tells how the session failed, not an answer it cut.
         found = [*from_body, *(leaf for leaf in found if all(leaf is not own for own in from_body))]
         from_body_ids = {id(own) for own in from_body}
-        if cancelled_in_body and all(isinstance(leaf, LATE_ANSWER_ERRORS) for leaf in found):
+        if cancelled_in_body and all(isinstance(leaf, _LATE_ANSWER_ERRORS) for leaf in found):
             raise asyncio.CancelledError from None
-        beside_no_echo = any(not isinstance(leaf, LATE_ANSWER_ERRORS) for leaf in found)
+        beside_no_echo = any(not isinstance(leaf, _LATE_ANSWER_ERRORS) for leaf in found)
         leaves = [_settled(leaf, from_body_ids, auth, beside_no_echo=beside_no_echo) for leaf in found]
         if len(leaves) == 1:
             raise leaves[0] from None

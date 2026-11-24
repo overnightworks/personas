@@ -14,10 +14,10 @@ from agents.member import (
     HttpsFileRef,
     SetTurnStateArguments,
 )
+from agents.member_outcomes import UnusableAnswer, jsonrpc_code
 from mcp_types import INTERNAL_ERROR
 
-from personas.decision import Accept, jsonrpc_code
-from personas.failures import UnusableAnswer
+from personas.decision import Accept
 from personas.secret import Secret
 from tests.support.app_session import opened, served
 from tests.support.entry_logs import configure_logging_into

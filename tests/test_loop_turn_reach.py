@@ -5,18 +5,17 @@ from __future__ import annotations
 import asyncio
 from http import HTTPStatus
 
-import anyio
 import httpx2
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.member import ACCEPT_INVITATION_TOOL, SPEAK_TOOL
+from agents.member_outcomes import Unreachable, jsonrpc_code, status_code
 from agents.tools import ToolOutcome
 from mcp_types import INVALID_PARAMS, UNSUPPORTED_PROTOCOL_VERSION, ListToolsResult, Tool
 
-from personas import app_session
 from personas.config import load_config
-from personas.decision import NETWORK_FAILURE_CODE, jsonrpc_code, status_code
-from personas.failures import Unreachable, leaves_of
+from personas.decision import NETWORK_FAILURE_CODE
+from personas.failures import leaves_of
 from personas.recall import RECALL_TOOL
 from personas.reporting import Event
 from personas.tokens import HttpTokenSource
@@ -26,17 +25,17 @@ from tests.support.fakes import CANCELLED_TURN
 from tests.support.gateway import Gateway
 from tests.support.hopin import CALL, DISCOVER, LIMIT_SECONDS, LIST_TOOLS, LISTEN, SAY_TOOL
 from tests.support.logs import formatted, lines_of
+from tests.support.openers import (
+    ClosingHold,
+    opener_whose_cancelled_close_fails,
+    opener_whose_close_adds_a_defect,
+    opener_whose_close_adds_a_late_answer,
+    opener_whose_close_loses_a_child,
+    opener_whose_request_raises,
+    opener_whose_session_loses_a_child,
+)
 from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG, SCOPE, ToolsOnlyApp
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
-from tests.support.transport import (
-    ClosingHold,
-    opener_whose_request_raises,
-    transport_by_url,
-    transport_closing_with_late_answers,
-    transport_closing_with_leaves,
-    transport_whose_close_loses_a_child,
-    transport_whose_session_loses_a_child,
-)
 from tests.support.wire import cuts, hangs, hangs_once_entered, refuses_with_a_server_error
 
 pytestmark = pytest.mark.anyio
@@ -294,14 +293,10 @@ async def test_a_tools_only_call_that_fails_shows_the_model_an_error_and_the_tur
 
 
 async def test_a_session_of_a_tools_only_call_whose_sdk_child_is_lost_shows_the_model_an_error_and_the_runner_goes_on(
-    runner, songmaker, monkeypatch
+    runner, songmaker
 ):
     failing = asyncio.Event()
-    monkeypatch.setattr(
-        app_session,
-        "streamable_http_client",
-        transport_whose_session_loses_a_child(failing, nth=2, of_url=songmaker_url(runner)),
-    )
+    runner.open_session = opener_whose_session_loses_a_child(failing, nth=2, of_url=songmaker_url(runner))
 
     async def loses_its_child(reply):
         failing.set()
@@ -332,8 +327,8 @@ async def test_a_tools_only_app_whose_call_failed_takes_no_more_calls_in_the_tur
     ]
 
 
-async def a_loss_while_the_app_session_opens_and_a_turn_that_answers(runner, songmaker, monkeypatch, transport):
-    monkeypatch.setattr(app_session, "streamable_http_client", transport)
+async def a_loss_while_the_app_session_opens_and_a_turn_that_answers(runner, songmaker, opener):
+    runner.open_session = opener
     runner.gateway = Gateway(saying(ANSWER), completion("done"))
 
     await addressed_in_the_call(runner)
@@ -347,7 +342,7 @@ async def a_loss_while_the_app_session_opens_and_a_turn_that_answers(runner, son
 
 
 async def test_a_child_lost_while_the_listing_session_discovers_leaves_the_app_absent_and_the_runner_goes_on(
-    runner, songmaker, monkeypatch
+    runner, songmaker
 ):
     failing = asyncio.Event()
 
@@ -356,20 +351,16 @@ async def test_a_child_lost_while_the_listing_session_discovers_leaves_the_app_a
         await asyncio.Event().wait()
 
     songmaker.script(DISCOVER, loses_its_child)
-    transport = transport_whose_session_loses_a_child(failing, nth=1, of_url=songmaker_url(runner))
+    opener = opener_whose_session_loses_a_child(failing, nth=1, of_url=songmaker_url(runner))
 
-    await a_loss_while_the_app_session_opens_and_a_turn_that_answers(runner, songmaker, monkeypatch, transport)
+    await a_loss_while_the_app_session_opens_and_a_turn_that_answers(runner, songmaker, opener)
 
 
 async def test_a_child_lost_while_a_calls_session_discovers_shows_the_model_an_error_and_the_runner_goes_on(
-    runner, songmaker, monkeypatch
+    runner, songmaker
 ):
     failing = asyncio.Event()
-    monkeypatch.setattr(
-        app_session,
-        "streamable_http_client",
-        transport_whose_session_loses_a_child(failing, nth=2, of_url=songmaker_url(runner)),
-    )
+    runner.open_session = opener_whose_session_loses_a_child(failing, nth=2, of_url=songmaker_url(runner))
     runner.gateway = Gateway(calling(CREATE_SONG), saying(ANSWER), completion("done"))
     first_round = runner.gateway.hold_request(1)
     await addressed_in_the_call(runner)
@@ -392,13 +383,13 @@ async def test_a_child_lost_while_a_calls_session_discovers_shows_the_model_an_e
 
 @pytest.mark.parametrize("hung", [DISCOVER, LIST_TOOLS], ids=["discovery", "listing"])
 async def test_a_hang_past_the_call_time_whose_close_gives_late_answers_leaves_the_app_absent_and_the_turn_answers(
-    runner, songmaker, monkeypatch, hung
+    runner, songmaker, hung
 ):
     songmaker.script(hung, hangs)
     runner.bound_tools_only_calls_to(SHORT_CALL_SECONDS)
-    transport = transport_closing_with_late_answers(echo=anyio.BrokenResourceError, only_close=1)
+    opener = opener_whose_close_adds_a_late_answer(only_close=1)
 
-    await a_loss_while_the_app_session_opens_and_a_turn_that_answers(runner, songmaker, monkeypatch, transport)
+    await a_loss_while_the_app_session_opens_and_a_turn_that_answers(runner, songmaker, opener)
 
 
 async def test_a_token_the_realm_refuses_in_mid_turn_for_the_tools_only_scope_is_an_error_and_no_reaction(
@@ -446,12 +437,12 @@ async def test_a_turn_whose_place_left_during_a_tools_only_call_stops_with_no_fu
 
 
 async def test_a_defect_in_a_tools_only_request_whose_place_then_leaves_while_it_closes_ends_the_runner_loud(
-    runner, songmaker, monkeypatch
+    runner, songmaker
 ):
     defect = ValueError("a defect")
     runner.open_session = opener_whose_request_raises("invoke", defect)
     closing = ClosingHold()
-    monkeypatch.setattr(app_session, "streamable_http_client", closing.transport(nth=2, of_url=songmaker_url(runner)))
+    runner.open_session = closing.opener(nth=2, of_url=songmaker_url(runner), inner=runner.open_session)
     runner.gateway = Gateway(calling(CREATE_SONG), saying(ANSWER), completion("done"))
     await addressed_in_the_call(runner)
     try:
@@ -477,14 +468,14 @@ def raising_in_the_tools_only_request(runner, where, defect):
 
 @pytest.mark.parametrize("where", ["listing", "call"])
 async def test_a_defect_in_a_tools_only_request_whose_close_outlasts_the_apps_call_time_ends_the_runner_loud(
-    runner, songmaker, monkeypatch, where
+    runner, songmaker, where
 ):
     defect = ValueError("a defect")
     raising_in_the_tools_only_request(runner, where, defect)
     runner.bound_tools_only_calls_to(SHORT_CALL_SECONDS)
     closing = ClosingHold()
     nth = 1 if where == "listing" else 2
-    monkeypatch.setattr(app_session, "streamable_http_client", closing.transport(nth=nth, of_url=songmaker_url(runner)))
+    runner.open_session = closing.opener(nth=nth, of_url=songmaker_url(runner), inner=runner.open_session)
     runner.gateway = Gateway(calling(CREATE_SONG), saying(ANSWER), completion("done"))
     await addressed_in_the_call(runner)
     try:
@@ -533,14 +524,14 @@ async def test_a_timeout_the_token_source_raises_itself_before_the_call_time_is_
 
 
 async def test_a_defect_in_a_tools_only_call_whose_close_outlasts_the_turns_duration_ends_the_runner_loud(
-    runner, songmaker, monkeypatch
+    runner, songmaker
 ):
     runner.files.persona_path.write_text(runner.files.persona_text(max_duration_seconds=1), encoding="utf-8")
     runner.config = load_config(runner.files.write())
     defect = ValueError("a defect")
     raising_in_the_tools_only_request(runner, "call", defect)
     closing = ClosingHold()
-    monkeypatch.setattr(app_session, "streamable_http_client", closing.transport(nth=2, of_url=songmaker_url(runner)))
+    runner.open_session = closing.opener(nth=2, of_url=songmaker_url(runner), inner=runner.open_session)
     runner.gateway = Gateway(calling(CREATE_SONG), saying(ANSWER), completion("done"))
     await addressed_in_the_call(runner)
     try:
@@ -557,10 +548,8 @@ async def test_a_defect_in_a_tools_only_call_whose_close_outlasts_the_turns_dura
     assert runner.app.said == []
 
 
-async def test_a_tools_only_call_whose_cancelled_session_leaves_as_a_failure_still_stops_the_turn(
-    runner, songmaker, monkeypatch
-):
-    monkeypatch.setattr(app_session, "streamable_http_client", transport_closing_with_leaves(OSError(), only_close=1))
+async def test_a_tools_only_call_whose_cancelled_session_leaves_as_a_failure_still_stops_the_turn(runner, songmaker):
+    runner.open_session = opener_whose_cancelled_close_fails(only_close=1)
     await a_turn_inside_a_tools_only_call(runner, songmaker)
 
     runner.app.stand(SUBJECT)
@@ -679,18 +668,15 @@ REQUEST_AT = pytest.mark.parametrize("where", ["listing", "call"])
 @REQUEST_AT
 @CHILD_LOST
 async def test_a_defect_in_a_tools_only_request_whose_loop_session_loses_a_child_while_it_closes_ends_the_runner_loud(
-    runner, songmaker, monkeypatch, where, child
+    runner, songmaker, where, child
 ):
     defect = ValueError("a defect")
     raising_in_the_tools_only_request(runner, where, defect)
     failing = asyncio.Event()
     closing = ClosingHold()
-    held = closing.transport(nth=1 if where == "listing" else 2, of_url=songmaker_url(runner))
-    lost = transport_whose_session_loses_a_child(failing, nth=1, of_url=runner.app_url, error=child)
-    monkeypatch.setattr(
-        app_session,
-        "streamable_http_client",
-        transport_by_url({songmaker_url(runner): held, runner.app_url: lost}),
+    held = closing.opener(nth=1 if where == "listing" else 2, of_url=songmaker_url(runner), inner=runner.open_session)
+    runner.open_session = opener_whose_session_loses_a_child(
+        failing, nth=1, of_url=runner.app_url, error=child, inner=held
     )
     runner.gateway = Gateway(calling(CREATE_SONG), saying(ANSWER), completion("done"))
     await addressed_in_the_call(runner)
@@ -722,12 +708,10 @@ async def test_a_second_defect_of_the_turns_session_body_leaves_beside_the_first
 
 
 async def test_a_tools_only_call_that_fails_whose_close_adds_a_defect_ends_the_runner_with_each_leaf_once(
-    runner, songmaker, monkeypatch
+    runner, songmaker
 ):
     songmaker.script(CALL, refuses_with_a_server_error)
-    monkeypatch.setattr(
-        app_session, "streamable_http_client", transport_closing_with_late_answers(echo=RuntimeError, only_close=1)
-    )
+    runner.open_session = opener_whose_close_adds_a_defect(RuntimeError, only_close=1)
     runner.gateway = Gateway(calling(CREATE_SONG), saying(ANSWER), completion("done"))
     await addressed_in_the_call(runner)
 
@@ -739,23 +723,16 @@ async def test_a_tools_only_call_that_fails_whose_close_adds_a_defect_ends_the_r
 
 @REQUEST_AT
 @pytest.mark.parametrize(
-    ("lost_child", "then"),
-    [
-        (OSError, "say answers"),
-        (OSError, "say fails"),
-        (anyio.BrokenResourceError, "say answers"),
-    ],
-    ids=["a lost child, say answers", "a lost child, say fails", "a late answer"],
+    "then", ["say answers", "say fails"], ids=["a lost child, say answers", "a lost child, say fails"]
 )
 async def test_a_defect_in_a_tools_only_request_whose_own_close_loses_a_child_ends_the_runner_loud_whatever_follows(
-    runner, songmaker, monkeypatch, where, lost_child, then
+    runner, songmaker, where, then
 ):
     defect = ValueError("a defect")
     raising_in_the_tools_only_request(runner, where, defect)
-    lost = transport_whose_close_loses_a_child(
-        lost_child, nth=1 if where == "listing" else 2, of_url=songmaker_url(runner)
+    runner.open_session = opener_whose_close_loses_a_child(
+        nth=1 if where == "listing" else 2, of_url=songmaker_url(runner), inner=runner.open_session
     )
-    monkeypatch.setattr(app_session, "streamable_http_client", lost)
     if then == "say fails":
         runner.app.script(CALL, refuses_with_a_server_error)
     runner.gateway = Gateway(calling(CREATE_SONG), saying(ANSWER), completion("done"))

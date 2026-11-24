@@ -10,6 +10,7 @@ import pytest
 from agents.backend import TurnStopKind, TurnStopped
 from agents.backend.gateway import GatewayBackend
 from agents.member import AcceptInvitationRefusal, PlaceRef
+from agents.member_outcomes import StatusFailure, Unreachable, UnusableAnswer, jsonrpc_code, status_code
 from agents.tools import ToolDeclaration, ToolEffect
 from agents.turn import RejectionCode
 from logline.testing import configured
@@ -24,10 +25,8 @@ from personas.decision import (
     SUSPENDED_RETRY_SECONDS,
     Accept,
     backoff_delay,
-    jsonrpc_code,
-    status_code,
 )
-from personas.failures import StatusFailure, TokenStatusFailure, Unreachable, UnusableAnswer, leaves_of
+from personas.failures import TokenStatusFailure, leaves_of
 from personas.loop import AgentLoop, Boundaries
 from personas.reporting import Event
 from tests.support.fakes import (

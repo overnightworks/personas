@@ -9,10 +9,11 @@ import secrets
 
 import httpx2
 import pytest
+from agents.member_outcomes import INVALID_ANSWER_CODE, Unreachable, UnusableAnswer
 from logline import current_traceparent, unit_trace
 
 from personas.decision import NO_ANSWER_REASON
-from personas.failures import INVALID_ANSWER_CODE, TokenStatusFailure, Unreachable, UnusableAnswer
+from personas.failures import TokenStatusFailure
 from personas.reporting import carry_trace
 from personas.secret import Secret
 from personas.tokens import HttpTokenSource, facts_of

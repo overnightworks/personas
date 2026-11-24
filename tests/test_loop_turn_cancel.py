@@ -7,26 +7,20 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
-import anyio
 import pytest
 from agents.member import STANDING_URI, place_window_uri
+from agents.member_outcomes import Unreachable, status_code
 from agents.turn import StopOutcome
 
-from personas import app_session
-from personas.decision import status_code
-from personas.failures import Unreachable, leaves_of
+from personas.failures import leaves_of
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import CANCELLED_TURN, COMPLETED_TURN, TurnEnded
 from tests.support.gateway import Gateway, says
 from tests.support.hopin import CALL, DISCOVER, LIMIT_SECONDS, LIST_TOOLS, LISTEN, READ
+from tests.support.openers import ClosingHold, opener_whose_close_adds_a_late_answer, opener_whose_request_raises
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, paused
-from tests.support.transport import (
-    ClosingHold,
-    opener_whose_request_raises,
-    transport_closing_with_late_answers,
-)
 from tests.support.voice import a_turn_whose_speak_is_in_flight
 from tests.support.wire import hangs, hangs_once_entered, lost_on_demand
 
@@ -36,9 +30,6 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.anyio
 
 OTHER_PLACE_ID = "room-8"
-LATE_ANSWERS = pytest.mark.parametrize(
-    "echo", [anyio.BrokenResourceError, anyio.ClosedResourceError], ids=["broken stream", "closed stream"]
-)
 
 
 async def a_turn_in_its_first_round(runner):
@@ -165,22 +156,6 @@ async def test_a_turns_backend_is_closed_once_the_runner_was_cancelled(runner):
     await ended_by(runner.task)
 
     assert runner.backends[0].closed.is_set()
-
-
-@LATE_ANSWERS
-async def test_a_runner_cancelled_while_its_lifecycle_session_unwinds_with_late_answers_alone_ends_cancelled(
-    runner, monkeypatch, echo
-):
-    monkeypatch.setattr(
-        app_session, "streamable_http_client", transport_closing_with_late_answers(echo=echo, only_close=1)
-    )
-    runner.app.stand(SUBJECT, active(PLACE_ID))
-    runner.start()
-    await runner.app.until_standing_read()
-
-    runner.task.cancel()
-
-    assert isinstance(await ended_by(runner.task), asyncio.CancelledError)
 
 
 SESSION_SEAMS = pytest.mark.parametrize(
@@ -315,7 +290,7 @@ async def test_a_lost_stream_while_a_turns_request_is_in_flight_ends_the_turn_as
     assert [event for event, _ in runner.reports.reported(started=False)].count(Event.BACKOFF) == 1
 
 
-async def a_turn_opening_a_tools_only_session(runner, songmaker, monkeypatch, *, only_close, echo):
+async def a_turn_opening_a_tools_only_session(runner, songmaker, *, only_close):
     """A turn whose ``server/discover`` at the tools-only app is held, the closes of its sessions leaving with late
     answers alone. The returned event releases the held request."""
     arrived, release = asyncio.Event(), asyncio.Event()
@@ -325,9 +300,7 @@ async def a_turn_opening_a_tools_only_session(runner, songmaker, monkeypatch, *,
         await release.wait()
         await reply.status(HTTPStatus.SERVICE_UNAVAILABLE)
 
-    monkeypatch.setattr(
-        app_session, "streamable_http_client", transport_closing_with_late_answers(echo=echo, only_close=only_close)
-    )
+    runner.open_session = opener_whose_close_adds_a_late_answer(only_close=only_close)
     runner.gateway = Gateway(*says(PLACE_ID, ANSWER))
     await restarted_in_the_call(runner)
     songmaker.script(DISCOVER, held)
@@ -338,11 +311,10 @@ async def a_turn_opening_a_tools_only_session(runner, songmaker, monkeypatch, *,
     return release
 
 
-@LATE_ANSWERS
 async def test_a_removal_that_reaches_a_turn_while_a_tools_only_session_opens_with_late_answers_alone_ends_it_cancelled(
-    runner, songmaker, monkeypatch, echo
+    runner, songmaker
 ):
-    release = await a_turn_opening_a_tools_only_session(runner, songmaker, monkeypatch, only_close=1, echo=echo)
+    release = await a_turn_opening_a_tools_only_session(runner, songmaker, only_close=1)
     try:
         runner.app.stand(SUBJECT)
         await runner.reports.until_a_turn_ended()
@@ -361,11 +333,10 @@ async def test_a_removal_that_reaches_a_turn_while_a_tools_only_session_opens_wi
         release.set()
 
 
-@LATE_ANSWERS
 async def test_a_runner_cancelled_while_a_turns_tools_only_session_opens_with_late_answers_alone_ends_cancelled(
-    runner, songmaker, monkeypatch, echo
+    runner, songmaker
 ):
-    release = await a_turn_opening_a_tools_only_session(runner, songmaker, monkeypatch, only_close=2, echo=echo)
+    release = await a_turn_opening_a_tools_only_session(runner, songmaker, only_close=2)
     try:
         runner.task.cancel()
 
@@ -374,14 +345,13 @@ async def test_a_runner_cancelled_while_a_turns_tools_only_session_opens_with_la
         release.set()
 
 
-@LATE_ANSWERS
 async def test_a_lifecycle_refusal_that_reaches_a_turn_while_a_tools_only_session_opens_backs_off_once(
-    runner, songmaker, monkeypatch, echo
+    runner, songmaker
 ):
     async def refused(reply):
         await reply.status(HTTPStatus.SERVICE_UNAVAILABLE)
 
-    release = await a_turn_opening_a_tools_only_session(runner, songmaker, monkeypatch, only_close=2, echo=echo)
+    release = await a_turn_opening_a_tools_only_session(runner, songmaker, only_close=2)
     try:
         runner.app.script(READ, refused)
         runner.app.stand(SUBJECT, active(PLACE_ID))

@@ -8,10 +8,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, NoReturn
 
 from agents.member import SetTurnStateArguments
+from agents.member_outcomes import CallFailure
 from agents.turn import StopOutcome
 
 from personas.decision import answers_unknown_tool, failure_reason, sync_seat_ends, turn_end_state
-from personas.failures import CallFailure, within_call_time
+from personas.failures import within_call_time
 from personas.reporting import Event
 
 if TYPE_CHECKING:

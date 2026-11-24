@@ -7,10 +7,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agents.backend import TurnStopKind, TurnStopped
+from agents.member_outcomes import Unreachable
 from agents.turn import FailureCode
 
 from personas.decision import is_defect
-from personas.failures import Unreachable, leaves_of, task_is_being_cancelled
+from personas.failures import leaves_of, task_is_being_cancelled
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterable

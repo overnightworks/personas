@@ -6,13 +6,13 @@ import json
 from typing import TYPE_CHECKING
 
 import pytest
+from agents.member_outcomes import StatusFailure, Unreachable
 from agents.turn import FailureCode, RejectionCode, TurnUsage
 from logline import Outcome
 from logline.testing import configured
 
 from personas.decision import TurnEnding
 from personas.entries import InputSizes
-from personas.failures import StatusFailure, Unreachable
 from personas.reporting import Event, StateChange, log_state_change, start_turn_tally
 
 if TYPE_CHECKING:

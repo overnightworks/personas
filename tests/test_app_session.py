@@ -38,6 +38,16 @@ from agents.member import (
     VoiceState,
     Written,
 )
+from agents.member_outcomes import (
+    INVALID_ANSWER_CODE,
+    LISTEN_NOT_HONORED_CODE,
+    StatusFailure,
+    Unreachable,
+    UnrecognisedRefusal,
+    UnusableAnswer,
+    jsonrpc_code,
+    status_code,
+)
 from agents.tools import ToolEffect, ToolOutcome
 from agents.turn import TOOL_IMAGE_MEDIA_TYPE
 from mcp_types import (
@@ -56,15 +66,8 @@ from pydantic import ValidationError
 from personas import app_session
 from personas.app_session import open_mcp_session
 from personas.config import AppTarget
-from personas.decision import Accept, UnrecognisedRefusal, jsonrpc_code, status_code
-from personas.failures import (
-    INVALID_ANSWER_CODE,
-    LISTEN_NOT_HONORED_CODE,
-    StatusFailure,
-    Unreachable,
-    UnusableAnswer,
-    leaves_of,
-)
+from personas.decision import Accept
+from personas.failures import leaves_of
 from personas.secret import Secret
 from tests.support.app_session import opened
 from tests.support.entry_logs import configure_logging_into
@@ -194,9 +197,7 @@ async def test_a_stream_the_app_completes_ends_the_iteration_and_a_new_one_opens
             pass
 
 
-async def test_an_accept_sends_the_place_invitation_and_epoch_and_a_success_is_no_refusal(app, bearer):
-    place = PlaceRef(kind="call", id="room-7")
-
+async def test_an_accept_sends_the_place_invitation_and_epoch_and_a_success_is_no_refusal(app, bearer, place):
     async with opened(app, bearer) as session:
         refusal = await session.accept(Accept(place, "inv-3", 2))
 
@@ -204,8 +205,7 @@ async def test_an_accept_sends_the_place_invitation_and_epoch_and_a_success_is_n
     assert app.accepted == [AcceptInvitationArguments(place=place, invitation="inv-3", epoch=2)]
 
 
-async def test_an_accept_sends_the_figure_it_carries_and_without_one_no_figure_key(app, bearer):
-    place = PlaceRef(kind="call", id="room-7")
+async def test_an_accept_sends_the_figure_it_carries_and_without_one_no_figure_key(app, bearer, place):
     figure = FigureRef(url="https://figures.test/figure.glb", sha256=secrets.token_hex(32))
 
     async with opened(app, bearer) as session:
@@ -218,22 +218,19 @@ async def test_an_accept_sends_the_figure_it_carries_and_without_one_no_figure_k
 
 
 @pytest.mark.parametrize("refusal", list(AcceptInvitationRefusal))
-async def test_an_accept_refused_with_a_code_of_the_record_is_told_by_that_code(app, bearer, refusal):
+async def test_an_accept_refused_with_a_code_of_the_record_is_told_by_that_code(app, bearer, refusal, place):
     app.accept_outcomes.append(ToolOutcome(AcceptInvitationRefused(refused=refusal).model_dump_json(), is_error=True))
 
     async with opened(app, bearer) as session:
-        assert await session.accept(Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 0)) is refusal
+        assert await session.accept(Accept(place, "inv-3", 0)) is refusal
 
 
 @pytest.mark.parametrize("text", ['{"refused": "own_account_only"}', "something else", "busy"])
-async def test_an_accept_error_outside_the_record_is_unrecognised(app, bearer, text):
+async def test_an_accept_error_outside_the_record_is_unrecognised(app, bearer, text, place):
     app.accept_outcomes.append(ToolOutcome(text, is_error=True))
 
     async with opened(app, bearer) as session:
-        assert (
-            await session.accept(Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 0))
-            is UnrecognisedRefusal.UNRECOGNISED
-        )
+        assert await session.accept(Accept(place, "inv-3", 0)) is UnrecognisedRefusal.UNRECOGNISED
 
 
 async def test_a_speak_sends_the_place_and_the_sentence_and_gives_that_it_starts_to_play(app, bearer, place):

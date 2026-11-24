@@ -6,13 +6,13 @@ import asyncio
 from dataclasses import replace
 from http import HTTPStatus
 
-import anyio
 import pytest
 from agents.backend.fake_gateway import Reply, completion
 from agents.member import (
     STANDING_URI,
     place_window_uri,
 )
+from agents.member_outcomes import Unreachable, jsonrpc_code
 from agents.tools import ToolOutcome
 from agents.turn import FailureCode, RejectionCode, person_fingerprint
 from mcp_types import (
@@ -20,13 +20,9 @@ from mcp_types import (
     ListToolsResult,
 )
 
-from personas import app_session
 from personas.config import load_config
-from personas.decision import BACKOFF_BASE_SECONDS, NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE, jsonrpc_code
-from personas.failures import (
-    Unreachable,
-    leaves_of,
-)
+from personas.decision import BACKOFF_BASE_SECONDS, NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE
+from personas.failures import leaves_of
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import SweepClock, failed_turn, refused_turn
@@ -34,10 +30,10 @@ from tests.support.gateway import BUDGET_SPENT, Gateway, says, says_after_a_hold
 from tests.support.history import act_entry, after_start, unanswered, url_of, woke_at_lines
 from tests.support.hopin import CALL, DISCOVER, LIMIT_SECONDS, LIST_TOOLS, LISTEN, READ, SAY_TOOL
 from tests.support.logs import lines_of
+from tests.support.openers import opener_whose_close_adds_a_defect, opener_whose_close_adds_a_late_answer
 from tests.support.realm import LIFETIME_SECONDS
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, invited
-from tests.support.transport import transport_closing_with_late_answers
 from tests.support.wire import cuts, hangs
 
 pytestmark = pytest.mark.anyio
@@ -480,9 +476,8 @@ async def test_a_relayed_call_that_fails_ends_the_turn_after_one_round_and_leads
     assert len(runner.realm.issued) == issued
 
 
-async def test_a_relayed_call_beside_a_late_answer_gives_one_reaction_and_no_pause(runner, monkeypatch):
-    failing = transport_closing_with_late_answers(echo=anyio.BrokenResourceError, only_close=1)
-    monkeypatch.setattr(app_session, "streamable_http_client", failing)
+async def test_a_relayed_call_beside_a_late_answer_gives_one_reaction_and_no_pause(runner):
+    runner.open_session = opener_whose_close_adds_a_late_answer(only_close=1)
     await relayed_say_fails(runner, cuts)
     await runner.reports.until(Event.RESUMED)
 
@@ -495,11 +490,8 @@ async def test_a_relayed_call_beside_a_late_answer_gives_one_reaction_and_no_pau
     assert not runner.task.done()
 
 
-async def test_a_relayed_call_that_fails_beside_a_defect_of_the_turns_teardown_ends_the_runner_loud_with_both(
-    runner, monkeypatch
-):
-    failing = transport_closing_with_late_answers(echo=RuntimeError, only_close=1)
-    monkeypatch.setattr(app_session, "streamable_http_client", failing)
+async def test_a_relayed_call_that_fails_beside_a_defect_of_the_turns_teardown_ends_the_runner_loud_with_both(runner):
+    runner.open_session = opener_whose_close_adds_a_defect(RuntimeError, only_close=1)
     await relayed_say_fails(runner, cuts)
     assert runner.task is not None
     async with asyncio.timeout(LIMIT_SECONDS):

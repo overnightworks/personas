@@ -9,9 +9,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 from agents.member import MemberStanding, PlaceRef, PlaceView
+from agents.member_outcomes import INVALID_ANSWER_CODE, UnusableAnswer
 from mcp_types import ReadResourceResult, TextResourceContents
 
-from personas.failures import INVALID_ANSWER_CODE, UnusableAnswer
 from tests.support.app_session import opened
 from tests.support.hopin import READ
 from tests.support.standings import AGENT_SUBJECT as SUBJECT

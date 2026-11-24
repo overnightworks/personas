@@ -6,8 +6,9 @@ from http import HTTPStatus
 
 import pytest
 from agents.backend.fake_gateway import completion
+from agents.member_outcomes import status_code
 
-from personas.decision import SUSPENDED_RETRY_SECONDS, status_code
+from personas.decision import SUSPENDED_RETRY_SECONDS
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway

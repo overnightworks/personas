@@ -6,55 +6,21 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Final, cast
 
-import anyio
+from agents.member_outcomes import StatusFailure, Unreachable
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Iterator
 
-INVALID_ANSWER_CODE: Final = "invalid_answer"
-"""The code of an answer that arrived but is not the kind of answer asked for."""
-LISTEN_NOT_HONORED_CODE: Final = "listen_not_honored"
-"""The code of a stream the app acknowledged without the subscription the runner asked for."""
-UNSUPPORTED_VERSION_CODE: Final = "unsupported_version"
-"""The code of an app that shares no protocol revision with the runner."""
 STORE_UNREACHABLE_CODE: Final = "store_unreachable"
 """The code of a store that could not be reached or ended the connection."""
 STORE_TIMEOUT_CODE: Final = "store_timeout"
 """The code of a write that did not finish within its bound."""
 STORE_DEFECT_CODE: Final = "store_defect"
 """The code of a database error that is no outage."""
-LATE_ANSWER_ERRORS: Final = (anyio.BrokenResourceError, anyio.ClosedResourceError)
-"""What the transport's task raises when an answer lands after its session ended."""
-
-
-# The base of the failures below, which name their kind; a suffix would repeat it.
-class CallFailure(Exception):  # noqa: N818
-    """A call did not give an answer the loop can use; an app's error status says the failed MCP method and answer."""
-
-    method: str | None = None
-    answer: str | None = None
-
-
-class StatusFailure(CallFailure):
-    """The server answered with an HTTP status that is not success.
-
-    An app's answer says the MCP method that failed and what it carried: a code of the JSON-RPC error, else its
-    content type; never its content.
-    """
-
-    def __init__(self, status: int, method: str | None = None, answer: str | None = None) -> None:
-        super().__init__(f"HTTP status {status}")
-        self.status = status
-        self.method = method
-        self.answer = answer
 
 
 class TokenStatusFailure(StatusFailure):
     """The realm's token endpoint answered with such a status."""
-
-
-class Unreachable(CallFailure):
-    """The server was not reached or timed out."""
 
 
 class CallTimedOut(Unreachable):
@@ -72,20 +38,6 @@ async def within_call_time(call_seconds: float) -> AsyncGenerator[None]:
         if not bound.expired():
             raise
         raise CallTimedOut("the app did not answer in time") from None
-
-
-class UnusableAnswer(CallFailure):
-    """The server answered, but with an error or a body the loop cannot use; ``code`` says which. ``entry`` is the index
-    of the entry of a listing that broke its rules, never any text of it."""
-
-    def __init__(
-        self, code: str, method: str | None = None, answer: str | None = None, entry: int | None = None
-    ) -> None:
-        super().__init__(code)
-        self.code = code
-        self.method = method
-        self.answer = answer
-        self.entry = entry
 
 
 # Named for the state of the store, as Unreachable is; a suffix would repeat it.

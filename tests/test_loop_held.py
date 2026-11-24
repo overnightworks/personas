@@ -12,11 +12,12 @@ from http import HTTPStatus
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.member import CONTINUE_SPEAKING_TOOL
+from agents.member_outcomes import status_code
 from agents.tools import ToolOutcome
 from agents.turn import FailureCode, Principal, person_fingerprint
 from mcp_types import ListToolsResult
 
-from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE, status_code
+from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE
 from personas.reporting import Event
 from tests.support.app_driving import said_and_taken, settled, shows, waits
 from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call

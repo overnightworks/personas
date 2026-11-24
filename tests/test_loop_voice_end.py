@@ -9,11 +9,12 @@ import anyio
 import pytest
 from agents.backend.fake_gateway import completion
 from agents.member import SPEAK_TOOL
+from agents.member_outcomes import INVALID_ANSWER_CODE, status_code
 from agents.tools import ToolOutcome
 from agents.turn import FailureCode
 
-from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE, status_code
-from personas.failures import INVALID_ANSWER_CODE, leaves_of
+from personas.decision import NETWORK_FAILURE_CODE, TURN_CANCELLED_CODE
+from personas.failures import leaves_of
 from personas.reporting import Event
 from personas.speech import DropReason
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, pulses_the_window_once, say_in_the_call
@@ -21,9 +22,9 @@ from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
 from tests.support.fakes import COMPLETED_TURN, failed_turn
 from tests.support.gateway import Gateway, speaks_and_says
 from tests.support.hopin import CALL, LISTEN, READ, SAY_TOOL
+from tests.support.openers import opener_whose_request_raises
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, paused
-from tests.support.transport import opener_whose_request_raises
 from tests.support.voice import (
     TWO_SENTENCES,
     a_turn_whose_speak_is_in_flight,

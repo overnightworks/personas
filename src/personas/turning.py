@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Final
 
 from agents.agent_file import TurnRequest
 from agents.backend import TurnPerson, TurnStopped
+from agents.member_outcomes import CallFailure
 from agents.tools import HandTool, ToolDeclaration, ToolOutcome
 from agents.turn import RejectionCode, Turn, TurnMessage, TurnRole
 from agents.turn_events import FinalEvent, ToolCallEvent
@@ -28,12 +29,7 @@ from personas.entries import (
     TurnTold,
     told_words,
 )
-from personas.failures import (
-    CallFailure,
-    leaves_of,
-    raise_if_cancelled,
-    task_is_being_cancelled,
-)
+from personas.failures import leaves_of, raise_if_cancelled, task_is_being_cancelled
 from personas.held_tools import Calls, HeldTools, HoldBack
 from personas.holds import (
     APP_FAILED_TEXT,

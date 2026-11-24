@@ -10,6 +10,7 @@ from operator import eq
 from typing import TYPE_CHECKING, Final, Literal, NoReturn
 
 from agents.member import DeclineInvitationRefusal
+from agents.member_outcomes import CallFailure, DeclineOutcome, UnrecognisedRefusal
 from logline import unit_trace
 
 from personas.admission import Admitted
@@ -19,13 +20,11 @@ from personas.decision import (
     SUSPENDED_RETRY_SECONDS,
     AppPlace,
     Decline,
-    Declined,
     Joined,
     Memory,
     Reaction,
     Suspend,
     Token,
-    UnrecognisedRefusal,
     accepts_for,
     active_places,
     active_view_places,
@@ -55,11 +54,7 @@ from personas.decision import (
 )
 from personas.due import left_standing, lines_of_a_hold
 from personas.entries import Lines, Occasion, ViewSeen, Visit, Waiting, WindowRead, taken_lines
-from personas.failures import (
-    CallFailure,
-    leaves_of,
-    raise_if_cancelled,
-)
+from personas.failures import leaves_of, raise_if_cancelled
 from personas.remembering import LineStore, Remembering
 from personas.reporting import (
     DueOccasion,
@@ -400,7 +395,7 @@ class AgentLoop:
         self._memory = after_decline(self._memory, decline, answer)
         if isinstance(answer, DeclineInvitationRefusal | UnrecognisedRefusal):
             self._report(Event.DECLINE_REFUSED, answer.value, place_kind=decline.place.kind)
-        elif answer is Declined.SENT:
+        elif answer is DeclineOutcome.SENT:
             self._report(Event.INVITATION_DECLINED, decline.reason.value, place_kind=decline.place.kind)
 
     async def _read_windows(self, session: AppSession, standings: tuple[Standing, ...], began: float) -> bool:

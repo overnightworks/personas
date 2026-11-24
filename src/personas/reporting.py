@@ -11,23 +11,23 @@ from enum import Enum, StrEnum, auto
 from typing import TYPE_CHECKING, Final, Protocol
 from urllib.parse import urlsplit
 
+from agents.member_outcomes import StatusFailure
 from anyio import BrokenResourceError, ClosedResourceError
 from anyio.lowlevel import checkpoint
 from logline import Outcome, StepTimer, current_traceparent
 
 from personas.decision import error_reason, failure_reason
-from personas.failures import StatusFailure
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
     import httpx2
+    from agents.member_outcomes import CallFailure
     from agents.turn import TurnUsage
 
     from personas.config import AppTarget
     from personas.decision import TurnEnding
     from personas.entries import InputSizes
-    from personas.failures import CallFailure
 
 _LOG: Final = logging.getLogger("personas")
 CUT_FOR_SPOKEN: Final = "spoken"

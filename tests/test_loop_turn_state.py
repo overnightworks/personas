@@ -33,9 +33,9 @@ from tests.support.fakes import FakeClock
 from tests.support.gateway import BUDGET_SPENT, Gateway, says
 from tests.support.hopin import CALL, LIMIT_SECONDS, READ, SAY_TOOL
 from tests.support.logs import lines_of
+from tests.support.openers import ClosingHold, opener_whose_request_raises
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, paused
-from tests.support.transport import ClosingHold, opener_whose_request_raises
 from tests.support.voice import ended_by
 from tests.support.wire import hangs
 
