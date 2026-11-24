@@ -1,8 +1,8 @@
 # Measured by `quality check --fix`. Entries only ever go down.
 
 [file_lines]
-"tests/test_decision.py" = 974
-"tests/test_loop.py" = 811
+"tests/test_decision.py" = 971
+"tests/test_loop.py" = 810
 
 [clones."src/personas/migrations/versions/0002_cut.py"]
 upgrade = [["src/personas/migrations/versions/0003_act.py", "upgrade"]]
