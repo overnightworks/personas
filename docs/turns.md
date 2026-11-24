@@ -53,15 +53,21 @@ seat, its lease or its client.
 ## What a turn is told
 
 Every turn, written, aloud or at a view, is sent the same front: the persona followed by the reply rules in
-the system text, and the runner's own tools, `continue_speaking` and `stop_speaking` among them. The rest is
-user messages, none an instruction:
+the system text, then one line for each skill of the apps the turn lists, and the runner's own tools,
+`read_skill`, `continue_speaking` and `stop_speaking` among them. A line is the skill's name and its description
+as the app declared them; an app that declares no skills extension has one implicit skill, whose description names
+the app by its derived name. A name two apps' skills share goes to the first in the configuration's order. The rest
+is user messages and the rounds of the skills he read, none an instruction:
 
 1. A header: his name (`you`) and whether older entries have left his history (`older_dropped`).
-2. One message for each earlier answered turn whose entries his history still holds.
+2. One message for each earlier answered turn whose entries his history still holds. A turn whose entries hold
+   skills he read is told split around each one's round: a message of the entries before it, the round, and so on
+   to the turn's message with the entries after the last round.
 3. TURNS-9: The turn's own message, which alone says whether the turn is aloud.
 
 - TURNS-10: A turn's message holds when it was admitted (`at`, UTC to the whole second), what woke him (`woke`), and
-  every entry he took since the message before it (`entries`), each told once, in the order he took them.
+  every entry he took since the message before it or since the round before it (`entries`), each told once, in the
+  order he took them. A message before a round holds `entries` alone.
   `woke` names its app and place and either `lines`, with the `seqs` of the lines the turn is for, whether
   older lines were `missed` and whether his answer is heard aloud, or `view`, with the `revision` it is for.
 
@@ -73,7 +79,10 @@ An entry has its app and the time he took it (`at`), and is one of:
 - TURNS-14: spoken sentence; fields: `text` and an `outcome`: taken, with `refused` and its code or `written` when the app wrote it instead, or `"answered": false` with a `code`
 
 - TURNS-15: Every message before the turn's own is byte for byte as the turn before sent it, so the gateway's cache
-  reads it back. A turn that ends without an answer adds no message; its entries go to the next turn's.
+  reads it back. A skill he read is told as a round of its own at its place among the messages: one `read_skill`
+  call with the skill's name under the id the runner minted for it, answered with the text the model was shown, byte
+  for byte in every later turn, after a restart or a take-over too. A turn that ends without an answer adds no
+  message; its entries go to the next turn's.
 - TURNS-16: Past `history_bytes` the oldest whole messages leave in one step until what stays fits
   `history_keep_bytes`. When the newest message alone is past it, its oldest entries leave too until what
   stays fits; its newest entry always stays. A larger value keeps more and makes every request longer.
@@ -85,9 +94,10 @@ An entry has its app and the time he took it (`at`), and is one of:
 - TURNS-18: A turn holds every tool its own app listed after its last tools notice on the loop's open stream, or at the
   turn's start when that stream carries no notice, the tools of every other app where he holds an
   active place, and those of the tools-only apps, declared in the configuration's order. A name two apps
-  offer goes to the first; `accept_invitation`, `speak`, `recall`, `continue_speaking`, `stop_speaking` and
-  `set_turn_state` are the runner's own and never taken from an app. `continue_speaking` and `stop_speaking`
-  are held in every turn, written or aloud, so a switch between them leaves the front as it was; called in a turn
+  offer goes to the first; `accept_invitation`, `speak`, `recall`, `read_skill`, `continue_speaking`,
+  `stop_speaking` and `set_turn_state` are the runner's own and never taken from an app. `read_skill(skill)` is held
+  in every turn and answers the text of a skill whose line the turn holds; it loads nothing. `continue_speaking` and
+  `stop_speaking` are held in every turn, written or aloud, so a switch between them leaves the front as it was; called in a turn
   that is not aloud they do nothing, and the model is told they act only in a spoken turn. No request asks the
   gateway for `parallel_tool_calls`.
 - TURNS-19: The turn's own app's list is kept on the loop's session for the stream and listed again after a tools notice, a
@@ -96,14 +106,20 @@ An entry has its app and the time he took it (`at`), and is one of:
   token for that app's scope. A call to another app that fails gives the model an error result and that app
   takes no more calls in the turn; a failed call to the turn's own app ends the turn, and a turn still running
   when the loop's session ends is cancelled before it closes. A tool's error result reaches the model inside
-  the same turn.
+  the same turn. The skills of each app the turn lists are read in the session that lists its tools: an app
+  that declares the skills extension is asked for its listing, and one that does not is sent no request; an app whose skills listing fails has no lines in that turn and the turn goes on. A read of a skill is a
+  call to its app: at another app in a session of its own, which fails as a call there does, on the loop's session
+  for the own app, which ends the turn as a failed call does. A skill the app serves a file for that is not what its
+  listing promised, a name no line holds and a text past one result's bound answer an error and enter nothing.
 - TURNS-20: Before the turn's next call goes out, once per turn, anything not his own that arrived since the turn
   began holds that call: it is not sent, the model is told what arrived, and decides again.
 - TURNS-21: Every relayed call enters his history when the app answers or the relay ends without an answer, with the
-  failure's code or `cancelled`; a call past an app's bound was never sent and does not enter.
+  failure's code or `cancelled`; a call past an app's bound was never sent and does not enter. An answered
+  `read_skill` enters as a skill entry instead.
 - TURNS-22: A call past an app's bound is answered with an error and the model may go on. The turn's total is the sum
-  of the apps' bounds plus one for the held call and one for the speaking tools, plus `lookup_calls` with `[memory]`, so a model that keeps
-  calling past a bound can spend it and end the turn without its `say`.
+  of the apps' bounds plus one for the held call and one for the speaking tools, plus `lookup_calls` with `[memory]`
+  and the two reads of skills `read_skill` takes, so a model that keeps calling past a bound can spend it and end
+  the turn without its `say`.
 - TURNS-23: In a call and at a table at once, a turn at either can answer in the call and act at the table, also
   when it is not his move; the table refuses what its rules do not allow.
 
