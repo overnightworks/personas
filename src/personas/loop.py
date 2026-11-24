@@ -9,6 +9,7 @@ from functools import partial
 from operator import eq
 from typing import TYPE_CHECKING, Final, Literal, NoReturn
 
+from agents.mcp_client import ToolsWake
 from agents.member import DeclineInvitationRefusal
 from agents.member_outcomes import CallFailure, DeclineOutcome, UnrecognisedRefusal
 from logline import unit_trace
@@ -16,6 +17,7 @@ from logline import unit_trace
 from personas.admission import Admitted
 from personas.decision import (
     NETWORK_FAILURE_CODE,
+    NO_TOKEN,
     NO_TURNS_CODE,
     SUSPENDED_RETRY_SECONDS,
     AppPlace,
@@ -25,6 +27,7 @@ from personas.decision import (
     Reaction,
     Suspend,
     Token,
+    accept_arguments,
     accepts_for,
     active_places,
     active_view_places,
@@ -34,6 +37,7 @@ from personas.decision import (
     backoff_delay,
     backoff_states_unavailable,
     decisive_failure,
+    decline_arguments,
     declines_for,
     failure_code,
     failure_reason,
@@ -77,15 +81,17 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
     from datetime import datetime
 
+    from agents.mcp_client import MemberSession, MemberWake
     from agents.member import PlaceRef, PlaceWindow, Standing
 
-    from personas.app_session import AppSession, SessionOpener
+    from personas.app_session import SessionOpener
     from personas.clock import Clock
     from personas.config import AgentCredentials, AppTarget
     from personas.due import Due
     from personas.mind import Mind
     from personas.readiness import ReadyMarker
     from personas.recall import LookupBounds
+    from personas.secret import Secret
     from personas.speech import DropReason
     from personas.tokens import TokenSource
     from personas.turning import BackendFactory
@@ -174,15 +180,15 @@ class AgentLoop:
             boundaries.open_session,
             mind,
             boundaries.clock,
-            self._use_current_token,
+            self._renew_token,
             self._report,
             self._report_pause,
             self._report_tools_left_out,
             self._report_dropped,
             self._remembering,
         )
-        self._turn_states = TurnStates(self._use_current_token, self._report, app.call_seconds)
-        self._token: Token | None = None
+        self._turn_states = TurnStates(self._renew_token, self._report, app.call_seconds)
+        self._token = NO_TOKEN
         self._memory = Memory()
         self._failures = 0
         self._renewed_after_401 = False
@@ -212,18 +218,18 @@ class AgentLoop:
                 await self._react(failure)
 
     async def _serve(self) -> NoReturn:
-        token = await self._current_token()
+        await self._renew_token()
         async with (
             asyncio.TaskGroup() as turns,
-            self._boundaries.open_session(self._app, token.value, self._agent.client_id) as session,
+            self._boundaries.open_session(self._app, self._bearer, self._agent.client_id) as session,
         ):
             turns.create_task(self._turn_states.state_each(session))
             try:
                 self._turning.new_session()
                 self._mind.voice_at(self._app.mcp_url, voice=await self._is_voice_app(session))
                 while True:
-                    await self._use_current_token(session)
-                    async with session.changes() as changes, aclosing(self._wakes(changes)) as wakes:
+                    await self._renew_token()
+                    async with session.listen() as changes, aclosing(self._wakes(changes)) as wakes:
                         await self._reconcile(session, turns)
                         async for _ in wakes:
                             await self._reconcile(session, turns)
@@ -248,26 +254,27 @@ class AgentLoop:
         if senders:
             await asyncio.wait(senders)
 
-    def _sender_at(self, turns: asyncio.TaskGroup, session: AppSession, place: PlaceRef) -> None:
+    def _sender_at(self, turns: asyncio.TaskGroup, session: MemberSession, place: PlaceRef) -> None:
         if place not in self._senders:
             args = (
                 session,
                 self._app.mcp_url,
                 place,
                 self._boundaries.clock,
-                partial(self._use_current_token, session),
+                self._renew_token,
             )
             sender = Sender(*args, self._report, self._report_dropped, self._mind)
             self._senders[place] = turns.create_task(sender.run())
 
-    async def _is_voice_app(self, session: AppSession) -> bool:
+    async def _is_voice_app(self, session: MemberSession) -> bool:
         """Whether the turns at this app's call places are spoken, decided once for the lifecycle session."""
         has_voice = self._turn_setup is not None and self._agent.voice is not None
         declared = await session.declared_tools() if has_voice else ()
         return is_voice_app(has_voice, declared)
 
-    async def _wakes(self, changes: AsyncIterator[object]) -> AsyncGenerator[None]:
-        """A wake for each change the app signals and for each wake of his mind; it ends when the stream does."""
+    async def _wakes(self, changes: AsyncIterator[MemberWake]) -> AsyncGenerator[None]:
+        """A wake for each change of a resource the app signals and for each wake of his mind; it ends when the stream
+        does. A change of the app's tools wakes no reconcile: it changes no standing."""
         change = asyncio.ensure_future(anext(changes, _STREAM_ENDED))
         ended = asyncio.ensure_future(self._turn_ended.wait())
         try:
@@ -278,10 +285,12 @@ class AgentLoop:
                     ended = asyncio.ensure_future(self._turn_ended.wait())
                     yield
                 if change.done():
-                    if change.result() is _STREAM_ENDED:
+                    wake = change.result()
+                    if wake is _STREAM_ENDED:
                         return
                     change = asyncio.ensure_future(anext(changes, _STREAM_ENDED))
-                    yield
+                    if not isinstance(wake, ToolsWake):
+                        yield
         finally:
             change.cancel()
             ended.cancel()
@@ -290,7 +299,7 @@ class AgentLoop:
             if (defect := _defect_of(change)) is not None:
                 raise defect
 
-    async def _reconcile(self, session: AppSession, turns: asyncio.TaskGroup) -> None:
+    async def _reconcile(self, session: MemberSession, turns: asyncio.TaskGroup) -> None:
         """Reads the standing as it is now and acts on it; a wake says only that it may have changed.
 
         The views are read before the windows, so a window holds every line up to its view's revision; the lines enter
@@ -308,9 +317,9 @@ class AgentLoop:
         await self._start_due_turn(turns, session)
         self._served()
 
-    async def _take_standing(self, session: AppSession) -> tuple[Standing, ...]:
+    async def _take_standing(self, session: MemberSession) -> tuple[Standing, ...]:
         """Reads the standing, keeps the checkpoints in line with it and accepts what it invites to."""
-        await self._use_current_token(session)
+        await self._renew_token()
         standing = await session.read_standing()
         self._memory = forget_gone(self._memory, standing.standings)
         self._mind.sync_checkpoints(self._app.mcp_url, standing.standings, self._standings)
@@ -333,11 +342,17 @@ class AgentLoop:
             self._turn = replace(turn, cancel_requested=True)
             turn.task.cancel()
 
-    async def _use_current_token(self, session: AppSession) -> None:
-        session.use_token((await self._current_token()).value)
+    async def _renew_token(self) -> None:
+        """Makes the cached token one the realm granted for now; a session reads it through ``_bearer`` at each call."""
+        await self._current_token()
+
+    def _bearer(self) -> Secret:
+        """The cached token's value. Every session is opened after a renewal and the cache is cleared only after the
+        sessions have closed, so no session reads the placeholder."""
+        return self._token.value
 
     async def _current_token(self) -> Token:
-        if self._token is None or renewal_due(self._token, self._boundaries.clock.now()):
+        if renewal_due(self._token, self._boundaries.clock.now()):
             granted = await self._boundaries.tokens.fetch(self._agent, self._app.scope)
             expires_at = self._boundaries.clock.now() + granted.lifetime_seconds
             self._token = Token(granted.value, expires_at)
@@ -353,7 +368,7 @@ class AgentLoop:
             self._backing_off = False
             self._report(Event.RESUMED)
 
-    async def _accept_invitations(self, session: AppSession, standings: tuple[Standing, ...]) -> None:
+    async def _accept_invitations(self, session: MemberSession, standings: tuple[Standing, ...]) -> None:
         takes_turns = self._turn_setup is not None
         self._memory, left_out = left_out_for(standings, self._memory, takes_turns=takes_turns)
         for standing in left_out:
@@ -376,8 +391,8 @@ class AgentLoop:
             for decline in declines_for(standings, self._memory, held_elsewhere=held_elsewhere):
                 await self._decline(session, decline)
             for accept in accepts:
-                await self._use_current_token(session)
-                refusal = await session.accept(accept)
+                await self._renew_token()
+                refusal = await session.accept(accept_arguments(accept))
                 if refusal is None:
                     unjoined = unjoined.difference((accept.place,))
                     self._mind.move_checkpoint(AppPlace(self._app.mcp_url, accept.place), Joined())
@@ -389,16 +404,16 @@ class AgentLoop:
         finally:
             self._mind.release_places(self._app.mcp_url, unjoined)
 
-    async def _decline(self, session: AppSession, decline: Decline) -> None:
-        await self._use_current_token(session)
-        answer = await session.decline(decline)
+    async def _decline(self, session: MemberSession, decline: Decline) -> None:
+        await self._renew_token()
+        answer = await session.decline(decline_arguments(decline))
         self._memory = after_decline(self._memory, decline, answer)
         if isinstance(answer, DeclineInvitationRefusal | UnrecognisedRefusal):
             self._report(Event.DECLINE_REFUSED, answer.value, place_kind=decline.place.kind)
         elif answer is DeclineOutcome.SENT:
             self._report(Event.INVITATION_DECLINED, decline.reason.value, place_kind=decline.place.kind)
 
-    async def _read_windows(self, session: AppSession, standings: tuple[Standing, ...], began: float) -> bool:
+    async def _read_windows(self, session: MemberSession, standings: tuple[Standing, ...], began: float) -> bool:
         """Reads the active window places' windows, a turn of his running or not, and takes their lines in. ``began`` is
         when the pass began, for the due it logs.
 
@@ -409,7 +424,7 @@ class AgentLoop:
         serving_view = frozenset(active_view_places(standings))
         lost = False
         for place in active_window_places(standings):
-            await self._use_current_token(session)
+            await self._renew_token()
             window = await session.read_place(place)
             if window is None:
                 self._mind.move_checkpoint(AppPlace(self._app.mcp_url, place), None)
@@ -424,7 +439,7 @@ class AgentLoop:
         return lost
 
     async def _read_views(
-        self, session: AppSession, standings: tuple[Standing, ...]
+        self, session: MemberSession, standings: tuple[Standing, ...]
     ) -> dict[PlaceRef, ViewSeen | None]:
         """Reads the views of the active view places in the standing's order, each stamped with the time of its read; a
         place the app gives no view of maps to none."""
@@ -432,7 +447,7 @@ class AgentLoop:
             return {}
         read: dict[PlaceRef, ViewSeen | None] = {}
         for place in active_view_places(standings):
-            await self._use_current_token(session)
+            await self._renew_token()
             view = await session.read_view(place)
             read[place] = (
                 None if view is None else ViewSeen(self._app.mcp_url, place, view, self._boundaries.clock.wall())
@@ -457,7 +472,7 @@ class AgentLoop:
             elif not seen.view.awaits_you:
                 self._mind.undue(partial(eq, at))
 
-    async def _start_due_turn(self, turns: asyncio.TaskGroup, session: AppSession) -> None:
+    async def _start_due_turn(self, turns: asyncio.TaskGroup, session: MemberSession) -> None:
         """Starts the turn of the place claimed first when it is in this app and none of his runs. The claim
         and the turn's start share one synchronous step; the turn waits until the claim is kept, so a pod that takes
         him over before then answers the place instead of him."""
@@ -524,7 +539,7 @@ class AgentLoop:
     def _start_turn(
         self,
         turns: asyncio.TaskGroup,
-        session: AppSession,
+        session: MemberSession,
         setup: TurnSetup,
         place: PlaceRef,
         admitted: Admitted,
@@ -562,7 +577,7 @@ class AgentLoop:
     async def _take_once_kept(
         self,
         claimed: int,
-        session: AppSession,
+        session: MemberSession,
         setup: TurnSetup,
         admitted: Admitted,
         record: TaskRecord,
@@ -598,7 +613,7 @@ class AgentLoop:
             self._turn = replace(turn, yielded=True)
             task.cancel()
 
-    def _turn_over(self, session: AppSession, task: asyncio.Task[None]) -> None:
+    def _turn_over(self, session: MemberSession, task: asyncio.Task[None]) -> None:
         """The one writer of ``turn.ended``, whatever way the task ended. A view revision whose turn read its tool list
         before a tools notice that came before the turn ended is not turned yet."""
         turn, self._turn = self._turn, None
@@ -647,7 +662,7 @@ class AgentLoop:
         match reaction_to(failure, already_renewed=self._renewed_after_401):
             case Reaction.RENEW:
                 self._renewed_after_401 = True
-                self._token = None
+                self._token = NO_TOKEN
             case Suspend(code=code):
                 await self._suspend(code, failure)
             case remaining:
@@ -661,7 +676,7 @@ class AgentLoop:
             self._suspension = code
             self._report(Event.SUSPENDED, code, None, failure)
         self._backing_off = False
-        self._token = None
+        self._token = NO_TOKEN
         await self._wait_parked(SUSPENDED_RETRY_SECONDS, stopped_taking_turns=True)
 
     async def _back_off(self, failure: CallFailure) -> None:
@@ -704,11 +719,11 @@ class AgentLoop:
         except TimeoutError:
             self._report(Event.TURN_STATE_FAILED, NETWORK_FAILURE_CODE)
 
-    async def _state_on_own_session(self, state: Callable[[AppSession], Awaitable[None]]) -> None:
+    async def _state_on_own_session(self, state: Callable[[MemberSession], Awaitable[None]]) -> None:
         """States on a session of its own, outside the loop's; a failure to open it is logged as a failed statement."""
         try:
-            token = await self._current_token()
-            async with self._boundaries.open_session(self._app, token.value, self._agent.client_id) as session:
+            await self._renew_token()
+            async with self._boundaries.open_session(self._app, self._bearer, self._agent.client_id) as session:
                 await state(session)
         except Exception as error:
             failure = decisive_failure(tuple(leaves_of(error)), already_renewed=False)

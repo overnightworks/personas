@@ -439,6 +439,9 @@ class FakeApp(AppVoice):
     async def until_view_read(self, place: PlaceRef, count: int = 1) -> None:
         await self.until_read(place_view_uri(place), count)
 
+    def standing_reads(self) -> int:
+        return self.reads.get(STANDING_URI, 0)
+
     def view_reads(self, place: PlaceRef) -> int:
         return self.reads.get(place_view_uri(place), 0)
 

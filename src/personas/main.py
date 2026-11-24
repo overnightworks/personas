@@ -18,7 +18,7 @@ import httpx2
 from agents.backend.gateway import GatewayBackend
 from logline import configure
 
-from personas.app_session import open_mcp_session
+from personas.app_session import open_app_session
 from personas.clock import SystemClock
 from personas.config import Config, ConfigError, load_config
 from personas.failures import SchemaNotAtHeadError, StoreDefect, StoreUnavailable, leaves_of
@@ -119,7 +119,7 @@ async def real_boundaries(config: Config, ready: ReadyMarker) -> AsyncGenerator[
         ):
             yield SweepingBoundaries(
                 tokens=HttpTokenSource(config.token_endpoint, token_client),
-                open_session=open_mcp_session,
+                open_session=open_app_session,
                 clock=clock,
                 report=log_state_change,
                 ready=ready,

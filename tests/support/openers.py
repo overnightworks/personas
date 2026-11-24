@@ -1,27 +1,36 @@
 """Session openers of real sessions that fail, wait or are lost at the points a scenario names.
 
-Each wraps the real ``open_mcp_session`` (or the ``inner`` opener it is given) and raises at the same point what the
-client's fold of a failed close gives, or runs an anyio group so that the real client meets a real cancellation.
+Each wraps the real ``open_app_session`` (or the ``inner`` opener it is given) and raises at the same point what
+agents' fold of a failed close gives, or runs an anyio group so that the real client meets a real cancellation.
 """
 
 from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Final, cast
 
 import anyio
+from agents.mcp_client.exchange import BearerAuth
+from agents.mcp_client.fold import folded
 from agents.member_outcomes import Unreachable
+from pydantic import SecretStr
 
-from personas.app_session import open_mcp_session
+from personas.app_session import open_app_session
 from personas.failures import leaves_of, task_is_being_cancelled
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable
 
-    from personas.app_session import AppSession, SessionOpener
+    from agents.mcp_client import MemberSession
+
+    from personas.app_session import SessionOpener
     from personas.config import AppTarget
     from personas.secret import Secret
+
+
+_NO_ANSWER_YET: Final = BearerAuth(lambda: SecretStr(""))
+"""The auth of a session that was given no HTTP answer, which ``folded`` reads the last answer of."""
 
 
 def _of_app(of_url: str | None, app: AppTarget) -> bool:
@@ -43,9 +52,13 @@ def _the_nth_session(nth: int, of_url: str | None) -> Callable[[AppTarget], bool
     return is_nth
 
 
-def a_late_answer() -> Unreachable:
-    """What the client's fold makes of an answer that lands after the session ended, beside another failure."""
-    return Unreachable("an answer landed after the session closed")
+def _folded_close(
+    leaves: list[Exception], raised_in_body: Exception | None, *, cancelled_in_body: bool = False
+) -> Exception | asyncio.CancelledError:
+    """What the client raises of a session that ended with these leaves."""
+    return folded(
+        ExceptionGroup("the close", leaves), raised_in_body, _NO_ANSWER_YET, cancelled_in_body=cancelled_in_body
+    )
 
 
 class ClosingHold:
@@ -84,7 +97,7 @@ class ClosingHold:
         return _opener_around(request, around, of_url=None)
 
     def opener(
-        self, *, nth: int = 1, of_url: str | None = None, inner: SessionOpener = open_mcp_session
+        self, *, nth: int = 1, of_url: str | None = None, inner: SessionOpener = open_app_session
     ) -> SessionOpener:
         """A session opener whose ``nth`` session leaves only once ``release`` is set, the real session at that app.
 
@@ -94,9 +107,9 @@ class ClosingHold:
         is_nth = _the_nth_session(nth, of_url)
 
         @asynccontextmanager
-        async def waiting(app: AppTarget, token: Secret, agent_id: str) -> AsyncGenerator[AppSession]:
+        async def waiting(app: AppTarget, bearer: Callable[[], Secret], agent_id: str) -> AsyncGenerator[MemberSession]:
             try:
-                async with inner(app, token, agent_id) as session:
+                async with inner(app, bearer, agent_id) as session:
                     yield session
             finally:
                 if is_nth(app):
@@ -112,7 +125,7 @@ class _AroundSession:
     """The real session at one app, whose named requests run inside their ``around``, which gets the real request to
     call."""
 
-    def __init__(self, session: AppSession, arounds: dict[str, _Around]) -> None:
+    def __init__(self, session: MemberSession, arounds: dict[str, _Around]) -> None:
         self._session = session
         self._arounds = arounds
 
@@ -134,10 +147,10 @@ def _opener_around(request: str, around: _Around, *, of_url: str | None) -> Sess
 
 def _opener_arounds(arounds: dict[str, _Around], *, of_url: str | None) -> SessionOpener:
     @asynccontextmanager
-    async def opened(app: AppTarget, token: Secret, agent_id: str) -> AsyncGenerator[AppSession]:
-        async with open_mcp_session(app, token, agent_id) as session:
+    async def opened(app: AppTarget, bearer: Callable[[], Secret], agent_id: str) -> AsyncGenerator[MemberSession]:
+        async with open_app_session(app, bearer, agent_id) as session:
             if _of_app(of_url, app):
-                yield cast("AppSession", _AroundSession(session, arounds))
+                yield cast("MemberSession", _AroundSession(session, arounds))
             else:
                 yield session
 
@@ -154,7 +167,7 @@ def opener_whose_request_raises(
     arrived: asyncio.Event | None = None,
     when_cancelled: bool = False,
 ) -> SessionOpener:
-    """A session opener of real sessions whose ``request``, an ``AppSession`` method, raises ``defect``.
+    """A session opener of real sessions whose ``request``, a ``MemberSession`` method, raises ``defect``.
 
     With ``of_url`` only the sessions at that URL raise, and with ``once`` only the first such request does. The
     first ``after`` requests are real. With ``when_cancelled`` the request waits, tells ``arrived`` and raises
@@ -210,7 +223,7 @@ def opener_whose_requests_raise_together(defects: dict[str, tuple[Exception, int
 
 
 def opener_whose_close_adds_a_late_answer(
-    *, only_close: int | None = None, inner: SessionOpener = open_mcp_session
+    *, only_close: int | None = None, inner: SessionOpener = open_app_session
 ) -> SessionOpener:
     """A session opener whose session, once it failed, leaves with a late answer beside the failure.
 
@@ -218,11 +231,13 @@ def opener_whose_close_adds_a_late_answer(
     ``only_close`` counts the sessions that left with an error or a cancellation from one and limits the late answer
     to that one; every failed session gets it without.
     """
-    return _opener_whose_close_adds(a_late_answer, replaces_cancellation=False, only_close=only_close, inner=inner)
+    return _opener_whose_close_adds(
+        anyio.BrokenResourceError, replaces_cancellation=False, only_close=only_close, inner=inner
+    )
 
 
 def opener_whose_close_adds_a_defect(
-    defect: Callable[[], Exception], *, only_close: int | None = None, inner: SessionOpener = open_mcp_session
+    defect: Callable[[], Exception], *, only_close: int | None = None, inner: SessionOpener = open_app_session
 ) -> SessionOpener:
     """A session opener whose session leaves with the defect ``defect`` makes beside the failure that ended it.
 
@@ -238,21 +253,21 @@ def _opener_whose_close_adds(
     closes = 0
 
     @asynccontextmanager
-    async def adding(app: AppTarget, token: Secret, agent_id: str) -> AsyncGenerator[AppSession]:
+    async def adding(app: AppTarget, bearer: Callable[[], Secret], agent_id: str) -> AsyncGenerator[MemberSession]:
         nonlocal closes
         try:
-            async with inner(app, token, agent_id) as session:
+            async with inner(app, bearer, agent_id) as session:
                 yield session
         except Exception as error:
             closes += 1
             if only_close not in (None, closes):
                 raise
-            raise ExceptionGroup("the session failed", [*leaves_of(error), added()]) from None
+            raise _folded_close([*leaves_of(error), added()], error) from None
         except asyncio.CancelledError:
             closes += 1
             if not replaces_cancellation or only_close not in (None, closes):
                 raise
-            raise ExceptionGroup("the session failed", [added()]) from None
+            raise _folded_close([added()], None) from None
 
     return adding
 
@@ -265,10 +280,10 @@ def opener_whose_cancelled_close_fails(*, only_close: int | None = None) -> Sess
     closes = 0
 
     @asynccontextmanager
-    async def failing(app: AppTarget, token: Secret, agent_id: str) -> AsyncGenerator[AppSession]:
+    async def failing(app: AppTarget, bearer: Callable[[], Secret], agent_id: str) -> AsyncGenerator[MemberSession]:
         nonlocal closes
         try:
-            async with open_mcp_session(app, token, agent_id) as session:
+            async with open_app_session(app, bearer, agent_id) as session:
                 yield session
         except asyncio.CancelledError:
             closes += 1
@@ -280,7 +295,7 @@ def opener_whose_cancelled_close_fails(*, only_close: int | None = None) -> Sess
 
 
 def opener_whose_close_loses_a_child(
-    *, nth: int = 1, of_url: str | None = None, inner: SessionOpener = open_mcp_session
+    *, nth: int = 1, of_url: str | None = None, inner: SessionOpener = open_app_session
 ) -> SessionOpener:
     """A session opener whose ``nth`` session leaves as ``Unreachable`` beside what its body raised, as the client's
     fold gives a close that loses a child of its task group.
@@ -290,13 +305,13 @@ def opener_whose_close_loses_a_child(
     is_nth = _the_nth_session(nth, of_url)
 
     @asynccontextmanager
-    async def losing(app: AppTarget, token: Secret, agent_id: str) -> AsyncGenerator[AppSession]:
+    async def losing(app: AppTarget, bearer: Callable[[], Secret], agent_id: str) -> AsyncGenerator[MemberSession]:
         if not is_nth(app):
-            async with inner(app, token, agent_id) as session:
+            async with inner(app, bearer, agent_id) as session:
                 yield session
             return
         try:
-            async with inner(app, token, agent_id) as session:
+            async with inner(app, bearer, agent_id) as session:
                 yield session
         except Exception as error:
             raise ExceptionGroup(
@@ -313,7 +328,7 @@ def opener_whose_session_loses_a_child(
     nth: int = 2,
     of_url: str | None = None,
     error: Callable[[], Exception] = anyio.BrokenResourceError,
-    inner: SessionOpener = open_mcp_session,
+    inner: SessionOpener = open_app_session,
 ) -> SessionOpener:
     """A session opener whose ``nth`` session runs beside a child that fails with ``error`` once ``failing`` is set.
 
@@ -325,9 +340,9 @@ def opener_whose_session_loses_a_child(
     is_nth = _the_nth_session(nth, of_url)
 
     @asynccontextmanager
-    async def losing(app: AppTarget, token: Secret, agent_id: str) -> AsyncGenerator[AppSession]:
+    async def losing(app: AppTarget, bearer: Callable[[], Secret], agent_id: str) -> AsyncGenerator[MemberSession]:
         if not is_nth(app):
-            async with inner(app, token, agent_id) as session:
+            async with inner(app, bearer, agent_id) as session:
                 yield session
             return
 
@@ -338,17 +353,13 @@ def opener_whose_session_loses_a_child(
         try:
             async with anyio.create_task_group() as group:
                 group.start_soon(child)
-                async with inner(app, token, agent_id) as session:
+                async with inner(app, bearer, agent_id) as session:
                     yield session
         except ExceptionGroup as lost:
-            # The client's fold gives the session's own cancellation by the group alone, or late answers alone, as
-            # the cancellation; a lost child while another cancellation is pending is unreachable.
-            late = all(
-                isinstance(leaf, anyio.BrokenResourceError | anyio.ClosedResourceError) for leaf in leaves_of(lost)
-            )
-            if late or not task_is_being_cancelled():
+            # The scenario's own group cancelling the body is the one choice kept; the client's fold gives the rest.
+            if not task_is_being_cancelled():
                 raise asyncio.CancelledError from None
-            raise Unreachable("the transport lost a child") from None
+            raise _folded_close(list(leaves_of(lost)), None, cancelled_in_body=True) from None
 
     return losing
 
@@ -358,12 +369,12 @@ def opener_cancelled_once() -> SessionOpener:
     opens = 0
 
     @asynccontextmanager
-    async def cancelling(app: AppTarget, token: Secret, agent_id: str) -> AsyncGenerator[AppSession]:
+    async def cancelling(app: AppTarget, bearer: Callable[[], Secret], agent_id: str) -> AsyncGenerator[MemberSession]:
         nonlocal opens
         opens += 1
         if opens == 1:
             raise asyncio.CancelledError
-        async with open_mcp_session(app, token, agent_id) as session:
+        async with open_app_session(app, bearer, agent_id) as session:
             yield session
 
     return cancelling

@@ -11,7 +11,15 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Literal, NamedTuple, overload
 
-from agents.member import DeclineInvitationRefusal, MemberStanding, Standing
+from agents.mcp_client import ResourceWake
+from agents.member import (
+    STANDING_URI,
+    AcceptInvitationArguments,
+    DeclineInvitationArguments,
+    DeclineInvitationRefusal,
+    MemberStanding,
+    Standing,
+)
 from agents.member_outcomes import CallFailure, DeclineOutcome
 
 from personas.config import (
@@ -22,7 +30,7 @@ from personas.config import (
     AppTarget,
     MemoryTarget,
 )
-from personas.decision import Accept, Decline, Refusal
+from personas.decision import Refusal
 from personas.mind import Mind
 from personas.reporting import Event
 from personas.secret import Secret
@@ -31,8 +39,9 @@ from tests.support.hopin_places import ISSUER
 from tests.support.realm import AGENT_NAME, API_GROUP, jwt_of
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Callable
 
+    from agents.mcp_client import MemberWake
     from agents.turn import FailureCode, RejectionCode
 
     from personas.reporting import StateChange
@@ -149,21 +158,18 @@ class _Wakes:
     def __aiter__(self) -> _Wakes:
         return self
 
-    async def __anext__(self) -> None:
+    async def __anext__(self) -> ResourceWake:
         if self._session.graceful_ends:
             self._session.graceful_ends -= 1
             raise StopAsyncIteration
-        if self._session.reads:
-            return
-        self._session.idle.set()
-        await asyncio.Event().wait()
+        if not self._session.reads:
+            self._session.idle.set()
+            await asyncio.Event().wait()
+        return ResourceWake(STANDING_URI)
 
 
 class BareSession:
-    """A session stand-in that holds no token, no list of its app's tools and received no tools notice."""
-
-    def use_token(self, token: Secret) -> None:
-        pass
+    """A session stand-in that holds no list of its app's tools and received no tools notice."""
 
     def kept_tools(self) -> None:
         return None
@@ -185,30 +191,27 @@ class FakeSession(BareSession):
     seconds_per_read: float = 0.0
     seconds_per_accept: float = 0.0
     graceful_ends: int = 0
-    bearer: Secret | None = None
+    bearer: Callable[[], Secret] | None = None
     entered_with_time: list[tuple[Secret, float]] = field(default_factory=list[tuple[Secret, float]])
     opened_with: list[Secret] = field(default_factory=list[Secret])
-    accepted: list[Accept] = field(default_factory=list[Accept])
-    declined: list[Decline] = field(default_factory=list[Decline])
+    accepted: list[AcceptInvitationArguments] = field(default_factory=list[AcceptInvitationArguments])
+    declined: list[DeclineInvitationArguments] = field(default_factory=list[DeclineInvitationArguments])
     bearers_with_time: list[tuple[Secret, float]] = field(default_factory=list[tuple[Secret, float]])
     idle: asyncio.Event = field(default_factory=asyncio.Event)
-
-    def use_token(self, token: Secret) -> None:
-        self.bearer = token
 
     @property
     def opened(self) -> int:
         return len(self.opened_with)
 
     @asynccontextmanager
-    async def changes(self) -> AsyncIterator[AsyncIterator[object]]:
+    async def listen(self) -> AsyncIterator[AsyncIterator[MemberWake]]:
         assert self.bearer is not None
-        self.entered_with_time.append((self.bearer, self.clock.now()))
+        self.entered_with_time.append((self.bearer(), self.clock.now()))
         yield _Wakes(self)
 
     async def read_standing(self) -> MemberStanding:
         assert self.bearer is not None
-        self.bearers_with_time.append((self.bearer, self.clock.now()))
+        self.bearers_with_time.append((self.bearer(), self.clock.now()))
         if not self.reads:
             self.idle.set()
             await asyncio.Event().wait()
@@ -218,9 +221,9 @@ class FakeSession(BareSession):
             raise step
         return step
 
-    async def accept(self, accept: Accept) -> Refusal | None:
+    async def accept(self, accept: AcceptInvitationArguments) -> Refusal | None:
         assert self.bearer is not None
-        self.bearers_with_time.append((self.bearer, self.clock.now()))
+        self.bearers_with_time.append((self.bearer(), self.clock.now()))
         self.clock.time += self.seconds_per_accept
         self.accepted.append(accept)
         step = self.accepts.pop(0) if self.accepts else None
@@ -228,14 +231,14 @@ class FakeSession(BareSession):
             raise step
         return step
 
-    async def decline(self, decline: Decline) -> DeclineOutcome | DeclineInvitationRefusal:
+    async def decline(self, decline: DeclineInvitationArguments) -> DeclineOutcome | DeclineInvitationRefusal:
         self.declined.append(decline)
         return DeclineOutcome.SENT
 
     @asynccontextmanager
-    async def open(self, app: AppTarget, token: Secret, agent_id: str):
-        self.opened_with.append(token)
-        self.bearer = token
+    async def open(self, app: AppTarget, bearer: Callable[[], Secret], agent_id: str) -> AsyncIterator[FakeSession]:
+        self.opened_with.append(bearer())
+        self.bearer = bearer
         yield self
 
 

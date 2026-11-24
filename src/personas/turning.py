@@ -73,12 +73,13 @@ if TYPE_CHECKING:
 
     from agents.agent_file import AgentDefinition
     from agents.backend import AgentBackend, TurnEvent
+    from agents.mcp_client import MemberSession
     from agents.member import PlaceRef, PlaceWindow
     from agents.turn import FailureCode, JsonObject, Principal
     from logline import StepTimer
 
     from personas.admission import Admitted
-    from personas.app_session import AppSession, SessionOpener
+    from personas.app_session import SessionOpener
     from personas.clock import Clock
     from personas.config import AgentCredentials, AppTarget
     from personas.mind import Mind
@@ -139,7 +140,7 @@ class Turning:
         open_session: SessionOpener,
         mind: Mind,
         clock: Clock,
-        use_current_token: Callable[[AppSession], Awaitable[None]],
+        renew_token: Callable[[], Awaitable[None]],
         report: LoopReport,
         report_pause: Callable[[float, str], None],
         report_tools_left_out: Callable[[AppTarget, int], None],
@@ -151,11 +152,11 @@ class Turning:
         self._apps = tuple((each, each.max_tool_calls) for each in apps if each.max_tool_calls is not None)
         self._sessions = TurnSessions(agent, tokens, open_session)
         self._lists = ToolLists(
-            agent, app, tuple(each for each, _ in self._apps), self._sessions, mind, clock, use_current_token, report
+            agent, app, tuple(each for each, _ in self._apps), self._sessions, mind, clock, renew_token, report
         )
         self._mind = mind
         self._clock = clock
-        self._use_current_token = use_current_token
+        self._renew_token = renew_token
         self._report = report
         self._report_pause = report_pause
         self._report_tools_left_out = report_tools_left_out
@@ -178,7 +179,7 @@ class Turning:
 
     async def take(
         self,
-        session: AppSession,
+        session: MemberSession,
         setup: TurnSetup,
         admitted: Admitted,
         record: TaskRecord,
@@ -206,7 +207,7 @@ class Turning:
 
     @asynccontextmanager
     async def _listing_beside(
-        self, session: AppSession, admitted: Admitted, record: TaskRecord
+        self, session: MemberSession, admitted: Admitted, record: TaskRecord
     ) -> AsyncGenerator[asyncio.Task[tuple[Declared, ...]]]:
         """Lists the tools of the apps in a task beside the block, which awaits it where it needs what they listed.
 
@@ -228,7 +229,7 @@ class Turning:
 
     async def _judge_turn(
         self,
-        session: AppSession,
+        session: MemberSession,
         setup: TurnSetup,
         admitted: Admitted,
         record: TaskRecord,
@@ -276,7 +277,7 @@ class Turning:
 
     async def _run_turn(
         self,
-        session: AppSession,
+        session: MemberSession,
         setup: TurnSetup,
         admitted: Admitted,
         record: TaskRecord,
@@ -316,7 +317,7 @@ class Turning:
         admitted: Admitted,
         turn: TurnTold,
         told: tuple[str, ...],
-        session: AppSession,
+        session: MemberSession,
         record: TaskRecord,
         sizing: Sizing,
         tally: TurnTally,
@@ -412,7 +413,7 @@ class Turning:
             speaking.cut()
         return final
 
-    async def hold(self, session: AppSession, place: PlaceRef, window: PlaceWindow) -> bool:
+    async def hold(self, session: MemberSession, place: PlaceRef, window: PlaceWindow) -> bool:
         """What a read of the place's window says of him. The hold it states stands in the mind's record of the place.
         The spoken turn at the place hears it; with none there, a hold that may be told makes the place due, and a hold
         whose turn ended without deciding it is stopped with its id, the loop's session taking the call, and the unsent
@@ -431,7 +432,7 @@ class Turning:
 
     def _hold_tools(
         self,
-        session: AppSession,
+        session: MemberSession,
         record: TaskRecord,
         admitted: Admitted,
         bound: TurnBound,
@@ -490,7 +491,7 @@ class Turning:
     def _hand_tools(
         self,
         app: AppTarget,
-        session: AppSession,
+        session: MemberSession,
         offered: tuple[ToolDeclaration, ...],
         calls: Calls,
         hold: HoldBack,
@@ -556,7 +557,13 @@ class Turning:
         return None
 
     async def _relay(
-        self, session: AppSession, name: str, calls: Calls, hold: HoldBack, _principal: Principal, arguments: JsonObject
+        self,
+        session: MemberSession,
+        name: str,
+        calls: Calls,
+        hold: HoldBack,
+        _principal: Principal,
+        arguments: JsonObject,
     ) -> ToolOutcome:
         if (held := self._held(hold)) is not None:
             return held
@@ -568,8 +575,8 @@ class Turning:
         except Exception as error:
             raise RelayFailed(error) from None
 
-    async def _invoke(self, session: AppSession, name: str, arguments: JsonObject) -> ToolOutcome:
-        await self._use_current_token(session)
+    async def _invoke(self, session: MemberSession, name: str, arguments: JsonObject) -> ToolOutcome:
+        await self._renew_token()
         return await session.invoke(name, arguments)
 
     async def _relay_elsewhere(

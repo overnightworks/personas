@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from agents.member import PlaceRef
 
-from personas.app_session import open_mcp_session
+from personas.app_session import open_app_session
 from personas.config import AppTarget
 from personas.secret import Secret
 from tests.support.hopin import FakeApp
@@ -46,4 +46,4 @@ def bearer(app: FakeApp) -> Secret:
 
 
 def opened(app: FakeApp, bearer: Secret, **keywords: Any):
-    return open_mcp_session(AppTarget(app.url, "scope"), bearer, "agent-one", **keywords)
+    return open_app_session(AppTarget(app.url, "scope"), lambda: bearer, "agent-one", **keywords)

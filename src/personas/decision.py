@@ -63,6 +63,7 @@ from personas.entries import (
 )
 from personas.failures import TokenStatusFailure, leaves_of
 from personas.recall import RECALL_TOOL
+from personas.secret import Secret
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -70,8 +71,6 @@ if TYPE_CHECKING:
     from agents.member import FigureRef, HttpsFileRef, Invitation, VoiceName
     from agents.tools import ToolDeclaration, ToolOutcome
     from agents.turn import AgentRole
-
-    from personas.secret import Secret
 
 CALL_PLACE_KIND: Final = "call"
 RESERVED_TOOLS: Final = frozenset(
@@ -173,6 +172,10 @@ def decline_arguments(decline: Decline) -> DeclineInvitationArguments:
 class Token:
     value: Secret = field(repr=False)
     expires_at: float
+
+
+NO_TOKEN: Final = Token(Secret(""), -math.inf)
+"""The cache before a token is fetched and after one is dropped; a token that is due at once, which no session reads."""
 
 
 @dataclass(frozen=True)
@@ -323,8 +326,8 @@ def after_refusal(memory: Memory, accept: Accept, refusal: Refusal) -> tuple[Mem
     return replace(memory, refused={**memory.refused, accept.invitation_id: refusal}), is_news
 
 
-def renewal_due(token: Token | None, now: float) -> bool:
-    return token is None or now >= token.expires_at - RENEW_BEFORE_EXPIRY_SECONDS
+def renewal_due(token: Token, now: float) -> bool:
+    return now >= token.expires_at - RENEW_BEFORE_EXPIRY_SECONDS
 
 
 def _doubling_wait(count: int, cap_seconds: float) -> float:

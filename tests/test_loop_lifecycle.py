@@ -31,7 +31,7 @@ from mcp_types import (
     TextResourceContents,
 )
 
-from personas.app_session import open_mcp_session
+from personas.app_session import open_app_session
 from personas.decision import NETWORK_FAILURE_CODE, SUSPENDED_RETRY_SECONDS, backoff_delay
 from personas.failures import leaves_of
 from personas.reporting import Event
@@ -148,7 +148,7 @@ async def test_a_stream_that_never_completes_is_cut_at_the_runners_deadline_and_
 
 async def test_an_answer_that_lands_after_the_session_closed_backs_off_and_does_not_end_the_runner(runner):
     runner.open_session = opener_whose_close_adds_a_late_answer(
-        only_close=1, inner=partial(open_mcp_session, stream_seconds=SHORT_STREAM_SECONDS)
+        only_close=1, inner=partial(open_app_session, stream_seconds=SHORT_STREAM_SECONDS)
     )
     runner.app.pulses_on_read = True
     runner.start(stream_seconds=SHORT_STREAM_SECONDS)
