@@ -12,8 +12,9 @@ from personas.decision import SUSPENDED_RETRY_SECONDS
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway
-from tests.support.hopin import LIST_TOOLS
+from tests.support.hopin import LIST_TOOLS, SKILLS_LIST
 from tests.support.pods import SECOND_AGENT, SECOND_SUBJECT
+from tests.support.skills import Shelf, a_skill_file
 from tests.support.songmaker import CREATE_SONG, GENERATE_SONG, SCOPE
 from tests.support.standings import AGENT_SUBJECT, active
 
@@ -31,6 +32,12 @@ def refused_by_the_app(runner, songmaker):
     songmaker.refused_method = LIST_TOOLS
 
 
+def refused_skills_by_the_app(runner, songmaker):
+    songmaker.shelf = Shelf({"songmaker": a_skill_file("songmaker")})
+    songmaker.refuse_with = HTTPStatus.FORBIDDEN
+    songmaker.refused_method = SKILLS_LIST
+
+
 def granted_by_the_realm(runner, songmaker):
     runner.realm.refused_scopes.discard(SCOPE)
 
@@ -44,8 +51,9 @@ REFUSALS = pytest.mark.parametrize(
     [
         (refused_by_the_realm, granted_by_the_realm, status_code(HTTPStatus.UNAUTHORIZED)),
         (refused_by_the_app, granted_by_the_app, status_code(HTTPStatus.FORBIDDEN)),
+        (refused_skills_by_the_app, granted_by_the_app, status_code(HTTPStatus.FORBIDDEN)),
     ],
-    ids=["the realm refuses the token", "the app answers 403"],
+    ids=["the realm refuses the token", "the app answers 403", "the app refuses its skills listing"],
 )
 
 
