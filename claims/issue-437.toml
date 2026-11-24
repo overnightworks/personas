@@ -1,0 +1,7 @@
+claim_id = "9f2da366844542baaa512ec3c9d1ee5b"
+agent = "Claude 94207f40-f773-4b39-81c0-3931eea96ec0"
+role = "builder"
+base = "7ebcda718a04150d6cb928e417687ae26a72b672"
+branch = "claude/issue-437-one-entry-per-skill-round"
+scope = ["src/personas/entries.py", "tests/support/history.py", "tests/test_entries.py"]
+opened_commit = "0cfa163c7fc06a21e58b7e05a4e7c93b12466692"
