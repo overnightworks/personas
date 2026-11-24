@@ -61,10 +61,7 @@ async def test_an_invitation_is_accepted_once_with_its_place_invitation_and_epoc
 
 async def test_a_stale_invitation_is_not_retried_and_is_reported_once(scenario):
     standing = invited("room-7", "inv-3")
-    run = scenario(
-        [read_of(standing), read_of(standing), read_of(standing)],
-        accepts=[AcceptInvitationRefusal.STALE_INVITATION],
-    )
+    run = scenario([read_of(standing) for _ in range(3)], accepts=[AcceptInvitationRefusal.STALE_INVITATION])
 
     await run.play()
 
