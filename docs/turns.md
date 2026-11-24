@@ -108,9 +108,10 @@ An entry has its app and the time he took it (`at`), and is one of:
   when the loop's session ends is cancelled before it closes. A tool's error result reaches the model inside
   the same turn. The skills of each app the turn lists are read in the session that lists its tools: an app
   that declares the skills extension is asked for its listing, and one that does not is sent no request; an app
-  whose skills listing fails has no lines in that turn and the turn goes on. A read of a skill is a call to its app: at another app in a session of its own, which fails as a call there does, on the loop's session
-  for the own app, which ends the turn as a failed call does. A skill the app serves a file for that is not what its
-  listing promised, a name no line holds and a text past one result's bound answer an error and enter nothing.
+  whose skills listing fails has no lines in that turn and the turn goes on. A read of a skill is a call to its app: at
+  another app in a session of its own, which fails as a call there does, and for the own app on the loop's session,
+  which ends the turn as a failed call does. A skill the app serves a file for that is not what its listing
+  promised, a name no line holds and a text past one result's bound answer an error and enter nothing.
 - TURNS-20: Before the turn's next call goes out, once per turn, anything not his own that arrived since the turn
   began holds that call: it is not sent, the model is told what arrived, and decides again.
 - TURNS-21: Every relayed call enters his history when the app answers or the relay ends without an answer, with the

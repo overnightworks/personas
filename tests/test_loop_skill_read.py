@@ -257,7 +257,7 @@ async def test_a_refused_skill_answers_an_error_logs_its_code_and_enters_nothing
     assert skill_reads(runner) == []
 
 
-async def test_read_skill_calls_past_their_bound_answer_an_error_within_the_turn_total(runner, songmaker):
+async def test_read_skill_calls_past_their_bound_answer_an_error_and_a_later_call_still_runs(runner, songmaker):
     skilled(runner, songmaker)
     reads = [reading(SONGMAKER, f"model-read-{number}") for number in range(READ_SKILL_CALLS + 1)]
     runner.gateway = Gateway(tool_round(*reads), tool_round(a_song("model-song")), completion("done"))
@@ -307,7 +307,7 @@ async def test_a_skills_listing_that_times_out_leaves_its_apps_lines_out_and_its
     assert {CREATE_SONG, GENERATE_SONG} <= set(runner.gateway.offered_tools(1))
 
 
-async def test_an_app_without_the_skills_extension_is_sent_no_request_for_its_skills(runner, songmaker):
+async def test_an_app_without_the_skills_extension_is_sent_no_request_for_its_skills(runner, songmaker, caplog):
     await restarted_in_the_call(runner)
 
     await a_turn(runner, 1)
@@ -316,6 +316,7 @@ async def test_an_app_without_the_skills_extension_is_sent_no_request_for_its_sk
     assert SKILLS_LIST not in sent
     assert SKILLS_GET not in sent
     assert songmaker.log.count(LIST_TOOLS) == 1
+    assert lines_of(caplog.get_records("call"), "skill_list.ended") == []
 
 
 async def test_the_own_apps_declared_skills_are_listed_on_the_loops_session_with_its_tools(runner, caplog):
