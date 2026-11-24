@@ -11,12 +11,14 @@ from typing import TYPE_CHECKING, Final
 from agents.agent_file import TurnRequest
 from agents.backend import TurnPerson, TurnStopped
 from agents.member_outcomes import CallFailure
+from agents.skills import Skill, SkillRefused
 from agents.tools import HandTool, ToolDeclaration, ToolOutcome
-from agents.turn import RejectionCode, Turn, TurnMessage, TurnRole
+from agents.turn import RejectionCode, ToolRound, Turn, TurnMessage, is_within_event_bound
 from agents.turn_events import FinalEvent, ToolCallEvent
 from agents.voice.reply import REPLY_RULES
 
 from personas.decision import (
+    READ_SKILL_CALLS,
     TURN_ROLE,
     AppPlace,
     act_outcome,
@@ -42,7 +44,17 @@ from personas.holds import (
     Voiced,
     close_when_over,
 )
-from personas.present import held_told, turn_messages
+from personas.present import (
+    READ_SKILL_DECLARATION,
+    ListedSkill,
+    held_told,
+    listed_skills,
+    skill_lines,
+    skill_text,
+    skill_to_read,
+    turn_messages,
+    user_message,
+)
 from personas.recall import (
     LOOKUPS_SPENT_TEXT,
     RECALL_DECLARATION,
@@ -52,7 +64,7 @@ from personas.recall import (
     search_text,
     text_refused_text,
 )
-from personas.reporting import LoopReport, TurnTally, failure_event, step_timer, stepping
+from personas.reporting import Event, LoopReport, TurnTally, failure_event, step_timer, stepping
 from personas.sizing import Sizing
 from personas.speech import HoldOutcome, Telling, hold_ended_as
 from personas.task_record import (
@@ -62,13 +74,13 @@ from personas.task_record import (
     failure_held_by,
     failures_leaving_with,
 )
-from personas.tool_lists import Declared, ToolLists
+from personas.tool_lists import Listed, ToolLists
 from personas.turn_bound import TurnBound
 from personas.turn_sessions import TurnSessions
 from personas.voice import DropReporter, Voicing
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterable
+    from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterable, Mapping
     from contextlib import AbstractAsyncContextManager
 
     from agents.agent_file import AgentDefinition
@@ -83,6 +95,7 @@ if TYPE_CHECKING:
     from personas.clock import Clock
     from personas.config import AgentCredentials, AppTarget
     from personas.mind import Mind
+    from personas.present import AppSkill
     from personas.recall import LookupBounds
     from personas.remembering import Remembering
     from personas.task_record import TaskRecord
@@ -97,6 +110,10 @@ _APART_TEXT: Final = (
     "a hold is decided in a round of its own when one starts: nothing is held now, so there is nothing to decide"
 )
 _WRITTEN_TURN_TEXT: Final = "this turn is not spoken: continue_speaking and stop_speaking act only in a spoken turn"
+_SKILLS_SPENT_TEXT: Final = "no more skills can be read in this turn"
+_NO_SUCH_SKILL_TEXT: Final = "no skill of that name is listed in your instructions"
+_SKILL_REFUSED_TEXT: Final = "this skill cannot be read"
+_SKILL_TOO_LARGE_TEXT: Final = "this skill is too large to read"
 
 
 async def _final_event_of(events: AsyncIterator[TurnEvent], tally: TurnTally) -> FinalEvent | None:
@@ -150,6 +167,7 @@ class Turning:
         self._agent = agent
         self._app = app
         self._apps = tuple((each, each.max_tool_calls) for each in apps if each.max_tool_calls is not None)
+        self._app_at = {each.mcp_url: each for each, _ in self._apps}
         self._sessions = TurnSessions(agent, tokens, open_session)
         self._lists = ToolLists(
             agent, app, tuple(each for each, _ in self._apps), self._sessions, mind, clock, renew_token, report
@@ -208,8 +226,8 @@ class Turning:
     @asynccontextmanager
     async def _listing_beside(
         self, session: MemberSession, admitted: Admitted, record: TaskRecord
-    ) -> AsyncGenerator[asyncio.Task[tuple[Declared, ...]]]:
-        """Lists the tools of the apps in a task beside the block, which awaits it where it needs what they listed.
+    ) -> AsyncGenerator[asyncio.Task[tuple[Listed, ...]]]:
+        """Lists the tools and skills of the apps in a task beside the block, which awaits it where it needs them.
 
         The listing is a task of its own, not in a group with the gate, so a listing that fails never cuts the gate
         and its failure ends the turn after the thinking. A turn that ends before it awaited the listing cancels it,
@@ -299,7 +317,7 @@ class Turning:
                 )
                 told = turn_messages(admitted.facts.name, admitted.present, turn)
                 if admitted.held is not None:
-                    told = (*told, self._holds.told_standing(admitted.place, admitted.held))
+                    told = (*told, user_message(self._holds.told_standing(admitted.place, admitted.held)))
                 bound = TurnBound(self._clock, setup.persona.max_duration_seconds)
                 try:
                     await self._run_session_body(
@@ -316,14 +334,14 @@ class Turning:
         setup: TurnSetup,
         admitted: Admitted,
         turn: TurnTold,
-        told: tuple[str, ...],
+        told: tuple[TurnMessage | ToolRound, ...],
         session: MemberSession,
         record: TaskRecord,
         sizing: Sizing,
         tally: TurnTally,
         hand_off: StepTimer,
         bound: TurnBound,
-        lists: tuple[Declared, ...],
+        lists: tuple[Listed, ...],
     ) -> None:
         raise_if_cancelled()
         deciding = None if admitted.held is None else TurnHold(admitted.held)
@@ -341,8 +359,9 @@ class Turning:
                 partial(self._holds.hold_decided, place),
                 lambda hold: self._holds.end_hold(place, record, hold, HoldOutcome.UNDECIDED, bound),
             )
-        held = self._hold_tools(session, record, admitted, bound, lists, inbox, deciding, answering)
-        request = self._request_of(setup, admitted, told, held)
+        skills = listed_skills((app.mcp_url, each.skills) for (app, _), each in zip(self._apps, lists, strict=True))
+        held = self._hold_tools(session, record, admitted, bound, lists, skills, inbox, deciding, answering)
+        request = self._request_of(setup, admitted, told, held, skills)
         sizing.request_built(held.declarations, told)
         person = TurnPerson(admitted.facts.principal, TURN_ROLE, admitted.groups)
         async with (
@@ -362,11 +381,18 @@ class Turning:
             tally.usage = None if final is None else final.usage
             self._mind.answered(turn)
 
-    def _request_of(self, setup: TurnSetup, admitted: Admitted, told: tuple[str, ...], held: HeldTools) -> TurnRequest:
-        system = f"{setup.persona.prompt}\n\n{REPLY_RULES}"
+    def _request_of(
+        self,
+        setup: TurnSetup,
+        admitted: Admitted,
+        told: tuple[TurnMessage | ToolRound, ...],
+        held: HeldTools,
+        skills: Mapping[str, ListedSkill],
+    ) -> TurnRequest:
+        front = [setup.persona.prompt, REPLY_RULES, *filter(None, [skill_lines(skills.values())])]
         return TurnRequest(
             agent=setup.persona.name,
-            turn=Turn(system=system, messages=[TurnMessage(role=TurnRole.USER, text=each) for each in told]),
+            turn=Turn(system="\n\n".join(front), messages=list(told)),
             roles=setup.persona.roles,
             tools=held.declarations,
             model=(self._agent.hold_model if admitted.held else None) or setup.persona.model,
@@ -436,14 +462,15 @@ class Turning:
         record: TaskRecord,
         admitted: Admitted,
         bound: TurnBound,
-        lists: tuple[Declared, ...],
+        lists: tuple[Listed, ...],
+        skills: Mapping[str, ListedSkill],
         inbox: HoldInbox | None,
         deciding: TurnHold | None,
         answering: Answering | None,
     ) -> HeldTools:
-        """The lookup when the configuration has a memory, then the tools of the place's app, of each app named in the
-        admission and of each tools-only app the realm grants and that answers, in the configuration's order, each app
-        counting its own calls.
+        """The lookup when the configuration has a memory, the skills' ``read_skill``, then the tools of the place's
+        app, of each app named in the admission and of each tools-only app the realm grants and that answers, in the
+        configuration's order, each app counting its own calls.
 
         Of each app every tool it lists now is held but the runner's reserved names and those an earlier app holds,
         none when it lists none. Another app whose listing fails, and the place's own app when it does not answer within
@@ -457,9 +484,13 @@ class Turning:
         if lookup is not None:
             tools.append(HandTool(RECALL_DECLARATION, partial(self._look, lookup, Calls(lookup.calls), admitted, hold)))
             bounds.append(lookup.calls)
-        for (app, max_calls), declared in zip(self._apps, lists, strict=True):
-            calls = Calls(max_calls)
-            if declared is None:
+        app_calls = {app.mcp_url: Calls(max_calls) for app, max_calls in self._apps}
+        reading = partial(self._read_skill, skills, app_calls, session, Calls(READ_SKILL_CALLS), hold, record)
+        tools.append(HandTool(READ_SKILL_DECLARATION, reading))
+        bounds.append(READ_SKILL_CALLS)
+        for (app, _), listed in zip(self._apps, lists, strict=True):
+            calls = app_calls[app.mcp_url]
+            if (declared := listed.tools) is None:
                 continue
             offered, left_out = offered_declarations(declared, taken)
             self._tools_left_out(app, left_out)
@@ -539,6 +570,70 @@ class Turning:
         if found is None:
             return ToolOutcome(STORE_DID_NOT_ANSWER_TEXT, is_error=True)
         return ToolOutcome(lookup_result(found, lookup.result_bytes), is_error=False)
+
+    async def _read_skill(
+        self,
+        skills: Mapping[str, ListedSkill],
+        app_calls: Mapping[str, Calls],
+        session: MemberSession,
+        calls: Calls,
+        hold: HoldBack,
+        record: TaskRecord,
+        _principal: Principal,
+        arguments: JsonObject,
+    ) -> ToolOutcome:
+        """Reads a skill this turn listed and enters it into his history, so the next turn tells it as a round. It is
+        never held back by what arrived, only by a hold he has not decided. A skill an app refuses, a name no line
+        holds and a body past a result's bound answer an error and enter nothing; a read that fails is a failed call to
+        its app."""
+        if hold.deciding_first:
+            return ToolOutcome(DECIDING_FIRST_TEXT, is_error=True)
+        if not calls.take():
+            return ToolOutcome(_SKILLS_SPENT_TEXT, is_error=True)
+        name = skill_to_read(arguments)
+        listed = None if name is None else skills.get(name)
+        if listed is None:
+            return ToolOutcome(_NO_SUCH_SKILL_TEXT, is_error=True)
+        app = self._app_at[listed.app]
+        read = await self._skill_read(app, listed.skill, app_calls[listed.app], session, hold, record)
+        if isinstance(read, ToolOutcome):
+            return read
+        text = skill_text(read.body)
+        if not is_within_event_bound(text, None):
+            return ToolOutcome(_SKILL_TOO_LARGE_TEXT, is_error=True)
+        self._mind.skill_read(app.mcp_url, read.name, read.identity.uri, read.body, self._clock.wall())
+        return ToolOutcome(text, is_error=False)
+
+    async def _skill_read(
+        self,
+        app: AppTarget,
+        skill: AppSkill,
+        app_calls: Calls,
+        session: MemberSession,
+        hold: HoldBack,
+        record: TaskRecord,
+    ) -> Skill | ToolOutcome:
+        """The skill, read from its app unless it is the app's implicit skill, whose body its listing kept; or the
+        result of a read that failed or was refused."""
+        if isinstance(skill, Skill):
+            return skill
+        try:
+            with hold.sending():
+                if app.mcp_url == self._app.mcp_url:
+                    await self._renew_token()
+                    answer = await _got_skill(session, skill.uri)
+                else:
+                    answer = await self._sessions.ask_elsewhere(app, partial(_got_skill, uri=skill.uri), record)
+        except Exception as error:
+            raise RelayFailed(error) from None
+        if isinstance(answer, CallFailure):
+            app_calls.close()
+            self._report(failure_event(app), failure_code(answer), app, answer)
+            return ToolOutcome(APP_FAILED_TEXT, is_error=True)
+        if isinstance(answer, SkillRefused):
+            self._report(Event.SKILL_REFUSED, answer.refusal.value, app)
+            return ToolOutcome(_SKILL_REFUSED_TEXT, is_error=True)
+        return answer
 
     async def _answered_apart(  # NOSONAR(S7503) HandToolHandler is async
         self, text: str, _principal: Principal, _arguments: JsonObject
@@ -640,3 +735,12 @@ class Turning:
                     # The cancellation reaches the turn at its next suspension, which can come after the model's next
                     # request went out; the answer of the call does not go back to the model.
                     raise_if_cancelled()
+
+
+async def _got_skill(session: MemberSession, uri: str) -> Skill | SkillRefused:
+    """The skill at ``uri``, or the refusal of a file that is not what its entry promised, which is an answer, not a
+    defect."""
+    try:
+        return await session.get_skill(uri)
+    except SkillRefused as refused:
+        return refused

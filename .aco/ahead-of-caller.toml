@@ -1,9 +1,4 @@
 [[code]]
-path = "src/personas/app_session.py"
-item = "#427"
-reason = "The skills read of an app; S8b calls read_skills at a join."
-
-[[code]]
 path = "src/personas/entries.py"
 item = "#427"
-reason = "The skill entry and the load entry the history reads back; S8b is the next row and writes them."
+reason = "The load entry the history reads back; S8b2 writes it."

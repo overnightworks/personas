@@ -227,8 +227,15 @@ def a_sentence(*, text="Guten Tag.", outcome=None, at=LATER - timedelta(seconds=
     return SaidAloud(APP, MORNING.place, text, Spoken(spoken=True) if outcome is None else outcome, at)
 
 
-def a_skill_read(*, body="Greet people by name.", at=LATER - timedelta(seconds=9)) -> SkillRead:
-    return SkillRead(APP, "greeting", "skill://greeting/SKILL.md", body, at, "call-body")
+def message_texts(messages) -> list[str]:
+    """The texts of messages that hold no round."""
+    return [each.text for each in messages]
+
+
+def a_skill_read(
+    *, name="greeting", body="Greet people by name.", call_id="call-body", at=LATER - timedelta(seconds=9)
+) -> SkillRead:
+    return SkillRead(APP, name, f"skill://{name}/SKILL.md", body, at, call_id)
 
 
 def a_tools_load(*, tools=("say", "play"), at=LATER - timedelta(seconds=9)) -> ToolsLoaded:

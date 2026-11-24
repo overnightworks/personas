@@ -35,8 +35,8 @@ from personas.due import (
     without_due,
     yields_to_spoken,
 )
-from personas.entries import KeptLine
-from personas.present import EMPTY_PRESENT, answered_into, taken_into
+from personas.entries import KeptLine, SkillRead
+from personas.present import EMPTY_PRESENT, answered_into, skill_call_id, taken_into
 from personas.speech import (
     NO_SPEECH,
     Answered,
@@ -67,6 +67,7 @@ from personas.speech import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
+    from datetime import datetime
 
     from agents.member import PlaceRef, PlaceWindow, Standing
 
@@ -241,6 +242,11 @@ class Mind:
     def hold_standing(self, at: AppPlace) -> Held | None:
         """The hold that stands at the place."""
         return self._speech.get(at, NO_SPEECH).hold
+
+    def skill_read(self, app: str, name: str, uri: str, body: str, at: datetime) -> None:
+        """Appends the entry of a skill the agent read, under the call id minted from its ordinal: the count of entries
+        ever appended, which no cut or resume lowers while an entry is kept, so no kept entry holds the id."""
+        self.take((SkillRead(app, name, uri, body, at, skill_call_id(self.history.taken)),))
 
     def _set_speech(self, at: AppPlace, record: SpeechRecord) -> None:
         if record == self._speech.get(at, NO_SPEECH):

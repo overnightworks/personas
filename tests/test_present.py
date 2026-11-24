@@ -40,6 +40,7 @@ from tests.support.history import (
     a_view,
     an_act,
     history_holding,
+    message_texts,
     said,
     told_line_bytes,
 )
@@ -93,8 +94,8 @@ def test_the_messages_before_the_last_do_not_change_with_the_clock_a_turn_is_com
     present = present_with_a_turn_told(1)
     next_turn = a_lines_turn(1, through=1)
 
-    early = turn_messages("Mozart", present, next_turn)
-    late = turn_messages("Mozart", present, replace(next_turn, at=LATER + timedelta(hours=3)))
+    early = message_texts(turn_messages("Mozart", present, next_turn))
+    late = message_texts(turn_messages("Mozart", present, replace(next_turn, at=LATER + timedelta(hours=3))))
 
     assert early[:-1] == late[:-1]
     assert early[-1] != late[-1]
@@ -103,7 +104,7 @@ def test_the_messages_before_the_last_do_not_change_with_the_clock_a_turn_is_com
 def test_a_line_another_places_turn_told_first_is_named_by_the_woke_seqs_of_the_turn_it_is_for():
     present = present_with_a_turn_told(1)
 
-    *_, own = (json.loads(each) for each in turn_messages("Mozart", present, a_lines_turn(1, through=1)))
+    *_, own = (json.loads(each) for each in message_texts(turn_messages("Mozart", present, a_lines_turn(1, through=1))))
 
     assert (own["entries"], own["woke"]["seqs"]) == ([], [1])
 
@@ -111,7 +112,7 @@ def test_a_line_another_places_turn_told_first_is_named_by_the_woke_seqs_of_the_
 def test_a_turns_woke_seqs_leave_out_a_line_of_its_place_the_history_dropped_though_another_place_holds_its_seq():
     present = taken_into(EMPTY_PRESENT, (said(4, "elsewhere", visit=NOON),), ROOMY_BYTES, ROOMY_BYTES)
 
-    *_, own = (json.loads(each) for each in turn_messages("Mozart", present, a_lines_turn(4, through=1)))
+    *_, own = (json.loads(each) for each in message_texts(turn_messages("Mozart", present, a_lines_turn(4, through=1))))
 
     assert own["woke"]["seqs"] == []
 
@@ -121,7 +122,7 @@ def test_a_view_another_places_turn_told_first_is_named_by_the_woke_revision_of_
     present = answered_into(taken_into(EMPTY_PRESENT, (view,), ROOMY_BYTES, ROOMY_BYTES), a_lines_turn(through=1))
     for_the_view = TurnTold(LATER, APP, TABLE, Waiting(2), aloud=False, through=1)
 
-    *_, own = (json.loads(each) for each in turn_messages("Mozart", present, for_the_view))
+    *_, own = (json.loads(each) for each in message_texts(turn_messages("Mozart", present, for_the_view)))
 
     assert (own["entries"], own["woke"]["revision"]) == ([], 2)
 

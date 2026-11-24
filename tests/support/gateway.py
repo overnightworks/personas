@@ -13,6 +13,7 @@ import httpx2
 from agents.backend.fake_gateway import FakeGateway, Reply, completion, tool_call, tool_round
 from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL
 
+from personas.decision import READ_SKILL_TOOL
 from tests.support.call import PLACE_ID
 from tests.support.history import TABLE
 from tests.support.hopin import LIMIT_SECONDS, PLAY_TOOL, SAY_TOOL
@@ -212,14 +213,15 @@ class TurnOpening:
 
 
 def _opens_a_turn(messages: list[JsonObject]) -> bool:
-    """A turn's first round holds the persona and user messages alone, the turn's own last; every later round adds the
-    model's calls and results."""
+    """A turn's first round ends with the turn's own user message; every later round adds the model's calls and
+    results after it. The rounds of skills read in earlier turns stand among the messages before."""
     told = messages[1:]
-    return (
-        len(told) >= MESSAGES_OF_A_FIRST_ROUND
-        and all(each["role"] == "user" for each in told)
-        and '"woke"' in told[-1]["content"]
-    )
+    return len(told) >= MESSAGES_OF_A_FIRST_ROUND and told[-1]["role"] == "user" and '"woke"' in told[-1]["content"]
+
+
+def _user_messages(body: JsonObject) -> list[JsonObject]:
+    """The user messages a request carried after the system text, in order; the rounds of skills read are none."""
+    return [each for each in body["messages"][1:] if each["role"] == "user"]
 
 
 class Gateway(FakeGateway):
@@ -342,8 +344,8 @@ class Gateway(FakeGateway):
         return [
             TurnOpening(
                 body["messages"][0]["content"],
-                [json.loads(each["content"]) for each in body["messages"][1:]],
-                tuple(each["content"] for each in body["messages"][1:]),
+                [json.loads(each["content"]) for each in _user_messages(body)],
+                tuple(each["content"] for each in _user_messages(body)),
                 body["user"],
             )
             for body in bodies
@@ -425,15 +427,17 @@ class Gateway(FakeGateway):
         read them."""
         return [json.loads(each) for each in self.held_result_texts(request_number)]
 
-    def offered_tools(self, request_number: int = 1, *, speaking: bool = False) -> list[str]:
+    def offered_tools(self, request_number: int = 1, *, speaking: bool = False, reading: bool = False) -> list[str]:
         """The names of the tools the request that arrived as this number (from one) offered, in the order offered;
-        the two speaking tools every request holds only when asked for."""
+        the two speaking tools and the skills' ``read_skill``, which every request holds, only when asked for."""
         names = [
             tool["function"]["name"] for tool in json.loads(self.requests[request_number - 1].content).get("tools", [])
         ]
-        return (
-            names if speaking else [name for name in names if name not in {CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL}]
-        )
+        left_out = {
+            *(() if speaking else (CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL)),
+            *(() if reading else (READ_SKILL_TOOL,)),
+        }
+        return [name for name in names if name not in left_out]
 
     def round_sizes(self) -> list[int]:
         """The number of messages of each request in arrival order: a turn's rounds grow, a new turn starts at two."""

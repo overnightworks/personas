@@ -12,11 +12,11 @@ from agents.backend import TurnPerson, TurnStopped
 from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL
 from agents.member_outcomes import CallFailure
 from agents.tools import HandTool, ToolDeclaration, ToolEffect, ToolOutcome
-from agents.turn import Turn, TurnMessage, TurnRole
+from agents.turn import Turn
 
 from personas.decision import TURN_ROLE, AppPlace, failure_code, round_seconds
 from personas.entries import TurnTold, told_hold, told_stop
-from personas.present import turn_messages
+from personas.present import turn_messages, user_message
 from personas.reporting import Event, failure_event
 from personas.speech import (
     DropReason,
@@ -327,17 +327,15 @@ class HoldDeciding:
         current = TurnTold(
             turn.at, turn.app, turn.place, turn.occasion, aloud=turn.aloud, through=self._mind.history.taken
         )
-        told = (
-            *turn_messages(admitted.facts.name, self._mind.present, current),
-            self.told_standing(
-                admitted.place, hold, None if inbox.waiting is None else (inbox.waiting.name, inbox.waiting.input)
-            ),
+        standing = self.told_standing(
+            admitted.place, hold, None if inbox.waiting is None else (inbox.waiting.name, inbox.waiting.input)
         )
+        told = [*turn_messages(admitted.facts.name, self._mind.present, current), user_message(standing)]
         request = voiced.request.model_copy(
             update={
                 "turn": Turn(
                     system=voiced.request.turn.system,
-                    messages=[TurnMessage(role=TurnRole.USER, text=each) for each in told],
+                    messages=told,
                 ),
                 "model": self._agent.hold_model or voiced.request.model,
                 "max_duration_seconds": round_seconds(speaking.seconds_left()),

@@ -58,6 +58,8 @@ from tests.support.wire import ConnectionCut, Handler, Reply, Rpc
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator
 
+    from tests.support.skills import Shelf
+
 
 LIMIT_SECONDS = 10
 _SUBJECT_KEY = "test.subject"
@@ -229,6 +231,8 @@ class FakeApp(AppVoice):
     undeclared_arguments: frozenset[str] = frozenset()
     """The arguments no declared tool of the app names, as an app that predates them; ``looks[].room`` is the ``room``
     of each entry of ``looks``."""
+    shelf: Shelf | None = None
+    """The skills the app serves, when it says anything of them; a request a script answers is the script's."""
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -582,6 +586,8 @@ class FakeApp(AppVoice):
             except ConnectionCut:
                 self.log.add(f"{method} cut")
                 raise
+        elif self.shelf is not None and (served := self.shelf.answers(reply.rpc)) is not None:
+            await served(reply)
         else:
             scope[_SUBJECT_KEY] = self.bearers[bearer]
             await self._front(scope, _replayed(body, receive), noting)
