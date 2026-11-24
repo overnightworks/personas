@@ -185,11 +185,11 @@ def test_a_stale_invitation_stays_refused_when_a_read_leaves_it_out_and_a_later_
 @pytest.mark.parametrize(
     ("seconds_left", "due"),
     [(RENEW_BEFORE_EXPIRY_SECONDS + 1, False), (RENEW_BEFORE_EXPIRY_SECONDS, True), (-5, True), (None, True)],
+    ids=["outside_the_window", "at_the_window", "expired", "no_token_yet"],
 )
 def test_a_token_is_due_for_renewal_before_it_expires(seconds_left, due):
     now = 500.0
     token = NO_TOKEN if seconds_left is None else Token(Secret(secrets.token_hex(8)), expires_at=now + seconds_left)
-
     assert renewal_due(token, now) is due
 
 
