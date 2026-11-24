@@ -1,8 +1,0 @@
-claim_id = "7cd618aa2fd34dce91f998f87eb7fc7a"
-agent = "Claude 94207f40-f773-4b39-81c0-3931eea96ec0"
-role = "builder"
-base = "2dbcbc9eab2eb1057e559c0e6e0ebc44af33fb85"
-branch = "claude/issue-436-personas-reads-agents-member-outcomes-an"
-scope = ["pyproject.toml", "quality/baseline.toml", "src/personas/app_session.py", "src/personas/decision.py", "src/personas/failures.py", "src/personas/holds.py", "src/personas/loop.py", "src/personas/reporting.py", "src/personas/task_record.py", "src/personas/tokens.py", "src/personas/tool_lists.py", "src/personas/turn_sessions.py", "src/personas/turn_states.py", "src/personas/turning.py", "src/personas/voice.py", "tests", "uv.lock"]
-opened_commit = "c9a986738be194011f72f0bb5123acff41ed1169"
-whole_reason = "The failure classes change identity in every importer at once, or a failure raised as agents' class is a defect to a module still reading personas' own."
