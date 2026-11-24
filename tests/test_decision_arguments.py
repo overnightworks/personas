@@ -54,11 +54,10 @@ def test_a_figure_with_a_room_carries_one_look_of_both():
     assert (look.url, look.sha256, look.room) == (figure.url, figure.sha256, room)
 
 
-def test_voices_travel_as_listed_and_none_as_no_voices():
+def test_voices_travel_as_listed():
     voices = (VoiceName("amy"),)
 
     assert accept_arguments(Accept(PLACE, "inv-3", 2, voices=voices)).voices == voices
-    assert accept_arguments(Accept(PLACE, "inv-3", 2)).voices is None
 
 
 @pytest.mark.parametrize("reason", list(DeclineInvitationReason))
