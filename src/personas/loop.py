@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import math
 from contextlib import aclosing, nullcontext
 from dataclasses import dataclass, replace
 from functools import partial
@@ -18,6 +17,7 @@ from logline import unit_trace
 from personas.admission import Admitted
 from personas.decision import (
     NETWORK_FAILURE_CODE,
+    NO_TOKEN,
     NO_TURNS_CODE,
     SUSPENDED_RETRY_SECONDS,
     AppPlace,
@@ -71,7 +71,6 @@ from personas.reporting import (
     step_timer,
     stepping,
 )
-from personas.secret import Secret
 from personas.task_record import TaskRecord
 from personas.tokens import facts_of
 from personas.turn_states import TurnStates
@@ -92,13 +91,12 @@ if TYPE_CHECKING:
     from personas.mind import Mind
     from personas.readiness import ReadyMarker
     from personas.recall import LookupBounds
+    from personas.secret import Secret
     from personas.speech import DropReason
     from personas.tokens import TokenSource
     from personas.turning import BackendFactory
 
 _STREAM_ENDED: Final = object()
-_NO_TOKEN: Final = Token(Secret(""), -math.inf)
-"""The cache before a token is fetched and after one is dropped; a token that is due at once, which no session reads."""
 
 
 @dataclass(frozen=True)
@@ -190,7 +188,7 @@ class AgentLoop:
             self._remembering,
         )
         self._turn_states = TurnStates(self._renew_token, self._report, app.call_seconds)
-        self._token = _NO_TOKEN
+        self._token = NO_TOKEN
         self._memory = Memory()
         self._failures = 0
         self._renewed_after_401 = False
@@ -664,7 +662,7 @@ class AgentLoop:
         match reaction_to(failure, already_renewed=self._renewed_after_401):
             case Reaction.RENEW:
                 self._renewed_after_401 = True
-                self._token = _NO_TOKEN
+                self._token = NO_TOKEN
             case Suspend(code=code):
                 await self._suspend(code, failure)
             case remaining:
@@ -678,7 +676,7 @@ class AgentLoop:
             self._suspension = code
             self._report(Event.SUSPENDED, code, None, failure)
         self._backing_off = False
-        self._token = _NO_TOKEN
+        self._token = NO_TOKEN
         await self._wait_parked(SUSPENDED_RETRY_SECONDS, stopped_taking_turns=True)
 
     async def _back_off(self, failure: CallFailure) -> None:

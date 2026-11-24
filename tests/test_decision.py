@@ -38,6 +38,7 @@ from personas.decision import (
     DEFECT_REASON,
     NETWORK_FAILURE_CODE,
     NO_FINAL_EVENT_REASON,
+    NO_TOKEN,
     RENEW_BEFORE_EXPIRY_SECONDS,
     TURN_CANCELLED_CODE,
     Accept,
@@ -193,7 +194,7 @@ def test_a_token_is_due_for_renewal_before_it_expires(seconds_left, due):
 
 
 def test_no_token_is_due_for_renewal():
-    assert renewal_due(None, 0.0)
+    assert renewal_due(NO_TOKEN, 0.0)
 
 
 def test_the_backoff_grows_never_beyond_its_cap_and_is_never_zero():
