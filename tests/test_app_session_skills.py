@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+from contextlib import nullcontext
 from typing import TYPE_CHECKING
 
 import pytest
@@ -33,7 +34,7 @@ def a_listing(entries: list[dict], next_cursor: str | None = None) -> Handler:
 async def skills_of(session, app) -> tuple:
     """The skills of the app, read with the tools its listing gave."""
     tools = [tool.name for tool in await session.declared_tools()]
-    return await read_skills(session, app.url, tools)
+    return await read_skills(session, app.url, tools, listing=nullcontext)
 
 
 def named(skills) -> list[str]:
@@ -61,7 +62,7 @@ async def test_an_implicit_skill_holds_the_tools_it_is_given_and_sends_no_reques
     tools = [secrets.token_hex(4), secrets.token_hex(4)]
 
     async with opened(app, bearer) as session:
-        (skill,) = await read_skills(session, app.url, tools)
+        (skill,) = await read_skills(session, app.url, tools, listing=nullcontext)
 
     assert skill.tools == tuple(tools)
     assert app.log.count(LIST_TOOLS) == 0

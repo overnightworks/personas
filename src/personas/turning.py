@@ -618,12 +618,7 @@ class Turning:
         if isinstance(skill, Skill):
             return skill
         if app.mcp_url == self._app.mcp_url:
-            try:
-                with hold.sending():
-                    await self._renew_token()
-                    answer = await _got_skill(session, skill.uri)
-            except Exception as error:
-                raise RelayFailed(error) from None
+            answer = await _sent(hold, self._got_renewed(session, skill.uri))
         else:
             answer = await self._asked_elsewhere(
                 app,
@@ -667,15 +662,17 @@ class Turning:
             return held
         if not calls.take():
             return ToolOutcome(_CALL_BOUND_TEXT, is_error=True)
-        try:
-            with hold.sending():
-                return await self._recorded_as_act(self._app, name, arguments, self._invoke(session, name, arguments))
-        except Exception as error:
-            raise RelayFailed(error) from None
+        return await _sent(
+            hold, self._recorded_as_act(self._app, name, arguments, self._invoke(session, name, arguments))
+        )
 
     async def _invoke(self, session: MemberSession, name: str, arguments: JsonObject) -> ToolOutcome:
         await self._renew_token()
         return await session.invoke(name, arguments)
+
+    async def _got_renewed(self, session: MemberSession, uri: str) -> Skill | SkillRefused:
+        await self._renew_token()
+        return await _got_skill(session, uri)
 
     async def _relay_elsewhere(
         self,
@@ -710,11 +707,7 @@ class Turning:
         calls are closed is sent nothing; a failed call closes them for the rest of the turn."""
         if calls.closed:
             return ToolOutcome(_CALL_BOUND_TEXT, is_error=True)
-        try:
-            with hold.sending():
-                answer = await asking()
-        except Exception as error:
-            raise RelayFailed(error) from None
+        answer = await _sent(hold, asking())
         if isinstance(answer, CallFailure):
             calls.close()
             self._report(failure_event(app), failure_code(answer), app, answer)
@@ -752,6 +745,16 @@ class Turning:
                     # The cancellation reaches the turn at its next suspension, which can come after the model's next
                     # request went out; the answer of the call does not go back to the model.
                     raise_if_cancelled()
+
+
+async def _sent[Answer](hold: HoldBack, sending: Awaitable[Answer]) -> Answer:
+    """What a call on its way to its app answers while the hold knows it is sent; a failure of it ends the turn as the
+    loop's own."""
+    try:
+        with hold.sending():
+            return await sending
+    except Exception as error:
+        raise RelayFailed(error) from None
 
 
 async def _got_skill(session: MemberSession, uri: str) -> Skill | SkillRefused:

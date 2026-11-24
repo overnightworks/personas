@@ -31,14 +31,13 @@ class Calls:
     closed: bool = False
 
     def take(self) -> bool:
-        if not call_within_bound(self.made, self.bound):
+        if self.closed or not call_within_bound(self.made, self.bound):
             return False
         self.made += 1
         return True
 
     def close(self) -> None:
         """The app takes no more calls in this turn."""
-        self.made = self.bound
         self.closed = True
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from contextlib import AbstractAsyncContextManager, nullcontext
+from contextlib import AbstractAsyncContextManager
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -43,7 +43,7 @@ async def read_skills(
     app_url: str,
     tools: Sequence[str],
     *,
-    listing: Callable[[], AbstractAsyncContextManager[object]] = nullcontext,
+    listing: Callable[[], AbstractAsyncContextManager[object]],
 ) -> tuple[AppSkill, ...]:
     """The app's skills: its one implicit skill, of the ``tools`` its turn listed, when it declares no skills
     extension, else every entry of its listing in its order, however many pages. An empty listing is no skills. No

@@ -356,41 +356,21 @@ async def test_read_skill_in_a_spoken_turn_answers_under_one_call_per_reply(runn
     assert len(skill_reads(runner)) == 1
 
 
-async def test_a_read_that_fails_at_another_app_is_its_failed_call_and_that_app_takes_no_more_calls(runner, songmaker):
-    skilled(runner, songmaker)
-    songmaker.script(SKILLS_GET, refuses_with_a_server_error)
-    runner.gateway = Gateway(tool_round(reading(SONGMAKER)), tool_round(a_song("model-song")), completion("done"))
-    await restarted_in_the_call(runner)
-
-    await a_turn(runner, 1)
-    await runner.gateway.until_requested(3)
-
-    (failed,) = runner.gateway.tool_results(2)
-    assert failed.startswith(ERROR_MARK)
-    assert runner.gateway.tool_results(3)[-1].startswith(ERROR_MARK)
-    assert songmaker.called == []
-    assert runner.reports.reported(apps=True, started=False) == [
-        (Event.TOOLS_ONLY_APP_FAILED, status_code(HTTPStatus.INTERNAL_SERVER_ERROR), songmaker_url(runner))
-    ]
-    assert skill_reads(runner) == []
-
-
 @pytest.mark.parametrize(
-    ("failing", "first_round", "reads_sent"),
+    ("failing", "first_round", "second_round", "reads_sent", "calls_sent"),
     [
-        (SKILLS_GET, reading(SONGMAKER, "model-read-1"), 1),
-        (CALL, a_song("model-song"), 0),
+        (SKILLS_GET, reading(SONGMAKER, "model-read-1"), reading(SONGMAKER, "model-read-2"), 1, 0),
+        (CALL, a_song("model-song"), reading(SONGMAKER, "model-read-2"), 0, 1),
+        (SKILLS_GET, reading(SONGMAKER, "model-read-1"), a_song("model-song"), 1, 0),
     ],
-    ids=["a failed read", "a failed relayed call"],
+    ids=["a read after a failed read", "a read after a failed relayed call", "a relayed call after a failed read"],
 )
-async def test_a_read_at_an_app_that_takes_no_more_calls_is_not_sent_and_answers_an_error(
-    runner, songmaker, failing, first_round, reads_sent
+async def test_an_app_that_failed_a_call_takes_no_more_this_turn_and_the_next_is_not_sent(
+    runner, songmaker, failing, first_round, second_round, reads_sent, calls_sent
 ):
     skilled(runner, songmaker)
     songmaker.script(failing, refuses_with_a_server_error)
-    runner.gateway = Gateway(
-        tool_round(first_round), tool_round(reading(SONGMAKER, "model-read-2")), completion("done")
-    )
+    runner.gateway = Gateway(tool_round(first_round), tool_round(second_round), completion("done"))
     await restarted_in_the_call(runner)
 
     await a_turn(runner, 1)
@@ -399,6 +379,10 @@ async def test_a_read_at_an_app_that_takes_no_more_calls_is_not_sent_and_answers
     assert runner.gateway.tool_results(2)[-1].startswith(ERROR_MARK)
     assert runner.gateway.tool_results(3)[-1].startswith(ERROR_MARK)
     assert songmaker.log.count(SKILLS_GET) == reads_sent
+    assert songmaker.log.count(CALL) == calls_sent
+    assert runner.reports.reported(apps=True, started=False) == [
+        (Event.TOOLS_ONLY_APP_FAILED, status_code(HTTPStatus.INTERNAL_SERVER_ERROR), songmaker_url(runner))
+    ]
     assert skill_reads(runner) == []
 
 
