@@ -27,7 +27,7 @@ from tests.support.realm import LIFETIME_SECONDS
 from tests.support.skills import Shelf, a_skill_file, an_entry
 from tests.support.songmaker import CREATE_SONG, GENERATE_SONG
 from tests.support.voice import a_voice_call
-from tests.support.wire import refuses_with_a_server_error
+from tests.support.wire import hangs, refuses_with_a_server_error
 
 pytestmark = pytest.mark.anyio
 
@@ -293,6 +293,18 @@ async def test_a_malformed_skill_listing_leaves_its_apps_lines_out_and_logs_the_
     (line,) = [each for each in lines_of(caplog.get_records("call"), "skill_list.ended") if each["outcome"] == "failed"]
     assert (line["reason"], line["entry"]) == (INVALID_ANSWER_CODE, 2)
     assert marker not in formatted(caplog.get_records("call"))
+
+
+async def test_a_skills_listing_that_times_out_leaves_its_apps_lines_out_and_its_tools_held(runner, songmaker):
+    skilled(runner, songmaker)
+    songmaker.script(SKILLS_LIST, hangs)
+    runner.bound_tools_only_calls_to(0.5)
+    await restarted_in_the_call(runner)
+
+    await a_turn(runner, 1)
+
+    assert SONG_DESCRIPTION not in runner.gateway.system_of(1)
+    assert {CREATE_SONG, GENERATE_SONG} <= set(runner.gateway.offered_tools(1))
 
 
 async def test_an_app_without_the_skills_extension_is_sent_no_request_for_its_skills(runner, songmaker):

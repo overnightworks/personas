@@ -39,9 +39,11 @@ class TurnSessions:
         record: TaskRecord,
         *,
         opening: bool = False,
+        call_times: int = 1,
     ) -> Answer | CallFailure:
         """Asks another app in a session of its own, under the token for its own scope; ``opening`` says the turn
-        waits for the session's opening, which is then a step of its own.
+        waits for the session's opening, which is then a step of its own. The request has the app's call time
+        ``call_times`` times over, for an ``ask`` that bounds each of its own steps by it.
 
         The session lives only for this request. A failure of the call, a session that died of its own child and
         an expiry of the app's call time come back as the failure; any other error is raised, and a turn whose
@@ -49,7 +51,8 @@ class TurnSessions:
         """
         try:
             return await ending_loud_when_cancelled(
-                self._within_call_time(app, ask, record, opening=opening), unreachable_unless_cancelling
+                self._within_call_time(app, ask, record, opening=opening, call_times=call_times),
+                unreachable_unless_cancelling,
             )
         except Exception as error:
             raise_if_cancelled()
@@ -71,10 +74,16 @@ class TurnSessions:
             return await opened.enter_async_context(self._open_session(app, bearer, self._agent.client_id))
 
     async def _within_call_time[Answer](
-        self, app: AppTarget, ask: Callable[[MemberSession], Awaitable[Answer]], record: TaskRecord, *, opening: bool
+        self,
+        app: AppTarget,
+        ask: Callable[[MemberSession], Awaitable[Answer]],
+        record: TaskRecord,
+        *,
+        opening: bool,
+        call_times: int,
     ) -> Answer:
         """The token, the session and the request, all under the call time of the app."""
-        async with within_call_time(app.call_seconds):
+        async with within_call_time(app.call_seconds * call_times):
             granted = await self._tokens.fetch(self._agent, app.scope)
             async with AsyncExitStack() as opened:
                 session = await self.opened(opened, app, lambda: granted.value, measured=opening)

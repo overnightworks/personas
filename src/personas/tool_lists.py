@@ -96,7 +96,7 @@ class ToolLists:
 
     async def _list_elsewhere(self, app: AppTarget, record: TaskRecord) -> Listed:
         """What another app lists, or nothing after the report of its failed listing."""
-        declared = await self._sessions.ask_elsewhere(app, partial(self._list, app), record, opening=True)
+        declared = await self._sessions.ask_elsewhere(app, partial(self._list, app), record, opening=True, call_times=2)
         if isinstance(declared, CallFailure):
             if not app.listens and is_not_granted(declared):
                 if self._mind.refused(app.mcp_url, self._clock.now()):
@@ -137,7 +137,8 @@ class ToolLists:
 
     async def _list_tools(self, app: AppTarget, session: MemberSession) -> tuple[ToolDeclaration, ...]:
         with stepping(step_timer("tool_list.ended", self._agent.client_id, app.mcp_url), turn_goes_on=True):
-            return await session.declared_tools()
+            async with within_call_time(app.call_seconds):
+                return await session.declared_tools()
 
     async def _list(self, app: AppTarget, session: MemberSession) -> Listed:
         tools = await self._list_tools(app, session)
