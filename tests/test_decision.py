@@ -9,12 +9,9 @@ import secrets
 import pytest
 from agents.backend import TurnStopKind, TurnStopped
 from agents.member import (
-    ACCEPT_INVITATION_TOOL,
-    CONTINUE_SPEAKING_TOOL,
     DECLINE_INVITATION_TOOL,
     LISTEN_BOUND_SECONDS,
     SPEAK_TOOL,
-    STOP_SPEAKING_TOOL,
     AcceptInvitationRefusal,
     FigureRef,
     PlaceRef,
@@ -39,9 +36,8 @@ from personas.decision import (
     NETWORK_FAILURE_CODE,
     NO_FINAL_EVENT_REASON,
     NO_TOKEN,
-    READ_SKILL_CALLS,
-    READ_SKILL_TOOL,
     RENEW_BEFORE_EXPIRY_SECONDS,
+    RESERVED_TOOLS,
     TURN_CANCELLED_CODE,
     Accept,
     Joined,
@@ -89,7 +85,6 @@ from personas.decision import (
 )
 from personas.entries import Answered, Lines, Reading, Unanswered, Waiting
 from personas.failures import TokenStatusFailure
-from personas.recall import RECALL_TOOL
 from personas.secret import Secret
 from tests.support.history import MORNING, OTHER_TABLE, TABLE, a_view
 from tests.support.pictures import a_picture
@@ -605,15 +600,7 @@ def _declaration(name: str) -> ToolDeclaration:
         (["a", "b"], ["a", "b"], [], 2),
         ([], ["a"], [], 0),
         (
-            [
-                "a",
-                SPEAK_TOOL,
-                RECALL_TOOL,
-                READ_SKILL_TOOL,
-                ACCEPT_INVITATION_TOOL,
-                CONTINUE_SPEAKING_TOOL,
-                STOP_SPEAKING_TOOL,
-            ],
+            ["a", *RESERVED_TOOLS],
             [],
             ["a"],
             0,
@@ -655,10 +642,6 @@ def test_the_places_of_an_app_are_spoken_only_for_an_agent_with_a_voice_and_an_a
 def test_a_turns_call_bound_is_the_sum_of_the_bounds_of_the_apps_whose_tools_it_holds_plus_the_call_it_may_hold_back():
     assert turn_call_bound([4, 5, 2]) == 12
     assert turn_call_bound([4]) == 5
-
-
-def test_the_skills_a_turn_may_read_count_in_the_turns_call_bound():
-    assert turn_call_bound([4, READ_SKILL_CALLS]) == 4 + READ_SKILL_CALLS + 1
 
 
 def test_a_turn_that_holds_no_tool_has_no_call_bound():

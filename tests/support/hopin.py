@@ -571,11 +571,7 @@ class FakeApp(AppVoice):
         if bearer not in self.bearers:
             self.refusals.put_nowait(HTTPStatus.UNAUTHORIZED)
             await reply.status(HTTPStatus.UNAUTHORIZED)
-        elif (
-            self.refuse_with is not None
-            and self.refused_method in (None, method)
-            and self.refused_tool in (None, (document.get("params") or {}).get("name"))
-        ):
+        elif self._refuses(method, document):
             self.refusals.put_nowait(self.refuse_with)
             await reply.status(self.refuse_with)
         elif method == READ and self._fails_the_window_read(document):
@@ -591,6 +587,13 @@ class FakeApp(AppVoice):
         else:
             scope[_SUBJECT_KEY] = self.bearers[bearer]
             await self._front(scope, _replayed(body, receive), noting)
+
+    def _refuses(self, method: str, document: dict[str, Any]) -> bool:
+        return (
+            self.refuse_with is not None
+            and self.refused_method in (None, method)
+            and self.refused_tool in (None, (document.get("params") or {}).get("name"))
+        )
 
     def _note_bearer(self, method: str, document: dict[str, Any], bearer: str) -> None:
         """The token a ``speak`` call or a tool listing came with."""

@@ -196,6 +196,7 @@ async def test_read_skill_for_a_name_no_line_holds_answers_an_error_and_enters_n
 
 
 async def test_a_refused_skill_answers_an_error_logs_its_code_and_enters_nothing(runner, songmaker, caplog):
+    """LOG-40."""
     skilled(runner, songmaker)
     songmaker.shelf.tampered.add(SONGMAKER)
     runner.gateway = Gateway(tool_round(reading(SONGMAKER)), completion("done"))
