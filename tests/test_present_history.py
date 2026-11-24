@@ -117,11 +117,11 @@ def test_a_skill_and_a_load_taken_since_the_admission_hold_back_no_call():
 @pytest.mark.parametrize(
     ("kept", "size"),
     [
-        pytest.param(a_skill_read(body="x" * 100, tools=("say", "play")), 100 + len("say") + len("play"), id="a skill"),
+        pytest.param(a_skill_read(body="x" * 100), 100, id="a skill"),
         pytest.param(a_tools_load(tools=("say", "play")), len("say") + len("play"), id="a load"),
     ],
 )
-def test_the_cut_counts_a_skill_by_its_body_and_tool_names_and_a_load_by_its_tool_names(kept, size):
+def test_the_cut_counts_a_skill_by_its_body_and_a_load_by_its_tool_names(kept, size):
     bound = entry_size(kept) + entry_size(said(2, "two"))
 
     present = took(took(EMPTY_PRESENT, said(1, "one"), kept), said(2, "two"), bound=bound)

@@ -124,26 +124,25 @@ class SaidAloud:
 
 @dataclass(frozen=True)
 class SkillRead:
-    """A skill of the app at ``app`` an agent loaded: its name and uri, its body, the tools it loads and the wall time.
-    The round that loaded it is told under ``body_call_id``, the skill's body, and ``load_call_id``, the load of its
-    tools; the runner minted both when it wrote the entry, so a replay tells the round under the same ids."""
+    """A skill of the app at ``app`` an agent loaded: its name and uri, its body and the wall time. The round that
+    read it is told under ``call_id``, which the runner minted when it wrote the entry, so a replay tells the round
+    under the same id."""
 
     app: str
     name: str
     uri: str
     body: str = field(repr=False)
-    tools: tuple[str, ...]
     at: datetime
-    body_call_id: str
-    load_call_id: str
+    call_id: str
 
 
 @dataclass(frozen=True)
 class ToolsLoaded:
-    """Tools of the app at ``app`` an agent loaded without a skill, and the wall time. The round that loaded them is
-    told under ``call_id``, which the runner minted when it wrote the entry."""
+    """The tools of the skill ``skill`` of the app at ``app`` an agent loaded, and the wall time. The round that
+    loaded them is told under ``call_id``, which the runner minted when it wrote the entry."""
 
     app: str
+    skill: str
     tools: tuple[str, ...]
     at: datetime
     call_id: str
@@ -364,9 +363,9 @@ def _names_bytes(names: Iterable[str]) -> int:
 
 def entry_size(entry: Entry) -> int:
     """A view counts the bytes of its state's JSON; a line, an act and a spoken sentence count the bytes of the JSON
-    they are told as; a skill the bytes of its body and tool names, a load those of its tool names."""
+    they are told as; a skill the bytes of its body, a load those of its tool names."""
     if isinstance(entry, SkillRead):
-        return len(entry.body.encode()) + _names_bytes(entry.tools)
+        return len(entry.body.encode())
     if isinstance(entry, ToolsLoaded):
         return _names_bytes(entry.tools)
     if isinstance(entry, ViewSeen):
