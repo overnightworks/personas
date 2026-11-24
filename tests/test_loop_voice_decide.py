@@ -126,14 +126,23 @@ async def test_a_hold_left_standing_when_his_speech_ends_is_decided_by_his_next_
     assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
 
 
+def with_a_skill_to_read(runner) -> None:
+    runner.app.shelf = Shelf({"hopin": a_skill_file("hopin")})
+
+
 @pytest.mark.parametrize(
-    "early",
-    [say("early", PLACE_ID), tool_call("early-read", READ_SKILL_TOOL, {"skill": "hopin"})],
+    ("early", "arrange"),
+    [
+        (say("early", PLACE_ID), lambda runner: None),
+        (tool_call("early-read", READ_SKILL_TOOL, {"skill": "hopin"}), with_a_skill_to_read),
+    ],
     ids=["say", "read_skill"],
 )
-async def test_every_other_call_of_a_turn_told_a_hold_is_answered_deciding_first_until_he_decides(runner, early):
+async def test_every_other_call_of_a_turn_told_a_hold_is_answered_deciding_first_until_he_decides(
+    runner, early, arrange
+):
     """TURNS-31."""
-    runner.app.shelf = Shelf({"hopin": a_skill_file("hopin")})
+    arrange(runner)
     replies = [
         tool_round(early),
         deciding(CONTINUE_SPEAKING_TOOL),
