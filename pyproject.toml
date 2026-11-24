@@ -8,8 +8,6 @@ dependencies = [
     "alembic>=1.16",
     "anyio>=4.16.0",
     "httpx2>=2.16.0",
-    "mcp>=2.3.0",
-    "mcp-types>=2.3.0",
     "overnightworks-agents[backend,voice,mcp-client] @ git+https://github.com/overnightworks/agents@v0.78.0",
     "overnightworks-logline @ git+https://github.com/overnightworks/logline@v1.9.0",
     "psycopg[binary]>=3.2",

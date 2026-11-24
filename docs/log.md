@@ -8,9 +8,10 @@ events and their fields. A test cites each rule by its ID at the start of its do
 
 - LOG-1: Every line is one JSON object through [logline](https://github.com/overnightworks/logline), with
   `service` `personas`. `LOG_LEVEL` sets the level (default `info`) on every command, `SERVICE_VERSION` the `version`.
-  alembic, which checks the memory's schema at the start, writes only its warnings and errors. The mcp client's
-  ERROR for a stream that closed under a request, which a recovered blip causes, is written at info; any other error of
-  that client stays at error. An uncaught exception of any command writes logline's `process.crashed` line at level
+  alembic, which checks the memory's schema at the start, writes only its warnings and errors. The MCP SDK's client
+  logger, which agents' member client uses, writes an ERROR for a stream that closed under a request, which a
+  recovered blip causes; it is written at info, and any other error of that client stays at error. An uncaught
+  exception of any command writes logline's `process.crashed` line at level
   critical, with `error_type` and `exception`, Python's traceback with its frames and messages; a configuration it
   refuses before it starts is one plain line on stderr.
 - LOG-2: An event is `<noun>.<verb_past>`, written once per state change. Its ids are `agent_id` and `app_id`, the

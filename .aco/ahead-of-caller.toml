@@ -1,7 +1,7 @@
 [[code]]
 path = "src/personas/app_session.py"
 item = "#427"
-reason = "The skills read and the skill read of an app session; S8b calls the first at a join and S8c the second from read_skill."
+reason = "The skills read of an app; S8b calls read_skills at a join."
 
 [[code]]
 path = "src/personas/entries.py"

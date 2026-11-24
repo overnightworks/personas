@@ -19,7 +19,7 @@ from agents.backend.gateway import GatewayBackend
 from agents.turn_events import FinalEvent
 from logline import current_traceparent, unit_trace
 
-from personas.app_session import open_mcp_session
+from personas.app_session import open_app_session
 from personas.config import CONFIG_ENVIRONMENT_VARIABLE, load_config
 from personas.failures import STORE_UNREACHABLE_CODE, SchemaNotAtHeadError, StoreUnavailable, leaves_of
 from personas.main import (
@@ -209,8 +209,8 @@ class World:
             assert config.gateway is not None
             return StopsAfterTheAnswer(GatewayBackend(config.gateway, tools=tools, transport=self.gateway))
 
-        def open_at_the_app(app: AppTarget, token: Secret, agent_id: str):
-            return open_mcp_session(replace(app, mcp_url=app_url), token, agent_id)
+        def open_at_the_app(app: AppTarget, bearer: Callable[[], Secret], agent_id: str):
+            return open_app_session(replace(app, mcp_url=app_url), bearer, agent_id)
 
         async with (
             self.app.serving() as app_url,

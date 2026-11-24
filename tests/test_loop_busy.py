@@ -15,7 +15,7 @@ from agents.member import (
 from agents.member_outcomes import UnrecognisedRefusal
 from agents.tools import ToolOutcome
 
-from personas.decision import Decline
+from personas.decision import Decline, decline_arguments
 from personas.reporting import Event
 from tests.support.app_driving import settled
 from tests.support.call import PLACE_ID
@@ -49,7 +49,7 @@ async def test_a_call_invitation_while_a_place_is_active_is_declined_once_and_no
 
     await run.play()
 
-    assert run.session.declined == [Decline(PlaceRef(kind="call", id="room-7"), "inv-3", 2)]
+    assert run.session.declined == [decline_arguments(Decline(PlaceRef(kind="call", id="room-7"), "inv-3", 2))]
     assert run.session.accepted == []
     assert [event for event, _ in run.reports.reported()].count(Event.INVITATION_DECLINED) == 1
 

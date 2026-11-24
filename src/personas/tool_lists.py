@@ -16,10 +16,10 @@ from personas.reporting import Event, failure_event, step_timer, stepping
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    from agents.mcp_client import MemberSession
     from agents.tools import ToolDeclaration
 
     from personas.admission import Admitted
-    from personas.app_session import AppSession
     from personas.clock import Clock
     from personas.config import AgentCredentials, AppTarget
     from personas.mind import Mind
@@ -41,7 +41,7 @@ class ToolLists:
         sessions: TurnSessions,
         mind: Mind,
         clock: Clock,
-        use_current_token: Callable[[AppSession], Awaitable[None]],
+        renew_token: Callable[[], Awaitable[None]],
         report: Callable[[Event, str | None, AppTarget | None, CallFailure | None], None],
     ) -> None:
         self._agent = agent
@@ -50,10 +50,10 @@ class ToolLists:
         self._sessions = sessions
         self._mind = mind
         self._clock = clock
-        self._use_current_token = use_current_token
+        self._renew_token = renew_token
         self._report = report
 
-    async def listed(self, session: AppSession, admitted: Admitted, record: TaskRecord) -> tuple[Declared, ...]:
+    async def listed(self, session: MemberSession, admitted: Admitted, record: TaskRecord) -> tuple[Declared, ...]:
         """What each configured app lists for the turn, in the configuration's order: its declarations, or ``None``
         when the turn holds none of its. The apps are listed side by side, so their reports come in any order; the
         place's own app is listed whether the configuration names it or not."""
@@ -91,7 +91,7 @@ class ToolLists:
             self._report(Event.RESUMED, None, app, None)
         return declared
 
-    async def _list_own_tools(self, session: AppSession, record: TaskRecord) -> Declared:
+    async def _list_own_tools(self, session: MemberSession, record: TaskRecord) -> Declared:
         """The tools the place's app lists, or ``None`` when it did not answer within its call time; the step then
         ends failed with its reason and the turn goes on. The list the session kept is used as it is: no request is
         sent and no step is written. The record keeps how many tools notices the session had received when the turn
@@ -103,7 +103,7 @@ class ToolLists:
         with stepping(timer):
             try:
                 async with within_call_time(self._app.call_seconds):
-                    await self._use_current_token(session)
+                    await self._renew_token()
                     return await session.declared_tools()
             except CallTimedOut as failure:
                 timer.handled()
@@ -111,6 +111,6 @@ class ToolLists:
                 timer.end()
                 return None
 
-    async def _list_tools(self, app: AppTarget, session: AppSession) -> tuple[ToolDeclaration, ...]:
+    async def _list_tools(self, app: AppTarget, session: MemberSession) -> tuple[ToolDeclaration, ...]:
         with stepping(step_timer("tool_list.ended", self._agent.client_id, app.mcp_url), turn_goes_on=True):
             return await session.declared_tools()

@@ -9,12 +9,13 @@ from http import HTTPStatus
 
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
+from agents.mcp_client import READ_SECONDS
 from agents.member_outcomes import INVALID_ANSWER_CODE, Unreachable, jsonrpc_code, status_code
 from agents.tools import ToolOutcome
 from agents.turn import TOOL_IMAGE_MEDIA_TYPE, Principal, person_fingerprint
 from mcp_types import INVALID_PARAMS, CallToolResult, TextContent
 
-from personas.app_session import READ_SECONDS, open_mcp_session
+from personas.app_session import open_app_session
 from personas.decision import BACKOFF_BASE_SECONDS, NETWORK_FAILURE_CODE, SUSPENDED_RETRY_SECONDS, TURN_CANCELLED_CODE
 from personas.reporting import Event
 from tests.support.app_driving import said_and_taken, settled, waits
@@ -349,8 +350,8 @@ async def test_a_call_cut_in_flight_whose_request_ends_as_a_transport_failure_is
             raise Unreachable("cut")
 
     @contextlib.asynccontextmanager
-    async def opened(app, token, agent_id):
-        async with open_mcp_session(app, token, agent_id, stream_seconds=READ_SECONDS) as session:
+    async def opened(app, bearer, agent_id):
+        async with open_app_session(app, bearer, agent_id, stream_seconds=READ_SECONDS) as session:
             yield EndsACutCallAsAFailure(session)
 
     act, second = await a_call_waiting_for_its_app_while_its_place_leaves(

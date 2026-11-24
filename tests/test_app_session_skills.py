@@ -1,4 +1,4 @@
-"""An app session reads an app's skills from its discover answer and its listing, and one skill's file on need."""
+"""The runner reads an app's skills from its discover answer and its listing, paging through the listing."""
 
 from __future__ import annotations
 
@@ -7,11 +7,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 from agents.member_outcomes import INVALID_ANSWER_CODE, UnusableAnswer
-from agents.skills import SKILLS_EXTENSION, Skill, SkillEntry, SkillRefusal, SkillRefused, skill_digest, skill_uri
-from mcp_types import ListToolsResult, ReadResourceResult, TextResourceContents, Tool
+from agents.skills import SKILLS_EXTENSION, Skill, SkillEntry, skill_digest, skill_uri
+from mcp_types import ListToolsResult, Tool
 
+from personas.app_session import read_skills
 from tests.support.app_session import opened
-from tests.support.hopin import DISCOVER, LIST_TOOLS, READ, SKILLS_GET, SKILLS_LIST, discovering
+from tests.support.hopin import DISCOVER, LIST_TOOLS, READ, SKILLS_LIST, discovering
 
 if TYPE_CHECKING:
     from tests.support.wire import Handler
@@ -41,21 +42,6 @@ def a_listing(entries: list[dict], next_cursor: str | None = None) -> Handler:
     return lists
 
 
-def a_skill_answer(entry: dict) -> Handler:
-    async def answers(reply):
-        await reply.raw_result({"skill": entry})
-
-    return answers
-
-
-def serving_file(content: bytes, uri: str) -> Handler:
-    async def shows(reply):
-        contents = TextResourceContents(uri=uri, text=content.decode(), mime_type="text/markdown")
-        await reply.result(ReadResourceResult(contents=[contents], ttl_ms=0, cache_scope="private"))
-
-    return shows
-
-
 def named(skills) -> list[str]:
     return [skill.name for skill in skills]
 
@@ -65,7 +51,7 @@ async def test_an_app_that_declares_no_skills_extension_has_its_implicit_skill_n
     app.script(DISCOVER, discovering(instructions=instructions))
 
     async with opened(app, bearer) as session:
-        (skill,) = await session.read_skills()
+        (skill,) = await read_skills(session, app.url)
         declared = await session.declared_tools()
 
     assert isinstance(skill, Skill)
@@ -83,7 +69,7 @@ async def test_an_app_with_the_extension_has_every_entry_of_its_listing_over_its
     app.script(SKILLS_LIST, a_listing([entries["one"], entries["two"]], "next"), a_listing([entries["three"]]))
 
     async with opened(app, bearer) as session:
-        skills = await session.read_skills()
+        skills = await read_skills(session, app.url)
 
     assert all(isinstance(skill, SkillEntry) for skill in skills)
     assert named(skills) == ["one", "two", "three"]
@@ -94,7 +80,7 @@ async def test_an_empty_listing_is_no_skills_and_never_the_implicit_skill(app, b
     app.script(SKILLS_LIST, a_listing([]))
 
     async with opened(app, bearer) as session:
-        assert await session.read_skills() == ()
+        assert await read_skills(session, app.url) == ()
 
 
 @pytest.mark.parametrize(
@@ -118,24 +104,10 @@ async def test_a_listing_that_breaks_a_rule_fails_whole_naming_the_entry_and_no_
 
     async with opened(app, bearer) as session:
         with pytest.raises(UnusableAnswer) as failure:
-            await session.read_skills()
+            await read_skills(session, app.url)
 
     assert (failure.value.code, failure.value.entry) == (INVALID_ANSWER_CODE, index)
     assert marker not in f"{failure.value} {failure.value!r} {failure.value.answer}"
-
-
-async def test_a_listing_page_that_is_no_list_of_entries_fails_with_no_index(app, bearer):
-    async def lists_nothing(reply):
-        await reply.raw_result({"skills": "none"})
-
-    app.script(DISCOVER, WITH_THE_EXTENSION)
-    app.script(SKILLS_LIST, lists_nothing)
-
-    async with opened(app, bearer) as session:
-        with pytest.raises(UnusableAnswer) as failure:
-            await session.read_skills()
-
-    assert (failure.value.code, failure.value.entry) == (INVALID_ANSWER_CODE, None)
 
 
 async def test_reading_the_skills_fetches_no_skill_file(app, bearer):
@@ -144,36 +116,9 @@ async def test_reading_the_skills_fetches_no_skill_file(app, bearer):
     app.script(SKILLS_LIST, a_listing([an_entry("greeting", content)]))
 
     async with opened(app, bearer) as session:
-        await session.read_skills()
+        await read_skills(session, app.url)
 
     assert app.log.count(READ) == 0
-
-
-async def test_a_skill_whose_file_matches_its_entry_is_read_with_its_body_and_tools_under_the_apps_label(app, bearer):
-    content = a_skill_file("greeting", body="Greet people by name.")
-    entry = an_entry("greeting", content)
-    app.script(SKILLS_GET, a_skill_answer(entry))
-    app.script(READ, serving_file(content, entry["uri"]))
-
-    async with opened(app, bearer) as session:
-        skill = await session.read_skill(entry["uri"])
-
-    assert (skill.name, skill.body, skill.tools) == ("greeting", "Greet people by name.", ("say", "play"))
-    assert skill.identity.server == app.url
-    assert app.log.count(READ) == 1
-
-
-async def test_a_skill_whose_file_differs_from_its_entry_is_refused_with_its_code(app, bearer):
-    content = a_skill_file("greeting", body="Greet people by name.")
-    entry = an_entry("greeting", content)
-    app.script(SKILLS_GET, a_skill_answer(entry))
-    app.script(READ, serving_file(a_skill_file("greeting", body="Greet people by none."), entry["uri"]))
-
-    async with opened(app, bearer) as session:
-        with pytest.raises(SkillRefused) as refused:
-            await session.read_skill(entry["uri"])
-
-    assert refused.value.refusal == SkillRefusal.DIGEST_MISMATCH
 
 
 async def test_an_app_that_lists_a_tool_twice_fails_its_implicit_skill_as_an_unusable_answer(app, bearer):
@@ -188,20 +133,7 @@ async def test_an_app_that_lists_a_tool_twice_fails_its_implicit_skill_as_an_unu
 
     async with opened(app, bearer) as session:
         with pytest.raises(UnusableAnswer) as failure:
-            await session.read_skills()
+            await read_skills(session, app.url)
 
     assert failure.value.code == INVALID_ANSWER_CODE
     assert marker not in f"{failure.value} {failure.value!r} {failure.value.answer}"
-
-
-async def test_an_answer_for_another_skill_than_the_one_asked_for_is_refused_unread(app, bearer):
-    content = a_skill_file("other")
-    app.script(SKILLS_GET, a_skill_answer(an_entry("other", content)))
-    app.script(READ, serving_file(content, skill_uri("other")))
-
-    async with opened(app, bearer) as session:
-        with pytest.raises(UnusableAnswer) as failure:
-            await session.read_skill(skill_uri("greeting"))
-
-    assert failure.value.code == INVALID_ANSWER_CODE
-    assert app.log.count(READ) == 0

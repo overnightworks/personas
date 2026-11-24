@@ -47,7 +47,7 @@ flowchart LR
 - **Ownership** (`ownership.py` over `locks.py`) lets several pods serve one set of agents, each agent by
   one pod at a time: a round every `contend_seconds` takes free locks and confirms held ones.
 - **A loop** (`loop.py`, `app_session.py`, `tokens.py`; `runner.py` starts one for each agent and listening app) holds one token and one `subscriptions/listen` per
-  agent and app, reads the standing on every wake, accepts invitations, then reads windows and views;
+  agent and app on agents' member client (`agents.mcp_client`, opened in `app_session.py`), reads the standing on every wake, accepts invitations, then reads windows and views;
   `turn_states.py` states what his turns at each place do on its session, and on one of its own while the
   loop waits to retry or he stops.
 - **The mind** (`mind.py`) holds one agent's present in memory: his history, the answered turns it tells,
@@ -70,7 +70,7 @@ flowchart LR
   clock. `config.py` alone owns the TOML's fields and refusals.
 - **The stores** (`memory.py`, its migrations in `src/personas/migrations`) are the history store, always,
   and the line store with `[memory]`; `sweep.py` removes old lines.
-- **Boundaries** are the token endpoint, the MCP session, the model gateway, the clock, the log, the ready
+- **Boundaries** are the token endpoint, agents' member client (the MCP session), the model gateway, the clock, the log, the ready
   marker (`readiness.py`) and the stores, each behind a narrow port so the loop is driven with scripted ones.
 - **Characters** (`src/characters/<name>.md`) are the agents' persona files, shipped in the image. Their
   figures and rooms (`*.vrm`, `*.room.glb`) are written by `scripts/write_figures.py` and never by hand; the

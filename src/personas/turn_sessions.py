@@ -14,9 +14,10 @@ from personas.task_record import ending_loud_when_cancelled, unreachable_unless_
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    from agents.mcp_client import MemberSession
     from agents.member_outcomes import CallFailure
 
-    from personas.app_session import AppSession, SessionOpener
+    from personas.app_session import SessionOpener
     from personas.config import AgentCredentials, AppTarget
     from personas.secret import Secret
     from personas.task_record import TaskRecord
@@ -34,7 +35,7 @@ class TurnSessions:
     async def ask_elsewhere[Answer](
         self,
         app: AppTarget,
-        ask: Callable[[AppSession], Awaitable[Answer]],
+        ask: Callable[[MemberSession], Awaitable[Answer]],
         record: TaskRecord,
         *,
         opening: bool = False,
@@ -60,21 +61,23 @@ class TurnSessions:
                 raise defect from failure
             return failure
 
-    async def opened(self, opened: AsyncExitStack, app: AppTarget, token: Secret, *, measured: bool) -> AppSession:
+    async def opened(
+        self, opened: AsyncExitStack, app: AppTarget, bearer: Callable[[], Secret], *, measured: bool
+    ) -> MemberSession:
         """The session at another ``app``, closed with ``opened``; its opening is a step when ``measured``."""
         if not measured:
-            return await opened.enter_async_context(self._open_session(app, token, self._agent.client_id))
+            return await opened.enter_async_context(self._open_session(app, bearer, self._agent.client_id))
         with stepping(step_timer("session_open.ended", self._agent.client_id, app.mcp_url), turn_goes_on=True):
-            return await opened.enter_async_context(self._open_session(app, token, self._agent.client_id))
+            return await opened.enter_async_context(self._open_session(app, bearer, self._agent.client_id))
 
     async def _within_call_time[Answer](
-        self, app: AppTarget, ask: Callable[[AppSession], Awaitable[Answer]], record: TaskRecord, *, opening: bool
+        self, app: AppTarget, ask: Callable[[MemberSession], Awaitable[Answer]], record: TaskRecord, *, opening: bool
     ) -> Answer:
         """The token, the session and the request, all under the call time of the app."""
         async with within_call_time(app.call_seconds):
             granted = await self._tokens.fetch(self._agent, app.scope)
             async with AsyncExitStack() as opened:
-                session = await self.opened(opened, app, granted.value, measured=opening)
+                session = await self.opened(opened, app, lambda: granted.value, measured=opening)
                 try:
                     return await ask(session)
                 except Exception as error:

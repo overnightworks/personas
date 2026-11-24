@@ -24,7 +24,7 @@ from agents.tools import ToolOutcome
 from agents.turn import StopOutcome
 from mcp_types import INVALID_PARAMS
 
-from personas.app_session import open_mcp_session
+from personas.app_session import open_app_session
 from personas.decision import INVALID_PARAMS_REASON, NETWORK_FAILURE_CODE, NO_ANSWER_REASON, SUSPENDED_RETRY_SECONDS
 from personas.failures import leaves_of
 from personas.reporting import Event
@@ -40,9 +40,10 @@ from tests.support.voice import ended_by
 from tests.support.wire import hangs
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from collections.abc import AsyncGenerator, Callable
 
-    from personas.app_session import AppSession
+    from agents.mcp_client import MemberSession
+
     from personas.config import AppTarget
     from personas.secret import Secret
     from tests.support.wire import Reply as AppReply
@@ -574,10 +575,10 @@ def opener_failing_while(stopping: asyncio.Event, defect: Exception):
     set."""
 
     @asynccontextmanager
-    async def opened(app: AppTarget, token: Secret, agent_id: str) -> AsyncGenerator[AppSession]:
+    async def opened(app: AppTarget, bearer: Callable[[], Secret], agent_id: str) -> AsyncGenerator[MemberSession]:
         if stopping.is_set():
             raise defect
-        async with open_mcp_session(app, token, agent_id) as session:
+        async with open_app_session(app, bearer, agent_id) as session:
             yield session
 
     return opened

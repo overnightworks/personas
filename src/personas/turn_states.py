@@ -18,9 +18,9 @@ from personas.reporting import Event
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    from agents.mcp_client import MemberSession
     from agents.member import PlaceRef, Standing
 
-    from personas.app_session import AppSession
     from personas.config import AppTarget
     from personas.decision import TurnEnding
 
@@ -52,19 +52,19 @@ class TurnStates:
 
     def __init__(
         self,
-        use_current_token: Callable[[AppSession], Awaitable[None]],
+        renew_token: Callable[[], Awaitable[None]],
         report: Callable[[Event, str | None, AppTarget | None, CallFailure | None], None],
         call_seconds: float,
     ) -> None:
         self._call_seconds = call_seconds
-        self._use_current_token = use_current_token
+        self._renew_token = renew_token
         self._report = report
         self._seat_ends: dict[PlaceRef, StopOutcome | None] = {}
         self._queue: asyncio.Queue[_Queued] = asyncio.Queue()
         self._unserved: set[PlaceRef] = set()
         self._unavailable = False
         self._lost = False
-        self._ended_session: AppSession | None = None
+        self._ended_session: MemberSession | None = None
 
     def sync_seats(self, standings: tuple[Standing, ...]) -> None:
         """Forgets the last turn end of each seat he no longer holds, and that its app served it no statement, so a
@@ -104,7 +104,7 @@ class TurnStates:
         if self._lost and not self._unavailable:
             self._restate()
 
-    def session_ended(self, session: AppSession) -> None:
+    def session_ended(self, session: MemberSession) -> None:
         """The loop's ``session`` is ending on another call's failure or his stop: a statement on it that fails from
         now on was lost with it, not failed by the app."""
         self._ended_session = session
@@ -122,7 +122,7 @@ class TurnStates:
         self._queue.put_nowait(queued)
         return queued.sent
 
-    async def state_each(self, session: AppSession) -> NoReturn:
+    async def state_each(self, session: MemberSession) -> NoReturn:
         """Sends each statement in the order queued on the loop's ``session``, until the session ends; what is queued
         then goes out on the next session. A statement that failed or was cut in flight may not have reached the app:
         once such a session ended, the next full pass states each seat again."""
@@ -136,12 +136,12 @@ class TurnStates:
             if unsure:
                 self._lost = True
 
-    async def state_queued(self, session: AppSession) -> None:
+    async def state_queued(self, session: MemberSession) -> None:
         """Sends what is queued now, in order, on ``session``."""
         while not self._queue.empty():
             await self._send(session, self._queue.get_nowait())
 
-    async def state_unavailable(self, session: AppSession) -> None:
+    async def state_unavailable(self, session: MemberSession) -> None:
         """Sends what is queued, then ``unavailable`` at each held seat until the app does not answer one, on a session
         the loop opened while it does not take turns in the app."""
         await self.state_queued(session)
@@ -149,7 +149,7 @@ class TurnStates:
             if not await self._state(session, SetTurnStateArguments(place=place, stopped=StopOutcome.UNAVAILABLE)):
                 return
 
-    async def _send(self, session: AppSession, queued: _Queued) -> bool:
+    async def _send(self, session: MemberSession, queued: _Queued) -> bool:
         """States what was queued in the context it was queued in; says whether the app answered."""
         answered = await asyncio.create_task(self._state(session, queued.statement), context=queued.context)
         # A turn cancelled while it waited has cancelled the future.
@@ -157,13 +157,13 @@ class TurnStates:
             queued.sent.set_result(None)
         return answered
 
-    async def _state(self, session: AppSession, statement: SetTurnStateArguments) -> bool:
+    async def _state(self, session: MemberSession, statement: SetTurnStateArguments) -> bool:
         """States one statement; says whether the app answered it, taken or refused, or none was due at its seat."""
         if statement.place in self._unserved:
             return True
         try:
             async with within_call_time(self._call_seconds):
-                await self._use_current_token(session)
+                await self._renew_token()
                 refusal = await session.set_turn_state(statement)
         except CallFailure as failure:
             if session is self._ended_session:

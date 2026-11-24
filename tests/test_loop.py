@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager, suppress
 import pytest
 from agents.backend import TurnStopKind, TurnStopped
 from agents.backend.gateway import GatewayBackend
-from agents.member import AcceptInvitationRefusal, PlaceRef
+from agents.member import AcceptInvitationRefusal
 from agents.member_outcomes import StatusFailure, Unreachable, UnusableAnswer, jsonrpc_code, status_code
 from agents.tools import ToolDeclaration, ToolEffect
 from agents.turn import RejectionCode
@@ -23,7 +23,6 @@ from personas.decision import (
     NO_FINAL_EVENT_REASON,
     RENEW_BEFORE_EXPIRY_SECONDS,
     SUSPENDED_RETRY_SECONDS,
-    Accept,
     backoff_delay,
 )
 from personas.failures import TokenStatusFailure, leaves_of
@@ -54,7 +53,7 @@ async def test_an_invitation_is_accepted_once_with_its_place_invitation_and_epoc
 
     await run.play()
 
-    assert run.session.accepted == [Accept(PlaceRef(kind="call", id="room-7"), "inv-3", 2)]
+    assert [(each.place.id, each.invitation, each.epoch) for each in run.session.accepted] == [("room-7", "inv-3", 2)]
     assert run.reports.reported() == [(Event.STARTED, None), (Event.JOINED, None)]
 
 
@@ -174,7 +173,7 @@ async def test_a_loop_resumed_after_a_suspension_joins_only_when_invited_anew(sc
         (Event.RESUMED, None),
         (Event.JOINED, None),
     ]
-    assert run.session.accepted == [Accept(PlaceRef(kind="call", id="room-7"), "inv-9", 0)]
+    assert [(each.place.id, each.invitation, each.epoch) for each in run.session.accepted] == [("room-7", "inv-9", 0)]
 
 
 @pytest.mark.parametrize(
@@ -390,7 +389,7 @@ class ScriptedSessions(BareSession):
         )
 
     @asynccontextmanager
-    async def changes(self):
+    async def listen(self):
         yield _Wakes(2)
 
     async def accept(self, accept):
@@ -424,7 +423,7 @@ class TurnAndLifecycle(ScriptedSessions):
         super().__init__(files, self._no_model)
 
     @asynccontextmanager
-    async def open(self, app, token, agent_id):
+    async def open(self, app, bearer, agent_id):
         yield self
 
     async def declared_tools(self):
@@ -572,7 +571,7 @@ class TurnEndingInTheStepItsPlaceLeaves(TurnAndLifecycle):
         self._ending = ending
 
     @asynccontextmanager
-    async def open(self, app, token, agent_id):
+    async def open(self, app, bearer, agent_id):
         yield self
 
     async def declared_tools(self):
@@ -705,11 +704,11 @@ class WakesFailingWhileTheReadFails(ScriptedSessions):
         super().__init__(files, None)
 
     @asynccontextmanager
-    async def open(self, app, token, agent_id):
+    async def open(self, app, bearer, agent_id):
         yield self
 
     @asynccontextmanager
-    async def changes(self):
+    async def listen(self):
         yield _WakesFailingAfterOne(self._wakes_failure, self.raised)
 
     async def read_standing(self):
@@ -768,7 +767,7 @@ class DefectInARelayedCall(ScriptedSessions):
         return GatewayBackend(self.config.gateway, tools=tools, transport=self.gateway)
 
     @asynccontextmanager
-    async def open(self, app, token, agent_id):
+    async def open(self, app, bearer, agent_id):
         try:
             yield self
         except asyncio.CancelledError:

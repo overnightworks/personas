@@ -14,10 +14,11 @@ import pytest
 from agents.agent_file import load_agent
 from agents.backend.fake_gateway import completion
 from agents.backend.gateway import GatewayBackend
+from agents.mcp_client import READ_SECONDS
 from agents.turn import Principal
 from logline.testing import configured
 
-from personas.app_session import READ_SECONDS, open_mcp_session
+from personas.app_session import open_app_session
 from personas.config import MemoryTarget, Voice, load_config
 from personas.loop import AgentLoop, Boundaries
 from personas.main import ALEMBIC_LOGGER, SweepingBoundaries, run_with_sweep
@@ -244,7 +245,7 @@ class Harness:
     def start(self, *, stream_seconds: float = READ_SECONDS) -> None:
         boundaries = SweepingBoundaries(
             tokens=HttpTokenSource(TOKEN_ENDPOINT, self.token_client),
-            open_session=self.open_session or partial(open_mcp_session, stream_seconds=stream_seconds),
+            open_session=self.open_session or partial(open_app_session, stream_seconds=stream_seconds),
             clock=self.clock,
             report=self._report,
             ready=FileReadyMarker(self.ready_file),

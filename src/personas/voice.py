@@ -34,10 +34,10 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 
     from agents.backend import TurnEvent
+    from agents.mcp_client import MemberSession
     from agents.member import PlaceRef, SpeakAnswer
     from agents.turn import JsonObject
 
-    from personas.app_session import AppSession
     from personas.clock import Clock
     from personas.config import AppTarget
     from personas.holds import HoldInbox, TurnHold
@@ -315,7 +315,7 @@ class Sender:
 
     def __init__(
         self,
-        session: AppSession,
+        session: MemberSession,
         app: str,
         place: PlaceRef,
         clock: Clock,
