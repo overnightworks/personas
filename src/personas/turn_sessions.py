@@ -39,11 +39,11 @@ class TurnSessions:
         record: TaskRecord,
         *,
         opening: bool = False,
-        call_times: int = 1,
+        bounds_own_steps: bool = False,
     ) -> Answer | CallFailure:
         """Asks another app in a session of its own, under the token for its own scope; ``opening`` says the turn
-        waits for the session's opening, which is then a step of its own. The request has the app's call time
-        ``call_times`` times over, for an ``ask`` that bounds each of its own steps by it.
+        waits for the session's opening, which is then a step of its own. An ``ask`` that ``bounds_own_steps`` by the
+        app's call time each is bounded by none else, and the token and the opening have the call time to themselves.
 
         The session lives only for this request. A failure of the call, a session that died of its own child and
         an expiry of the app's call time come back as the failure; any other error is raised, and a turn whose
@@ -51,7 +51,7 @@ class TurnSessions:
         """
         try:
             return await ending_loud_when_cancelled(
-                self._within_call_time(app, ask, record, opening=opening, call_times=call_times),
+                self._within_call_time(app, ask, record, opening=opening, bounds_own_steps=bounds_own_steps),
                 unreachable_unless_cancelling,
             )
         except Exception as error:
@@ -80,15 +80,27 @@ class TurnSessions:
         record: TaskRecord,
         *,
         opening: bool,
-        call_times: int,
+        bounds_own_steps: bool,
     ) -> Answer:
-        """The token, the session and the request, all under the call time of the app."""
-        async with within_call_time(app.call_seconds * call_times):
-            granted = await self._tokens.fetch(self._agent, app.scope)
-            async with AsyncExitStack() as opened:
-                session = await self.opened(opened, app, lambda: granted.value, measured=opening)
-                try:
-                    return await ask(session)
-                except Exception as error:
-                    record.note(error)
-                    raise
+        """The token, the session and the request under the call time of the app; when the ``ask`` bounds its own
+        steps, it runs outside that call time, which bounds the token, the session's opening and its close."""
+        async with within_call_time(app.call_seconds) as call_time, AsyncExitStack() as opened:
+            session = await self._session_at(opened, app, opening=opening)
+            if bounds_own_steps:
+                with call_time.paused():
+                    return await self._noted(ask, session, record)
+            return await self._noted(ask, session, record)
+
+    async def _session_at(self, opened: AsyncExitStack, app: AppTarget, *, opening: bool) -> MemberSession:
+        granted = await self._tokens.fetch(self._agent, app.scope)
+        return await self.opened(opened, app, lambda: granted.value, measured=opening)
+
+    @staticmethod
+    async def _noted[Answer](
+        ask: Callable[[MemberSession], Awaitable[Answer]], session: MemberSession, record: TaskRecord
+    ) -> Answer:
+        try:
+            return await ask(session)
+        except Exception as error:
+            record.note(error)
+            raise

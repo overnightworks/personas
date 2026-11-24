@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from typing import TYPE_CHECKING, Final, cast
 
 from agents.member_outcomes import StatusFailure, Unreachable
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Iterator
+    from collections.abc import AsyncGenerator, Generator, Iterator
 
 STORE_UNREACHABLE_CODE: Final = "store_unreachable"
 """The code of a store that could not be reached or ended the connection."""
@@ -27,13 +27,31 @@ class CallTimedOut(Unreachable):
     """The app did not answer within its call time."""
 
 
+class CallTime:
+    """The running call time of one app's request."""
+
+    def __init__(self, call_seconds: float, bound: asyncio.Timeout) -> None:
+        self._call_seconds = call_seconds
+        self._bound = bound
+
+    @contextmanager
+    def paused(self) -> Generator[None]:
+        """Runs its body outside the call time, for a body that bounds each of its own steps by it; the call time
+        then runs again for its whole length."""
+        self._bound.reschedule(None)
+        try:
+            yield
+        finally:
+            self._bound.reschedule(asyncio.get_running_loop().time() + self._call_seconds)
+
+
 @asynccontextmanager
-async def within_call_time(call_seconds: float) -> AsyncGenerator[None]:
+async def within_call_time(call_seconds: float) -> AsyncGenerator[CallTime]:
     """Runs its body under an app's call time; an expired bound raises ``CallTimedOut``."""
     bound = asyncio.timeout(call_seconds)
     try:
         async with bound:
-            yield
+            yield CallTime(call_seconds, bound)
     except TimeoutError:
         if not bound.expired():
             raise
