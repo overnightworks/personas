@@ -429,3 +429,19 @@ async def test_a_skill_body_past_the_bound_of_one_result_answers_an_error_and_en
     assert shown.startswith(ERROR_MARK)
     assert len(shown) < MAX_EVENT_BYTES
     assert skill_reads(runner) == []
+
+
+async def test_a_skill_listing_an_app_refuses_leaves_the_app_out_of_the_turn_and_the_turn_goes_on(runner, songmaker):
+    skilled(runner, songmaker)
+    songmaker.refuse_with = HTTPStatus.FORBIDDEN
+    songmaker.refused_method = SKILLS_LIST
+    await restarted_in_the_call(runner)
+
+    await a_turn(runner, 1)
+
+    assert runner.reports.reported(apps=True, started=False) == [
+        (Event.SUSPENDED, status_code(HTTPStatus.FORBIDDEN), songmaker_url(runner))
+    ]
+    assert not {CREATE_SONG, GENERATE_SONG} & set(runner.gateway.offered_tools(1))
+    assert SONG_DESCRIPTION not in runner.gateway.system_of(1)
+    assert HOPIN_DESCRIPTION in runner.gateway.system_of(1)
