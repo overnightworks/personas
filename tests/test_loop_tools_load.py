@@ -413,15 +413,17 @@ async def test_a_load_counts_its_answer_in_the_results_bytes_of_its_turn(runner,
 
 
 async def test_the_next_turn_counts_a_loads_round_in_its_told_bytes(runner, songmaker, caplog):
+    """A turn's span of the told history grows by its round when it loaded, and not otherwise."""
     skilled(runner, songmaker)
-    runner.gateway = Gateway(tool_round(loading(SONGMAKER)), completion("done"), completion("again"))
+    runner.gateway = Gateway(
+        completion("done"), completion("done"), tool_round(loading(SONGMAKER)), completion("done"), completion("done")
+    )
     await restarted_in_the_call(runner)
-    await a_turn(runner, 1)
-    await runner.reports.until_a_turn_completed()
-    await a_turn(runner, 3)
-    await runner.reports.until_a_turn_completed(count=2)
+    for count, request_number in enumerate([1, 2, 3, 5], start=1):
+        await a_turn(runner, request_number)
+        await runner.reports.until_a_turn_completed(count=count)
 
-    first, second = lines_of(caplog.get_records("call"), "turn.ended")
-    ((assistant, _),) = runner.gateway.tool_rounds(3)
-    arguments = assistant["tool_calls"][0]["function"]["arguments"]
-    assert second["told_bytes"] - first["told_bytes"] >= len(arguments)
+    _, plain_turn_told, load_turn_told, after_load_told = [
+        each["told_bytes"] for each in lines_of(caplog.get_records("call"), "turn.ended")
+    ]
+    assert after_load_told - load_turn_told > load_turn_told - plain_turn_told
