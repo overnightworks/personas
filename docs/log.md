@@ -87,8 +87,8 @@ events and their fields. A test cites each rule by its ID at the start of its do
   line or revision that made the place due, so it joins that place's `turn_wait.ended`; a hold carries no trace, so
   its event has none. A line that joins a place already due, a wake that makes nothing due, a place due again after
   a turn without an answer and a place a pod resumes write none. The event carries no line's kind, text or
-  name. Its fields beyond the ids are `occasion` (`line`, `view` or `hold`), `spoken` (whether its turn would be
-  spoken) and `read_ms`.
+  name.
+  - `turn.fell_due`; written when: a pass made a place due that was not due; fields beyond the ids: `occasion` (`line`, `view` or `hold`), `spoken` (whether its turn would be spoken), `read_ms`
 
 ## `turn.ended`
 
