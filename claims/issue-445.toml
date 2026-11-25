@@ -1,8 +1,0 @@
-claim_id = "ee57277958c4470c9cc3c4a8cd7739cd"
-agent = "Claude f0c05936-2de0-40e4-8ecc-a6090ecb310b"
-role = "builder"
-base = "149058c5ad2f9d9e267248ae1f31923e070b9f4b"
-branch = "claude/issue-445-skills-on-request"
-scope = [".aco/ahead-of-caller.toml", "docs/ARCHITECTURE.md", "docs/log.md", "docs/runbooks/erase-memory.md", "docs/turns.md", "quality/baseline.toml", "src/personas/app_session.py", "src/personas/decision.py", "src/personas/failures.py", "src/personas/held_tools.py", "src/personas/holds.py", "src/personas/mind.py", "src/personas/present.py", "src/personas/reporting.py", "src/personas/sizing.py", "src/personas/tool_lists.py", "src/personas/turn_sessions.py", "src/personas/turning.py", "tests"]
-opened_commit = "9ea88fd3cfa30e6ea04fe17dcb78148d04ea000e"
-whole_reason = "The skill lines, read_skill and the told round are one capability: lines without the tool name skills no one can read, and a read without its round is forgotten at the next turn."
