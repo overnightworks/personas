@@ -10,7 +10,6 @@ import pytest
 from agents.backend.fake_gateway import completion, tool_round
 from agents.member import CONTINUE_SPEAKING_TOOL
 from agents.skills import implicit_skill_name
-from mcp_types import ListToolsResult, Tool
 
 from personas.decision import LOAD_TOOLS_CALLS, LOAD_TOOLS_TOOL, READ_SKILL_TOOL
 from personas.entries import ActDone, ToolsLoaded, told_bytes
@@ -18,9 +17,8 @@ from personas.held_tools import LOADS_SPENT_TEXT, NOTHING_WAITS_TEXT
 from personas.present import NO_SUCH_SKILL_TEXT, NOT_OFFERED_TEXT
 from personas.reporting import Event
 from tests.support.app_driving import said_and_taken
-from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, a_turn, restarted, restarted_in_the_call, say_in_the_call
+from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, a_turn, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway, loading, reading, say
-from tests.support.history import bounded_history, told_line_bytes
 from tests.support.hopin import LIST_TOOLS, SAY_TOOL
 from tests.support.logs import lines_of
 from tests.support.skills import (
@@ -30,8 +28,10 @@ from tests.support.skills import (
     Shelf,
     a_skill_file,
     skilled,
+    turns_past_a_cut_of_a_round,
+    turns_telling_a_round_across_a_restart,
 )
-from tests.support.songmaker import CREATE_SONG, GENERATE_SONG, a_song, songmaker_url
+from tests.support.songmaker import CREATE_SONG, GENERATE_SONG, OWN_DESCRIPTION, a_song, lists_only, songmaker_url
 from tests.support.voice import a_voice_call, deciding, held_in_the_first_sentence
 
 pytestmark = pytest.mark.anyio
@@ -71,18 +71,6 @@ def shown_bytes(runner, request_number: int) -> int:
         for each in tools
         if not each.get("defer_loading") or each["function"]["name"] in loaded
     )
-
-
-def lists_only(*names: str):
-    """A listing of songmaker that holds only these tools."""
-
-    async def lists(reply) -> None:
-        tools = [
-            Tool(name=name, description=f"{name} in songmaker.", input_schema={"type": "object"}) for name in names
-        ]
-        await reply.result(ListToolsResult(tools=tools))
-
-    return lists
 
 
 def declared_skill(runner, songmaker):
@@ -174,15 +162,7 @@ async def test_the_next_turn_tells_a_load_as_a_load_tools_round_under_its_id_and
 
 
 async def test_a_loads_round_is_byte_equal_after_a_restart(runner, songmaker):
-    skilled(runner, songmaker)
-    runner.gateway = Gateway(tool_round(loading(SONGMAKER)), completion("done"), completion("again"), completion("end"))
-    await restarted_in_the_call(runner)
-    await a_turn(runner, 1)
-    await runner.gateway.until_requested(2)
-    await a_turn(runner, 3)
-
-    await restarted(runner)
-    await a_turn(runner, 4)
+    await turns_telling_a_round_across_a_restart(runner, songmaker, loading(SONGMAKER))
 
     assert len(runner.gateway.tool_rounds(3)) == 1
     assert runner.gateway.tool_rounds(4) == runner.gateway.tool_rounds(3)
@@ -355,27 +335,9 @@ async def test_a_hold_round_after_a_load_in_its_turn_tells_the_load_and_is_sent(
 
 
 async def test_a_loads_round_is_gone_once_a_cut_drops_its_entry_and_is_not_written_again(runner, songmaker):
-    skilled(runner, songmaker)
-    line_bytes = told_line_bytes(songmaker_url(runner), PLACE_ID, f"{ADDRESSED} {secrets.token_hex(3)}")
-    runner.config = bounded_history(runner.config, 2 * line_bytes + len(CREATE_SONG) + len(GENERATE_SONG))
-    runner.gateway = Gateway(
-        tool_round(loading(SONGMAKER)),
-        completion("done"),
-        completion("again"),
-        completion("later"),
-        completion("last"),
-        completion("end"),
-    )
-    await restarted_in_the_call(runner)
-    await a_turn(runner, 1)
-    await a_turn(runner, 3)
+    await turns_past_a_cut_of_a_round(runner, songmaker, loading(SONGMAKER), len(CREATE_SONG) + len(GENERATE_SONG))
 
     assert len(runner.gateway.tool_rounds(3)) == 1
-
-    await a_turn(runner, 4)
-    await a_turn(runner, 5)
-    await a_turn(runner, 6)
-
     assert (runner.gateway.tool_rounds(5), runner.gateway.tool_rounds(6)) == ([], [])
     assert len(tools_loaded(runner)) == 1
 
@@ -383,14 +345,7 @@ async def test_a_loads_round_is_gone_once_a_cut_drops_its_entry_and_is_not_writt
 async def test_an_apps_tool_named_load_tools_is_not_taken(runner, songmaker):
     skilled(runner, songmaker)
 
-    async def lists_load_tools(reply) -> None:
-        tools = [
-            Tool(name=name, description="Its own.", input_schema={"type": "object"})
-            for name in (LOAD_TOOLS_TOOL, CREATE_SONG)
-        ]
-        await reply.result(ListToolsResult(tools=tools))
-
-    songmaker.script(LIST_TOOLS, lists_load_tools)
+    songmaker.script(LIST_TOOLS, lists_only(LOAD_TOOLS_TOOL, CREATE_SONG))
     runner.gateway = Gateway(tool_round(loading(SONGMAKER)), completion("done"))
     await restarted_in_the_call(runner)
 
@@ -399,7 +354,7 @@ async def test_an_apps_tool_named_load_tools_is_not_taken(runner, songmaker):
 
     own = [each for each in runner.gateway.body_of(1)["tools"] if each["function"]["name"] == LOAD_TOOLS_TOOL]
     assert len(own) == 1
-    assert own[0]["function"]["description"] != "Its own."
+    assert own[0]["function"]["description"] != OWN_DESCRIPTION
     assert referenced(runner.gateway.tool_results(2)[0]) == [CREATE_SONG]
 
 

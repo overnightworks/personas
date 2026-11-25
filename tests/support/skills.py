@@ -6,12 +6,16 @@ import secrets
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from agents.backend.fake_gateway import completion, tool_round
 from agents.front_matter import parse_front_matter, split_front_matter
 from agents.skills import SKILLS_EXTENSION, skill_digest, skill_uri
 from mcp_types import ReadResourceResult, TextResourceContents
 
+from tests.support.call import ADDRESSED, PLACE_ID, a_turn, restarted, restarted_in_the_call
+from tests.support.gateway import Gateway
+from tests.support.history import bounded_history, told_line_bytes
 from tests.support.hopin import DISCOVER, READ, SKILLS_GET, SKILLS_LIST, discovering
-from tests.support.songmaker import CREATE_SONG, GENERATE_SONG
+from tests.support.songmaker import CREATE_SONG, GENERATE_SONG, songmaker_url
 
 if TYPE_CHECKING:
     from tests.support.wire import Handler, Rpc
@@ -104,3 +108,29 @@ def skilled(runner, songmaker) -> None:
         }
     )
     runner.app.shelf = Shelf({HOPIN: a_skill_file(HOPIN, description=HOPIN_DESCRIPTION)})
+
+
+async def turns_telling_a_round_across_a_restart(runner, songmaker, call) -> None:
+    """A turn whose first reply is ``call``, the turn after it and, once the runner restarted, a third: the requests
+    that arrive as 3 and 4 tell the round of the call."""
+    skilled(runner, songmaker)
+    runner.gateway = Gateway(tool_round(call), completion("done"), completion("again"), completion("end"))
+    await restarted_in_the_call(runner)
+    await a_turn(runner, 1)
+    await runner.gateway.until_requested(2)
+    await a_turn(runner, 3)
+    await restarted(runner)
+    await a_turn(runner, 4)
+
+
+async def turns_past_a_cut_of_a_round(runner, songmaker, call, entry_bytes: int) -> None:
+    """A turn whose first reply is ``call``, whose entry weighs ``entry_bytes``, and five more turns over a history that
+    holds only two lines and that entry: the request that arrives as 3 tells the round, the ones as 5 and 6 do not."""
+    skilled(runner, songmaker)
+    line_bytes = told_line_bytes(songmaker_url(runner), PLACE_ID, f"{ADDRESSED} {secrets.token_hex(3)}")
+    runner.config = bounded_history(runner.config, 2 * line_bytes + entry_bytes)
+    replies = [tool_round(call), *(completion(text) for text in ("done", "again", "later", "last", "end"))]
+    runner.gateway = Gateway(*replies)
+    await restarted_in_the_call(runner)
+    for number in (1, 3, 4, 5, 6):
+        await a_turn(runner, number)
