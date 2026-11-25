@@ -2,7 +2,7 @@
 
 What the runner promises about an agent's turns: when one is due, what it is told, what it may do and how it
 ends. What is stored, and for how long, is in [the architecture](ARCHITECTURE.md), Persistence. A test cites
-each rule by its ID at the start of its docstring, such as `TURNS-1`. Every list item that opens with an ID is a rule;
+each rule by its ID at the start of its docstring, such as `TURNS-1`. Every list item that opens with an ID and every table row is a rule;
 prose without an ID is context.
 
 ## Joining and reading
@@ -73,10 +73,12 @@ is user messages and the rounds of the skills he read, none an instruction:
 
 An entry has its app and the time he took it (`at`), and is one of:
 
-- TURNS-11: line; fields: place, `seq`, own mark, `spoken`; `cut` only when the app cut it, its text then the part heard; `act` only when it says what someone did
-- TURNS-12: table state; fields: place, `revision`, whether it waits for him, the state as the app sent it, told whole in the first turn that held it
-- TURNS-13: call; fields: `tool`, the `arguments` he sent and an `outcome`: `"answered": true` with `text`, `is_error` and `image` when a picture came, or `"answered": false` with a `code`
-- TURNS-14: spoken sentence; fields: `text` and an `outcome`: taken, with `refused` and its code or `written` when the app wrote it instead, or `"answered": false` with a `code`
+| ID | Kind | Fields |
+|---|---|---|
+| TURNS-11 | line | place, `seq`, own mark, `spoken`; `cut` only when the app cut it, its text then the part heard; `act` only when it says what someone did |
+| TURNS-12 | table state | place, `revision`, whether it waits for him, the state as the app sent it, told whole in the first turn that held it |
+| TURNS-13 | call | `tool`, the `arguments` he sent and an `outcome`: `"answered": true` with `text`, `is_error` and `image` when a picture came, or `"answered": false` with a `code` |
+| TURNS-14 | spoken sentence | `text` and an `outcome`: taken, with `refused` and its code or `written` when the app wrote it instead, or `"answered": false` with a `code` |
 
 - TURNS-15: Every message before the turn's own is byte for byte as the turn before sent it, so the gateway's cache
   reads it back. A skill he read is told as a round of its own at its place among the messages: one `read_skill`

@@ -2,7 +2,7 @@
 
 What the runner writes to stdout, for whoever reads or alerts on it. `src/personas/reporting.py` owns the
 events and their fields. A test cites each rule by its ID at the start of its docstring, such as
-`LOG-1`. Every list item that opens with an ID is a rule; prose without an ID is context.
+`LOG-1`. Every list item that opens with an ID and every table row is a rule; prose without an ID is context.
 
 ## Shape
 
@@ -30,33 +30,36 @@ events and their fields. A test cites each rule by its ID at the start of its do
 
 ## Events
 
-- LOG-6: `loop.started`; written when: a loop starts; fields beyond the ids: `model` when the agent can take turns
-- LOG-7: `loop.suspended`; written when: the realm or an app refuses the agent; fields beyond the ids: `reason`; `status` and `mcp_method` when a call failed
-- LOG-8: `loop.resumed`; written when: a full pass of standing, accepts and windows went through after a suspension or a backoff, so a retry whose window reads still fail logs none; fields beyond the ids: none
-- LOG-9: `loop.backed_off`; written when: a network failure, a lost stream or a 5xx; fields beyond the ids: `reason`; `status` and `mcp_method` when a call failed
-- LOG-10: `invitation.accepted`, `invitation.refused`; written when: an accept answered; fields beyond the ids: `reason` for a refusal
-- LOG-11: `invitation.left_out`; written when: an invitation the agent cannot take turns at; fields beyond the ids: `place_kind`, `reason` `no_turns`
-  - `invitation.declined`; written when: an invitation to a call declined as busy while the agent held an active place; fields beyond the ids: `place_kind`, `reason` `busy`
-  - `invitation.decline_refused`; written when: a decline of a call invitation the app refused; fields beyond the ids: `place_kind`, `reason` the refusal's code, or `unrecognised` for an error answer that is none of the app's refusals
-- LOG-12: `turn.ended`; written when: every turn, however it ends; fields beyond the ids: see below
-- LOG-13: `turn_wait.ended`, `claim_write.ended`, `thinking.ended`, `session_open.ended`, `tool_list.ended`, `skill_list.ended`, `turn_setup.ended`; written when: each step of a turn; fields beyond the ids: `duration_ms`, `outcome`; `reason` and `error_type` of a failed `session_open`, `tool_list`, `skill_list` or `turn_setup`, and `entry`, the index of the entry a malformed skills listing broke a rule at, never its text (`session_open` is a session the turn opens to another app, since the turn's own app is served on the loop's session; a place's own app that does not list its tools within its `call_seconds` fails the `tool_list` step and the turn goes on without them, and `tool_list` is written only for a listing that was sent, so a turn that uses the list its app's stream kept writes none; `skill_list` is written only for a `skills/list` that was sent, so an app that declares no skills extension writes none, and an app whose listing fails keeps its tools and has no skill lines in that turn; `turn_wait` ends when the turn starts and `claim_write` only waits for the store's writer, so neither fails; `thinking` is the statement that the turn is thinking, answered by the app; `turn_setup` is what the turn still waited for after its thinking was answered); `wait_reason` on `turn_wait.ended`
-- LOG-14: `token_request.ended`; written when: each token request; fields beyond the ids: `duration_ms`, `outcome`; `reason` and `error_type` of a failed request
-- LOG-15: `turns.paused`; written when: a turn without an answer pauses his turns; fields beyond the ids: `reason` (the turn's code, `budget_spent` among them), `pause_ms`
-- LOG-16: `speak.refused`; written when: the app refused a sentence, which drops the unsent ones at its place; his own stop's or answer's refusal of a request it cut is not logged; fields beyond the ids: `reason` (the app's code)
-- LOG-36: `speech.dropped`; written when: sentences were dropped unsent, once per drop; fields beyond the ids: `reason`: `replaced` (a later spoken turn's first sentence, or his answer instead of a hold), `limit_exceeded` (unsent at its bound, or a request not answered by it), `stopped` (a hold's stop or undecided end, a runner stop) or `failed` (its turn ended without an answer, a `speak` failed as a call, the session ended); `sentence_count`
-- LOG-17: `hold.decided`; written when: once per hold id; fields beyond the ids: `reason`: `continued`, `short_line` (the app took his short line, then his unsent sentences follow), `stopped`, `answered` (the app took the first sentence of his answer instead), `undecided`, or `gone` when the app refused the decision because no such hold stood; `hold_id`, the app's id for the hold, which comes again in a new window generation
-- LOG-40: `skill.refused`; written when: the app served a skill file that is not what its listing promised, so `read_skill` answered an error; fields beyond the ids: `reason` (the refusal's code), never a name or text
-- LOG-18: `tools.left_out`; written when: an app lost tool names to an earlier app, once per session; fields beyond the ids: `tool_count`, never a name
-- LOG-39: `argument.left_out`; written when: a call went out without an optional argument its tool's declared schema does not name (`figure`, `voices`, `looks` and `looks[].room`, the `room` of each entry of `looks`, of `accept_invitation`, `style` and `interrupted` of `speak`, `thinking` of `set_turn_state`), once per tool and argument per app session, so an app that renamed an argument shows instead of losing the feature quietly; a required argument is never left out; an `accept_invitation` that carries `figure`, `voices` or `looks` on a session with no list yet asks the app for its tools first, so an app whose list fails fails that accept with the list's failure; logged at info; fields beyond the ids: `tool`, `argument`, never a value
-- LOG-19: `held_app.failed`, `tools_only_app.failed`; written when: a call to another app failed, a read of a skill included; fields beyond the ids: `status`, `mcp_method`, `reason`
-- LOG-20: `store.failed`, `store.resumed`; written when: once per store outage, and when it answers again; fields beyond the ids: `reason` `store_unreachable` or `store_timeout`
-- LOG-21: `lines.swept`; written when: a sweep that erased lines; fields beyond the ids: `line_count`; no agent or app
-- LOG-22: `agent.taken`; written when: a pod holds an agent's lock; fields beyond the ids: the agent only
-- LOG-23: `agent.lost`; written when: a pod stops an agent it served; fields beyond the ids: `reason`: `hold_lost`, `generation_stale` or the store's code
-- LOG-24: `agent.stop_overran`; written when: an agent took longer than `cancel_margin_seconds` to stop; fields beyond the ids: the agent only
-- LOG-25: `runner.stop_cut`; written when: the runner had not stopped `stop_seconds` after a SIGTERM and ends at once; fields beyond the ids: none; no agent or app
-- LOG-34: `turn_state.failed`; written when: the app refused or failed a statement of his turns at a place, or a stop's statements did not go out within its margin; fields beyond the ids: `reason` (the app's refusal code, the failed call's reason, `invalid_params` for a tool the app does not serve, `network` for a stop's margin); `status` and `mcp_method` when a call failed
-- LOG-35: `turn_state.lost`; written when: a statement whose answer was lost when its session ended on another call's failure or on the runner's stop; the runner recovers on its own, since the next full pass states it again, and the stop states each seat's last end again within its margin, so it logs at info, once for the statement and not again for that restatement; fields beyond the ids: none
+| ID | Event | Written when | Fields beyond the ids |
+|---|---|---|---|
+| LOG-6 | `loop.started` | a loop starts | `model` when the agent can take turns |
+| LOG-7 | `loop.suspended` | the realm or an app refuses the agent | `reason`; `status` and `mcp_method` when a call failed |
+| LOG-8 | `loop.resumed` | a full pass of standing, accepts and windows went through after a suspension or a backoff, so a retry whose window reads still fail logs none | none |
+| LOG-9 | `loop.backed_off` | a network failure, a lost stream or a 5xx | `reason`; `status` and `mcp_method` when a call failed |
+| LOG-10 | `invitation.accepted`, `invitation.refused` | an accept answered | `reason` for a refusal |
+| LOG-11 | `invitation.left_out` | an invitation the agent cannot take turns at | `place_kind`, `reason` `no_turns` |
+| LOG-11 | `invitation.declined` | an invitation to a call declined as busy while the agent held an active place | `place_kind`, `reason` `busy` |
+| LOG-11 | `invitation.decline_refused` | a decline of a call invitation the app refused | `place_kind`, `reason` the refusal's code, or `unrecognised` for an error answer that is none of the app's refusals |
+| LOG-37 | `turn.fell_due` | a pass made a place due that was not due | `occasion` (`line`, `view` or `hold`), `spoken` (whether its turn would be spoken), `read_ms` |
+| LOG-12 | `turn.ended` | every turn, however it ends | see below |
+| LOG-13 | `turn_wait.ended`, `claim_write.ended`, `thinking.ended`, `session_open.ended`, `tool_list.ended`, `skill_list.ended`, `turn_setup.ended` | each step of a turn | `duration_ms`, `outcome`; `reason` and `error_type` of a failed `session_open`, `tool_list`, `skill_list` or `turn_setup`, and `entry`, the index of the entry a malformed skills listing broke a rule at, never its text (`session_open` is a session the turn opens to another app, since the turn's own app is served on the loop's session; a place's own app that does not list its tools within its `call_seconds` fails the `tool_list` step and the turn goes on without them, and `tool_list` is written only for a listing that was sent, so a turn that uses the list its app's stream kept writes none; `skill_list` is written only for a `skills/list` that was sent, so an app that declares no skills extension writes none, and an app whose listing fails keeps its tools and has no skill lines in that turn; `turn_wait` ends when the turn starts and `claim_write` only waits for the store's writer, so neither fails; `thinking` is the statement that the turn is thinking, answered by the app; `turn_setup` is what the turn still waited for after its thinking was answered); `wait_reason` on `turn_wait.ended` |
+| LOG-14 | `token_request.ended` | each token request | `duration_ms`, `outcome`; `reason` and `error_type` of a failed request |
+| LOG-15 | `turns.paused` | a turn without an answer pauses his turns | `reason` (the turn's code, `budget_spent` among them), `pause_ms` |
+| LOG-16 | `speak.refused` | the app refused a sentence, which drops the unsent ones at its place; his own stop's or answer's refusal of a request it cut is not logged | `reason` (the app's code) |
+| LOG-36 | `speech.dropped` | sentences were dropped unsent, once per drop | `reason`: `replaced` (a later spoken turn's first sentence, or his answer instead of a hold), `limit_exceeded` (unsent at its bound, or a request not answered by it), `stopped` (a hold's stop or undecided end, a runner stop) or `failed` (its turn ended without an answer, a `speak` failed as a call, the session ended); `sentence_count` |
+| LOG-17 | `hold.decided` | once per hold id | `reason`: `continued`, `short_line` (the app took his short line, then his unsent sentences follow), `stopped`, `answered` (the app took the first sentence of his answer instead), `undecided`, or `gone` when the app refused the decision because no such hold stood; `hold_id`, the app's id for the hold, which comes again in a new window generation |
+| LOG-40 | `skill.refused` | the app served a skill file that is not what its listing promised, so `read_skill` answered an error | `reason` (the refusal's code), never a name or text |
+| LOG-18 | `tools.left_out` | an app lost tool names to an earlier app, once per session | `tool_count`, never a name |
+| LOG-39 | `argument.left_out` | a call went out without an optional argument its tool's declared schema does not name (`figure`, `voices`, `looks` and `looks[].room`, the `room` of each entry of `looks`, of `accept_invitation`, `style` and `interrupted` of `speak`, `thinking` of `set_turn_state`), once per tool and argument per app session, so an app that renamed an argument shows instead of losing the feature quietly; a required argument is never left out; an `accept_invitation` that carries `figure`, `voices` or `looks` on a session with no list yet asks the app for its tools first, so an app whose list fails fails that accept with the list's failure; logged at info | `tool`, `argument`, never a value |
+| LOG-19 | `held_app.failed`, `tools_only_app.failed` | a call to another app failed, a read of a skill included | `status`, `mcp_method`, `reason` |
+| LOG-20 | `store.failed`, `store.resumed` | once per store outage, and when it answers again | `reason` `store_unreachable` or `store_timeout` |
+| LOG-21 | `lines.swept` | a sweep that erased lines | `line_count`; no agent or app |
+| LOG-22 | `agent.taken` | a pod holds an agent's lock | the agent only |
+| LOG-23 | `agent.lost` | a pod stops an agent it served | `reason`: `hold_lost`, `generation_stale` or the store's code |
+| LOG-24 | `agent.stop_overran` | an agent took longer than `cancel_margin_seconds` to stop | the agent only |
+| LOG-25 | `runner.stop_cut` | the runner had not stopped `stop_seconds` after a SIGTERM and ends at once | none; no agent or app |
+| LOG-34 | `turn_state.failed` | the app refused or failed a statement of his turns at a place, or a stop's statements did not go out within its margin | `reason` (the app's refusal code, the failed call's reason, `invalid_params` for a tool the app does not serve, `network` for a stop's margin); `status` and `mcp_method` when a call failed |
+| LOG-35 | `turn_state.lost` | a statement whose answer was lost when its session ended on another call's failure or on the runner's stop; the runner recovers on its own, since the next full pass states it again, and the stop states each seat's last end again within its margin, so it logs at info, once for the statement and not again for that restatement | none |
 
 - LOG-26: A `status` is the integer of an error status, absent for a JSON-RPC error sent with a success status. A
   `reason` of a failed call is a standard JSON-RPC error or a known media type by name, else one fixed word,
@@ -88,7 +91,6 @@ events and their fields. A test cites each rule by its ID at the start of its do
   its event has none. A line that joins a place already due, a wake that makes nothing due, a place due again after
   a turn without an answer and a place a pod resumes write none. The event carries no line's kind, text or
   name.
-  - `turn.fell_due`; written when: a pass made a place due that was not due; fields beyond the ids: `occasion` (`line`, `view` or `hold`), `spoken` (whether its turn would be spoken), `read_ms`
 
 ## `turn.ended`
 
