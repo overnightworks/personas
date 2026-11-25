@@ -162,10 +162,9 @@ async def test_the_next_turn_tells_a_load_as_a_load_tools_round_under_its_id_and
 
 
 async def test_a_loads_round_is_byte_equal_after_a_restart(runner, songmaker):
-    await turns_telling_a_round_across_a_restart(runner, songmaker, loading(SONGMAKER))
+    told, told_again = await turns_telling_a_round_across_a_restart(runner, songmaker, loading(SONGMAKER))
 
-    assert len(runner.gateway.tool_rounds(3)) == 1
-    assert runner.gateway.tool_rounds(4) == runner.gateway.tool_rounds(3)
+    assert (len(told), told_again) == (1, told)
 
 
 @pytest.mark.parametrize(

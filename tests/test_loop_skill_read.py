@@ -116,10 +116,9 @@ async def test_the_next_turn_counts_a_read_skills_round_in_its_told_bytes(runner
 
 
 async def test_a_read_skills_round_is_byte_equal_after_a_restart(runner, songmaker):
-    await turns_telling_a_round_across_a_restart(runner, songmaker, reading(SONGMAKER))
+    told, told_again = await turns_telling_a_round_across_a_restart(runner, songmaker, reading(SONGMAKER))
 
-    assert len(runner.gateway.tool_rounds(3)) == 1
-    assert runner.gateway.tool_rounds(4) == runner.gateway.tool_rounds(3)
+    assert (len(told), told_again) == (1, told)
 
 
 async def test_a_read_skills_round_is_gone_once_a_cut_drops_its_entry_and_is_not_written_again(runner, songmaker):
