@@ -18,7 +18,7 @@ from personas.present import NO_SUCH_SKILL_TEXT, NOT_OFFERED_TEXT
 from personas.reporting import Event
 from tests.support.app_driving import said_and_taken
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, a_turn, restarted_in_the_call, say_in_the_call
-from tests.support.gateway import Gateway, loading, reading, say
+from tests.support.gateway import ERROR_MARK, Gateway, loading, reading, say
 from tests.support.hopin import LIST_TOOLS, SAY_TOOL
 from tests.support.logs import lines_of
 from tests.support.skills import (
@@ -36,8 +36,6 @@ from tests.support.voice import a_voice_call, deciding, held_in_the_first_senten
 
 pytestmark = pytest.mark.anyio
 
-ERROR_MARK = "Error: "
-"""How the gateway shows the model an error result."""
 SONG_TOOLS = [CREATE_SONG, GENERATE_SONG]
 
 

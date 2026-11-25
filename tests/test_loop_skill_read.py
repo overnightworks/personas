@@ -18,7 +18,7 @@ from personas.decision import READ_SKILL_CALLS, READ_SKILL_TOOL
 from personas.entries import ActDone, SkillRead
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, a_turn, restarted_in_the_call, say_in_the_call
-from tests.support.gateway import Gateway, reading
+from tests.support.gateway import ERROR_MARK, Gateway, reading
 from tests.support.hopin import CALL, LIST_TOOLS, READ, SKILLS_GET, SKILLS_LIST
 from tests.support.logs import formatted, lines_of
 from tests.support.realm import LIFETIME_SECONDS
@@ -41,8 +41,6 @@ from tests.support.wire import hangs, refuses_with_a_server_error
 
 pytestmark = pytest.mark.anyio
 
-ERROR_MARK = "Error: "
-"""How the gateway shows the model an error result."""
 LARGE_BODY_BYTES = 5000
 
 

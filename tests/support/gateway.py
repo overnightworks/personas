@@ -54,6 +54,8 @@ class RoundBackend:
             raise self._defect from None
 
 
+ERROR_MARK = "Error: "
+"""How the gateway shows the model an error result."""
 MESSAGES_OF_A_FIRST_ROUND = 2
 """A turn's first round holds at least its header and its own message after the persona."""
 BUDGET_SPENT = Reply(
