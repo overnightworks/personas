@@ -1,0 +1,8 @@
+claim_id = "a3babc1626544f6fb29f871a70eac005"
+agent = "Claude f0c05936-2de0-40e4-8ecc-a6090ecb310b"
+role = "builder"
+base = "2841d92beb420ca8bf2e4bd06a6924cbbb495328"
+branch = "claude/issue-450-personas-pins-quality-v0-27-0"
+scope = [".github/workflows/ci.yml", ".github/workflows/code-scanning.yml", ".github/workflows/release.yml", "docs/configuration.md", "docs/log.md", "docs/turns.md"]
+opened_commit = "2c667a599ba56a6969784d45190bbb6c2594e6a9"
+whole_reason = "The five pins and the eight restored tables land together: the tables define their IDs only under v0.27.0's spec-citation rule, and the pin without them leaves the ruled restore undone."
