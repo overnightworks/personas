@@ -38,7 +38,6 @@ events and their fields. A test cites each rule by its ID at the start of its do
 | LOG-9 | `loop.backed_off` | a network failure, a lost stream or a 5xx | `reason`; `status` and `mcp_method` when a call failed |
 | LOG-10 | `invitation.accepted`, `invitation.refused` | an accept answered | `reason` for a refusal |
 | LOG-11 | `invitation.left_out`<br>`invitation.declined`<br>`invitation.decline_refused` | an invitation the agent cannot take turns at<br>an invitation to a call declined as busy while the agent held an active place<br>a decline of a call invitation the app refused | `place_kind`, `reason` `no_turns`<br>`place_kind`, `reason` `busy`<br>`place_kind`, `reason` the refusal's code, or `unrecognised` for an error answer that is none of the app's refusals |
-| LOG-37 | `turn.fell_due` | a pass made a place due that was not due | `occasion` (`line`, `view` or `hold`), `spoken` (whether its turn would be spoken), `read_ms` |
 | LOG-12 | `turn.ended` | every turn, however it ends | see below |
 | LOG-13 | `turn_wait.ended`, `claim_write.ended`, `thinking.ended`, `session_open.ended`, `tool_list.ended`, `skill_list.ended`, `turn_setup.ended` | each step of a turn | `duration_ms`, `outcome`; `reason` and `error_type` of a failed `session_open`, `tool_list`, `skill_list` or `turn_setup`, and `entry`, the index of the entry a malformed skills listing broke a rule at, never its text (`session_open` is a session the turn opens to another app, since the turn's own app is served on the loop's session; a place's own app that does not list its tools within its `call_seconds` fails the `tool_list` step and the turn goes on without them, and `tool_list` is written only for a listing that was sent, so a turn that uses the list its app's stream kept writes none; `skill_list` is written only for a `skills/list` that was sent, so an app that declares no skills extension writes none, and an app whose listing fails keeps its tools and has no skill lines in that turn; `turn_wait` ends when the turn starts and `claim_write` only waits for the store's writer, so neither fails; `thinking` is the statement that the turn is thinking, answered by the app; `turn_setup` is what the turn still waited for after its thinking was answered); `wait_reason` on `turn_wait.ended` |
 | LOG-14 | `token_request.ended` | each token request | `duration_ms`, `outcome`; `reason` and `error_type` of a failed request |
@@ -82,13 +81,14 @@ events and their fields. A test cites each rule by its ID at the start of its do
   and `session_open` may run beside `claim_write` and `thinking`: their overlap is read from each line's time
   minus its duration.
 
-- A `turn.fell_due` is written once for a place that a pass makes due while it was not due: by a line that wakes
+- LOG-37: A `turn.fell_due` is written once for a place that a pass makes due while it was not due: by a line that wakes
   him, by a view revision that waits for him, or by a hold that may be told. `read_ms` runs from the pass's start
   of reading the standing to that moment, on the monotonic scale of `Clock.now`. It stands in the trace of the
   line or revision that made the place due, so it joins that place's `turn_wait.ended`; a hold carries no trace, so
   its event has none. A line that joins a place already due, a wake that makes nothing due, a place due again after
   a turn without an answer and a place a pod resumes write none. The event carries no line's kind, text or
-  name.
+  name. Its fields beyond the ids are `occasion` (`line`, `view` or `hold`), `spoken` (whether its turn would be
+  spoken) and `read_ms`.
 
 ## `turn.ended`
 
