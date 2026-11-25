@@ -46,7 +46,7 @@ from tests.support.call import (
     say_in_the_call,
 )
 from tests.support.fakes import CANCELLED_TURN, failed_turn, memory_target
-from tests.support.gateway import Gateway, play, say, says
+from tests.support.gateway import Gateway, play, reads_of_every_skill_the_bound_allows, say, says
 from tests.support.history import MORNING, TABLE, a_state, at_table, entry, said, url_of
 from tests.support.hopin import LIMIT_SECONDS, LIST_TOOLS, LISTEN, PLAY_TOOL, SAY_TOOL
 from tests.support.logs import formatted, lines_of
@@ -228,6 +228,7 @@ async def test_a_turns_call_total_is_his_apps_bounds_plus_his_lookups_and_the_on
     lookups = runner.config.memory.lookup_calls
     own_calls = runner.config.apps[0].max_tool_calls if lists_tools else 0
     total = [
+        *reads_of_every_skill_the_bound_allows(),
         *(tool_round(recalling()) for _ in range(lookups + 1)),
         *(tool_round(say(secrets.token_hex(4))) for _ in range(own_calls)),
         deciding(CONTINUE_SPEAKING_TOOL),

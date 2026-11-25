@@ -220,7 +220,7 @@ async def test_a_written_turn_after_a_spoken_one_sends_the_spoken_turns_front_an
     first, second = (runner.gateway.body_of(number) for number in (1, 2))
     assert aloud.aloud
     assert not written.aloud
-    assert aloud.system.endswith(REPLY_RULES)
+    assert REPLY_RULES in aloud.system
     assert written.system == aloud.system
     assert second["tools"] == first["tools"]
     assert second["messages"][: len(first["messages"])] == first["messages"]

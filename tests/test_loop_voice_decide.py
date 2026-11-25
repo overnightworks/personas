@@ -19,6 +19,7 @@ from agents.member import (
 )
 from agents.tools import ToolOutcome
 
+from personas.decision import READ_SKILL_TOOL
 from personas.recall import RECALL_TOOL
 from personas.reporting import Event
 from personas.speech import DropReason
@@ -26,7 +27,8 @@ from tests.support.app_driving import settled
 from tests.support.call import ADDRESSED, PLACE_ID, say_in_the_call
 from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
 from tests.support.gateway import BUDGET_SPENT, say
-from tests.support.hopin import CALL, SAY_TOOL
+from tests.support.hopin import CALL, SAY_TOOL, SKILLS_GET
+from tests.support.skills import Shelf, a_skill_file
 from tests.support.store import ScriptedStore
 from tests.support.voice import TWO_SENTENCES, a_voice_call, holding_sentence_ends, sentences_spoken
 from tests.support.wire import refuses_with_a_server_error
@@ -124,10 +126,25 @@ async def test_a_hold_left_standing_when_his_speech_ends_is_decided_by_his_next_
     assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
 
 
-async def test_every_other_call_of_a_turn_told_a_hold_is_answered_deciding_first_until_he_decides(runner):
+def with_a_skill_to_read(runner) -> None:
+    runner.app.shelf = Shelf({"hopin": a_skill_file("hopin")})
+
+
+@pytest.mark.parametrize(
+    ("early", "arrange"),
+    [
+        (say("early", PLACE_ID), lambda runner: None),
+        (tool_call("early-read", READ_SKILL_TOOL, {"skill": "hopin"}), with_a_skill_to_read),
+    ],
+    ids=["say", "read_skill"],
+)
+async def test_every_other_call_of_a_turn_told_a_hold_is_answered_deciding_first_until_he_decides(
+    runner, early, arrange
+):
     """TURNS-31."""
+    arrange(runner)
     replies = [
-        tool_round(say("early", PLACE_ID)),
+        tool_round(early),
         deciding(CONTINUE_SPEAKING_TOOL),
         deciding(STOP_SPEAKING_TOOL),
         completion("[silent]"),
@@ -140,6 +157,7 @@ async def test_every_other_call_of_a_turn_told_a_hold_is_answered_deciding_first
     results = runner.gateway.tool_results(4)
     assert [each.startswith("Error") for each in results] == [True, False, True]
     assert SAY_TOOL not in runner.app.calls
+    assert SKILLS_GET not in runner.app.log.entries
     assert runner.app.hold_calls == [(CONTINUE_SPEAKING_TOOL, HOLD_ID)]
 
 

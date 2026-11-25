@@ -6,10 +6,12 @@ import json
 from typing import TYPE_CHECKING
 
 import pytest
+from agents.turn import ToolRound
 
 from personas.entries import HistoryDelta, KeptHistory, Lines, TurnTold, entry_size
 from personas.present import (
     EMPTY_PRESENT,
+    EMPTY_SKILL_TEXT,
     Arrived,
     Present,
     answered_into,
@@ -97,13 +99,69 @@ def test_the_first_delta_after_a_resume_continues_the_ordinals_of_the_kept_histo
     assert history_delta(resumed, grown) == HistoryDelta(3, (said(4, "four"),), 2, grown.told[-1:], 1)
 
 
-def test_a_turn_is_told_a_history_holding_a_skill_and_a_load_without_them():
-    held = took(EMPTY_PRESENT, said(1, "one"), a_skill_read(), a_tools_load(), said(2, "two"))
-    turn = TurnTold(LATER, APP, MORNING.place, Lines(MORNING.generation, frozenset({1, 2}), missed=False), False, 4)
+def seen_in(messages) -> list[object]:
+    """What a turn's messages hold in order: the entries a message tells, or the id, call and result of a round."""
+    return [
+        ("round", each.calls[0].call_id, each.calls[0].arguments, each.calls[0].result, len(each.calls))
+        if isinstance(each, ToolRound)
+        else ("message", [entry["seq"] for entry in json.loads(each.text).get("entries", [])])
+        for each in messages
+    ]
 
-    *_, message = (json.loads(each) for each in turn_messages("Mozart", held, turn))
 
-    assert [entry["entry"] for entry in message["entries"]] == ["line", "line"]
+@pytest.mark.parametrize(
+    ("entries", "expected"),
+    [
+        pytest.param(
+            (said(1, "one"), a_skill_read(), said(2, "two")),
+            [
+                ("message", []),
+                ("message", [1]),
+                ("round", "call-body", '{"skill": "greeting"}', "Greet people by name.", 1),
+                ("message", [2]),
+            ],
+            id="one read between two lines",
+        ),
+        pytest.param(
+            (
+                said(1, "one"),
+                a_skill_read(),
+                said(2, "two"),
+                a_skill_read(name="other", body="", call_id="call-other"),
+                said(3, "six"),
+            ),
+            [
+                ("message", []),
+                ("message", [1]),
+                ("round", "call-body", '{"skill": "greeting"}', "Greet people by name.", 1),
+                ("message", [2]),
+                ("round", "call-other", '{"skill": "other"}', EMPTY_SKILL_TEXT, 1),
+                ("message", [3]),
+            ],
+            id="two reads, the second with no text",
+        ),
+        pytest.param(
+            (a_skill_read(), a_tools_load(), said(1, "one")),
+            [
+                ("message", []),
+                ("round", "call-body", '{"skill": "greeting"}', "Greet people by name.", 1),
+                ("message", [1]),
+            ],
+            id="a read before the first line, a load told by nothing",
+        ),
+    ],
+)
+def test_a_turn_message_splits_around_each_skill_entrys_round(entries, expected):
+    held = took(EMPTY_PRESENT, *entries)
+    turn = TurnTold(
+        LATER, APP, MORNING.place, Lines(MORNING.generation, frozenset({1, 2}), missed=False), False, len(entries)
+    )
+
+    messages = turn_messages("Mozart", held, turn)
+
+    assert seen_in(messages) == expected
+    assert "woke" in json.loads(messages[-1].text)
+    assert all("woke" not in json.loads(each.text) for each in messages[1:-1] if not isinstance(each, ToolRound))
 
 
 def test_a_skill_and_a_load_taken_since_the_admission_hold_back_no_call():

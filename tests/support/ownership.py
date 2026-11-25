@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from itertools import takewhile
 from typing import TYPE_CHECKING
 
 from personas.entries import HistoryDelta, KeptHistory, KeptTurns
@@ -41,7 +42,17 @@ class KeptHistories:
             raise StaleGenerationError
         if delta is not None:
             self.written.append((client_id, delta))
+            self.kept[client_id] = _kept_after(self.kept.get(client_id, NOTHING_KEPT), delta)
         self.turns[client_id] = turns
+
+
+def _kept_after(kept: KeptHistory, delta: HistoryDelta) -> KeptHistory:
+    """What the store keeps of a history once it took ``delta``: the entries and turns it held that the delta does not
+    drop, then the delta's."""
+    entries = (*kept.entries[delta.left_out - kept.first : delta.first - kept.first], *delta.entries)
+    told = (*kept.told[: delta.first_told - kept.first_told], *delta.told)
+    dropped = sum(1 for _ in takewhile(lambda turn: turn.through <= delta.left_out, told))
+    return KeptHistory(delta.left_out, entries, kept.first_told + dropped, told[dropped:])
 
 
 class AllAgentsOwned:

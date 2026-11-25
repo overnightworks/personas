@@ -11,7 +11,7 @@ from enum import Enum, StrEnum, auto
 from typing import TYPE_CHECKING, Final, Protocol
 from urllib.parse import urlsplit
 
-from agents.member_outcomes import StatusFailure
+from agents.member_outcomes import StatusFailure, UnusableAnswer
 from anyio import BrokenResourceError, ClosedResourceError
 from anyio.lowlevel import checkpoint
 from logline import Outcome, StepTimer, current_traceparent
@@ -64,6 +64,7 @@ class Event(Enum):
     TURN_STATE_LOST = auto()
     TOOLS_ONLY_APP_FAILED = auto()
     HELD_APP_FAILED = auto()
+    SKILL_REFUSED = auto()
     TOOLS_LEFT_OUT = auto()
     STORE_FAILED = auto()
     STORE_RESUMED = auto()
@@ -141,6 +142,7 @@ _LINE_OF: Final = {
     Event.TURN_STATE_LOST: (logging.INFO, "turn_state.lost"),
     Event.TOOLS_ONLY_APP_FAILED: (logging.WARNING, "tools_only_app.failed"),
     Event.HELD_APP_FAILED: (logging.WARNING, "held_app.failed"),
+    Event.SKILL_REFUSED: (logging.WARNING, "skill.refused"),
     Event.TOOLS_LEFT_OUT: (logging.INFO, "tools.left_out"),
     Event.STORE_FAILED: (logging.WARNING, "store.failed"),
     Event.STORE_RESUMED: (logging.INFO, "store.resumed"),
@@ -328,7 +330,8 @@ def step_timer(event: str, /, agent_id: str, app: str | None = None, *, elapsed_
 def stepping(timer: StepTimer, *, turn_goes_on: bool = False) -> Generator[StepTimer]:
     """Ends the timer's one line when the block does: an error ends it failed with its closed reason, a cancellation
     cancelled, and the timer's own ``end`` inside the block writes it earlier. A failure the unit survives
-    (``turn_goes_on``) is written as a handled one."""
+    (``turn_goes_on``) is written as a handled one. An unusable answer that names the entry of a listing which broke a
+    rule adds that index as ``entry``, never the entry."""
     with timer:
         if turn_goes_on:
             timer.handled()
@@ -336,6 +339,8 @@ def stepping(timer: StepTimer, *, turn_goes_on: bool = False) -> Generator[StepT
             yield timer
         except Exception as error:
             timer.fail(error_reason(error))
+            if isinstance(error, UnusableAnswer) and error.entry is not None:
+                timer.add(entry=error.entry)
             raise
 
 

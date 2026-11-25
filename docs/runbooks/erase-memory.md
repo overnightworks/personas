@@ -1,7 +1,7 @@
 # Runbook: show and erase what an agent keeps
 
 Task: someone asks what an agent keeps of them, or that it be erased. Impact: the agent forgets every line,
-table state, call and sentence of his history, and every kept line, of the agent or agents named.
+table state, call, sentence and skill he read of his history, and every kept line, of the agent or agents named.
 
 Both commands load the runner's whole configuration, so `PERSONAS_CONFIG` names a valid one whose secret
 files are all readable; a configuration it refuses ends them with exit 2. They use only its `[database]`

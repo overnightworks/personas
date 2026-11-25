@@ -12,8 +12,11 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
-from agents.turn import MAX_EVENT_BYTES
+from agents.skills import Skill, SkillEntry
+from agents.tools import ToolDeclaration, ToolEffect
+from agents.turn import MAX_EVENT_BYTES, RoundCall, ToolRound, TurnMessage, TurnRole
 
+from personas.decision import READ_SKILL_TOOL
 from personas.entries import (
     ActDone,
     Entry,
@@ -23,6 +26,7 @@ from personas.entries import (
     KeptLine,
     Lines,
     SaidAloud,
+    SkillRead,
     TurnTold,
     ViewSeen,
     Visit,
@@ -36,9 +40,10 @@ from personas.entries import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Mapping
 
     from agents.member import PlaceRef
+    from agents.turn import JsonObject
 
 
 def _revision_key(view: ViewSeen) -> tuple[str, PlaceRef, int]:
@@ -240,15 +245,112 @@ def _naming_told_lines(turn: TurnTold, history: History) -> TurnTold:
     return TurnTold(turn.at, turn.app, turn.place, still_told, turn.aloud, turn.through)
 
 
-def turn_messages(you: str, present: Present, current: TurnTold) -> tuple[str, ...]:
-    """The messages of a turn's request after the persona: the header, one for each answered turn the present holds,
-    each rendered from the history as it stands, and the turn's own, which tells what the history holds from where the
-    last of those ended up to ``current.through``. A message's ``woke`` names only the lines the history holds."""
+def user_message(text: str) -> TurnMessage:
+    return TurnMessage(role=TurnRole.USER, text=text)
+
+
+def _told_entries(entries: Iterable[Entry]) -> TurnMessage:
+    """The message of the entries that came before a skill's round in a turn's span: the entries alone."""
+    return user_message(
+        json.dumps({"entries": [told_entry(entry) for entry in entries if is_told(entry)]}, ensure_ascii=False)
+    )
+
+
+def _told_in_turn(turn: TurnTold, entries: Iterable[Entry]) -> list[TurnMessage | ToolRound]:
+    """What a turn tells of its span of the history: a message of the entries before each skill the agent read, the
+    skill's round, and the turn's own message with what came after the last round."""
+    told: list[TurnMessage | ToolRound] = []
+    before: list[Entry] = []
+    for entry in entries:
+        if isinstance(entry, SkillRead):
+            if before:
+                told.append(_told_entries(before))
+                before = []
+            told.append(skill_round(entry))
+        else:
+            before.append(entry)
+    told.append(user_message(told_turn(turn, before)))
+    return told
+
+
+def turn_messages(you: str, present: Present, current: TurnTold) -> tuple[TurnMessage | ToolRound, ...]:
+    """The messages of a turn's request after the persona: the header, then for each answered turn the present holds
+    its span of the history as it stands, and the turn's own, which tells what the history holds from where the last of
+    those ended up to ``current.through``. A span is told split around each skill the agent read in it, which
+    comes as the round of a ``read_skill`` call. A message's ``woke`` names only the lines the history holds."""
     history = present.history
-    messages = [told_header(you, history)]
+    messages: list[TurnMessage | ToolRound] = [user_message(told_header(you, history))]
     start = history.left_out
     for turn in (*present.told, current):
         entries = history.entries[start - history.left_out : turn.through - history.left_out]
-        messages.append(told_turn(_naming_told_lines(turn, history), entries))
+        messages += _told_in_turn(_naming_told_lines(turn, history), entries)
         start = max(start, turn.through)
     return tuple(messages)
+
+
+type AppSkill = Skill | SkillEntry
+"""A skill an app serves as a listing entry, which proves nothing of its file, or its one implicit skill."""
+
+EMPTY_SKILL_TEXT: Final = "this skill has no text"
+_SKILL_ARGUMENT: Final = "skill"
+READ_SKILL_DECLARATION: Final = ToolDeclaration(
+    name=READ_SKILL_TOOL,
+    description=(
+        "Reads a skill listed in your instructions and answers with its text. `skill` is the skill's name as listed."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {_SKILL_ARGUMENT: {"type": "string", "description": "The skill's name as listed."}},
+        "required": [_SKILL_ARGUMENT],
+        "additionalProperties": False,
+    },
+    effect=ToolEffect.READ_ONLY,
+)
+_SKILL_CALL_PREFIX: Final = "personas-skill-"
+
+
+@dataclass(frozen=True)
+class ListedSkill:
+    """A skill a turn lists, and the app at that URL that serves it."""
+
+    app: str
+    skill: AppSkill
+
+
+def listed_skills(by_app: Iterable[tuple[str, Iterable[AppSkill]]]) -> Mapping[str, ListedSkill]:
+    """The skills a turn lists by name, in the order of the apps given; a name two skills share goes to the first."""
+    listed: dict[str, ListedSkill] = {}
+    for app, skills in by_app:
+        for skill in skills:
+            listed.setdefault(skill.name, ListedSkill(app, skill))
+    return listed
+
+
+def skill_lines(listed: Iterable[ListedSkill]) -> str:
+    """One line for each skill, its name and its description as the app declared them with whitespace made single
+    spaces, so that no description makes a line of its own."""
+    return "\n".join(f"{each.skill.name}: {' '.join(each.skill.description.split())}" for each in listed)
+
+
+def skill_call_id(ordinal: int) -> str:
+    """The call id of the read whose entry has this ordinal. The prefix keeps it from a model's call id."""
+    return f"{_SKILL_CALL_PREFIX}{ordinal}"
+
+
+def skill_to_read(arguments: JsonObject) -> str | None:
+    """The name of the skill a ``read_skill`` call asks for, or ``None`` for arguments that name none."""
+    name = arguments.get(_SKILL_ARGUMENT)
+    return name if isinstance(name, str) else None
+
+
+def skill_text(body: str) -> str:
+    """What a read of a skill with this body answers."""
+    return body or EMPTY_SKILL_TEXT
+
+
+def skill_round(entry: SkillRead) -> ToolRound:
+    """The round that tells a skill the agent read: one ``read_skill`` call under the entry's call id, answered with
+    what the model was shown."""
+    arguments = json.dumps({_SKILL_ARGUMENT: entry.name}, ensure_ascii=False)
+    call = RoundCall(call_id=entry.call_id, tool=READ_SKILL_TOOL, arguments=arguments, result=skill_text(entry.body))
+    return ToolRound(calls=(call,))

@@ -41,6 +41,7 @@ from tests.support.wire import cuts, hangs, hangs_once_entered, refuses_with_a_s
 pytestmark = pytest.mark.anyio
 
 SHORT_CALL_SECONDS = 0.3
+WHOLE_CALL_SECONDS = 1.0
 
 
 def songmaker_url(runner) -> str:
@@ -390,6 +391,20 @@ async def test_a_hang_past_the_call_time_whose_close_gives_late_answers_leaves_t
     opener = opener_whose_close_adds_a_late_answer(only_close=1)
 
     await a_loss_while_the_app_session_opens_and_a_turn_that_answers(runner, songmaker, opener)
+
+
+async def test_a_hang_in_the_listing_apps_discovery_holds_the_turn_for_one_call_time_only(runner, songmaker):
+    songmaker.script(DISCOVER, hangs)
+    runner.bound_tools_only_calls_to(WHOLE_CALL_SECONDS)
+    runner.gateway = Gateway(saying(ANSWER), completion("done"))
+    loop = asyncio.get_running_loop()
+    await restarted_in_the_call(runner)
+
+    started = loop.time()
+    say_in_the_call(runner, ADDRESSED)
+    await runner.app.said_count(1)
+
+    assert loop.time() - started < WHOLE_CALL_SECONDS * 1.5
 
 
 async def test_a_token_the_realm_refuses_in_mid_turn_for_the_tools_only_scope_is_an_error_and_no_reaction(

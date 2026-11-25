@@ -9,12 +9,9 @@ import secrets
 import pytest
 from agents.backend import TurnStopKind, TurnStopped
 from agents.member import (
-    ACCEPT_INVITATION_TOOL,
-    CONTINUE_SPEAKING_TOOL,
     DECLINE_INVITATION_TOOL,
     LISTEN_BOUND_SECONDS,
     SPEAK_TOOL,
-    STOP_SPEAKING_TOOL,
     AcceptInvitationRefusal,
     FigureRef,
     PlaceRef,
@@ -40,6 +37,7 @@ from personas.decision import (
     NO_FINAL_EVENT_REASON,
     NO_TOKEN,
     RENEW_BEFORE_EXPIRY_SECONDS,
+    RESERVED_TOOLS,
     TURN_CANCELLED_CODE,
     Accept,
     Joined,
@@ -87,7 +85,6 @@ from personas.decision import (
 )
 from personas.entries import Answered, Lines, Reading, Unanswered, Waiting
 from personas.failures import TokenStatusFailure
-from personas.recall import RECALL_TOOL
 from personas.secret import Secret
 from tests.support.history import MORNING, OTHER_TABLE, TABLE, a_view
 from tests.support.pictures import a_picture
@@ -603,7 +600,7 @@ def _declaration(name: str) -> ToolDeclaration:
         (["a", "b"], ["a", "b"], [], 2),
         ([], ["a"], [], 0),
         (
-            ["a", SPEAK_TOOL, RECALL_TOOL, ACCEPT_INVITATION_TOOL, CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL],
+            ["a", *RESERVED_TOOLS],
             [],
             ["a"],
             0,

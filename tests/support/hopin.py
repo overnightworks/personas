@@ -46,7 +46,7 @@ from agents.member import (
 )
 from agents.tools import ToolDeclaration, ToolEffect, ToolOutcome, tool_parameters
 from agents.turn import JsonObject, Principal
-from mcp_types import DiscoverResult, ServerCapabilities
+from mcp_types import DiscoverResult, ResourcesCapability, ServerCapabilities, ToolsCapability
 
 from tests.support.hopin_places import ACCEPTED_NAME, ISSUER
 from tests.support.hopin_voice import CONTINUE_DECLARATION, SPEAK_DECLARATION, STOP_DECLARATION, AppVoice
@@ -57,6 +57,8 @@ from tests.support.wire import ConnectionCut, Handler, Reply, Rpc
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator
+
+    from tests.support.skills import Shelf
 
 
 LIMIT_SECONDS = 10
@@ -229,6 +231,8 @@ class FakeApp(AppVoice):
     undeclared_arguments: frozenset[str] = frozenset()
     """The arguments no declared tool of the app names, as an app that predates them; ``looks[].room`` is the ``room``
     of each entry of ``looks``."""
+    shelf: Shelf | None = None
+    """The skills the app serves, when it says anything of them; a request a script answers is the script's."""
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -567,11 +571,7 @@ class FakeApp(AppVoice):
         if bearer not in self.bearers:
             self.refusals.put_nowait(HTTPStatus.UNAUTHORIZED)
             await reply.status(HTTPStatus.UNAUTHORIZED)
-        elif (
-            self.refuse_with is not None
-            and self.refused_method in (None, method)
-            and self.refused_tool in (None, (document.get("params") or {}).get("name"))
-        ):
+        elif self._refuses(method, document):
             self.refusals.put_nowait(self.refuse_with)
             await reply.status(self.refuse_with)
         elif method == READ and self._fails_the_window_read(document):
@@ -582,9 +582,18 @@ class FakeApp(AppVoice):
             except ConnectionCut:
                 self.log.add(f"{method} cut")
                 raise
+        elif self.shelf is not None and (served := self.shelf.answers(reply.rpc)) is not None:
+            await served(reply)
         else:
             scope[_SUBJECT_KEY] = self.bearers[bearer]
             await self._front(scope, _replayed(body, receive), noting)
+
+    def _refuses(self, method: str, document: dict[str, Any]) -> bool:
+        return (
+            self.refuse_with is not None
+            and self.refused_method in (None, method)
+            and self.refused_tool in (None, (document.get("params") or {}).get("name"))
+        )
 
     def _note_bearer(self, method: str, document: dict[str, Any], bearer: str) -> None:
         """The token a ``speak`` call or a tool listing came with."""
@@ -615,10 +624,15 @@ class FakeApp(AppVoice):
 
 
 def discovering(*, instructions: str | None = None, extensions: dict[str, dict[str, Any]] | None = None) -> Handler:
-    """The answer to ``server/discover`` of an app with these instructions that declares these extensions."""
+    """The answer to ``server/discover`` of an app with these instructions that declares these extensions, and the
+    tools and subscribable resources the front serves."""
 
     async def discovers(reply: Reply) -> None:
-        capabilities = ServerCapabilities(extensions=extensions)
+        capabilities = ServerCapabilities(
+            tools=ToolsCapability(list_changed=False),
+            resources=ResourcesCapability(subscribe=True, list_changed=False),
+            extensions=extensions,
+        )
         await reply.result(
             DiscoverResult(
                 supported_versions=[PROTOCOL_VERSION], capabilities=capabilities, instructions=instructions, ttl_ms=0

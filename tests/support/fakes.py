@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Literal, NamedTuple, overload
 
-from agents.mcp_client import ResourceWake
+from agents.mcp_client import AppDiscovery, ResourceWake
 from agents.member import (
     STANDING_URI,
     AcceptInvitationArguments,
@@ -169,10 +169,14 @@ class _Wakes:
 
 
 class BareSession:
-    """A session stand-in that holds no list of its app's tools and received no tools notice."""
+    """A session stand-in that holds no list of its app's tools, received no tools notice and whose app says nothing of
+    itself."""
 
     def kept_tools(self) -> None:
         return None
+
+    async def read_discovery(self) -> AppDiscovery:
+        return AppDiscovery(instructions=None, declares_skills=False)
 
     def tools_notices(self) -> int:
         return 0

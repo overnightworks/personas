@@ -2,26 +2,24 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from functools import partial
 from typing import TYPE_CHECKING
 
 from agents.mcp_client import READ_SECONDS, MemberSession, open_member_session
 from agents.member_outcomes import INVALID_ANSWER_CODE, UnusableAnswer
-from agents.skills import Skill, SkillEntry, implicit_skill, implicit_skill_name
+from agents.skills import Skill, implicit_skill, implicit_skill_name
 from pydantic import SecretStr
 
 from personas.reporting import report_argument_left_out
 
 if TYPE_CHECKING:
     from personas.config import AppTarget
+    from personas.present import AppSkill
     from personas.secret import Secret
 
 _IMPLICIT_DESCRIPTION = "What the app {} says of itself, and the tools it offers."
-
-type AppSkill = Skill | SkillEntry
-"""A skill the app serves as a listing entry, which proves nothing of its file, or its one implicit skill."""
 
 type SessionOpener = Callable[[AppTarget, Callable[[], Secret], str], AbstractAsyncContextManager[MemberSession]]
 """Opens a session at an app; the bearer callable is read at each call, so a renewed token reaches the next one."""
@@ -40,28 +38,36 @@ def open_app_session(
     )
 
 
-async def read_skills(session: MemberSession, app_url: str) -> tuple[AppSkill, ...]:
-    """The app's skills: its one implicit skill when it declares no skills extension, else every entry of its
-    listing in its order, however many pages. An empty listing is no skills. No skill file is read.
+async def read_skills(
+    session: MemberSession,
+    app_url: str,
+    tools: Sequence[str],
+    *,
+    listing: Callable[[], AbstractAsyncContextManager[object]],
+) -> tuple[AppSkill, ...]:
+    """The app's skills: its one implicit skill, of the ``tools`` its turn listed, when it declares no skills
+    extension, else every entry of its listing in its order, however many pages. An empty listing is no skills. No
+    skill file is read. The listing requests, which only an app that declares the extension is sent, run inside
+    ``listing()``.
 
     A listing that breaks a rule fails whole as an ``UnusableAnswer`` that carries the entry's index; raises
     ``StatusFailure``, ``Unreachable`` or ``UnusableAnswer`` otherwise.
     """
     discovery = await session.read_discovery()
     if not discovery.declares_skills:
-        return (await _implicit_skill(session, app_url, discovery.instructions),)
+        return (_implicit_skill(app_url, discovery.instructions, tools),)
     skills: list[AppSkill] = []
     cursor: str | None = None
-    while True:
-        page = await session.list_skills(cursor, listed=len(skills))
-        skills.extend(page.skills)
-        cursor = page.next_cursor
-        if cursor is None:
-            return tuple(skills)
+    async with listing():
+        while True:
+            page = await session.list_skills(cursor, listed=len(skills))
+            skills.extend(page.skills)
+            cursor = page.next_cursor
+            if cursor is None:
+                return tuple(skills)
 
 
-async def _implicit_skill(session: MemberSession, app_url: str, instructions: str | None) -> Skill:
-    tools = [tool.name for tool in await session.declared_tools()]
+def _implicit_skill(app_url: str, instructions: str | None, tools: Sequence[str]) -> Skill:
     try:
         description = _IMPLICIT_DESCRIPTION.format(implicit_skill_name(app_url))
         return implicit_skill(app_url, app_url, instructions, tools, description)
