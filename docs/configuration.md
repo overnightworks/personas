@@ -42,8 +42,7 @@ At the default history, a skat game (40 to 50 states of about 1.5 KB) fills it a
 | CONFIG-15 | `persona_file` | absolute path | none | its agent file `<name>.md`; the image holds them at `/app/characters/` |
 | CONFIG-16 | `model` | `text/<model>` | the agent file's | the gateway model his turns run on; needs `persona_file` |
 | CONFIG-17 | `hold_model` | `text/<model>` | the agent's model | the model of the round or turn that decides a hold; needs `persona_file` |
-| CONFIG-18 | `[agents.figure]` | `url` (absolute `https`, no user, query or fragment), `sha256` (64 lowercase hex) | none | carried by every accept; an app that shows figures and allows the address shows him with it |
-| CONFIG-18 | `[agents.room]` | `url`, `sha256` as `[agents.figure]`; needs `[agents.figure]` | none | the agent's own room, drawn behind his figure; every accept carries it as the `room` of his figure's look, beside the `figure`, and an app that does not declare `looks` or `looks[].room` gets the accept without it |
+| CONFIG-18 | `[agents.figure]`<br>`[agents.room]` | `url` (absolute `https`, no user, query or fragment), `sha256` (64 lowercase hex)<br>`url`, `sha256` as `[agents.figure]`; needs `[agents.figure]` | none | carried by every accept; an app that shows figures and allows the address shows him with it<br>the agent's own room, drawn behind his figure; every accept carries it as the `room` of his figure's look, beside the `figure`, and an app that does not declare `looks` or `looks[].room` gets the accept without it |
 | CONFIG-19 | `[agents.voice]` | table, optional `names`: 1 to 8 distinct voice ids, first choice first | none | turns spoken turns on; every accept carries `names` as `voices` |
 
 - CONFIG-20: The agent file names no tools and no call bound, offers the role `user`, and has no `voice` section. The
@@ -61,8 +60,7 @@ At the default history, a skat game (40 to 50 states of about 1.5 KB) fills it a
 
 | ID | Name | Type | Default | Meaning |
 |---|---|---|---|---|
-| CONFIG-22 | `host`, `dbname`, `user` | strings | required | the Postgres every pod shares |
-| CONFIG-22 | `port` | integer, 1 to 65535 | required | the Postgres every pod shares |
+| CONFIG-22 | `host`, `dbname`, `user`<br>`port` | strings<br>integer, 1 to 65535 | required | the Postgres every pod shares |
 | CONFIG-23 | `password_file` | absolute path | required | the file holding the password |
 | CONFIG-24 | `write_seconds` | number above 0, or `inf` | 2 | the bound on one write or read against a database that answers |
 
