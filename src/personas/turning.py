@@ -529,7 +529,7 @@ class Turning:
             apart = partial(self._answered_apart, _APART_TEXT if admitted.aloud else _WRITTEN_TURN_TEXT)
             tools.extend(HandTool(each, apart) for each in DECISION_DECLARATIONS)
         bounds.append(DECISION_CALLS)
-        return HeldTools(tuple(tools), turn_call_bound(bounds), hold.inbox, deciding, deferred)
+        return HeldTools(tuple(tools), turn_call_bound(bounds), deferred, hold.inbox, deciding)
 
     def _enter_load(self, app: str, skill: str, tools: tuple[str, ...]) -> None:
         self._mind.tools_loaded(app, skill, tools, self._clock.wall())

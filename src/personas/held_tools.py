@@ -128,9 +128,9 @@ class HeldTools:
 
     tools: tuple[HandTool, ...]
     max_tool_calls: int | None
+    deferred: Deferred
     inbox: HoldInbox | None = None
     told: TurnHold | None = None
-    deferred: Deferred = field(default_factory=dict[str, tuple[str, ...]])
 
     @property
     def deferred_names(self) -> frozenset[str]:

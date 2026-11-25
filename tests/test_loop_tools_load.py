@@ -353,52 +353,37 @@ async def test_an_apps_tool_named_load_tools_is_not_taken(runner, songmaker):
     assert referenced(runner.gateway.tool_results(2)[0]) == [CREATE_SONG]
 
 
-async def test_tools_bytes_count_the_loaded_tools_and_leave_out_the_deferred_ones_none_loaded(
-    runner, songmaker, caplog
+@pytest.mark.parametrize(
+    ("script", "turns", "shown_in_request"),
+    [
+        ([completion("done")], [1], 1),
+        ([tool_round(loading(SONGMAKER)), completion("done"), completion("again")], [1, 3], 3),
+        (
+            [
+                tool_round(loading(SONGMAKER)),
+                tool_round(a_song("model-song")),
+                tool_round(a_song("again")),
+                completion("done"),
+            ],
+            [1],
+            4,
+        ),
+    ],
+    ids=["none loaded", "loaded by a told round", "loaded in the turn and counted once"],
+)
+async def test_tools_bytes_count_the_loaded_tools_and_leave_out_the_deferred_ones(
+    runner, songmaker, caplog, script, turns, shown_in_request
 ):
     skilled(runner, songmaker)
-    runner.gateway = Gateway(completion("done"))
+    runner.gateway = Gateway(*script)
     await restarted_in_the_call(runner)
+    for count, request_number in enumerate(turns, start=1):
+        await a_turn(runner, request_number)
+        await runner.reports.until_a_turn_completed(count=count)
 
-    await a_turn(runner, 1)
-    await runner.reports.until_a_turn_completed()
-
-    (ended,) = lines_of(caplog.get_records("call"), "turn.ended")
-    assert ended["tools_bytes"] == shown_bytes(runner, 1)
-    assert deferred_in(runner, 1) == SONG_TOOLS
-
-
-async def test_tools_bytes_count_the_loaded_tools_and_leave_out_the_deferred_ones_loaded_by_a_told_round(
-    runner, songmaker, caplog
-):
-    skilled(runner, songmaker)
-    runner.gateway = Gateway(tool_round(loading(SONGMAKER)), completion("done"), completion("again"))
-    await restarted_in_the_call(runner)
-    await a_turn(runner, 1)
-    await runner.reports.until_a_turn_completed()
-    await a_turn(runner, 3)
-    await runner.reports.until_a_turn_completed(count=2)
-
-    _, second = lines_of(caplog.get_records("call"), "turn.ended")
-    assert second["tools_bytes"] == shown_bytes(runner, 3)
-
-
-async def test_tools_bytes_count_the_loaded_tools_and_leave_out_the_deferred_ones_loaded_in_the_turn_once(
-    runner, songmaker, caplog
-):
-    skilled(runner, songmaker)
-    runner.gateway = Gateway(
-        tool_round(loading(SONGMAKER)),
-        tool_round(a_song("model-song")),
-        tool_round(a_song("again")),
-        completion("done"),
-    )
-    await restarted_in_the_call(runner)
-    await a_turn(runner, 1)
-    await runner.reports.until_a_turn_completed()
-
-    (ended,) = lines_of(caplog.get_records("call"), "turn.ended")
-    assert ended["tools_bytes"] == shown_bytes(runner, 4)
+    *_, ended = lines_of(caplog.get_records("call"), "turn.ended")
+    assert ended["tools_bytes"] == shown_bytes(runner, shown_in_request)
+    assert deferred_in(runner, shown_in_request) == SONG_TOOLS
 
 
 async def test_a_load_counts_its_answer_in_the_results_bytes_of_its_turn(runner, songmaker, caplog):
