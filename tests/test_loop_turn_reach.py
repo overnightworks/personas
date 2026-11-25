@@ -398,9 +398,10 @@ async def test_a_hang_in_the_listing_apps_discovery_holds_the_turn_for_one_call_
     runner.bound_tools_only_calls_to(WHOLE_CALL_SECONDS)
     runner.gateway = Gateway(saying(ANSWER), completion("done"))
     loop = asyncio.get_running_loop()
+    await restarted_in_the_call(runner)
 
     started = loop.time()
-    await addressed_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED)
     await runner.app.said_count(1)
 
     assert loop.time() - started < WHOLE_CALL_SECONDS * 1.5

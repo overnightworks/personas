@@ -96,9 +96,7 @@ class ToolLists:
 
     async def _list_elsewhere(self, app: AppTarget, record: TaskRecord) -> Listed:
         """What another app lists, or nothing after the report of its failed listing."""
-        declared = await self._sessions.ask_elsewhere(
-            app, partial(self._list, app), record, opening=True, bounds_own_steps=True
-        )
+        declared = await self._sessions.ask_elsewhere(app, partial(self._list, app), record, listing=True)
         if isinstance(declared, CallFailure):
             if not app.listens and is_not_granted(declared):
                 if self._mind.refused(app.mcp_url, self._clock.now()):
