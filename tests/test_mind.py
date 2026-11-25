@@ -585,37 +585,31 @@ def test_a_place_claimed_in_another_app_counts_as_held_until_released_or_read_ag
     assert not mind.holds_active_place_elsewhere(CALL.app)
 
 
-def test_a_load_gets_a_call_id_no_kept_entry_holds():
+@pytest.mark.parametrize(
+    ("appending", "entry_type"),
+    [
+        (
+            lambda mind: partial(
+                mind.skill_read, CALL.app, "greeting", "skill://greeting/SKILL.md", "Greet people by name.", READ_AT
+            ),
+            SkillRead,
+        ),
+        (lambda mind: partial(mind.tools_loaded, CALL.app, "greeting", ("say", "play"), READ_AT), ToolsLoaded),
+    ],
+    ids=["a skill read", "a tools load"],
+)
+def test_a_round_after_a_cut_gets_a_call_id_no_kept_entry_holds(appending, entry_type):
     mind = Mind(600, 500, BUDGET_PAUSE_CAP_SECONDS)
-    load = partial(mind.tools_loaded, CALL.app, "greeting", ("say", "play"), READ_AT)
+    append = appending(mind)
     mind.take((said(CALL, 1, "a" * 150),))
-    load()
+    append()
     mind.take((said(CALL, 2, "b" * 150),))
-    load()
+    append()
     mind.take((said(CALL, 3, "c" * 150),))
     kept_before = len(mind.history.entries)
-    load()
+    append()
 
-    ids = [entry.call_id for entry in mind.history.entries if isinstance(entry, ToolsLoaded)]
-
-    assert mind.history.left_out > 0
-    assert len(ids) == 2
-    assert len(set(ids)) == len(ids)
-    assert ids[-1] != round_call_id(kept_before)
-
-
-def test_a_read_after_a_cut_gets_a_call_id_no_kept_entry_holds():
-    mind = Mind(600, 500, BUDGET_PAUSE_CAP_SECONDS)
-    read = partial(mind.skill_read, CALL.app, "greeting", "skill://greeting/SKILL.md", "Greet people by name.", READ_AT)
-    mind.take((said(CALL, 1, "a" * 150),))
-    read()
-    mind.take((said(CALL, 2, "b" * 150),))
-    read()
-    mind.take((said(CALL, 3, "c" * 150),))
-    kept_before = len(mind.history.entries)
-    read()
-
-    ids = [entry.call_id for entry in mind.history.entries if isinstance(entry, SkillRead)]
+    ids = [entry.call_id for entry in mind.history.entries if isinstance(entry, entry_type)]
 
     assert mind.history.left_out > 0
     assert len(ids) == 2
