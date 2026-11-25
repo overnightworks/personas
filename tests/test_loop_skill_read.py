@@ -19,8 +19,9 @@ from mcp_types import ListToolsResult, Tool
 from personas.decision import READ_SKILL_CALLS, READ_SKILL_TOOL
 from personas.entries import ActDone, SkillRead, told_bytes
 from personas.reporting import Event
-from tests.support.call import ADDRESSED, restarted_in_the_call, say_in_the_call
+from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway
+from tests.support.history import bounded_history, told_line_bytes
 from tests.support.hopin import CALL, LIST_TOOLS, READ, SKILLS_GET, SKILLS_LIST
 from tests.support.logs import formatted, lines_of
 from tests.support.realm import LIFETIME_SECONDS
@@ -193,6 +194,32 @@ async def test_a_read_skills_round_is_byte_equal_after_a_restart(runner, songmak
 
     assert len(rounds_in(runner, 3)) == 1
     assert rounds_in(runner, 4) == rounds_in(runner, 3)
+
+
+async def test_a_read_skills_round_is_gone_once_a_cut_drops_its_entry_and_is_not_written_again(runner, songmaker):
+    skilled(runner, songmaker)
+    line_bytes = told_line_bytes(songmaker_url(runner), PLACE_ID, f"{ADDRESSED} {secrets.token_hex(3)}")
+    runner.config = bounded_history(runner.config, 2 * line_bytes + len(SONG_BODY.encode()))
+    runner.gateway = Gateway(
+        tool_round(reading(SONGMAKER)),
+        completion("done"),
+        completion("again"),
+        completion("later"),
+        completion("last"),
+        completion("end"),
+    )
+    await restarted_in_the_call(runner)
+    await a_turn(runner, 1)
+    await a_turn(runner, 3)
+
+    assert len(rounds_in(runner, 3)) == 1
+
+    await a_turn(runner, 4)
+    await a_turn(runner, 5)
+    await a_turn(runner, 6)
+
+    assert (rounds_in(runner, 5), rounds_in(runner, 6)) == ([], [])
+    assert len(skill_reads(runner)) == 1
 
 
 async def test_a_read_skill_beside_a_relayed_call_enters_both_in_the_order_they_ended_and_its_round_holds_only_the_read(
