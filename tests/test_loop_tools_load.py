@@ -27,9 +27,9 @@ from tests.support.skills import (
     SONGMAKER,
     Shelf,
     a_skill_file,
+    assert_a_round_is_told_byte_for_byte_after_a_restart,
     skilled,
     turns_past_a_cut_of_a_round,
-    turns_telling_a_round_across_a_restart,
 )
 from tests.support.songmaker import CREATE_SONG, GENERATE_SONG, OWN_DESCRIPTION, a_song, lists_only, songmaker_url
 from tests.support.voice import a_voice_call, deciding, held_in_the_first_sentence
@@ -162,9 +162,7 @@ async def test_the_next_turn_tells_a_load_as_a_load_tools_round_under_its_id_and
 
 
 async def test_a_loads_round_is_byte_equal_after_a_restart(runner, songmaker):
-    told, told_again = await turns_telling_a_round_across_a_restart(runner, songmaker, loading(SONGMAKER))
-
-    assert (len(told), told_again) == (1, told)
+    await assert_a_round_is_told_byte_for_byte_after_a_restart(runner, songmaker, loading(SONGMAKER))
 
 
 @pytest.mark.parametrize(

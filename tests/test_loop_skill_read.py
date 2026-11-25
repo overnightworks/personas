@@ -31,9 +31,9 @@ from tests.support.skills import (
     Shelf,
     a_skill_file,
     an_entry,
+    assert_a_round_is_told_byte_for_byte_after_a_restart,
     skilled,
     turns_past_a_cut_of_a_round,
-    turns_telling_a_round_across_a_restart,
 )
 from tests.support.songmaker import CREATE_SONG, GENERATE_SONG, OWN_DESCRIPTION, a_song, lists_only, songmaker_url
 from tests.support.voice import a_voice_call
@@ -116,9 +116,7 @@ async def test_the_next_turn_counts_a_read_skills_round_in_its_told_bytes(runner
 
 
 async def test_a_read_skills_round_is_byte_equal_after_a_restart(runner, songmaker):
-    told, told_again = await turns_telling_a_round_across_a_restart(runner, songmaker, reading(SONGMAKER))
-
-    assert (len(told), told_again) == (1, told)
+    await assert_a_round_is_told_byte_for_byte_after_a_restart(runner, songmaker, reading(SONGMAKER))
 
 
 async def test_a_read_skills_round_is_gone_once_a_cut_drops_its_entry_and_is_not_written_again(runner, songmaker):

@@ -110,9 +110,9 @@ def skilled(runner, songmaker) -> None:
     runner.app.shelf = Shelf({HOPIN: a_skill_file(HOPIN, description=HOPIN_DESCRIPTION)})
 
 
-async def turns_telling_a_round_across_a_restart(runner, songmaker, call) -> tuple[list, list]:
-    """A turn whose first reply is ``call``, the turn after it and, once the runner restarted, a third: the rounds the
-    requests of the second and the third tell, which are the round of the call and, byte for byte, the same."""
+async def assert_a_round_is_told_byte_for_byte_after_a_restart(runner, songmaker, call) -> None:
+    """A turn whose first reply is ``call``, the turn after it and, once the runner restarted, a third: the second tells
+    the round of the call and the third tells it byte for byte again."""
     skilled(runner, songmaker)
     runner.gateway = Gateway(tool_round(call), completion("done"), completion("again"), completion("end"))
     await restarted_in_the_call(runner)
@@ -121,7 +121,9 @@ async def turns_telling_a_round_across_a_restart(runner, songmaker, call) -> tup
     await a_turn(runner, 3)
     await restarted(runner)
     await a_turn(runner, 4)
-    return runner.gateway.tool_rounds(3), runner.gateway.tool_rounds(4)
+    told = runner.gateway.tool_rounds(3)
+    assert len(told) == 1
+    assert runner.gateway.tool_rounds(4) == told
 
 
 async def turns_past_a_cut_of_a_round(runner, songmaker, call, entry_bytes: int) -> None:
