@@ -1,0 +1,8 @@
+claim_id = "1a50439b25284ea1a0db9b47fcafebd8"
+agent = "Claude f0c05936-2de0-40e4-8ecc-a6090ecb310b"
+role = "builder"
+base = "2841d92beb420ca8bf2e4bd06a6924cbbb495328"
+branch = "claude/issue-449-load-tools"
+scope = [".aco/ahead-of-caller.toml", "docs/ARCHITECTURE.md", "docs/configuration.md", "docs/log.md", "docs/runbooks/erase-memory.md", "docs/turns.md", "src/personas/decision.py", "src/personas/held_tools.py", "src/personas/holds.py", "src/personas/mind.py", "src/personas/present.py", "src/personas/sizing.py", "src/personas/turning.py", "tests"]
+opened_commit = "ca45dc65972e9341c638f8cb28713421ef73405b"
+whole_reason = "Deferral, load_tools and the told load round are one capability: deferring without the loader hides songmaker's tools, a loader without deferral loads nothing, and a load without its told round is forgotten at the next turn, while a round not held to what the turn defers breaks the request once a loaded tool goes."
