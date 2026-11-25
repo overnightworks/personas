@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from itertools import takewhile
 from typing import TYPE_CHECKING
 
-from personas.entries import HistoryDelta, KeptHistory, KeptTurns
+from personas.entries import Entry, HistoryDelta, KeptHistory, KeptTurns
 from personas.failures import StaleGenerationError
 from personas.ownership import taken_over
 
@@ -29,6 +29,10 @@ class KeptHistories:
     generations: dict[str, int] = field(default_factory=dict[str, int])
     written: list[tuple[str, HistoryDelta]] = field(default_factory=list[tuple[str, HistoryDelta]])
     turns: dict[str, KeptTurns] = field(default_factory=dict[str, KeptTurns])
+
+    def entries(self) -> list[Entry]:
+        """Every entry written, in order."""
+        return [entry for _, delta in self.written for entry in delta.entries]
 
     async def take_over(self, client_id: str) -> int:
         self.generations[client_id] = self.generations.get(client_id, 0) + 1

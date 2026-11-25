@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -10,17 +11,25 @@ from agents.skills import SKILLS_EXTENSION, skill_digest, skill_uri
 from mcp_types import ReadResourceResult, TextResourceContents
 
 from tests.support.hopin import DISCOVER, READ, SKILLS_GET, SKILLS_LIST, discovering
+from tests.support.songmaker import CREATE_SONG, GENERATE_SONG
 
 if TYPE_CHECKING:
     from tests.support.wire import Handler, Rpc
 
 DESCRIPTION = "Greets."
+SONGMAKER = "songmaker"
+HOPIN = "hopin"
+SONG_BODY = f"Make songs {secrets.token_hex(6)}."
+SONG_DESCRIPTION = f"Makes songs {secrets.token_hex(4)}."
+HOPIN_DESCRIPTION = f"Plays at the table {secrets.token_hex(4)}."
 
 
 def a_skill_file(
-    name: str, *, tools: str = "say play", body: str = "Greet people by name.", description: str = DESCRIPTION
+    name: str, *, tools: str | None = "say play", body: str = "Greet people by name.", description: str = DESCRIPTION
 ) -> bytes:
-    return f"---\nname: {name}\ndescription: {description}\nmetadata:\n  tools: {tools}\n---\n{body}\n".encode()
+    """A skill file naming these tools, or none when ``tools`` is ``None``."""
+    metadata = "" if tools is None else f"metadata:\n  tools: {tools}\n"
+    return f"---\nname: {name}\ndescription: {description}\n{metadata}---\n{body}\n".encode()
 
 
 def an_entry(name: str, content: bytes) -> dict:
@@ -83,3 +92,15 @@ class Shelf:
             await reply.result(ReadResourceResult(contents=contents))
 
         return file
+
+
+def skilled(runner, songmaker) -> None:
+    """Both apps declare a skill of their own: songmaker's makes songs and hopin's plays at the table."""
+    songmaker.shelf = Shelf(
+        {
+            SONGMAKER: a_skill_file(
+                SONGMAKER, tools=f"{CREATE_SONG} {GENERATE_SONG}", body=SONG_BODY, description=SONG_DESCRIPTION
+            )
+        }
+    )
+    runner.app.shelf = Shelf({HOPIN: a_skill_file(HOPIN, description=HOPIN_DESCRIPTION)})

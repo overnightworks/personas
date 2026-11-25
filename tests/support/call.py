@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import asyncio
+import secrets
 
 from agents.member import STANDING_URI, PlaceRef, place_window_uri
 
 from tests.support.standings import AGENT_SUBJECT, active
-
-if TYPE_CHECKING:
-    import asyncio
 
 PLACE_ID = "room-7"
 CALL_PLACE = PlaceRef(kind="call", id=PLACE_ID)
@@ -31,6 +29,21 @@ async def restarted_in_the_call(runner, place_id=PLACE_ID):
     runner.app.stand(AGENT_SUBJECT, active(place_id))
     runner.start()
     await runner.app.until_window_read(place_id)
+
+
+async def a_turn(runner, number: int, text: str = ADDRESSED) -> None:
+    """A line addressed to him, and the turn for it asked its first request: the request that arrives as this number."""
+    say_in_the_call(runner, f"{text} {secrets.token_hex(3)}")
+    await runner.gateway.until_requested(number)
+
+
+async def restarted(runner) -> None:
+    """The runner stops and starts again over the history the store kept, at the call it stood in."""
+    reads = runner.app.window_reads(PLACE_ID)
+    runner.task.cancel()
+    await asyncio.gather(runner.task, return_exceptions=True)
+    runner.start()
+    await runner.app.until_window_read(PLACE_ID, reads + 1)
 
 
 def pulses_the_window_once(line_said: asyncio.Event, *, ended: asyncio.Event | None = None):

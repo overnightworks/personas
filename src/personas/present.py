@@ -16,7 +16,7 @@ from agents.skills import Skill, SkillEntry
 from agents.tools import ToolDeclaration, ToolEffect
 from agents.turn import MAX_EVENT_BYTES, RoundCall, ToolRound, TurnMessage, TurnRole
 
-from personas.decision import READ_SKILL_TOOL
+from personas.decision import LOAD_TOOLS_TOOL, READ_SKILL_TOOL
 from personas.entries import (
     ActDone,
     Entry,
@@ -27,6 +27,7 @@ from personas.entries import (
     Lines,
     SaidAloud,
     SkillRead,
+    ToolsLoaded,
     TurnTold,
     ViewSeen,
     Visit,
@@ -40,7 +41,7 @@ from personas.entries import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Collection, Iterable, Mapping, Sequence
 
     from agents.member import PlaceRef
     from agents.turn import JsonObject
@@ -250,40 +251,43 @@ def user_message(text: str) -> TurnMessage:
 
 
 def _told_entries(entries: Iterable[Entry]) -> TurnMessage:
-    """The message of the entries that came before a skill's round in a turn's span: the entries alone."""
+    """The message of the entries that came before a round in a turn's span: the entries alone."""
     return user_message(
         json.dumps({"entries": [told_entry(entry) for entry in entries if is_told(entry)]}, ensure_ascii=False)
     )
 
 
-def _told_in_turn(turn: TurnTold, entries: Iterable[Entry]) -> list[TurnMessage | ToolRound]:
-    """What a turn tells of its span of the history: a message of the entries before each skill the agent read, the
-    skill's round, and the turn's own message with what came after the last round."""
+def _told_in_turn(turn: TurnTold, entries: Iterable[Entry], deferred: Deferred) -> list[TurnMessage | ToolRound]:
+    """What a turn tells of its span of the history: a message of the entries before each skill the agent read or
+    tools it loaded, that round, and the turn's own message with what came after the last round."""
     told: list[TurnMessage | ToolRound] = []
     before: list[Entry] = []
     for entry in entries:
-        if isinstance(entry, SkillRead):
+        if isinstance(entry, SkillRead | ToolsLoaded):
             if before:
                 told.append(_told_entries(before))
                 before = []
-            told.append(skill_round(entry))
+            told.append(skill_round(entry) if isinstance(entry, SkillRead) else load_round(entry, deferred))
         else:
             before.append(entry)
     told.append(user_message(told_turn(turn, before)))
     return told
 
 
-def turn_messages(you: str, present: Present, current: TurnTold) -> tuple[TurnMessage | ToolRound, ...]:
+def turn_messages(
+    you: str, present: Present, current: TurnTold, deferred: Deferred
+) -> tuple[TurnMessage | ToolRound, ...]:
     """The messages of a turn's request after the persona: the header, then for each answered turn the present holds
     its span of the history as it stands, and the turn's own, which tells what the history holds from where the last of
     those ended up to ``current.through``. A span is told split around each skill the agent read in it, which
-    comes as the round of a ``read_skill`` call. A message's ``woke`` names only the lines the history holds."""
+    comes as the round of a ``read_skill`` call, and each load of tools, a ``load_tools`` round that names the tools
+    ``deferred`` still holds. A message's ``woke`` names only the lines the history holds."""
     history = present.history
     messages: list[TurnMessage | ToolRound] = [user_message(told_header(you, history))]
     start = history.left_out
     for turn in (*present.told, current):
         entries = history.entries[start - history.left_out : turn.through - history.left_out]
-        messages += _told_in_turn(_naming_told_lines(turn, history), entries)
+        messages += _told_in_turn(_naming_told_lines(turn, history), entries, deferred)
         start = max(start, turn.through)
     return tuple(messages)
 
@@ -291,22 +295,37 @@ def turn_messages(you: str, present: Present, current: TurnTold) -> tuple[TurnMe
 type AppSkill = Skill | SkillEntry
 """A skill an app serves as a listing entry, which proves nothing of its file, or its one implicit skill."""
 
+type Deferred = Mapping[str, tuple[str, ...]]
+"""The tools a turn sends deferred, in the listing's order of the app at each URL."""
+
 EMPTY_SKILL_TEXT: Final = "this skill has no text"
+NO_SUCH_SKILL_TEXT: Final = "no skill of that name is listed in your instructions"
+NOT_OFFERED_TEXT: Final = "these tools are not offered now"
 _SKILL_ARGUMENT: Final = "skill"
+_SKILL_PARAMETERS: Final = {
+    "type": "object",
+    "properties": {_SKILL_ARGUMENT: {"type": "string", "description": "The skill's name as listed."}},
+    "required": [_SKILL_ARGUMENT],
+    "additionalProperties": False,
+}
 READ_SKILL_DECLARATION: Final = ToolDeclaration(
     name=READ_SKILL_TOOL,
     description=(
         "Reads a skill listed in your instructions and answers with its text. `skill` is the skill's name as listed."
     ),
-    parameters={
-        "type": "object",
-        "properties": {_SKILL_ARGUMENT: {"type": "string", "description": "The skill's name as listed."}},
-        "required": [_SKILL_ARGUMENT],
-        "additionalProperties": False,
-    },
+    parameters=_SKILL_PARAMETERS,
     effect=ToolEffect.READ_ONLY,
 )
-_SKILL_CALL_PREFIX: Final = "personas-skill-"
+LOAD_TOOLS_DECLARATION: Final = ToolDeclaration(
+    name=LOAD_TOOLS_TOOL,
+    description=(
+        "Loads the tools of a skill listed in your instructions, so you can call them from your next step on. `skill` "
+        "is the skill's name as listed."
+    ),
+    parameters=_SKILL_PARAMETERS,
+    effect=ToolEffect.READ_ONLY,
+)
+_ROUND_CALL_PREFIX: Final = "personas-skill-"
 
 
 @dataclass(frozen=True)
@@ -332,15 +351,17 @@ def skill_lines(listed: Iterable[ListedSkill]) -> str:
     return "\n".join(f"{each.skill.name}: {' '.join(each.skill.description.split())}" for each in listed)
 
 
-def skill_call_id(ordinal: int) -> str:
-    """The call id of the read whose entry has this ordinal. The prefix keeps it from a model's call id."""
-    return f"{_SKILL_CALL_PREFIX}{ordinal}"
+def round_call_id(ordinal: int) -> str:
+    """The call id of the round whose entry has this ordinal, a skill's read or a load of tools. The prefix keeps it
+    from a model's call id."""
+    return f"{_ROUND_CALL_PREFIX}{ordinal}"
 
 
-def skill_to_read(arguments: JsonObject) -> str | None:
-    """The name of the skill a ``read_skill`` call asks for, or ``None`` for arguments that name none."""
+def listed_skill_named(skills: Mapping[str, ListedSkill], arguments: JsonObject) -> ListedSkill | None:
+    """The skill a ``read_skill`` or ``load_tools`` call names among the skills a turn lists, or ``None`` for arguments
+    that name none the turn lists."""
     name = arguments.get(_SKILL_ARGUMENT)
-    return name if isinstance(name, str) else None
+    return skills.get(name) if isinstance(name, str) else None
 
 
 def skill_text(body: str) -> str:
@@ -354,3 +375,46 @@ def skill_round(entry: SkillRead) -> ToolRound:
     arguments = json.dumps({_SKILL_ARGUMENT: entry.name}, ensure_ascii=False)
     call = RoundCall(call_id=entry.call_id, tool=READ_SKILL_TOOL, arguments=arguments, result=skill_text(entry.body))
     return ToolRound(calls=(call,))
+
+
+def load_round(entry: ToolsLoaded, deferred: Deferred) -> ToolRound:
+    """The round that tells tools the agent loaded: one ``load_tools`` call under the entry's call id, answered with
+    references to the tools its app still sends deferred in this turn, or, when it sends none, a text that loads
+    nothing."""
+    loads = tuple(name for name in entry.tools if name in deferred.get(entry.app, ()))
+    arguments = json.dumps({_SKILL_ARGUMENT: entry.skill}, ensure_ascii=False)
+    result = "" if loads else NOT_OFFERED_TEXT
+    call = RoundCall(call_id=entry.call_id, tool=LOAD_TOOLS_TOOL, arguments=arguments, result=result, loads=loads)
+    return ToolRound(calls=(call,))
+
+
+def loaded_by(messages: Iterable[TurnMessage | ToolRound]) -> frozenset[str]:
+    """The tools the rounds among ``messages`` loaded."""
+    return frozenset(
+        name for each in messages if isinstance(each, ToolRound) for call in each.calls for name in call.loads
+    )
+
+
+def tools_to_load(skill: AppSkill, deferred: Sequence[str], loaded: Collection[str]) -> tuple[str, ...]:
+    """The tools of ``skill``, in its order, that its app sends ``deferred`` and that ``loaded`` does not hold."""
+    return tuple(name for name in skill.tools if name in deferred and name not in loaded)
+
+
+@dataclass(frozen=True)
+class AppOffer:
+    """What an app offers a turn: its URL, whether it listens, and the declarations of its listing the turn is offered,
+    in its order."""
+
+    app: str
+    listens: bool
+    declarations: tuple[ToolDeclaration, ...]
+
+
+def deferred_by_app(offers: Iterable[AppOffer]) -> Deferred:
+    """The tools a turn sends deferred by the URL of their app, in its listing's order: every tool of a tools-only app
+    and none of a listening app's."""
+    return {
+        offer.app: tuple(each.name for each in offer.declarations)
+        for offer in offers
+        if not offer.listens and offer.declarations
+    }

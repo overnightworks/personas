@@ -24,6 +24,7 @@ from personas.entries import (
     Occasion,
     SaidAloud,
     SkillRead,
+    ToolsLoaded,
     TurnTold,
     Unanswered,
     ViewSeen,
@@ -32,7 +33,7 @@ from personas.entries import (
     entry_size,
 )
 from personas.mind import Mind
-from personas.present import skill_call_id, turn_messages
+from personas.present import round_call_id, turn_messages
 from personas.speech import Answered, HoldKey
 from tests.support.history import message_texts
 
@@ -348,7 +349,7 @@ def answer_turn_for(mind: Mind, first_seq: int) -> list[str]:
     """Takes one line, has the turn for it answered and returns the messages that turn was sent."""
     mind.take((said(CALL, first_seq, "x"),))
     turn = a_lines_turn(mind, first_seq)
-    sent = message_texts(turn_messages("Mozart", mind.present, turn))
+    sent = message_texts(turn_messages("Mozart", mind.present, turn, {}))
     mind.answered(turn)
     return list(sent)
 
@@ -382,7 +383,7 @@ def test_a_turn_in_flight_whose_message_left_in_a_step_is_not_told_and_every_ent
     mind.answered(in_flight)
     mind.take((said(CALL, 9, "x"),))
 
-    sent = message_texts(turn_messages("Mozart", mind.present, a_lines_turn(mind, 9)))
+    sent = message_texts(turn_messages("Mozart", mind.present, a_lines_turn(mind, 9), {}))
 
     told = [seq for each in sent[1:] for seq in seqs_told(each)]
     assert told == [entry.seq for entry in mind.history.entries]
@@ -395,7 +396,7 @@ def test_a_turn_whose_message_a_step_cut_names_only_the_lines_it_still_tells():
     mind.take(tuple(said(CALL, seq, "x") for seq in range(7, 10)))
     mind.answered(in_flight)
 
-    sent = message_texts(turn_messages("Mozart", mind.present, a_lines_turn(mind, 9)))
+    sent = message_texts(turn_messages("Mozart", mind.present, a_lines_turn(mind, 9), {}))
 
     message = sent[1]
     assert (json.loads(message)["woke"]["seqs"], seqs_told(message)) == ([6], [6])
@@ -407,7 +408,7 @@ def test_a_newest_message_past_the_kept_bytes_loses_its_oldest_entries_and_keeps
     answer_turn_for(mind, 1)
     mind.take(tuple(said(CALL, seq, "x") for seq in range(2, 7)))
 
-    sent = message_texts(turn_messages("Mozart", mind.present, a_lines_turn(mind, 6)))
+    sent = message_texts(turn_messages("Mozart", mind.present, a_lines_turn(mind, 6), {}))
 
     assert [seqs_told(each) for each in sent[1:]] == [[5, 6]]
     assert json.loads(sent[0])["older_dropped"] is True
@@ -418,7 +419,7 @@ def test_the_newest_entry_stays_when_it_alone_is_past_the_kept_bytes():
     mind = Mind(4 * LINE_BYTES, 1, BUDGET_PAUSE_CAP_SECONDS)
     mind.take(tuple(said(CALL, seq, "x") for seq in range(1, 6)))
 
-    sent = message_texts(turn_messages("Mozart", mind.present, a_lines_turn(mind, 5)))
+    sent = message_texts(turn_messages("Mozart", mind.present, a_lines_turn(mind, 5), {}))
 
     assert [seqs_told(each) for each in sent[1:]] == [[5]]
 
@@ -584,6 +585,25 @@ def test_a_place_claimed_in_another_app_counts_as_held_until_released_or_read_ag
     assert not mind.holds_active_place_elsewhere(CALL.app)
 
 
+def test_a_load_gets_a_call_id_no_kept_entry_holds():
+    mind = Mind(600, 500, BUDGET_PAUSE_CAP_SECONDS)
+    load = partial(mind.tools_loaded, CALL.app, "greeting", ("say", "play"), READ_AT)
+    mind.take((said(CALL, 1, "a" * 150),))
+    load()
+    mind.take((said(CALL, 2, "b" * 150),))
+    load()
+    mind.take((said(CALL, 3, "c" * 150),))
+    kept_before = len(mind.history.entries)
+    load()
+
+    ids = [entry.call_id for entry in mind.history.entries if isinstance(entry, ToolsLoaded)]
+
+    assert mind.history.left_out > 0
+    assert len(ids) == 2
+    assert len(set(ids)) == len(ids)
+    assert ids[-1] != round_call_id(kept_before)
+
+
 def test_a_read_after_a_cut_gets_a_call_id_no_kept_entry_holds():
     mind = Mind(600, 500, BUDGET_PAUSE_CAP_SECONDS)
     read = partial(mind.skill_read, CALL.app, "greeting", "skill://greeting/SKILL.md", "Greet people by name.", READ_AT)
@@ -600,4 +620,4 @@ def test_a_read_after_a_cut_gets_a_call_id_no_kept_entry_holds():
     assert mind.history.left_out > 0
     assert len(ids) == 2
     assert len(set(ids)) == len(ids)
-    assert ids[-1] != skill_call_id(kept_before)
+    assert ids[-1] != round_call_id(kept_before)

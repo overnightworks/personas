@@ -13,7 +13,7 @@ import httpx2
 from agents.backend.fake_gateway import FakeGateway, Reply, completion, tool_call, tool_round
 from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL
 
-from personas.decision import READ_SKILL_CALLS, READ_SKILL_TOOL
+from personas.decision import LOAD_TOOLS_CALLS, LOAD_TOOLS_TOOL, READ_SKILL_CALLS, READ_SKILL_TOOL
 from tests.support.call import PLACE_ID
 from tests.support.history import TABLE
 from tests.support.hopin import LIMIT_SECONDS, PLAY_TOOL, SAY_TOOL
@@ -89,11 +89,22 @@ def play(text: str):
     return say(text, TABLE.id, PLAY_TOOL)
 
 
-def reads_of_every_skill_the_bound_allows() -> list[Reply]:
-    """The rounds of a model that calls ``read_skill`` once a round until the turn's bound for it is spent; a name no
-    line holds takes a call as a skill does."""
+def reading(skill: str, call_id: str = "model-read"):
+    """A call of ``read_skill`` for the skill."""
+    return tool_call(call_id, READ_SKILL_TOOL, {"skill": skill})
+
+
+def loading(skill: str, call_id: str = "model-load"):
+    """A call of ``load_tools`` for the skill."""
+    return tool_call(call_id, LOAD_TOOLS_TOOL, {"skill": skill})
+
+
+def reads_and_loads_the_bounds_allow() -> list[Reply]:
+    """The rounds of a model that calls ``read_skill`` once a round until the turn's bound for it is spent and then
+    ``load_tools`` likewise; a name no line holds takes a call as a skill does."""
     return [
-        tool_round(tool_call(secrets.token_hex(4), READ_SKILL_TOOL, {"skill": "none"})) for _ in range(READ_SKILL_CALLS)
+        *(tool_round(reading("none", secrets.token_hex(4))) for _ in range(READ_SKILL_CALLS)),
+        *(tool_round(loading("none", secrets.token_hex(4))) for _ in range(LOAD_TOOLS_CALLS)),
     ]
 
 
@@ -394,7 +405,7 @@ class Gateway(FakeGateway):
         return [
             number
             for number, _ in enumerate(self.requests, start=1)
-            if self.body_of(number)["messages"][-1]["content"].startswith('{"held"')
+            if str(self.body_of(number)["messages"][-1]["content"]).startswith('{"held"')
         ]
 
     def hold_told(self, request_number: int) -> JsonObject:
@@ -410,6 +421,16 @@ class Gateway(FakeGateway):
         that is only text, the parts of one that holds a picture."""
         messages = json.loads(self.requests[request_number - 1].content)["messages"]
         return [message["content"] for message in messages if message["role"] == "tool"]
+
+    def tool_rounds(self, request_number: int) -> list[list[JsonObject]]:
+        """The tool rounds the request that arrived as this number (from one) told: each assistant message with its
+        calls and the tool results after it."""
+        messages = self.body_of(request_number)["messages"]
+        return [
+            [message, *messages[index + 1 : index + 1 + len(message["tool_calls"])]]
+            for index, message in enumerate(messages)
+            if message["role"] == "assistant" and message.get("tool_calls")
+        ]
 
     def pictures_in(self, request_number: int) -> list[str]:
         """The data URL of each picture the tool messages of the request that arrived as this number (from one)
@@ -437,13 +458,14 @@ class Gateway(FakeGateway):
 
     def offered_tools(self, request_number: int = 1, *, speaking: bool = False, reading: bool = False) -> list[str]:
         """The names of the tools the request that arrived as this number (from one) offered, in the order offered;
-        the two speaking tools and the skills' ``read_skill``, which every request holds, only when asked for."""
+        the two speaking tools and the skills' ``read_skill`` and ``load_tools``, which every request holds, only when
+        asked for."""
         names = [
             tool["function"]["name"] for tool in json.loads(self.requests[request_number - 1].content).get("tools", [])
         ]
         left_out = {
             *(() if speaking else (CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL)),
-            *(() if reading else (READ_SKILL_TOOL,)),
+            *(() if reading else (READ_SKILL_TOOL, LOAD_TOOLS_TOOL)),
         }
         return [name for name in names if name not in left_out]
 

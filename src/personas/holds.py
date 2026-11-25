@@ -330,7 +330,10 @@ class HoldDeciding:
         standing = self.told_standing(
             admitted.place, hold, None if inbox.waiting is None else (inbox.waiting.name, inbox.waiting.input)
         )
-        told = [*turn_messages(admitted.facts.name, self._mind.present, current), user_message(standing)]
+        told = [
+            *turn_messages(admitted.facts.name, self._mind.present, current, voiced.held.deferred),
+            user_message(standing),
+        ]
         request = voiced.request.model_copy(
             update={
                 "turn": Turn(

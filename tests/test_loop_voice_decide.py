@@ -19,7 +19,7 @@ from agents.member import (
 )
 from agents.tools import ToolOutcome
 
-from personas.decision import READ_SKILL_TOOL
+from personas.decision import LOAD_TOOLS_TOOL, READ_SKILL_TOOL
 from personas.recall import RECALL_TOOL
 from personas.reporting import Event
 from personas.speech import DropReason
@@ -135,8 +135,9 @@ def with_a_skill_to_read(runner) -> None:
     [
         (say("early", PLACE_ID), lambda runner: None),
         (tool_call("early-read", READ_SKILL_TOOL, {"skill": "hopin"}), with_a_skill_to_read),
+        (tool_call("early-load", LOAD_TOOLS_TOOL, {"skill": "hopin"}), with_a_skill_to_read),
     ],
-    ids=["say", "read_skill"],
+    ids=["say", "read_skill", "load_tools"],
 )
 async def test_every_other_call_of_a_turn_told_a_hold_is_answered_deciding_first_until_he_decides(
     runner, early, arrange

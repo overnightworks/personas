@@ -35,8 +35,8 @@ from personas.due import (
     without_due,
     yields_to_spoken,
 )
-from personas.entries import KeptLine, SkillRead
-from personas.present import EMPTY_PRESENT, answered_into, skill_call_id, taken_into
+from personas.entries import KeptLine, SkillRead, ToolsLoaded
+from personas.present import EMPTY_PRESENT, answered_into, round_call_id, taken_into
 from personas.speech import (
     NO_SPEECH,
     Answered,
@@ -246,7 +246,11 @@ class Mind:
     def skill_read(self, app: str, name: str, uri: str, body: str, at: datetime) -> None:
         """Appends the entry of a skill the agent read, under the call id minted from its ordinal: the count of entries
         ever appended, which no cut or resume lowers while an entry is kept, so no kept entry holds the id."""
-        self.take((SkillRead(app, name, uri, body, at, skill_call_id(self.history.taken)),))
+        self.take((SkillRead(app, name, uri, body, at, round_call_id(self.history.taken)),))
+
+    def tools_loaded(self, app: str, skill: str, tools: tuple[str, ...], at: datetime) -> None:
+        """Appends the entry of tools the agent loaded, under a call id minted as a read's is."""
+        self.take((ToolsLoaded(app, skill, tools, at, round_call_id(self.history.taken)),))
 
     def _set_speech(self, at: AppPlace, record: SpeechRecord) -> None:
         if record == self._speech.get(at, NO_SPEECH):

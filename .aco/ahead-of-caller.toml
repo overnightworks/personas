@@ -1,4 +1,0 @@
-[[code]]
-path = "src/personas/entries.py"
-item = "#427"
-reason = "The load entry the history reads back; S8b2 writes it."
