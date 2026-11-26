@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
-from agents.backend.fake_gateway import completion
+from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.member import CONTINUE_SPEAKING_TOOL
 from agents.voice.conversation import told_went_on
 
@@ -13,6 +14,9 @@ from personas.reporting import Event
 from tests.support.app_driving import settled
 from tests.support.call import ADDRESSED, PLACE_ID, say_in_the_call
 from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
+from tests.support.gateway import say
+from tests.support.hopin import CALL, LIMIT_SECONDS
+from tests.support.songmaker import CREATE_SONG
 from tests.support.voice import (
     FIRST,
     HOLD_ID,
@@ -29,6 +33,7 @@ from tests.support.voice import (
     play_out,
     sentences_spoken,
 )
+from tests.support.wire import answers_once_released
 
 pytestmark = pytest.mark.anyio
 
@@ -147,6 +152,79 @@ async def test_a_round_at_a_hold_with_words_after_his_going_on_is_not_told_again
     turn_goes_on.set()
 
     assert told_of_going_on(runner) == []
+
+
+async def test_at_its_going_on_the_next_turn_is_told_he_went_on_once_when_no_call_waited(runner):
+    """TURNS-29, TURNS-31."""
+    holding_sentence_ends(runner)
+    await a_voice_call(runner, completion(THREE_SENTENCES), *[completion("[silent]")] * 3)
+    say_in_the_call(runner, ADDRESSED, spoken=True)
+    await runner.app.until_called(2)
+    runner.app.hold_wordless(PLACE_ID, HOLD_ID, ("Ada", "…"))
+    await settled(runner.app)
+
+    runner.app.go_on(PLACE_ID)
+    await play_out(runner, 3)
+    await runner.reports.until_a_turn_ended()
+    await another_turn(runner)
+    await another_turn(runner)
+
+    assert told_of_going_on(runner) == [2]
+
+
+async def test_at_its_going_on_a_round_at_a_hold_with_words_is_told_he_went_on_once_when_no_call_waited(runner):
+    """TURNS-29, TURNS-47."""
+    holding_sentence_ends(runner)
+    await a_voice_call(
+        runner,
+        tool_round(say("before", PLACE_ID), content=FIRST),
+        tool_round(say("waits", PLACE_ID)),
+        deciding(CONTINUE_SPEAKING_TOOL, SECOND_HOLD),
+        *[completion("[silent]")] * 3,
+    )
+    turn_goes_on = runner.gateway.hold_request(2)
+    say_in_the_call(runner, ADDRESSED, spoken=True)
+    await runner.app.said_count(1)
+    await runner.app.spoken_count(1)
+    runner.app.hold_wordless(PLACE_ID, HOLD_ID, ("Ada", "…"))
+    await settled(runner.app)
+
+    runner.app.go_on(PLACE_ID)
+    await runner.gateway.until_requested(2)
+    runner.app.hold(PLACE_ID, SECOND_HOLD, SAID)
+    await decided(runner)
+    turn_goes_on.set()
+    await runner.reports.until_a_turn_ended()
+    requests_before_the_next_turn = len(runner.gateway.requests)
+    await another_turn(runner)
+
+    told = told_of_going_on(runner)
+    assert runner.gateway.rounds()[0] in told
+    assert max(told) <= requests_before_the_next_turn
+
+
+async def test_at_its_going_on_the_result_of_a_waiting_call_to_another_app_tells_he_went_on_once(runner, songmaker):
+    """TURNS-29, TURNS-31."""
+    entered, released = asyncio.Event(), asyncio.Event()
+    songmaker.script(CALL, answers_once_released(entered, released, "made"))
+    await a_voice_call(
+        runner,
+        tool_round(tool_call("elsewhere", CREATE_SONG, {"title": "t"})),
+        *[completion("[silent]")] * 3,
+    )
+    say_in_the_call(runner, ADDRESSED, spoken=True)
+    async with asyncio.timeout(LIMIT_SECONDS):
+        await entered.wait()
+    runner.app.hold_wordless(PLACE_ID, HOLD_ID, ("Ada", "…"))
+    await settled(runner.app)
+
+    runner.app.go_on(PLACE_ID)
+    await settled(runner.app)
+    released.set()
+    await runner.reports.until_a_turn_ended()
+    await another_turn(runner)
+
+    assert told_of_going_on(runner) == [2]
 
 
 async def test_a_word_said_over_a_wordless_hold_makes_it_decided_as_any_hold(runner):
