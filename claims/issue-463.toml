@@ -1,8 +1,0 @@
-claim_id = "c2661e35983c41719c4a61c1c84031a7"
-agent = "Claude 21fa6737-d531-4443-a43b-24ac7ae34820"
-role = "builder"
-base = "e89db245d6d9168ab05f724eb8b69dd3e530d35b"
-branch = "claude/issue-463-one-owner-for-the-agent-and-app-fields-o"
-scope = ["pyproject.toml", "src/personas/loop.py", "src/personas/reporting.py", "src/personas/tool_lists.py", "src/personas/turn_sessions.py", "src/personas/turning.py", "uv.lock"]
-opened_commit = "768895af91fd5102bd97a56309f35007cf0d0295"
-whole_reason = "The fields function, its callers and the dependency it imports change together: callers cannot spread a function that does not exist, and the function cannot import typing_extensions without declaring it."
