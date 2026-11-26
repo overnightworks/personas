@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from agents.member import (
+    HoldPlace,
     CONTINUE_SPEAKING_TOOL,
     SPEAK_TOOL,
     STOP_SPEAKING_TOOL,
@@ -83,6 +84,8 @@ class AppVoice(AppPlaces):
         default_factory=dict[str, tuple[str, tuple[PartialSpeech, ...] | None]]
     )
     """Each place whose member is held: the hold's id and what is said over it, none once the record is gone."""
+    hold_places: dict[str, HoldPlace] = field(default_factory=dict[str, HoldPlace])
+    """Each place whose app states, with every hold, where it stopped the member; the others state none."""
     talked_over: dict[str, tuple[PartialSpeech, ...]] = field(default_factory=dict[str, tuple[PartialSpeech, ...]])
     """Each place where people still talk over a member whose hold a continue ended: what each has said so far."""
     hold_calls: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
@@ -108,6 +111,11 @@ class AppVoice(AppPlaces):
             return
         hold_id, _ = self.holds[place_id]
         self.hold(place_id, hold_id, *said)
+
+    def talk_over_unheld(self, place_id: str, *said: tuple[str, str]) -> None:
+        """People talk over the member and the window states what they say, with no hold yet."""
+        self.talked_over[place_id] = tuple(PartialSpeech(name=name, text=text) for name, text in said)
+        self._signal_window(place_id)
 
     def end_record(self, place_id: str) -> None:
         """The record of what was said over the held member is gone while the hold stands."""

@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Final, TypeIs, cast
 
 from agents.member import (
+    HoldPlace,
     PartialSpeech,
     PlaceEntry,
     PlaceRef,
@@ -22,6 +23,7 @@ from agents.member import (
     Written,
 )
 from agents.turn import JsonObject  # noqa: TC002 - pydantic resolves the fields' types at run time
+from agents.voice.conversation import told_hold as agents_told_hold
 from pydantic import TypeAdapter
 
 if TYPE_CHECKING:
@@ -488,18 +490,16 @@ def told_entry(entry: ToldEntry) -> dict[str, object]:
 def told_hold(
     hold_id: str,
     speech: Iterable[PartialSpeech],
-    saying: str | None,
+    place: HoldPlace,
     unsaid: Iterable[str],
     waiting: tuple[str, JsonObject] | None,
 ) -> str:
-    """The message that tells him he is held: the hold's id, what people said over him, the sentence he was in, the
-    sentences he had not yet said and the call of his that waits, as its tool and arguments."""
+    """The message that tells him he is held: the hold's id, what people said over him, where it stopped him and the
+    sentences he had not yet said as agents tells them, and the call of his that waits, as its tool and arguments."""
     held: dict[str, object] = {
         "id": hold_id,
         "talked_over": [{"name": each.name, "text": each.text} for each in speech],
-        "in_sentence": saying,
-        "unsaid": list(unsaid),
-    }
+    } | agents_told_hold(place, list(unsaid))
     if waiting is not None:
         held["call_waiting"] = {"tool": waiting[0], "arguments": waiting[1]}
     return json.dumps({"held": held}, ensure_ascii=False)

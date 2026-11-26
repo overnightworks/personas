@@ -79,7 +79,6 @@ async def test_a_hold_with_words_where_no_turn_of_his_speaks_makes_his_turn_due_
     assert runner.gateway.hold_told(number) == {
         "id": HOLD_ID,
         "talked_over": [{"name": SAID[0], "text": SAID[1]}],
-        "in_sentence": None,
         "unsaid": [],
     }
     assert sentences_spoken(runner) == [FIRST, SECOND]
@@ -122,7 +121,7 @@ async def test_a_hold_left_standing_when_his_speech_ends_is_decided_by_his_next_
 
     assert await decided(runner) == ["stopped"]
     (number,) = runner.gateway.rounds()
-    assert runner.gateway.hold_told(number)["in_sentence"] == FIRST
+    assert runner.gateway.hold_told(number)["sentence"] == FIRST
     assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
 
 
