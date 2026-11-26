@@ -1,5 +1,5 @@
 claim_id = "a3babc1626544f6fb29f871a70eac005"
-agent = "Claude f0c05936-2de0-40e4-8ecc-a6090ecb310b"
+agent = "Claude 21fa6737-d531-4443-a43b-24ac7ae34820"
 role = "builder"
 base = "2841d92beb420ca8bf2e4bd06a6924cbbb495328"
 branch = "claude/issue-450-personas-pins-quality-v0-27-0"
