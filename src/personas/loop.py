@@ -67,7 +67,7 @@ from personas.reporting import (
     Reporter,
     StateChange,
     TurnTally,
-    app_host,
+    agent_app_fields,
     began_ago,
     report_fell_due,
     start_turn_tally,
@@ -558,8 +558,7 @@ class AgentLoop:
                 "turn_wait.ended",
                 LOG,
                 started_at=began_ago(max(0.0, self._boundaries.clock.now() - due.since)),
-                agent_id=self._agent.client_id,
-                app_id=app_host(self._app.mcp_url),
+                **agent_app_fields(self._agent.client_id, self._app.mcp_url),
             )
             wait.add(wait_reason=due.waited_on.value)
             wait.end()
@@ -601,12 +600,10 @@ class AgentLoop:
     async def _claim_kept_and_thinking(self, claimed: int, place: PlaceRef) -> None:
         """The gate of a turn: the claim is kept, then the thinking statement is answered."""
         with stepping(
-            StepTimer("claim_write.ended", LOG, agent_id=self._agent.client_id, app_id=app_host(self._app.mcp_url))
+            StepTimer("claim_write.ended", LOG, **agent_app_fields(self._agent.client_id, self._app.mcp_url))
         ):
             await self._mind.until_written(claimed)
-        with stepping(
-            StepTimer("thinking.ended", LOG, agent_id=self._agent.client_id, app_id=app_host(self._app.mcp_url))
-        ):
+        with stepping(StepTimer("thinking.ended", LOG, **agent_app_fields(self._agent.client_id, self._app.mcp_url))):
             await self._turn_states.turn_started(place)
 
     async def _yield_when_a_spoken_place_is_due(self, task: asyncio.Task[None]) -> None:

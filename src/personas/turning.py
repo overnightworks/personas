@@ -66,7 +66,7 @@ from personas.recall import (
     search_text,
     text_refused_text,
 )
-from personas.reporting import LOG, Event, LoopReport, TurnTally, app_host, failure_event, stepping
+from personas.reporting import LOG, Event, LoopReport, TurnTally, agent_app_fields, failure_event, stepping
 from personas.sizing import Sizing
 from personas.speech import HoldOutcome, Telling, hold_ended_as
 from personas.task_record import (
@@ -307,7 +307,7 @@ class Turning:
         async with self._listing_beside(session, admitted, record) as listing:
             await gate()
             with stepping(
-                StepTimer("turn_setup.ended", LOG, agent_id=self._agent.client_id, app_id=app_host(self._app.mcp_url))
+                StepTimer("turn_setup.ended", LOG, **agent_app_fields(self._agent.client_id, self._app.mcp_url))
             ) as hand_off:
                 lists = await listing
                 turn = TurnTold(
