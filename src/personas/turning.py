@@ -481,7 +481,12 @@ class Turning:
         none when it lists none. Another app whose listing fails, and the place's own app when it does not answer within
         its call time, is left out and reported, and the turn holds the rest.
         """
-        hold = HoldBack(admitted.history, inbox, deciding)
+        hold = HoldBack(
+            admitted.history,
+            inbox,
+            deciding,
+            went_on_to_tell=partial(self._mind.went_on_to_tell, self._at(admitted.place)),
+        )
         tools: list[HandTool] = []
         bounds: list[int] = []
         taken = frozenset[str]()
@@ -667,9 +672,10 @@ class Turning:
             return held
         if not calls.take():
             return ToolOutcome(_CALL_BOUND_TEXT, is_error=True)
-        return await _sent(
+        sent = await _sent(
             hold, self._recorded_as_act(self._app, name, arguments, self._invoke(session, name, arguments))
         )
+        return hold.telling_went_on(sent)
 
     async def _invoke(self, session: MemberSession, name: str, arguments: JsonObject) -> ToolOutcome:
         await self._renew_token()
@@ -693,7 +699,7 @@ class Turning:
             return held
         if not calls.take():
             return ToolOutcome(_CALL_BOUND_TEXT, is_error=True)
-        return await self._asked_elsewhere(
+        answer = await self._asked_elsewhere(
             app,
             calls,
             hold,
@@ -704,6 +710,7 @@ class Turning:
                 self._sessions.ask_elsewhere(app, lambda session: session.invoke(name, arguments), record),
             ),
         )
+        return hold.telling_went_on(answer)
 
     async def _asked_elsewhere[Answer](
         self, app: AppTarget, calls: Calls, hold: HoldBack, asking: Callable[[], Awaitable[Answer | CallFailure]]

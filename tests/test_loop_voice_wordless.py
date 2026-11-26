@@ -72,7 +72,7 @@ async def test_a_hold_whose_only_partial_is_an_ellipsis_starts_no_decision(runne
     assert runner.gateway.rounds() == []
 
 
-async def test_at_its_going_on_his_waiting_call_goes_out_and_the_next_turn_is_told_he_went_on_once(runner):
+async def test_at_its_going_on_the_result_of_his_waiting_call_tells_he_went_on_and_no_later_turn_does(runner):
     """TURNS-29, TURNS-31."""
     await calling_while_held(
         runner, completion("[silent]"), completion("[silent]"), completion("[silent]"), wordless=True, words=False
@@ -87,7 +87,7 @@ async def test_at_its_going_on_his_waiting_call_goes_out_and_the_next_turn_is_to
 
     assert said_texts(runner) == ["before", "waits"]
     assert runner.app.hold_calls == []
-    assert len(told_of_going_on(runner)) == 1
+    assert told_of_going_on(runner) == [3]
 
 
 async def test_at_its_going_on_a_sentence_past_its_bound_that_waited_plays(runner):
@@ -128,7 +128,7 @@ async def test_at_its_going_on_a_speak_the_app_holds_past_its_bound_is_not_given
     assert runner.reports.changes_of(Event.SPEECH_DROPPED) == []
 
 
-async def test_a_hold_with_words_after_his_going_on_in_the_same_spoken_turn_starts_a_round_told_he_went_on(runner):
+async def test_a_round_at_a_hold_with_words_after_his_going_on_is_not_told_again_that_he_went_on(runner):
     """TURNS-29, TURNS-47."""
     await calling_while_held(
         runner,
@@ -146,7 +146,7 @@ async def test_a_hold_with_words_after_his_going_on_in_the_same_spoken_turn_star
     await decided(runner)
     turn_goes_on.set()
 
-    assert told_of_going_on(runner)
+    assert told_of_going_on(runner) == []
 
 
 async def test_a_word_said_over_a_wordless_hold_makes_it_decided_as_any_hold(runner):

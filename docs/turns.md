@@ -164,9 +164,10 @@ An entry has its app and the time he took it (`at`), and is one of:
   whole sentence when the app states no place), his unsaid sentences and his waiting call.
   Otherwise, once words were said over him or their record is gone, the hold makes the place due for its lines,
   and that turn is told the hold first. A round or turn told a hold runs on `hold_model` when set. A wordless hold
-  is told to no round and makes no place due. The next round or turn, once per window generation and hold id, is
-  told after a hold went on by itself that a sound without words held him and he went on (`{"went_on": true}`);
-  the runner never sends that id.
+  is told to no round and makes no place due. The result of a call that goes out after a hold went on by itself,
+  or else the next round or turn, once per window generation and hold id, tells that a sound without words held him
+  and he went on (`{"went_on": true}`, a line after the call's own result in the first case); the runner never sends
+  that id.
 - TURNS-31: He calls `continue_speaking(id)` to go on or `stop_speaking(id)` to drop the rest: no unsent sentence is
   spoken and a waiting call is never sent. His unsaid sentences include an ended turn's still waiting at the
   place. A turn told a hold sends no other call until he decided: after a stop its sentences play at once,
@@ -205,7 +206,8 @@ An entry has its app and the time he took it (`at`), and is one of:
   going on. The rule covers a hold decided by a round beside the running turn and, in a turn told the first hold, a
   second hold decided by a round beside that turn.
 - TURNS-32: After he went on, a call of his is not sent while people said words no round told him; its result says
-  so (`sent` false, `talked_over`).
+  so (`sent` false, `talked_over`). A call that waited through a wordless hold
+  goes out at its going on and its result tells he went on (TURNS-30); no later round or turn tells it again.
 
 ## Pictures
 
