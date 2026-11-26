@@ -14,7 +14,7 @@
 
 ## Rules
 
-- A decision that needs no process, network or clock goes into `src/personas/decision.py`, `speech.py`, `present.py`, `due.py`, `recall.py` or `entries.py`, imported one way only (`entries` <- `recall` <- `speech` <- `decision` <- `present` <- `due`, the layers contract and the forbidden contract `core-imports-no-adapter` under `[tool.importlinter]` in `pyproject.toml` that quality's check holds, the latter through its adapter-import rule that keeps core unit tests and the support modules they import free of adapter imports); `loop.py` performs it through the boundaries, and `config.py` alone owns the TOML's fields and refusals. Extend the owner of a question, never a second decider.
+- A decision that needs no process, network or clock goes into `src/personas/decision.py`, `speech.py`, `present.py`, `due.py`, `recall.py` or `entries.py`, imported one way only (`entries` <- `recall` <- `speech` <- `decision` <- `present` <- `due`, the layers contract and the forbidden contract `core-imports-no-adapter` under `[tool.importlinter]` in `pyproject.toml` that quality's check holds, the latter on the core modules (the six decision modules and `mind`) through its adapter-import rule, which applies it to core unit tests and the support modules they import); `loop.py` performs it through the boundaries, and `config.py` alone owns the TOML's fields and refusals. Extend the owner of a question, never a second decider.
 - A secret or token is held in `secret.Secret` and reaches no log line, error message, repr or test literal; tests generate theirs.
 - Every `except asyncio.CancelledError` re-raises (Sonar S7497); decide what follows in a `finally` or outside the handler.
 - Async tests carry `pytestmark = pytest.mark.anyio`.
