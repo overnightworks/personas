@@ -404,7 +404,7 @@ class FakeApp(AppVoice):
             starts_at=entries[0].seq if entries else 1,
             entries=entries,
             talked_over=None if not said else TalkedOver(id=f"talk-{hold_id}", playing=True, speech=said),
-            interrupted=None if hold_id is None else Interrupted(id=hold_id),
+            interrupted=None if hold_id is None else Interrupted(id=hold_id, place=self.hold_places.get(place.id)),
             voice_state=self.voice_states.get(place.id),
         )
 

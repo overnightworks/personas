@@ -151,10 +151,12 @@ An entry has its app and the time he took it (`at`), and is one of:
 
 ## Holds
 
-- TURNS-29: While he speaks the app may hold him: someone talks over him and the window states the hold
-  (`interrupted`, with an `id`) and what each person said (`talked_over`).
+- TURNS-29: While he speaks the app may hold him: a person's voice over him lasts longer than about 0.4 s (the app's
+  trigger) and the window states the hold (`interrupted`, with an `id` and, when the app can tell, the `place` it
+  stopped him at) and what each person said (`talked_over`). He is decided on `interrupted` alone.
 - TURNS-30: While a spoken turn of his runs at the place, a round beside his parked run is told his history and, once per
-  hold id, what was said over him, the sentence that plays, his unsaid sentences and his waiting call.
+  hold id, what was said over him, where every listener heard his sentence to (the part heard and the rest, or the
+  whole sentence when the app states no place), his unsaid sentences and his waiting call.
   Otherwise, once words were said over him or their record is gone, the hold makes the place due for its lines,
   and that turn is told the hold first. A round or turn told a hold runs on `hold_model` when set.
 - TURNS-31: He calls `continue_speaking(id)` to go on or `stop_speaking(id)` to drop the rest: no unsent sentence is

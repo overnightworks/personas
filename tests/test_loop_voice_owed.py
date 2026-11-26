@@ -161,5 +161,5 @@ async def test_a_hold_over_his_last_sentence_after_the_turn_ended_is_decided_by_
     await runner.reports.until_a_turn_completed(count=2)
 
     assert runner.app.hold_calls == [(tool, HOLD_ID)]
-    assert runner.gateway.hold_told(2)["in_sentence"] == ANSWER
+    assert runner.gateway.hold_told(2)["sentence"] == ANSWER
     assert [(each.text, each.cut) for each in runner.app.lines[PLACE_ID] if each.author == SUBJECT] == [(ANSWER, cut)]

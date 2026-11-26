@@ -8,7 +8,7 @@ dependencies = [
     "alembic>=1.16",
     "anyio>=4.16.0",
     "httpx2>=2.16.0",
-    "overnightworks-agents[backend,voice,mcp-client] @ git+https://github.com/overnightworks/agents@v0.79.0",
+    "overnightworks-agents[backend,voice,mcp-client] @ git+https://github.com/overnightworks/agents@v0.80.0",
     "overnightworks-logline @ git+https://github.com/overnightworks/logline@v1.11.0",
     "psycopg[binary]>=3.2",
     "pydantic>=2.12",
@@ -38,7 +38,7 @@ packages = ["src/personas"]
 [dependency-groups]
 dev = [
     "anyio>=4.16.0",
-    "overnightworks-agents[mcp-server] @ git+https://github.com/overnightworks/agents@v0.79.0",
+    "overnightworks-agents[mcp-server] @ git+https://github.com/overnightworks/agents@v0.80.0",
     "pyright>=1.1.414",
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
