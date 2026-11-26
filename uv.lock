@@ -599,8 +599,8 @@ voice = [
 
 [[package]]
 name = "overnightworks-logline"
-version = "1.9.0"
-source = { git = "https://github.com/overnightworks/logline?rev=v1.9.0#cca495315f8fb25dae85851592a2c42376052c58" }
+version = "1.11.0"
+source = { git = "https://github.com/overnightworks/logline?rev=v1.11.0#e8274f1129256fb3b7a8789590e159d2a7e00d07" }
 dependencies = [
     { name = "opentelemetry-api" },
     { name = "structlog" },
@@ -643,7 +643,7 @@ requires-dist = [
     { name = "anyio", specifier = ">=4.16.0" },
     { name = "httpx2", specifier = ">=2.16.0" },
     { name = "overnightworks-agents", extras = ["backend", "voice", "mcp-client"], git = "https://github.com/overnightworks/agents?rev=v0.79.0" },
-    { name = "overnightworks-logline", git = "https://github.com/overnightworks/logline?rev=v1.9.0" },
+    { name = "overnightworks-logline", git = "https://github.com/overnightworks/logline?rev=v1.11.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.12" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.1.6" },
