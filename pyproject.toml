@@ -38,6 +38,8 @@ packages = ["src/personas"]
 [dependency-groups]
 dev = [
     "anyio>=4.16.0",
+    "mcp>=2.3.0",
+    "mcp-types>=2.3.0",
     "overnightworks-agents[mcp-server] @ git+https://github.com/overnightworks/agents@v0.79.0",
     "pyright>=1.1.414",
     "pytest>=9.0.2",
@@ -165,4 +167,30 @@ layers = [
     "personas.speech",
     "personas.recall",
     "personas.entries",
+]
+
+# include_external_packages lets the contract forbid uvicorn, the server library
+# that tests/support reaches through the loopback fake.
+[[tool.importlinter.contracts]]
+id = "core-imports-no-adapter"
+name = "the core imports no adapter"
+type = "forbidden"
+include_external_packages = true
+source_modules = [
+    "personas.decision",
+    "personas.speech",
+    "personas.present",
+    "personas.due",
+    "personas.recall",
+    "personas.entries",
+    "personas.mind",
+]
+forbidden_modules = [
+    "personas.app_session",
+    "personas.tokens",
+    "personas.memory",
+    "personas.locks",
+    "personas.clock",
+    "personas.main",
+    "uvicorn",
 ]
