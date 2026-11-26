@@ -1,8 +1,0 @@
-claim_id = "27a5c864220740338b76d2db82a842fc"
-agent = "Claude 21fa6737-d531-4443-a43b-24ac7ae34820"
-role = "builder"
-base = "19bcc78a267cdb4bc0bc2e39400e1b10b7ad0a44"
-branch = "claude/issue-467-a-skill-read-that-goes-out-at-a-wordless"
-scope = ["docs/turns.md", "src/personas/holds.py", "src/personas/turning.py", "tests"]
-opened_commit = "30a0390b13cbee637ed76ad8b52818c15f984fa6"
-whole_reason = "The skill read's result, the one telling it counts as, the reference and the loop test change together: the result alone would tell twice without the count, and the count without the result tells nothing."
