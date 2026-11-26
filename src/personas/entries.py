@@ -499,7 +499,8 @@ def told_hold(
     held: dict[str, object] = {
         "id": hold_id,
         "talked_over": [{"name": each.name, "text": each.text} for each in speech],
-    } | agents_told_hold(place, list(unsaid))
+        **agents_told_hold(place, list(unsaid)),
+    }
     if waiting is not None:
         held["call_waiting"] = {"tool": waiting[0], "arguments": waiting[1]}
     return json.dumps({"held": held}, ensure_ascii=False)

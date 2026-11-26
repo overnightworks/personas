@@ -221,8 +221,9 @@ class HoldKey(NamedTuple):
 
 @dataclass(frozen=True)
 class Held:
-    """A hold as the window states it: its id and window generation and where the app says it stopped him, if it does, and what people said over him, which stays what
-    the last read that had a record said once the record is gone, and whether a turn was told it."""
+    """A hold as the window states it: its id and window generation, the place the app says it stopped him at, if it
+    does, and what people said over him, which stays what the last read that had a record said once the record is
+    gone, and whether a turn was told it."""
 
     id: str
     generation: str

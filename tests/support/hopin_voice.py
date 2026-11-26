@@ -9,7 +9,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from agents.member import (
-    HoldPlace,
     CONTINUE_SPEAKING_TOOL,
     SPEAK_TOOL,
     STOP_SPEAKING_TOOL,
@@ -17,6 +16,7 @@ from agents.member import (
     ContinueSpeakingRefusal,
     ContinueSpeakingRefused,
     DroppedSpeaking,
+    HoldPlace,
     PartialSpeech,
     SpeakArguments,
     SpeakRefusal,
