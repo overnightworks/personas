@@ -9,7 +9,7 @@ dependencies = [
     "anyio>=4.16.0",
     "httpx2>=2.16.0",
     "overnightworks-agents[backend,voice,mcp-client] @ git+https://github.com/overnightworks/agents@v0.80.0",
-    "overnightworks-logline @ git+https://github.com/overnightworks/logline@v1.11.0",
+    "overnightworks-logline @ git+https://github.com/overnightworks/logline@v1.12.0",
     "psycopg[binary]>=3.2",
     "pydantic>=2.12",
     "sqlalchemy[asyncio]>=2.1.6",

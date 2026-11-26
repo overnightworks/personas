@@ -16,6 +16,7 @@ from agents.tools import HandTool, ToolDeclaration, ToolOutcome
 from agents.turn import RejectionCode, ToolRound, Turn, TurnMessage, is_within_event_bound
 from agents.turn_events import FinalEvent, ToolCallEvent
 from agents.voice.reply import REPLY_RULES
+from logline import StepTimer
 
 from personas.decision import (
     READ_SKILL_CALLS,
@@ -64,7 +65,7 @@ from personas.recall import (
     search_text,
     text_refused_text,
 )
-from personas.reporting import Event, LoopReport, TurnTally, failure_event, step_timer, stepping
+from personas.reporting import LOG, Event, LoopReport, TurnTally, app_host, failure_event, stepping
 from personas.sizing import Sizing
 from personas.speech import HoldOutcome, Telling, hold_ended_as
 from personas.task_record import (
@@ -88,7 +89,6 @@ if TYPE_CHECKING:
     from agents.mcp_client import MemberSession
     from agents.member import PlaceRef, PlaceWindow
     from agents.turn import FailureCode, JsonObject, Principal
-    from logline import StepTimer
 
     from personas.admission import Admitted
     from personas.app_session import SessionOpener
@@ -305,7 +305,9 @@ class Turning:
     ) -> None:
         async with self._listing_beside(session, admitted, record) as listing:
             await gate()
-            with stepping(step_timer("turn_setup.ended", self._agent.client_id, self._app.mcp_url)) as hand_off:
+            with stepping(
+                StepTimer("turn_setup.ended", LOG, agent_id=self._agent.client_id, app_id=app_host(self._app.mcp_url))
+            ) as hand_off:
                 lists = await listing
                 turn = TurnTold(
                     admitted.at,
