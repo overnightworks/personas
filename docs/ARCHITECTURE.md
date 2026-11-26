@@ -174,9 +174,8 @@ own repositories own.
 against scripted boundaries and in-process fakes of the realm, the gateway and an app (`tests/support`).
 Tests marked `postgres` drive the stores and several pods against a throwaway Postgres. Branch coverage is
 100 % over all of them (`fail_under` in `pyproject.toml`). CI adds the image build with its start and stop,
-the figures' regeneration check,
-the offline link check, and quality's shared gate (`quality / verdict`), which holds the import direction to
-the layers contract under `[tool.importlinter]` in `pyproject.toml`. The contract `core-imports-no-adapter`
+the figures' regeneration check, the offline
+link check, and quality's shared gate (`quality / verdict`), which holds the import direction to the layers contract under `[tool.importlinter]` in `pyproject.toml`. The contract `core-imports-no-adapter`
 there holds the core's own imports free of adapters, and the gate's adapter-import rule applies it to core
 unit tests and the support modules they import.
 
