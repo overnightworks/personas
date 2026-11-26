@@ -16,7 +16,7 @@ from logline import StepTimer
 from personas.app_session import read_skills
 from personas.decision import failure_code, is_not_granted
 from personas.failures import CallTimedOut, within_call_time
-from personas.reporting import LOG, Event, app_host, failure_event, stepping
+from personas.reporting import LOG, Event, agent_app_fields, failure_event, stepping
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable
@@ -124,7 +124,7 @@ class ToolLists:
         record.tools_notices_read = session.tools_notices()
         if (kept := session.kept_tools()) is not None:
             return kept
-        timer = StepTimer("tool_list.ended", LOG, agent_id=self._agent.client_id, app_id=app_host(self._app.mcp_url))
+        timer = StepTimer("tool_list.ended", LOG, **agent_app_fields(self._agent.client_id, self._app.mcp_url))
         with stepping(timer):
             try:
                 async with within_call_time(self._app.call_seconds):
@@ -138,7 +138,7 @@ class ToolLists:
 
     async def _list_tools(self, app: AppTarget, session: MemberSession) -> tuple[ToolDeclaration, ...]:
         with stepping(
-            StepTimer("tool_list.ended", LOG, agent_id=self._agent.client_id, app_id=app_host(app.mcp_url)),
+            StepTimer("tool_list.ended", LOG, **agent_app_fields(self._agent.client_id, app.mcp_url)),
             turn_goes_on=True,
         ):
             async with within_call_time(app.call_seconds):
@@ -167,7 +167,7 @@ class ToolLists:
         """A ``skills/list`` that is sent: a step of its own, within the app's call time. The loop's token is renewed
         for its own app alone; another app's listing runs under that app's own token."""
         with stepping(
-            StepTimer("skill_list.ended", LOG, agent_id=self._agent.client_id, app_id=app_host(app.mcp_url)),
+            StepTimer("skill_list.ended", LOG, **agent_app_fields(self._agent.client_id, app.mcp_url)),
             turn_goes_on=True,
         ):
             async with within_call_time(app.call_seconds):
