@@ -23,7 +23,7 @@ from personas.config import MemoryTarget, Voice, load_config
 from personas.loop import AgentLoop, Boundaries
 from personas.main import ALEMBIC_LOGGER, SweepingBoundaries, run_with_sweep
 from personas.readiness import FileReadyMarker
-from personas.reporting import MCP_CLIENT_LOGGER, carry_trace, log_state_change
+from personas.reporting import MCP_CLIENT_LOGGER, log_state_change
 from personas.secret import Secret
 from personas.tokens import HttpTokenSource
 from tests.support.configfiles import MAX_TOOL_CALLS, PERSONA_MAX_DURATION_SECONDS, Files
@@ -151,7 +151,7 @@ class Harness:
         self.clock = FakeClock()
         self.reports = Reports()
         self.reports.attach_to(logging.getLogger())
-        self.token_client = httpx2.AsyncClient(transport=self.realm.transport(), event_hooks={"request": [carry_trace]})
+        self.token_client = httpx2.AsyncClient(transport=self.realm.transport())
         self.task: asyncio.Task[object] | None = None
         self.tools_only_apps: list[ToolsOnlyApp] = []
         self.other_apps: list[FakeApp] = []

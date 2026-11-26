@@ -419,7 +419,7 @@ def test_the_real_boundaries_hand_the_loops_the_marker_they_were_given(files):
     assert asyncio.run(boundaries_ready()) is marker
 
 
-def test_the_real_boundaries_send_the_current_trace_to_the_realm_and_none_outside_one(files):
+def test_the_real_boundaries_send_the_current_trace_to_the_realm_and_none_outside_one(files, restored_logging):
     files.write()
     seen: list[str | None] = []
 
