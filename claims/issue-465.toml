@@ -1,8 +1,0 @@
-claim_id = "775301e75a6f451b8d427d34fa528241"
-agent = "Claude 21fa6737-d531-4443-a43b-24ac7ae34820"
-role = "builder"
-base = "e89db245d6d9168ab05f724eb8b69dd3e530d35b"
-branch = "claude/issue-465-take-agents-v0-81-0-a-hold-through-which"
-scope = ["docs/turns.md", "pyproject.toml", "src/personas/admission.py", "src/personas/entries.py", "src/personas/held_tools.py", "src/personas/holds.py", "src/personas/loop.py", "src/personas/mind.py", "src/personas/speech.py", "src/personas/turn_bound.py", "src/personas/turning.py", "src/personas/voice.py", "tests", "uv.lock"]
-opened_commit = "966c800b75c7adc9cdf8f38a4da78c76e51d7874"
-whole_reason = "The pin, the wordless hold, the went-on line and the turns reference change together: the rollout order needs a runner that reads both fields before any app sets them."
