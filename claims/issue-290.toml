@@ -3,5 +3,6 @@ agent = "Claude 21fa6737-d531-4443-a43b-24ac7ae34820"
 role = "builder"
 base = "0e2c7c4c86738d2f78513fb56daec08637a9994c"
 branch = "claude/issue-290-core-tests-no-adapter"
-scope = ["pyproject.toml", "quality/config.toml", "uv.lock"]
+scope = ["AGENTS.md", "docs/ARCHITECTURE.md", "pyproject.toml", "quality/config.toml", "uv.lock"]
 opened_commit = "a62d24768837e70e02a2ea5ff297fd41bfa81678"
+whole_reason = "The contract, the dev group's direct dependencies with their lock, and the two documents that name what quality's check holds change together: the documents would understate the check without naming the contract, and the contract fails the tests' imports without the declared dependencies."
