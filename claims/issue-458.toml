@@ -1,0 +1,8 @@
+claim_id = "8a4a38f0d1f841d9a8efbb97c1f3102e"
+agent = "Claude 21fa6737-d531-4443-a43b-24ac7ae34820"
+role = "builder"
+base = "47edad03664110bb5d441158f28152676ff87e25"
+branch = "claude/issue-458-take-agents-v0-80-0-tell-the-agent-the-e"
+scope = [".aco/ahead-of-caller.toml", "docs/turns.md", "pyproject.toml", "src/characters", "src/personas/entries.py", "src/personas/holds.py", "src/personas/speech.py", "tests", "uv.lock"]
+opened_commit = "d10fbedc339767e348e80be2957a739e3b58cb31"
+whole_reason = "The pin, the told place, the persona texts and the turns reference change together: the told place needs the pin, and the persona texts and TURNS-29 and TURNS-30 would describe a hold the runner no longer tells."
