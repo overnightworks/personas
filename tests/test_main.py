@@ -91,7 +91,7 @@ def test_the_mcp_clients_error_for_a_closed_stream_is_written_at_info_and_any_ot
     try:
         raise error
     except Exception:
-        logging.getLogger("mcp.client.streamable_http").exception("Error parsing SSE message")
+        logging.getLogger("mcp.client.streamable_http").exception("sse_message.failed")
 
     assert json.loads(capsys.readouterr().out)["level"] == level
 

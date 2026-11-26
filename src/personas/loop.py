@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Final, Literal, NoReturn
 from agents.mcp_client import ToolsWake
 from agents.member import DeclineInvitationRefusal
 from agents.member_outcomes import CallFailure, DeclineOutcome, UnrecognisedRefusal
-from logline import unit_trace
+from logline import StepTimer, unit_trace
 
 from personas.admission import Admitted
 from personas.decision import (
@@ -61,14 +61,16 @@ from personas.entries import Lines, Occasion, ViewSeen, Visit, Waiting, WindowRe
 from personas.failures import leaves_of, raise_if_cancelled
 from personas.remembering import LineStore, Remembering
 from personas.reporting import (
+    LOG,
     DueOccasion,
     Event,
     Reporter,
     StateChange,
     TurnTally,
+    app_host,
+    began_ago,
     report_fell_due,
     start_turn_tally,
-    step_timer,
     stepping,
 )
 from personas.task_record import TaskRecord
@@ -551,11 +553,12 @@ class AgentLoop:
         do not. The turn's wait, from ``due.since`` to now, ends here with what first kept it waiting; a pause that
         ended later than ``due.since`` says the place was due only from then."""
         with unit_trace(admitted.occasion.traceparent):
-            wait = step_timer(
+            wait = StepTimer(
                 "turn_wait.ended",
-                self._agent.client_id,
-                self._app.mcp_url,
-                elapsed_seconds=max(0.0, self._boundaries.clock.now() - due.since),
+                LOG,
+                started_at=began_ago(max(0.0, self._boundaries.clock.now() - due.since)),
+                agent_id=self._agent.client_id,
+                app_id=app_host(self._app.mcp_url),
             )
             wait.add(wait_reason=due.waited_on.value)
             wait.end()
@@ -596,9 +599,13 @@ class AgentLoop:
 
     async def _claim_kept_and_thinking(self, claimed: int, place: PlaceRef) -> None:
         """The gate of a turn: the claim is kept, then the thinking statement is answered."""
-        with stepping(step_timer("claim_write.ended", self._agent.client_id, self._app.mcp_url)):
+        with stepping(
+            StepTimer("claim_write.ended", LOG, agent_id=self._agent.client_id, app_id=app_host(self._app.mcp_url))
+        ):
             await self._mind.until_written(claimed)
-        with stepping(step_timer("thinking.ended", self._agent.client_id, self._app.mcp_url)):
+        with stepping(
+            StepTimer("thinking.ended", LOG, agent_id=self._agent.client_id, app_id=app_host(self._app.mcp_url))
+        ):
             await self._turn_states.turn_started(place)
 
     async def _yield_when_a_spoken_place_is_due(self, task: asyncio.Task[None]) -> None:
