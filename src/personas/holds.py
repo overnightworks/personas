@@ -15,7 +15,7 @@ from agents.tools import HandTool, ToolDeclaration, ToolEffect, ToolOutcome
 from agents.turn import Turn
 
 from personas.decision import TURN_ROLE, AppPlace, failure_code, round_seconds
-from personas.entries import TurnTold, told_hold, told_stop
+from personas.entries import TurnTold, told_hold, told_stop, told_went_on
 from personas.present import turn_messages, user_message
 from personas.reporting import Event, failure_event
 from personas.speech import (
@@ -330,7 +330,10 @@ class HoldDeciding:
         standing = self.told_standing(
             admitted.place, hold, None if inbox.waiting is None else (inbox.waiting.name, inbox.waiting.input)
         )
-        told = [*turn_messages(admitted.facts.name, self._mind.present, current), user_message(standing)]
+        told = [*turn_messages(admitted.facts.name, self._mind.present, current)]
+        if self._mind.went_on_to_tell(self._at(admitted.place)):
+            told.append(user_message(told_went_on()))
+        told.append(user_message(standing))
         request = voiced.request.model_copy(
             update={
                 "turn": Turn(

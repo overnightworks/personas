@@ -24,6 +24,7 @@ from agents.member import (
 )
 from agents.turn import JsonObject  # noqa: TC002 - pydantic resolves the fields' types at run time
 from agents.voice.conversation import told_hold as agents_told_hold
+from agents.voice.conversation import told_went_on as agents_told_went_on
 from pydantic import TypeAdapter
 
 if TYPE_CHECKING:
@@ -504,6 +505,11 @@ def told_hold(
     if waiting is not None:
         held["call_waiting"] = {"tool": waiting[0], "arguments": waiting[1]}
     return json.dumps({"held": held}, ensure_ascii=False)
+
+
+def told_went_on() -> str:
+    """The message that tells him a sound without words held him and he went on by himself."""
+    return json.dumps(agents_told_went_on())
 
 
 def told_words(words: Iterable[PartialSpeech]) -> str:

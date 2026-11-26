@@ -39,6 +39,7 @@ from agents.member import (
     Standing,
     StandingState,
     TalkedOver,
+    WentOn,
     place_ref_from_view_uri,
     place_ref_from_window_uri,
     place_view_uri,
@@ -404,7 +405,10 @@ class FakeApp(AppVoice):
             starts_at=entries[0].seq if entries else 1,
             entries=entries,
             talked_over=None if not said else TalkedOver(id=f"talk-{hold_id}", playing=True, speech=said),
-            interrupted=None if hold_id is None else Interrupted(id=hold_id, place=self.hold_places.get(place.id)),
+            interrupted=None
+            if hold_id is None
+            else Interrupted(id=hold_id, place=self.hold_places.get(place.id), wordless=place.id in self.wordless),
+            went_on=None if place.id not in self.went_on else WentOn(id=self.went_on[place.id]),
             voice_state=self.voice_states.get(place.id),
         )
 
