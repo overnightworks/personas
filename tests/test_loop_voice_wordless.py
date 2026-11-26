@@ -10,12 +10,14 @@ from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.member import CONTINUE_SPEAKING_TOOL
 from agents.voice.conversation import told_went_on
 
+from personas.decision import READ_SKILL_TOOL
 from personas.reporting import Event
 from tests.support.app_driving import settled
 from tests.support.call import ADDRESSED, PLACE_ID, say_in_the_call
 from tests.support.configfiles import PERSONA_MAX_DURATION_SECONDS
 from tests.support.gateway import say
-from tests.support.hopin import CALL, LIMIT_SECONDS
+from tests.support.hopin import CALL, LIMIT_SECONDS, SKILLS_GET
+from tests.support.skills import Shelf, a_skill_file
 from tests.support.songmaker import CREATE_SONG
 from tests.support.voice import (
     FIRST,
@@ -201,6 +203,45 @@ async def test_at_its_going_on_a_round_at_a_hold_with_words_is_told_he_went_on_o
     told = told_of_going_on(runner)
     assert runner.gateway.rounds()[0] in told
     assert max(told) <= requests_before_the_next_turn
+
+
+async def test_at_its_going_on_the_result_of_a_skill_read_tells_he_went_on_once_and_no_later_call_round_or_turn_does(
+    runner,
+):
+    """TURNS-29, TURNS-30."""
+    runner.app.shelf = Shelf({"hopin": a_skill_file("hopin")})
+    entered, released = asyncio.Event(), asyncio.Event()
+
+    async def waiting_skill_entry(reply) -> None:
+        entered.set()
+        await released.wait()
+        await runner.app.shelf.answers(reply.rpc)(reply)
+
+    runner.app.script(SKILLS_GET, waiting_skill_entry)
+    await a_voice_call(
+        runner,
+        tool_round(tool_call("reads", READ_SKILL_TOOL, {"skill": "hopin"})),
+        tool_round(say("after", PLACE_ID)),
+        completion("[silent]"),
+        completion("[silent]"),
+        completion("[silent]"),
+    )
+    say_in_the_call(runner, ADDRESSED, spoken=True)
+    async with asyncio.timeout(LIMIT_SECONDS):
+        await entered.wait()
+    runner.app.hold_wordless(PLACE_ID, HOLD_ID, ("Ada", "…"))
+    await settled(runner.app)
+
+    runner.app.go_on(PLACE_ID)
+    await settled(runner.app)
+    released.set()
+    await runner.reports.until_a_turn_ended()
+    await another_turn(runner)
+    await another_turn(runner)
+
+    turn_rounds = 3
+    assert told_of_going_on(runner) == [2, turn_rounds]
+    assert runner.gateway.told_in(turn_rounds).count(json.dumps(told_went_on())) == 1
 
 
 async def test_at_its_going_on_the_result_of_a_waiting_call_to_another_app_tells_he_went_on_once(runner, songmaker):
