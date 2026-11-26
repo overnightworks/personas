@@ -167,8 +167,6 @@ def _fields_of(change: StateChange) -> dict[str, str | int | float]:
         fields["app_id"] = named["app_id"]
     elif change.client_id is not None:
         fields["agent_id"] = change.client_id
-    elif change.app is not None:
-        fields["app_id"] = app_host(change.app)
     fields |= _failure_fields(change)
     if change.lines is not None:
         fields["line_count"] = change.lines
