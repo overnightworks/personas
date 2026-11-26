@@ -144,7 +144,8 @@ An entry has its app and the time he took it (`at`), and is one of:
   loop's session, and a turn running on it, into the loop's reaction.
 - TURNS-28: The persona's `maxDurationSeconds` bounds the turn and each sentence it released: a turn past it ends
   `limit_exceeded`; a sentence still unsent past it is dropped and logged, except while a hold stands, and a
-  continue gives it the deciding turn's bound.
+  continue gives it the deciding turn's bound. A hold going on by itself (TURNS-29) gives the unsent sentences, and
+  the request the app holds in its queue, the bound they were given for, from that moment.
 - TURNS-45: A later spoken turn's first sentence at the place drops the earlier turn's unsent sentences, which is
   logged as `speech.dropped`; the sentence that plays and the one already sent stay, and the new one queues
   behind them. A silent or written turn keeps them.
@@ -153,19 +154,31 @@ An entry has its app and the time he took it (`at`), and is one of:
 
 - TURNS-29: While he speaks the app may hold him: a person's voice over him lasts longer than about 0.4 s (the app's
   trigger) and the window states the hold (`interrupted`, with an `id` and, when the app can tell, the `place` it
-  stopped him at) and what each person said (`talked_over`). He is decided on `interrupted` alone.
+  stopped him at) and what each person said (`talked_over`). He is decided on `interrupted` alone, unless the app
+  states it `wordless`: no word (a letter or a digit) of the talk-over was heard, and the app ends such a hold by
+  itself once no one speaks (`went_on`), at the place where it stopped him, so that what waited plays. A hold is
+  decided as any hold from the change in which a word is heard. A sound without words is no word: a partial of
+  only `…` counts as none.
 - TURNS-30: While a spoken turn of his runs at the place, a round beside his parked run is told his history and, once per
   hold id, what was said over him, where every listener heard his sentence to (the part heard and the rest, or the
   whole sentence when the app states no place), his unsaid sentences and his waiting call.
   Otherwise, once words were said over him or their record is gone, the hold makes the place due for its lines,
-  and that turn is told the hold first. A round or turn told a hold runs on `hold_model` when set.
+  and that turn is told the hold first. A round or turn told a hold runs on `hold_model` when set. A wordless hold
+  is told to no round and makes no place due. The result of a call that goes out after a hold went on by itself,
+  or else the next round or turn, once per window generation and hold id, tells that a sound without words held him
+  and he went on (`{"went_on": true}`, a line after the call's own result in the first case); the runner never sends
+  that id.
 - TURNS-31: He calls `continue_speaking(id)` to go on or `stop_speaking(id)` to drop the rest: no unsent sentence is
   spoken and a waiting call is never sent. His unsaid sentences include an ended turn's still waiting at the
   place. A turn told a hold sends no other call until he decided: after a stop its sentences play at once,
   after a continue they follow the rest. A round or turn that ends without a decision stops him, and what
   waited is dropped unsaid. Each id of a window generation is logged once as `hold.decided`, with its
   `hold_id`. A call made while a hold stands at the place where the turn speaks waits for his decision; a
-  call already sent runs to its answer.
+  call already sent runs to its answer. A call waits so for a wordless hold too, and so does a sentence the app
+  refused as held; both go once the hold no longer stands, whether he decided it or the app ended it by itself.
+  When the turn's deadline passes first, the turn ends `limit_exceeded`, its waiting call is never sent and the
+  turn's sentences not yet sent drop, as for any turn that fails; nothing in the runner ends a wordless hold, which
+  lasts as long as someone speaks.
   Text in a reply while the hold he was told is undecided, in the round beside his parked run or in a turn told
   the hold, answers it instead of either call: what he had not said is dropped, logged as `speech.dropped`
   `replaced`, the parked run is cut with its waiting call unsent, and a decision call of the same reply is
@@ -189,10 +202,12 @@ An entry has its app and the time he took it (`at`), and is one of:
   in the same turn.
 - TURNS-47: Every further hold in one spoken turn, after a go on or a short line, is
   decided as the first: a decision does what it did for the first, and no decision drops what waited and he says
-  nothing. The rule covers a hold decided by a round beside the running turn and, in a turn told the first hold, a
+  nothing. A further hold that is wordless is no hold to decide: it starts no round, and what waited plays at its
+  going on. The rule covers a hold decided by a round beside the running turn and, in a turn told the first hold, a
   second hold decided by a round beside that turn.
 - TURNS-32: After he went on, a call of his is not sent while people said words no round told him; its result says
-  so (`sent` false, `talked_over`).
+  so (`sent` false, `talked_over`). A call that waited through a wordless hold
+  goes out at its going on and its result tells he went on (TURNS-30); no later round or turn tells it again.
 
 ## Pictures
 

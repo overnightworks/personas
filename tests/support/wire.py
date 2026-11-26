@@ -158,6 +158,17 @@ def hangs_once_entered(entered: asyncio.Event) -> Handler:
     return hang
 
 
+def answers_once_released(entered: asyncio.Event, released: asyncio.Event, text: str) -> Handler:
+    """A request that waits, once entered, until ``released`` is set and then answers as a tool that ran."""
+
+    async def answer(reply: Reply) -> None:
+        entered.set()
+        await released.wait()
+        await reply.raw_result({"content": [{"type": "text", "text": text}], "isError": False})
+
+    return answer
+
+
 def lost_on_demand(said: asyncio.Event, lost: asyncio.Event, place_window: str) -> Handler:
     """A stream that opens, stands the place's window once ``said`` is set and is cut once ``lost`` is set."""
 

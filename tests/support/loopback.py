@@ -26,7 +26,6 @@ async def serving(app: ASGI3Application) -> AsyncIterator[str]:
         lifespan="off",
         interface="asgi3",
         log_config=None,
-        log_level="critical",
         access_log=False,
     )
     config.timeout_graceful_shutdown = SHUTDOWN_SECONDS

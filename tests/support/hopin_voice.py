@@ -28,6 +28,7 @@ from agents.member import (
     StopSpeakingRefused,
     VoiceState,
     Written,
+    has_words,
 )
 from agents.tools import ToolDeclaration, ToolEffect, ToolOutcome
 
@@ -84,6 +85,10 @@ class AppVoice(AppPlaces):
         default_factory=dict[str, tuple[str, tuple[PartialSpeech, ...] | None]]
     )
     """Each place whose member is held: the hold's id and what is said over it, none once the record is gone."""
+    wordless: set[str] = field(default_factory=set[str])
+    """Each place whose hold stands with no word of its talk-over heard yet."""
+    went_on: dict[str, str] = field(default_factory=dict[str, str])
+    """Each place whose latest hold went on by itself: that hold's id."""
     hold_places: dict[str, HoldPlace] = field(default_factory=dict[str, HoldPlace])
     """Each place whose app states, with every hold, where it stopped the member; the others state none."""
     talked_over: dict[str, tuple[PartialSpeech, ...]] = field(default_factory=dict[str, tuple[PartialSpeech, ...]])
@@ -105,6 +110,21 @@ class AppVoice(AppPlaces):
         """The member is held at the place: the window states the hold and, over it, what each person has said so far
         (a name and its words), and signals the change."""
         self.holds[place_id] = (hold_id, self._partial_speeches(said))
+        if any(has_words(text) for _, text in said):
+            self.wordless.discard(place_id)
+        self._signal_window(place_id)
+
+    def hold_wordless(self, place_id: str, hold_id: str, *said: tuple[str, str]) -> None:
+        """The member is held and no word has been heard of the talk-over: the app ends the hold by itself."""
+        self.wordless.add(place_id)
+        self.hold(place_id, hold_id, *said)
+
+    def go_on(self, place_id: str) -> None:
+        """The app ends a wordless hold by itself: it states the hold's id as the one that went on, and a sentence
+        waiting for its turn plays after the playing one."""
+        hold_id, _ = self.holds.pop(place_id)
+        self.wordless.discard(place_id)
+        self.went_on[place_id] = hold_id
         self._signal_window(place_id)
 
     def talk_over(self, place_id: str, *said: tuple[str, str]) -> None:

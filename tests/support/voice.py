@@ -116,10 +116,13 @@ async def in_a_voice_call_and_at_a_table(runner, *replies):
     await runner.app.until_window_read(PLACE_ID)
 
 
-async def calling_while_held(runner, *after_the_hold, hold_round: bool = False, words: bool = True):
+async def calling_while_held(
+    runner, *after_the_hold, hold_round: bool = False, words: bool = True, wordless: bool = False
+):
     """A spoken turn whose first round writes a sentence and calls ``say`` while it plays, whose second round, held back
     until a hold without words stands at the app, calls ``say`` again; people then talk over him. With ``hold_round``
-    the round that decides the hold waits for the returned event; with no ``words`` nobody talks over him."""
+    the round that decides the hold waits for the returned event; with no ``words`` nobody talks over him; a
+    ``wordless`` hold is one the app ends by itself."""
     holding_sentence_ends(runner)
     first, second = tool_round(say("before", PLACE_ID), content=FIRST), tool_round(say("waits", PLACE_ID))
     await a_voice_call(runner, first, second, *after_the_hold)
@@ -127,7 +130,10 @@ async def calling_while_held(runner, *after_the_hold, hold_round: bool = False, 
     say_in_the_call(runner, ADDRESSED, spoken=True)
     await runner.app.said_count(1)
     await runner.app.spoken_count(1)
-    runner.app.hold(PLACE_ID, HOLD_ID, ("Ada", ""))
+    if wordless:
+        runner.app.hold_wordless(PLACE_ID, HOLD_ID, ("Ada", "…"))
+    else:
+        runner.app.hold(PLACE_ID, HOLD_ID, ("Ada", ""))
     await settled(runner.app)
     deciding_round = runner.gateway.hold_request(3) if hold_round else None
     second_round.set()

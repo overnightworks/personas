@@ -22,7 +22,7 @@ from personas.entries import SaidAloud
 from personas.failures import task_is_being_cancelled
 from personas.holds import APP_FAILED_TEXT, CONTINUED_TEXT, GONE_TEXT, LINE_ARGUMENT, STYLE_ARGUMENT
 from personas.reporting import Event, failure_event
-from personas.speech import Answered, DropReason, HoldOutcome, answered_as
+from personas.speech import Answered, DropReason, HoldOutcome, answered_as, bound_reached
 from personas.task_record import (
     RelayFailed,
     TaskRecord,
@@ -228,7 +228,7 @@ class Answering:
         """More sentences of the reply that answered join the record, to be sent plain with the turn's bound."""
         for _ in sentences:
             self._tally.sentence_released()
-        self._mind.sentences_released(self._at, sentences, self._bound.ends_at(), replacing=False)
+        self._mind.sentences_released(self._at, sentences, self._bound.ends_at(), self._bound.allowed, replacing=False)
 
     async def _speak(self, text: str, hold_id: str, style: str | None) -> SpeakAnswer | SpeakRefusal | CallFailure:
         try:
@@ -286,7 +286,7 @@ class Speaking:
         for _ in reading.sentences:
             self._tally.sentence_released()
         dropped = self._mind.sentences_released(
-            self._at, reading.sentences, self._bound.ends_at(), replacing=self._replacing
+            self._at, reading.sentences, self._bound.ends_at(), self._bound.allowed, replacing=self._replacing
         )
         self._replacing = False
         self._report_dropped(DropReason.REPLACED, dropped)
@@ -371,14 +371,18 @@ class Sender:
         self, sentence: Sentence, request: Coroutine[None, None, SpeakAnswer | SpeakRefusal]
     ) -> SpeakAnswer | SpeakRefusal:
         """The answer of the request, which the app holds back while the sentence before plays; a request not answered
-        by the sentence's bound is given up."""
+        by the sentence's bound is given up, which a hold going on by itself renews while it waits."""
         sending = asyncio.create_task(request)
         giving_up = asyncio.create_task(self._clock.sleep(max(0.0, sentence.bound - self._clock.now())))
         try:
-            await asyncio.wait({sending, giving_up}, return_when=asyncio.FIRST_COMPLETED)
-            if sending.done():
-                return sending.result()
-            raise TurnStopped(TurnStopKind.FAILED, FailureCode.LIMIT_EXCEEDED)
+            while True:
+                await asyncio.wait({sending, giving_up}, return_when=asyncio.FIRST_COMPLETED)
+                if sending.done():
+                    return sending.result()
+                bound = self._mind.sentence_bound(self._at, sentence)
+                if bound_reached(self._clock.now(), bound):
+                    raise TurnStopped(TurnStopKind.FAILED, FailureCode.LIMIT_EXCEEDED)
+                giving_up = asyncio.create_task(self._clock.sleep(bound - self._clock.now()))
         finally:
             giving_up.cancel()
             if not sending.done():

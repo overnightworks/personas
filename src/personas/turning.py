@@ -16,6 +16,7 @@ from agents.tools import HandTool, ToolDeclaration, ToolOutcome
 from agents.turn import RejectionCode, ToolRound, Turn, TurnMessage, is_within_event_bound
 from agents.turn_events import FinalEvent, ToolCallEvent
 from agents.voice.reply import REPLY_RULES
+from logline import StepTimer
 
 from personas.decision import (
     READ_SKILL_CALLS,
@@ -29,6 +30,7 @@ from personas.decision import (
 from personas.entries import (
     ActDone,
     TurnTold,
+    told_went_on,
     told_words,
 )
 from personas.failures import leaves_of, raise_if_cancelled, task_is_being_cancelled
@@ -64,7 +66,7 @@ from personas.recall import (
     search_text,
     text_refused_text,
 )
-from personas.reporting import Event, LoopReport, TurnTally, failure_event, step_timer, stepping
+from personas.reporting import LOG, Event, LoopReport, TurnTally, agent_app_fields, failure_event, stepping
 from personas.sizing import Sizing
 from personas.speech import HoldOutcome, Telling, hold_ended_as
 from personas.task_record import (
@@ -88,7 +90,6 @@ if TYPE_CHECKING:
     from agents.mcp_client import MemberSession
     from agents.member import PlaceRef, PlaceWindow
     from agents.turn import FailureCode, JsonObject, Principal
-    from logline import StepTimer
 
     from personas.admission import Admitted
     from personas.app_session import SessionOpener
@@ -305,7 +306,9 @@ class Turning:
     ) -> None:
         async with self._listing_beside(session, admitted, record) as listing:
             await gate()
-            with stepping(step_timer("turn_setup.ended", self._agent.client_id, self._app.mcp_url)) as hand_off:
+            with stepping(
+                StepTimer("turn_setup.ended", LOG, **agent_app_fields(self._agent.client_id, self._app.mcp_url))
+            ) as hand_off:
                 lists = await listing
                 turn = TurnTold(
                     admitted.at,
@@ -316,6 +319,8 @@ class Turning:
                     through=admitted.history.taken,
                 )
                 told = turn_messages(admitted.facts.name, admitted.present, turn)
+                if admitted.went_on:
+                    told = (*told, user_message(told_went_on()))
                 if admitted.held is not None:
                     told = (*told, user_message(self._holds.told_standing(admitted.place, admitted.held)))
                 bound = TurnBound(self._clock, setup.persona.max_duration_seconds)
@@ -445,7 +450,7 @@ class Turning:
         whose turn ended without deciding it is stopped with its id, the loop's session taking the call, and the unsent
         sentences at the place drop. Whether the hold made the place due."""
         at = self._at(place)
-        held = self._mind.hold_read(at, window)
+        held = self._mind.hold_read(at, window, self._clock.now())
         if self._holds.heard_at(place, window) or held is None or self._aloud_at == place:
             return False
         if held.telling is Telling.UNDECIDED:
@@ -476,7 +481,12 @@ class Turning:
         none when it lists none. Another app whose listing fails, and the place's own app when it does not answer within
         its call time, is left out and reported, and the turn holds the rest.
         """
-        hold = HoldBack(admitted.history, inbox, deciding)
+        hold = HoldBack(
+            admitted.history,
+            inbox,
+            deciding,
+            went_on_to_tell=partial(self._mind.went_on_to_tell, self._at(admitted.place)),
+        )
         tools: list[HandTool] = []
         bounds: list[int] = []
         taken = frozenset[str]()
@@ -498,20 +508,29 @@ class Turning:
             if offered:
                 tools.extend(self._hand_tools(app, session, offered, calls, hold, record))
                 bounds.append(calls.bound)
+        tools.extend(self._decision_tools(admitted, record, bound, deciding, answering))
+        bounds.append(DECISION_CALLS)
+        return HeldTools(tuple(tools), turn_call_bound(bounds), inbox, deciding)
+
+    def _decision_tools(
+        self,
+        admitted: Admitted,
+        record: TaskRecord,
+        bound: TurnBound,
+        deciding: TurnHold | None,
+        answering: Answering | None,
+    ) -> list[HandTool]:
+        """The decision tools: decided at the hold when one stands, else answered apart."""
         if deciding is not None:
-            tools.extend(
+            return [
                 HandTool(
                     each,
                     partial(self._holds.decide_told, admitted.place, record, deciding, answering, bound, each.name),
                 )
                 for each in DECISION_DECLARATIONS
-            )
-            bounds.append(DECISION_CALLS)
-        else:
-            apart = partial(self._answered_apart, _APART_TEXT if admitted.aloud else _WRITTEN_TURN_TEXT)
-            tools.extend(HandTool(each, apart) for each in DECISION_DECLARATIONS)
-            bounds.append(DECISION_CALLS)
-        return HeldTools(tuple(tools), turn_call_bound(bounds), inbox, deciding)
+            ]
+        apart = partial(self._answered_apart, _APART_TEXT if admitted.aloud else _WRITTEN_TURN_TEXT)
+        return [HandTool(each, apart) for each in DECISION_DECLARATIONS]
 
     def _inbox_of(self, admitted: Admitted) -> HoldInbox:
         """What the spoken turn hears of a hold: the one that stands in the record, told at the turn's start or not."""
@@ -662,9 +681,10 @@ class Turning:
             return held
         if not calls.take():
             return ToolOutcome(_CALL_BOUND_TEXT, is_error=True)
-        return await _sent(
+        sent = await _sent(
             hold, self._recorded_as_act(self._app, name, arguments, self._invoke(session, name, arguments))
         )
+        return hold.telling_went_on(sent)
 
     async def _invoke(self, session: MemberSession, name: str, arguments: JsonObject) -> ToolOutcome:
         await self._renew_token()
@@ -688,7 +708,7 @@ class Turning:
             return held
         if not calls.take():
             return ToolOutcome(_CALL_BOUND_TEXT, is_error=True)
-        return await self._asked_elsewhere(
+        answer = await self._asked_elsewhere(
             app,
             calls,
             hold,
@@ -699,6 +719,7 @@ class Turning:
                 self._sessions.ask_elsewhere(app, lambda session: session.invoke(name, arguments), record),
             ),
         )
+        return hold.telling_went_on(answer)
 
     async def _asked_elsewhere[Answer](
         self, app: AppTarget, calls: Calls, hold: HoldBack, asking: Callable[[], Awaitable[Answer | CallFailure]]

@@ -569,8 +569,8 @@ wheels = [
 
 [[package]]
 name = "overnightworks-agents"
-version = "0.80.0"
-source = { git = "https://github.com/overnightworks/agents?rev=v0.80.0#99a1aedeecdb38803880aa0364dd18299845840f" }
+version = "0.81.1"
+source = { git = "https://github.com/overnightworks/agents?rev=v0.81.1#ffbbac51ed790a0e3f64b4948367b672826164db" }
 dependencies = [
     { name = "pydantic" },
     { name = "ruamel-yaml" },
@@ -599,8 +599,8 @@ voice = [
 
 [[package]]
 name = "overnightworks-logline"
-version = "1.11.0"
-source = { git = "https://github.com/overnightworks/logline?rev=v1.11.0#e8274f1129256fb3b7a8789590e159d2a7e00d07" }
+version = "1.12.0"
+source = { git = "https://github.com/overnightworks/logline?rev=v1.12.0#26c202af85cb01fd88029f76105cb1b0175dc8d2" }
 dependencies = [
     { name = "opentelemetry-api" },
     { name = "structlog" },
@@ -619,6 +619,7 @@ dependencies = [
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
     { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "typing-extensions" },
 ]
 
 [package.dev-dependencies]
@@ -642,11 +643,12 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.16" },
     { name = "anyio", specifier = ">=4.16.0" },
     { name = "httpx2", specifier = ">=2.16.0" },
-    { name = "overnightworks-agents", extras = ["backend", "voice", "mcp-client"], git = "https://github.com/overnightworks/agents?rev=v0.80.0" },
-    { name = "overnightworks-logline", git = "https://github.com/overnightworks/logline?rev=v1.11.0" },
+    { name = "overnightworks-agents", extras = ["backend", "voice", "mcp-client"], git = "https://github.com/overnightworks/agents?rev=v0.81.1" },
+    { name = "overnightworks-logline", git = "https://github.com/overnightworks/logline?rev=v1.12.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.12" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.1.6" },
+    { name = "typing-extensions", specifier = ">=4.16.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -654,7 +656,7 @@ dev = [
     { name = "anyio", specifier = ">=4.16.0" },
     { name = "mcp", specifier = ">=2.3.0" },
     { name = "mcp-types", specifier = ">=2.3.0" },
-    { name = "overnightworks-agents", extras = ["mcp-server"], git = "https://github.com/overnightworks/agents?rev=v0.80.0" },
+    { name = "overnightworks-agents", extras = ["mcp-server"], git = "https://github.com/overnightworks/agents?rev=v0.81.1" },
     { name = "pyright", specifier = ">=1.1.414" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-cov", specifier = ">=7.0.0" },
