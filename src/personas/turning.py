@@ -30,6 +30,7 @@ from personas.decision import (
 from personas.entries import (
     ActDone,
     TurnTold,
+    told_went_on,
     told_words,
 )
 from personas.failures import leaves_of, raise_if_cancelled, task_is_being_cancelled
@@ -318,6 +319,8 @@ class Turning:
                     through=admitted.history.taken,
                 )
                 told = turn_messages(admitted.facts.name, admitted.present, turn)
+                if admitted.went_on:
+                    told = (*told, user_message(told_went_on()))
                 if admitted.held is not None:
                     told = (*told, user_message(self._holds.told_standing(admitted.place, admitted.held)))
                 bound = TurnBound(self._clock, setup.persona.max_duration_seconds)
@@ -447,7 +450,7 @@ class Turning:
         whose turn ended without deciding it is stopped with its id, the loop's session taking the call, and the unsent
         sentences at the place drop. Whether the hold made the place due."""
         at = self._at(place)
-        held = self._mind.hold_read(at, window)
+        held = self._mind.hold_read(at, window, self._clock.now())
         if self._holds.heard_at(place, window) or held is None or self._aloud_at == place:
             return False
         if held.telling is Telling.UNDECIDED:

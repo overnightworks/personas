@@ -495,10 +495,11 @@ class AgentLoop:
         aloud = self._mind.speaks(at, occasion)
         apps = self._mind.held_apps(self._app.mcp_url)
         held = self._mind.hold_to_tell(at)
+        went_on = self._mind.went_on_to_tell(at)
         if aloud:
             self._sender_at(turns, session, at.place)
         admitted = Admitted(
-            facts, at.place, occasion, self._mind.present, self._boundaries.clock.wall(), aloud, apps, held
+            facts, at.place, occasion, self._mind.present, self._boundaries.clock.wall(), aloud, apps, held, went_on
         )
         self._start_turn(turns, session, setup, at.place, admitted, due, claimed)
 

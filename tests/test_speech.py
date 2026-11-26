@@ -3,7 +3,16 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-from agents.member import Interrupted, PartialSpeech, PlaceWindow, SpeakRefusal, Spoken, TalkedOver, Written
+from agents.member import (
+    Interrupted,
+    PartialSpeech,
+    PlaceWindow,
+    SpeakRefusal,
+    Spoken,
+    TalkedOver,
+    WentOn,
+    Written,
+)
 
 from personas.speech import (
     Answered,
@@ -34,9 +43,12 @@ from personas.speech import (
     speech_unsaid,
     unsent_dropped,
     untold_words,
+    went_on_marked_told,
+    went_on_untold,
 )
 
-ONE, TWO, THREE = Sentence("One.", 100.0), Sentence("Two.", 100.0), Sentence("Three.", 100.0)
+ALLOWED, NOW = 30.0, 1000.0
+ONE, TWO, THREE = Sentence("One.", 100.0, ALLOWED), Sentence("Two.", 100.0, ALLOWED), Sentence("Three.", 100.0, ALLOWED)
 
 
 @pytest.mark.parametrize(
@@ -61,9 +73,9 @@ def test_a_request_is_answered_as_spoken_written_held_refused_or_not_at_all(ende
     ids=["a turn told a hold adds", "a turn told none replaces the rest"],
 )
 def test_the_sentences_a_turn_releases_are_added_to_the_unsent_ones_or_replace_them(replacing, unsent):
-    record = SpeechRecord(in_flight=Request(Sentence("Sent.", 100.0)), saying="Plays.", unsent=(ONE,))
+    record = SpeechRecord(in_flight=Request(Sentence("Sent.", 100.0, ALLOWED)), saying="Plays.", unsent=(ONE,))
 
-    released, dropped = sentences_released(record, ("Two.", "Three."), 100.0, replacing=replacing)
+    released, dropped = sentences_released(record, ("Two.", "Three."), 100.0, ALLOWED, replacing=replacing)
 
     assert released.unsent == unsent
     assert dropped == (1 if replacing else 0)
@@ -166,7 +178,7 @@ def test_his_stop_drops_the_unsent_sentences_and_marks_the_request_in_flight_cut
 def test_his_continue_gives_the_unsent_sentences_the_bound_of_the_turn_that_decided():
     continued = speech_continued(SpeechRecord(unsent=(ONE, TWO)), 500.0)
 
-    assert continued.unsent == (Sentence("One.", 500.0), Sentence("Two.", 500.0))
+    assert continued.unsent == (Sentence("One.", 500.0, ALLOWED), Sentence("Two.", 500.0, ALLOWED))
 
 
 def test_unsent_sentences_drop_and_are_counted_whatever_else_the_record_holds():
@@ -221,8 +233,19 @@ def test_a_window_states_the_hold_with_what_was_said_over_him(window, seen, stat
         (Held("h", "g", ADA_SAYS, record_gone=False), True),
         (Held("h", "g", ADA_STARTED, record_gone=True), True),
         (Held("h", "g", (), record_gone=True), True),
+        (Held("h", "g", (PartialSpeech(name="Ada", text="…"),), record_gone=False), False),
+        (Held("h", "g", ADA_SAYS, record_gone=False, wordless=True), False),
+        (Held("h", "g", (), record_gone=True, wordless=True), False),
     ],
-    ids=["a person started and said no words", "words", "record gone", "record gone, no one said anything"],
+    ids=[
+        "a person started and said no words",
+        "words",
+        "record gone",
+        "record gone, no one said anything",
+        "an ellipsis is no word",
+        "the app ends a wordless hold by itself",
+        "the app ends a wordless hold by itself though its record is gone",
+    ],
 )
 def test_a_hold_may_be_told_once_someone_has_said_words_or_the_record_is_gone(held, tellable):
     assert hold_tellable(held) is tellable
@@ -260,15 +283,15 @@ def _record_with(held: Held | None, *, decided: HoldKey | None = None) -> Speech
 def test_the_hold_a_window_states_stands_in_the_record_unless_it_is_the_one_decided_last():
     stating = _window(interrupted="h1", speech=ADA_SAYS)
 
-    assert hold_read(SpeechRecord(), stating).hold == _held()
-    assert hold_read(_record_with(None, decided=HoldKey("g", "h1")), stating).hold is None
-    assert hold_read(_record_with(_held()), _window(interrupted=None, speech=None)).hold is None
+    assert hold_read(SpeechRecord(), stating, NOW).hold == _held()
+    assert hold_read(_record_with(None, decided=HoldKey("g", "h1")), stating, NOW).hold is None
+    assert hold_read(_record_with(_held()), _window(interrupted=None, speech=None), NOW).hold is None
 
 
 def test_a_read_of_the_same_hold_keeps_what_a_turn_was_told_of_it():
     told = hold_marked_told(_record_with(_held()))
 
-    assert hold_read(told, _window(interrupted="h1", speech=ADA_SAYS)).hold == _held(Telling.TELLING)
+    assert hold_read(told, _window(interrupted="h1", speech=ADA_SAYS), NOW).hold == _held(Telling.TELLING)
 
 
 def test_only_a_hold_that_may_be_told_and_that_no_turn_was_told_is_to_be_told():
@@ -282,7 +305,7 @@ def test_a_hold_id_decided_in_an_earlier_window_generation_is_a_new_hold():
     decided = _record_with(None, decided=HoldKey("g", "h1"))
     later = PlaceWindow(generation="g2", starts_at=1, entries=(), interrupted=Interrupted(id="h1"))
 
-    assert hold_read(decided, later).hold == Held("h1", "g2", (), record_gone=True)
+    assert hold_read(decided, later, NOW).hold == Held("h1", "g2", (), record_gone=True)
 
 
 def test_a_place_that_left_forgets_the_hold_it_decided():
@@ -311,14 +334,35 @@ def test_the_end_of_the_sender_drops_the_unsent_sentences_and_keeps_the_sentence
 def test_his_short_line_gives_the_unsent_ones_the_deciding_bound_and_the_stopped_request_goes_back_first():
     said = speech_line_said(SpeechRecord(in_flight=Request(ONE), unsent=(TWO,)), 500.0)
 
-    assert said.unsent == (Sentence("Two.", 500.0),)
+    assert said.unsent == (Sentence("Two.", 500.0, ALLOWED),)
     assert said.in_flight.cut_by_stop(SpeakRefusal.STOPPED)
 
     stopped = speech_answered(said, Answered.STOPPED)
 
-    assert stopped.unsent == (Sentence("One.", 500.0), Sentence("Two.", 500.0))
+    assert stopped.unsent == (Sentence("One.", 500.0, ALLOWED), Sentence("Two.", 500.0, ALLOWED))
     assert stopped.in_flight is None
 
 
 def test_his_short_line_with_no_request_in_flight_only_gives_the_unsent_sentences_the_deciding_bound():
-    assert speech_line_said(SpeechRecord(unsent=(ONE,)), 500.0) == SpeechRecord(unsent=(Sentence("One.", 500.0),))
+    assert speech_line_said(SpeechRecord(unsent=(ONE,)), 500.0) == SpeechRecord(
+        unsent=(Sentence("One.", 500.0, ALLOWED),)
+    )
+
+
+def test_a_partial_of_an_ellipsis_is_no_word_that_he_was_not_told():
+    assert untold_words((PartialSpeech(name="Ada", text="…"), *ADA_SAYS), ()) == ADA_SAYS
+
+
+def test_a_hold_that_went_on_by_itself_gives_what_waited_its_bound_again_and_is_told_once():
+    window = _window(interrupted=None, speech=None).model_copy(update={"went_on": WentOn(id="h1")})
+    waiting = SpeechRecord(in_flight=Request(Sentence("Sent.", 5.0, ALLOWED)), unsent=(Sentence("One.", 5.0, 10.0),))
+
+    read = hold_read(waiting, window, NOW)
+
+    assert read.unsent == (Sentence("One.", NOW + 10.0, 10.0),)
+    assert read.in_flight == Request(Sentence("Sent.", NOW + ALLOWED, ALLOWED))
+    assert went_on_untold(read)
+    told = went_on_marked_told(read)
+    assert not went_on_untold(told)
+    assert hold_read(told, window, NOW + 1).unsent == read.unsent
+    assert not went_on_untold(hold_read(told, window, NOW + 1))

@@ -585,9 +585,12 @@ async def test_a_relayed_call_that_fails_beside_a_decision_that_fails_ends_the_r
     assert sorted(type(leaf).__name__ for leaf in leaves_of(ended)) == [BrokenResourceError.__name__, KeyError.__name__]
 
 
-async def test_a_call_made_while_a_hold_stands_ends_the_turn_limit_exceeded_at_its_deadline_and_is_never_sent(runner):
-    """TURNS-28."""
-    await calling_while_held(runner, completion(), words=False)
+@pytest.mark.parametrize("wordless", [False, True], ids=["a hold", "a wordless hold"])
+async def test_a_call_made_while_a_hold_stands_ends_the_turn_limit_exceeded_at_its_deadline_and_is_never_sent(
+    runner, wordless
+):
+    """TURNS-28, TURNS-31."""
+    await calling_while_held(runner, completion(), words=False, wordless=wordless)
     runner.clock.time += PERSONA_MAX_DURATION_SECONDS
     runner.sleeps.release.set()
     await runner.reports.until(Event.PAUSED)
