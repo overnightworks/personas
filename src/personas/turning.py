@@ -603,9 +603,8 @@ class Turning:
     ) -> ToolOutcome:
         """Reads a skill this turn listed and enters it into his history, so the next turn tells it as a round. It is
         never held back by what arrived, only by a hold he has not decided; its result tells that he went on as a call's
-        does (TURNS-30). A skill an app refuses, a name no line
-        holds and a body past a result's bound answer an error and enter nothing; a read that fails is a failed call to
-        its app."""
+        does. A skill an app refuses, a name no line holds and a body past a result's bound answer an error and enter
+        nothing; a read that fails is a failed call to its app."""
         if hold.deciding_first:
             return ToolOutcome(DECIDING_FIRST_TEXT, is_error=True)
         if not calls.take():
