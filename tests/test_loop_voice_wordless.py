@@ -104,6 +104,28 @@ async def test_at_its_going_on_a_sentence_past_its_bound_that_waited_plays(runne
     assert sentences_spoken(runner) == [FIRST, SECOND, THIRD]
 
 
+async def test_at_its_going_on_a_speak_the_app_holds_past_its_bound_is_not_given_up_and_plays(runner):
+    """TURNS-28, TURNS-29."""
+    sleeps = holding_sentence_ends(runner)
+    await a_voice_call(runner, completion(THREE_SENTENCES), completion())
+    say_in_the_call(runner, ADDRESSED, spoken=True)
+    await runner.app.until_called(2)
+    runner.app.hold_wordless(PLACE_ID, HOLD_ID, ("Ada", "…"))
+    await settled(runner.app)
+    went_on_after = PERSONA_MAX_DURATION_SECONDS // 2
+    runner.clock.time += went_on_after
+
+    runner.app.go_on(PLACE_ID)
+    await settled(runner.app)
+    # The held wait ends at the bound it was given, which the going on has put off.
+    runner.clock.time -= went_on_after
+    sleeps.let_through()
+    await play_out(runner, 3)
+
+    assert sentences_spoken(runner) == [FIRST, SECOND, THIRD]
+    assert runner.reports.changes_of(Event.SPEECH_DROPPED) == []
+
+
 async def test_a_word_said_over_a_wordless_hold_makes_it_decided_as_any_hold(runner):
     """TURNS-29, TURNS-30."""
     await calling_while_held(
