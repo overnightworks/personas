@@ -508,20 +508,29 @@ class Turning:
             if offered:
                 tools.extend(self._hand_tools(app, session, offered, calls, hold, record))
                 bounds.append(calls.bound)
+        tools.extend(self._decision_tools(admitted, record, bound, deciding, answering))
+        bounds.append(DECISION_CALLS)
+        return HeldTools(tuple(tools), turn_call_bound(bounds), inbox, deciding)
+
+    def _decision_tools(
+        self,
+        admitted: Admitted,
+        record: TaskRecord,
+        bound: TurnBound,
+        deciding: TurnHold | None,
+        answering: Answering | None,
+    ) -> list[HandTool]:
+        """The decision tools: decided at the hold when one stands, else answered apart."""
         if deciding is not None:
-            tools.extend(
+            return [
                 HandTool(
                     each,
                     partial(self._holds.decide_told, admitted.place, record, deciding, answering, bound, each.name),
                 )
                 for each in DECISION_DECLARATIONS
-            )
-            bounds.append(DECISION_CALLS)
-        else:
-            apart = partial(self._answered_apart, _APART_TEXT if admitted.aloud else _WRITTEN_TURN_TEXT)
-            tools.extend(HandTool(each, apart) for each in DECISION_DECLARATIONS)
-            bounds.append(DECISION_CALLS)
-        return HeldTools(tuple(tools), turn_call_bound(bounds), inbox, deciding)
+            ]
+        apart = partial(self._answered_apart, _APART_TEXT if admitted.aloud else _WRITTEN_TURN_TEXT)
+        return [HandTool(each, apart) for each in DECISION_DECLARATIONS]
 
     def _inbox_of(self, admitted: Admitted) -> HoldInbox:
         """What the spoken turn hears of a hold: the one that stands in the record, told at the turn's start or not."""
