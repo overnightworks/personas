@@ -9,7 +9,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Final
 
 from agents.backend import TurnPerson, TurnStopped
-from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL
+from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL, hold_place
 from agents.member_outcomes import CallFailure
 from agents.tools import HandTool, ToolDeclaration, ToolEffect, ToolOutcome
 from agents.turn import Turn
@@ -439,10 +439,11 @@ class HoldDeciding:
         return ended
 
     def told_standing(self, place: PlaceRef, held: Held, waiting: tuple[str, JsonObject] | None = None) -> str:
-        """The telling of the hold: what was said over him, the sentence he was in, which is unknown when another pod
-        sent it, his unsaid sentences and the call of his that waits."""
+        """The telling of the hold: what was said over him, the place the app states for it or, when it states none, his
+        playing sentence as unknown, his unsaid sentences and the call of his that waits."""
         at = self._at(place)
-        return told_hold(held.id, held.speech, self._mind.speech_saying(at), self._mind.speech_unsaid(at), waiting)
+        stopped_at = held.place or hold_place(self._mind.speech_saying(at), None)
+        return told_hold(held.id, held.speech, stopped_at, self._mind.speech_unsaid(at), waiting)
 
     async def decide_told(
         self,

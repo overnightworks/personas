@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final, NamedTuple, cast
 
-from agents.member import ContinueSpeakingRefusal, SpeakRefusal, Spoken, StopSpeakingRefusal, Written
+from agents.member import ContinueSpeakingRefusal, HoldPlace, SpeakRefusal, Spoken, StopSpeakingRefusal, Written
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -221,14 +221,16 @@ class HoldKey(NamedTuple):
 
 @dataclass(frozen=True)
 class Held:
-    """A hold as the window states it: its id and window generation and what people said over him, which stays what
-    the last read that had a record said once the record is gone, and whether a turn was told it."""
+    """A hold as the window states it: its id and window generation, the place the app says it stopped him at, if it
+    does, and what people said over him, which stays what the last read that had a record said once the record is
+    gone, and whether a turn was told it."""
 
     id: str
     generation: str
     speech: tuple[PartialSpeech, ...]
     record_gone: bool
     telling: Telling = Telling.NOT_TOLD
+    place: HoldPlace | None = None
 
     @property
     def key(self) -> HoldKey:
@@ -271,6 +273,7 @@ def hold_stated(window: PlaceWindow, seen: Held | None) -> Held | None:
         kept if talked_over is None else talked_over.speech,
         record_gone=talked_over is None,
         telling=seen.telling if seen is not None and same else Telling.NOT_TOLD,
+        place=hold.place,
     )
 
 

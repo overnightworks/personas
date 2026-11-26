@@ -9,7 +9,7 @@ from http import HTTPStatus
 
 import pytest
 from agents.backend.fake_gateway import completion, tool_round
-from agents.member import CONTINUE_SPEAKING_TOOL, SPEAK_TOOL, STOP_SPEAKING_TOOL, VoiceState
+from agents.member import CONTINUE_SPEAKING_TOOL, SPEAK_TOOL, STOP_SPEAKING_TOOL, VoiceState, hold_place
 from agents.member_outcomes import Unreachable, status_code
 from agents.tools import ToolOutcome
 from agents.turn import FailureCode
@@ -71,9 +71,56 @@ async def test_a_hold_is_told_once_with_what_was_said_over_him_and_what_he_had_n
     assert runner.gateway.hold_told(number) == {
         "id": HOLD_ID,
         "talked_over": [{"name": SAID[0], "text": SAID[1]}],
-        "in_sentence": FIRST,
+        "heard": "unknown",
+        "sentence": FIRST,
         "unsaid": [SECOND],
     }
+
+
+HEARD_PLACES = pytest.mark.parametrize(
+    ("place", "told"),
+    [
+        pytest.param(
+            hold_place(FIRST, 5), {"heard": "part", "said": "First", "rest": " sentence."}, id="heard in part"
+        ),
+        pytest.param(hold_place(FIRST, 0), {"heard": "none", "rest": FIRST}, id="nothing heard"),
+        pytest.param(hold_place(FIRST, None), {"heard": "unknown", "sentence": FIRST}, id="unknown"),
+        pytest.param(hold_place(None, None), {}, id="between sentences"),
+    ],
+)
+
+
+@HEARD_PLACES
+async def test_a_hold_with_a_place_tells_where_every_listener_heard_his_sentence_to(runner, place, told):
+    """TURNS-29, TURNS-30."""
+    runner.app.hold_places[PLACE_ID] = place
+    await held_in_the_first_sentence(runner, completion(TWO_SENTENCES), deciding(CONTINUE_SPEAKING_TOOL), completion())
+
+    await decided(runner)
+
+    (number,) = runner.gateway.rounds()
+    assert runner.gateway.hold_told(number) == {
+        "id": HOLD_ID,
+        "talked_over": [{"name": SAID[0], "text": SAID[1]}],
+        **told,
+        "unsaid": [SECOND],
+    }
+
+
+async def test_a_record_of_talking_over_before_the_hold_changes_nothing_he_does(runner):
+    """TURNS-29."""
+    holding_sentence_ends(runner)
+    await a_voice_call(runner, completion(TWO_SENTENCES), completion())
+    say_in_the_call(runner, ADDRESSED, spoken=True)
+    await runner.app.until_called(2)
+    runner.app.talk_over_unheld(PLACE_ID, SAID)
+    await window_read_after_the_hold(runner)
+
+    assert runner.app.hold_calls == []
+    runner.app.end_sentence()
+    await runner.app.spoken_count(2)
+    assert sentences_spoken(runner) == [FIRST, SECOND]
+    assert runner.gateway.rounds() == []
 
 
 async def test_the_round_is_asked_over_his_history_and_the_turns_tools_with_one_call_per_reply(runner):
