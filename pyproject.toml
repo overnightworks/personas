@@ -156,6 +156,9 @@ min_confidence = 80
 
 [tool.importlinter]
 root_packages = ["personas"]
+# The core contract forbids uvicorn, the server library tests/support reaches
+# through the loopback fake; import-linter takes external packages only here.
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "the pure decisions import one way"
@@ -169,13 +172,10 @@ layers = [
     "personas.entries",
 ]
 
-# include_external_packages lets the contract forbid uvicorn, the server library
-# that tests/support reaches through the loopback fake.
 [[tool.importlinter.contracts]]
 id = "core-imports-no-adapter"
 name = "the core imports no adapter"
 type = "forbidden"
-include_external_packages = true
 source_modules = [
     "personas.decision",
     "personas.speech",
