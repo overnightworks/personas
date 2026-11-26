@@ -175,7 +175,7 @@ against scripted boundaries and in-process fakes of the realm, the gateway and a
 Tests marked `postgres` drive the stores and several pods against a throwaway Postgres. Branch coverage is
 100 % over all of them (`fail_under` in `pyproject.toml`). CI adds the image build with its start and stop,
 the figures' regeneration check, the offline link check, and quality's shared gate (`quality / verdict`),
-which holds the import direction to the layers contract under `[tool.importlinter]` in `pyproject.toml`.
+which holds the import direction to the layers contract under `[tool.importlinter]` in `pyproject.toml`, and, through its adapter-import rule, holds core unit tests and the support modules they import free of adapter imports with the forbidden contract `core-imports-no-adapter` beside it.
 
 **Errors.** A failure that could corrupt the history, the store or ownership ends the runner loud. A refusal
 by the realm or an app suspends that loop, a network failure backs it off, and a store outage is logged
