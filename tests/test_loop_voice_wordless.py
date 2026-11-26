@@ -18,10 +18,12 @@ from tests.support.voice import (
     HOLD_ID,
     SAID,
     SECOND,
+    SECOND_HOLD,
     THIRD,
     THREE_SENTENCES,
     a_voice_call,
     calling_while_held,
+    decided,
     deciding,
     holding_sentence_ends,
     play_out,
@@ -124,6 +126,27 @@ async def test_at_its_going_on_a_speak_the_app_holds_past_its_bound_is_not_given
 
     assert sentences_spoken(runner) == [FIRST, SECOND, THIRD]
     assert runner.reports.changes_of(Event.SPEECH_DROPPED) == []
+
+
+async def test_a_hold_with_words_after_his_going_on_in_the_same_spoken_turn_starts_a_round_told_he_went_on(runner):
+    """TURNS-29, TURNS-47."""
+    await calling_while_held(
+        runner,
+        completion("[silent]"),
+        deciding(CONTINUE_SPEAKING_TOOL, SECOND_HOLD),
+        completion("[silent]"),
+        wordless=True,
+        words=False,
+    )
+    turn_goes_on = runner.gateway.hold_request(3)
+
+    runner.app.go_on(PLACE_ID)
+    await runner.gateway.until_requested(3)
+    runner.app.hold(PLACE_ID, SECOND_HOLD, SAID)
+    await decided(runner)
+    turn_goes_on.set()
+
+    assert told_of_going_on(runner)
 
 
 async def test_a_word_said_over_a_wordless_hold_makes_it_decided_as_any_hold(runner):
