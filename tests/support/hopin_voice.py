@@ -97,16 +97,20 @@ class AppVoice(AppPlaces):
     hold_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
     """The answer to each next ``continue_speaking`` or ``stop_speaking`` as it arrives, in order."""
 
+    @staticmethod
+    def _partial_speeches(said: tuple[tuple[str, str], ...]) -> tuple[PartialSpeech, ...]:
+        return tuple(PartialSpeech(name=name, text=text) for name, text in said)
+
     def hold(self, place_id: str, hold_id: str, *said: tuple[str, str]) -> None:
         """The member is held at the place: the window states the hold and, over it, what each person has said so far
         (a name and its words), and signals the change."""
-        self.holds[place_id] = (hold_id, tuple(PartialSpeech(name=name, text=text) for name, text in said))
+        self.holds[place_id] = (hold_id, self._partial_speeches(said))
         self._signal_window(place_id)
 
     def talk_over(self, place_id: str, *said: tuple[str, str]) -> None:
         """What is said over the held member changes, under the same hold."""
         if place_id in self.talked_over:
-            self.talked_over[place_id] = tuple(PartialSpeech(name=name, text=text) for name, text in said)
+            self.talked_over[place_id] = self._partial_speeches(said)
             self._signal_window(place_id)
             return
         hold_id, _ = self.holds[place_id]
@@ -114,7 +118,7 @@ class AppVoice(AppPlaces):
 
     def talk_over_unheld(self, place_id: str, *said: tuple[str, str]) -> None:
         """People talk over the member and the window states what they say, with no hold yet."""
-        self.talked_over[place_id] = tuple(PartialSpeech(name=name, text=text) for name, text in said)
+        self.talked_over[place_id] = self._partial_speeches(said)
         self._signal_window(place_id)
 
     def end_record(self, place_id: str) -> None:
