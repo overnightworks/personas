@@ -13,15 +13,13 @@ from urllib.parse import urlsplit
 
 from agents.member_outcomes import StatusFailure, UnusableAnswer
 from anyio import BrokenResourceError, ClosedResourceError
-from anyio.lowlevel import checkpoint
-from logline import Outcome, StepTimer, current_traceparent
+from logline import Outcome, StepTimer
 
 from personas.decision import error_reason, failure_reason
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    import httpx2
     from agents.member_outcomes import ArgumentLeftOut, CallFailure
     from agents.turn import TurnUsage
 
@@ -265,16 +263,6 @@ def _reason_of(ending: TurnEnding) -> str:
 def start_turn_tally(client_id: str, app: str) -> TurnTally:
     """The tally of a turn that starts now; its line carries the agent and the app's host."""
     return TurnTally(StepTimer("turn.ended", _LOG, agent_id=client_id, app_id=urlsplit(app).hostname or ""))
-
-
-async def carry_trace(request: httpx2.Request) -> None:
-    """The request hook of every client that calls an app or the realm: the request carries the current trace's
-    ``traceparent``, and none when there is no current trace. The client awaits its hooks, so this is a coroutine that
-    yields to the event loop once."""
-    await checkpoint()
-    traceparent = current_traceparent()
-    if traceparent is not None:
-        request.headers["traceparent"] = traceparent
 
 
 class DueOccasion(StrEnum):

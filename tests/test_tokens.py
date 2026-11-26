@@ -14,7 +14,6 @@ from logline import current_traceparent, unit_trace
 
 from personas.decision import NO_ANSWER_REASON
 from personas.failures import TokenStatusFailure
-from personas.reporting import carry_trace
 from personas.secret import Secret
 from personas.tokens import HttpTokenSource, facts_of
 from tests.support.fakes import credentials
@@ -126,14 +125,14 @@ async def test_each_fetch_writes_one_token_request_line_with_its_outcome_and_a_c
     assert all(isinstance(line["duration_ms"], float) for line in (refused, granted))
 
 
-async def test_the_request_to_the_realm_carries_the_current_trace_and_none_outside_one():
+async def test_the_request_to_the_realm_carries_the_current_trace_and_none_outside_one(restored_logging):
     seen: list[str | None] = []
 
     def record(request: httpx2.Request) -> httpx2.Response:
         seen.append(request.headers.get("traceparent"))
         return httpx2.Response(200, json={"access_token": "t", "expires_in": 5})
 
-    client = httpx2.AsyncClient(transport=httpx2.MockTransport(record), event_hooks={"request": [carry_trace]})
+    client = httpx2.AsyncClient(transport=httpx2.MockTransport(record))
     source = HttpTokenSource(ENDPOINT, client)
     agent = credentials()
 
