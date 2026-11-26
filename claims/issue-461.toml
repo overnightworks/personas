@@ -1,8 +1,0 @@
-claim_id = "25d282b879bd487eb55faf903e57bbf8"
-agent = "Claude 21fa6737-d531-4443-a43b-24ac7ae34820"
-role = "builder"
-base = "7bab063927b0634938e3d7f3d047b9c00a159b58"
-branch = "claude/issue-461-take-logline-v1-12-0-asyncio-and-unraisa"
-scope = ["pyproject.toml", "src/personas/loop.py", "src/personas/reporting.py", "src/personas/tokens.py", "src/personas/tool_lists.py", "src/personas/turn_sessions.py", "src/personas/turning.py", "tests/support/loopback.py", "tests/test_main.py", "uv.lock"]
-opened_commit = "77f2ca6eab1cbb4df3426c7b1d15be6b3d439631"
-whole_reason = "The pin and the lines its check asks for change together: the check passes over personas' code only once every log call and step timer names its event at the call, and without the pin the check has nothing new to hold."
