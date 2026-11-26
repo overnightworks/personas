@@ -6,8 +6,15 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final, NamedTuple, cast
 
-from agents.member import ContinueSpeakingRefusal, HoldPlace, SpeakRefusal, Spoken, StopSpeakingRefusal, Written
-from agents.member_speaking import has_words
+from agents.member import (
+    ContinueSpeakingRefusal,
+    HoldPlace,
+    SpeakRefusal,
+    Spoken,
+    StopSpeakingRefusal,
+    Written,
+    has_words,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable

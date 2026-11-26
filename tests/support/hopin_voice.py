@@ -28,8 +28,8 @@ from agents.member import (
     StopSpeakingRefused,
     VoiceState,
     Written,
+    has_words,
 )
-from agents.member_speaking import has_words
 from agents.tools import ToolDeclaration, ToolEffect, ToolOutcome
 
 from tests.support.hopin_places import ACCEPTED_NAME, AppPlaces
