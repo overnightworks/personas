@@ -161,9 +161,13 @@ def log_state_change(change: StateChange) -> None:
 
 def _fields_of(change: StateChange) -> dict[str, str | int | float]:
     fields: dict[str, str | int | float] = {}
-    if change.client_id is not None:
+    if change.client_id is not None and change.app is not None:
+        named = agent_app_fields(change.client_id, change.app)
+        fields["agent_id"] = named["agent_id"]
+        fields["app_id"] = named["app_id"]
+    elif change.client_id is not None:
         fields["agent_id"] = change.client_id
-    if change.app is not None:
+    elif change.app is not None:
         fields["app_id"] = app_host(change.app)
     fields |= _failure_fields(change)
     if change.lines is not None:
