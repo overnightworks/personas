@@ -10,7 +10,7 @@ from logline import StepTimer
 
 from personas.decision import decisive_failure
 from personas.failures import leaves_of, raise_if_cancelled, within_call_time
-from personas.reporting import LOG, app_host, stepping
+from personas.reporting import LOG, agent_app_fields, stepping
 from personas.task_record import ending_loud_when_cancelled, unreachable_unless_cancelling
 
 if TYPE_CHECKING:
@@ -72,7 +72,7 @@ class TurnSessions:
         if not measured:
             return await opened.enter_async_context(self._open_session(app, bearer, self._agent.client_id))
         with stepping(
-            StepTimer("session_open.ended", LOG, agent_id=self._agent.client_id, app_id=app_host(app.mcp_url)),
+            StepTimer("session_open.ended", LOG, **agent_app_fields(self._agent.client_id, app.mcp_url)),
             turn_goes_on=True,
         ):
             return await opened.enter_async_context(self._open_session(app, bearer, self._agent.client_id))

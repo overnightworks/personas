@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 from agents.member_outcomes import StatusFailure, UnusableAnswer
 from anyio import BrokenResourceError, ClosedResourceError
 from logline import Outcome, StepTimer
+from typing_extensions import TypedDict
 
 from personas.decision import error_reason, failure_reason
 
@@ -160,10 +161,12 @@ def log_state_change(change: StateChange) -> None:
 
 def _fields_of(change: StateChange) -> dict[str, str | int | float]:
     fields: dict[str, str | int | float] = {}
-    if change.client_id is not None:
+    if change.client_id is not None and change.app is not None:
+        named = agent_app_fields(change.client_id, change.app)
+        fields["agent_id"] = named["agent_id"]
+        fields["app_id"] = named["app_id"]
+    elif change.client_id is not None:
         fields["agent_id"] = change.client_id
-    if change.app is not None:
-        fields["app_id"] = app_host(change.app)
     fields |= _failure_fields(change)
     if change.lines is not None:
         fields["line_count"] = change.lines
@@ -261,7 +264,7 @@ def _reason_of(ending: TurnEnding) -> str:
 
 def start_turn_tally(client_id: str, app: str) -> TurnTally:
     """The tally of a turn that starts now; its line carries the agent and the app's host."""
-    return TurnTally(StepTimer("turn.ended", LOG, agent_id=client_id, app_id=app_host(app)))
+    return TurnTally(StepTimer("turn.ended", LOG, **agent_app_fields(client_id, app)))
 
 
 class DueOccasion(StrEnum):
@@ -277,8 +280,7 @@ def report_fell_due(agent_id: str, app: str, occasion: DueOccasion, *, spoken: b
     LOG.info(
         "turn.fell_due",
         extra={
-            "agent_id": agent_id,
-            "app_id": app_host(app),
+            **agent_app_fields(agent_id, app),
             "occasion": occasion.value,
             "spoken": spoken,
             "read_ms": read_ms,
@@ -293,8 +295,7 @@ def report_argument_left_out(agent_id: str, app: str, left_out: ArgumentLeftOut)
     LOG.info(
         "argument.left_out",
         extra={
-            "agent_id": agent_id,
-            "app_id": app_host(app),
+            **agent_app_fields(agent_id, app),
             "tool": left_out.tool,
             "argument": left_out.argument,
         },
@@ -304,6 +305,16 @@ def report_argument_left_out(agent_id: str, app: str, left_out: ArgumentLeftOut)
 def app_host(app_url: str) -> str:
     """The host of an app's address: the only part of it a line names, never a path or a query."""
     return urlsplit(app_url).hostname or ""
+
+
+class AgentAppFields(TypedDict, closed=True):
+    agent_id: str
+    app_id: str
+
+
+def agent_app_fields(agent_id: str, app_url: str) -> AgentAppFields:
+    """The fields that name an agent and its app's host, the same on every line that names both."""
+    return AgentAppFields(agent_id=agent_id, app_id=app_host(app_url))
 
 
 def began_ago(seconds: float) -> float | None:
