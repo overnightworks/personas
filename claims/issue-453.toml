@@ -3,6 +3,6 @@ agent = "Claude 21fa6737-d531-4443-a43b-24ac7ae34820"
 role = "builder"
 base = "bc0c05587215eabb9dc044c75ebbc9b8b2b2856a"
 branch = "claude/issue-453-logline-v1-11-0"
-scope = ["pyproject.toml", "src/personas/main.py", "src/personas/reporting.py", "tests/conftest.py", "tests/test_tokens.py", "uv.lock"]
+scope = ["pyproject.toml", "src/personas/main.py", "src/personas/reporting.py", "tests/conftest.py", "tests/test_main.py", "tests/test_tokens.py", "uv.lock"]
 opened_commit = "b334339f7080be00ec7628a054e686de3240a61d"
 whole_reason = "One hook, its one install and two test builders, and the pin raise with its lock."
