@@ -24,6 +24,9 @@ release changes the runner, its characters, their figures and their rooms togeth
    holds, keep the served apps from the deployment's runner configuration (`apps/personas/personas.toml`
    in platform) that use the changed or removed tool, record or field, or every served app for an added
    tool, then read each kept app's `main` for its agents pin.
+   A name holds only when agents' `docs/connector.md`, "Rollout order", at the agents version `pyproject.toml`
+   pins on `main`, has apps take that change first; a name it has runners take first holds nothing, and a name
+   it does not place holds as above. Agents owns the order: read it there.
 
 ## Fix
 
@@ -53,5 +56,6 @@ chooses which release runs.
 
 A gate refusal is fixed on `main` first and dispatched again. A served app that pins an older agents
 version than a bump that holds a release under Check 2 (a change or removal of a tool, record or field
-the app uses, or an added tool `docs/calling.md` requires it to serve) needs: the release waits, and
+the app uses that the rollout order has apps take first, or an added tool `docs/calling.md` requires it to
+serve) needs: the release waits, and
 the operator hears which app holds it.
