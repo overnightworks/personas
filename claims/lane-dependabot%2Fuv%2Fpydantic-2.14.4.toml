@@ -1,7 +1,0 @@
-claim_id = "f257a9be0e1c4facbcc4b8a06c5c3562"
-agent = "Claude 09c5accf-533b-455a-a4f6-8e1e617175c5"
-role = "builder"
-base = "3460cc971ec0357784e61e66ebee4787e6139430"
-branch = "dependabot/uv/pydantic-2.14.4"
-scope = ["uv.lock"]
-opened_commit = "c9dd679965cc90b0cd951ea1ffd13a5317e03c24"
