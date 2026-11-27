@@ -1,5 +1,5 @@
 claim_id = "6ea31e6b9dd546a5af7dcc549e6332d8"
-agent = "Claude 21fa6737-d531-4443-a43b-24ac7ae34820"
+agent = "Claude 09c5accf-533b-455a-a4f6-8e1e617175c5"
 role = "builder"
 base = "0e2c7c4c86738d2f78513fb56daec08637a9994c"
 branch = "claude/issue-290-core-tests-no-adapter"
