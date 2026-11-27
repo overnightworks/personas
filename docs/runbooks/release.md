@@ -59,5 +59,5 @@ chooses which release runs.
 
 A gate refusal is fixed on `main` first and dispatched again. A served app that pins an older agents
 version than a bump that holds a release under Check 2 (a changed name the app uses that the rollout order
-has apps take first or does not place, a removed or renamed tool, record or field, or an added tool
-`docs/calling.md` requires it to serve) needs: the release waits, and the operator hears which app holds it.
+has apps take first or does not place, a removed, renamed or newly required argument, a removed or renamed
+tool, record or field, or an added tool `docs/calling.md` requires it to serve) needs: the release waits, and the operator hears which app holds it.
