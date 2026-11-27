@@ -14,8 +14,9 @@ release changes the runner, its characters, their figures and their rooms togeth
    nothing, an optional argument of a tool included, since the runner leaves out an optional argument the app's
    declared schema does not name and logs `argument.left_out`: the added-tool clause is the only addition that
    holds. A removed, renamed or newly required argument still holds. Read each agents release's `Member-tool wire:` line,
-   from the version in `pyproject.toml` at the newest `v<version>` tag up to the one on `main`. Its names
-   are changes, removals or additions: a name is an addition when `docs/calling.md` at the previous
+   from the version in `pyproject.toml` at the newest `v<version>` tag up to the one on `main`. The line's
+   labels (`changed:`, `fields added:`, `descriptions only:`) are read without regard to case. A name under
+   `changed:` is a change, removal or addition: a name is an addition when `docs/calling.md` at the previous
    release does not list it (compare the two files), and otherwise a change or removal. A line that says
    `unchanged.` holds nothing, and so does an agents release-note line `fields added: <records>`, since the
    runner reads a standing, window and view with the keys it does not know ignored. A name the line lists
