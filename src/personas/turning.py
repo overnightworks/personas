@@ -602,9 +602,9 @@ class Turning:
         arguments: JsonObject,
     ) -> ToolOutcome:
         """Reads a skill this turn listed and enters it into his history, so the next turn tells it as a round. It is
-        never held back by what arrived, only by a hold he has not decided. A skill an app refuses, a name no line
-        holds and a body past a result's bound answer an error and enter nothing; a read that fails is a failed call to
-        its app."""
+        never held back by what arrived, only by a hold he has not decided; its result tells that he went on as a call's
+        does. A skill an app refuses, a name no line holds and a body past a result's bound answer an error and enter
+        nothing; a read that fails is a failed call to its app."""
         if hold.deciding_first:
             return ToolOutcome(DECIDING_FIRST_TEXT, is_error=True)
         if not calls.take():
@@ -615,8 +615,9 @@ class Turning:
             return ToolOutcome(_NO_SUCH_SKILL_TEXT, is_error=True)
         app = self._app_at[listed.app]
         read = await self._skill_read(app, listed.skill, app_calls[listed.app], session, hold, record)
-        if isinstance(read, ToolOutcome):
-            return read
+        return hold.telling_went_on(read if isinstance(read, ToolOutcome) else self._entered(app, read))
+
+    def _entered(self, app: AppTarget, read: Skill) -> ToolOutcome:
         text = skill_text(read.body)
         if not is_within_event_bound(text, None):
             return ToolOutcome(_SKILL_TOO_LARGE_TEXT, is_error=True)
