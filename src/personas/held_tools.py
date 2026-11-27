@@ -9,22 +9,32 @@ from typing import TYPE_CHECKING, Final
 
 from agents.tools import ToolOutcome
 
-from personas.decision import call_within_bound
+from personas.decision import call_within_bound, offered_declarations
 from personas.entries import told_went_on
 from personas.holds import DECIDING_FIRST_TEXT, deciding_first
-from personas.present import NO_SUCH_SKILL_TEXT, arrived_since, listed_skill_named, tools_to_load
+from personas.present import (
+    NO_SUCH_SKILL_TEXT,
+    AppOffer,
+    arrived_since,
+    deferred_by_app,
+    listed_skill_named,
+    listed_skills,
+    tools_to_load,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Iterable, Mapping
     from contextlib import AbstractContextManager
 
     from agents.member import PartialSpeech
     from agents.tools import HandTool, ToolDeclaration
     from agents.turn import JsonObject, Principal
 
+    from personas.config import AppTarget
     from personas.entries import History
     from personas.holds import HoldInbox, TurnHold
-    from personas.present import AppOffer, Arrived, Deferred, ListedSkill
+    from personas.present import Arrived, Deferred, ListedSkill
+    from personas.tool_lists import Listed
 
 LOADS_SPENT_TEXT: Final = "no more tools can be loaded in this turn"
 NOTHING_WAITS_TEXT: Final = "no tool of this skill waits to be loaded"
@@ -95,6 +105,26 @@ class TurnOffer:
     skills: Mapping[str, ListedSkill]
     offers: tuple[AppOffer, ...]
     deferred: Deferred
+
+    @classmethod
+    def of(
+        cls, apps: Iterable[AppTarget], lists: Iterable[Listed], left_out: Callable[[AppTarget, int], None]
+    ) -> TurnOffer:
+        """What the listings of ``apps`` give the turn: their skills, in the order given, and of each app that listed
+        its tools every tool but the runner's reserved names and those an earlier app holds, whose count is passed to
+        ``left_out``."""
+        paired = tuple(zip(apps, lists, strict=True))
+        taken = frozenset[str]()
+        offers: list[AppOffer] = []
+        for app, listed in paired:
+            if (declared := listed.tools) is None:
+                continue
+            offered, count = offered_declarations(declared, taken)
+            left_out(app, count)
+            taken |= {each.name for each in offered}
+            offers.append(AppOffer(app.mcp_url, app.listens, offered))
+        skills = listed_skills((app.mcp_url, listed.skills) for app, listed in paired)
+        return cls(skills, tuple(offers), deferred_by_app(offers))
 
 
 @dataclass

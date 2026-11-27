@@ -25,7 +25,6 @@ from personas.decision import (
     AppPlace,
     act_outcome,
     failure_code,
-    offered_declarations,
     turn_call_bound,
 )
 from personas.entries import (
@@ -51,12 +50,9 @@ from personas.present import (
     LOAD_TOOLS_DECLARATION,
     NO_SUCH_SKILL_TEXT,
     READ_SKILL_DECLARATION,
-    AppOffer,
     ListedSkill,
-    deferred_by_app,
     held_told,
     listed_skill_named,
-    listed_skills,
     loaded_by,
     skill_lines,
     skill_text,
@@ -323,7 +319,7 @@ class Turning:
                     aloud=admitted.aloud,
                     through=admitted.history.taken,
                 )
-                offered = self._offered(lists)
+                offered = TurnOffer.of((app for app, _ in self._apps), lists, self._tools_left_out)
                 told = turn_messages(admitted.facts.name, admitted.present, turn, offered.deferred)
                 if admitted.went_on:
                     told = (*told, user_message(told_went_on()))
@@ -472,22 +468,6 @@ class Turning:
         elif self._mind.hold_makes_due(at):
             return self._mind.due_for_hold(at, window.generation, self._clock.now())
         return False
-
-    def _offered(self, lists: tuple[Listed, ...]) -> TurnOffer:
-        """What the apps' listings give the turn: the skills they list, in the configuration's order, and of each app
-        that listed its tools every tool but the runner's reserved names and those an earlier app holds, which are
-        reported once as left out."""
-        skills = listed_skills((app.mcp_url, each.skills) for (app, _), each in zip(self._apps, lists, strict=True))
-        taken = frozenset[str]()
-        offers: list[AppOffer] = []
-        for (app, _), listed in zip(self._apps, lists, strict=True):
-            if (declared := listed.tools) is None:
-                continue
-            offered, left_out = offered_declarations(declared, taken)
-            self._tools_left_out(app, left_out)
-            taken |= {each.name for each in offered}
-            offers.append(AppOffer(app.mcp_url, app.listens, offered))
-        return TurnOffer(skills, tuple(offers), deferred_by_app(offers))
 
     def _hold_tools(
         self,
