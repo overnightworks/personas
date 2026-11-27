@@ -6,39 +6,44 @@
 
 What the stores keep is in [the architecture](ARCHITECTURE.md), Persistence. A test
 cites each rule by its ID at the start of its docstring, such as `CONFIG-1`. Every list item that opens with an
-ID is a rule; prose without an ID is context.
+ID and every table row is a rule; prose without an ID is context.
 
 ## Top level
 
-- CONFIG-2: `token_endpoint`; type: URL; default: required; meaning: the realm's token endpoint
-- CONFIG-3: `ready_file`; type: absolute path; default: required; meaning: the readiness marker
-- CONFIG-4: `history_bytes`; type: integer above 0; default: 49152; meaning: the history each agent keeps and tells every turn, counted in the JSON bytes of each entry as told
-- CONFIG-5: `history_keep_bytes`; type: integer above 0, at most `history_bytes`; default: 32768; meaning: what stays after a cut; see [the turns reference](turns.md), What a turn is told
-- CONFIG-6: `budget_pause_cap_seconds`; type: number, at least 1; default: 300; meaning: the longest pause between his turns while the gateway refuses for a spent budget
+| ID | Name | Type | Default | Meaning |
+|---|---|---|---|---|
+| CONFIG-2 | `token_endpoint` | URL | required | the realm's token endpoint |
+| CONFIG-3 | `ready_file` | absolute path | required | the readiness marker |
+| CONFIG-4 | `history_bytes` | integer above 0 | 49152 | the history each agent keeps and tells every turn, counted in the JSON bytes of each entry as told |
+| CONFIG-5 | `history_keep_bytes` | integer above 0, at most `history_bytes` | 32768 | what stays after a cut; see [the turns reference](turns.md), What a turn is told |
+| CONFIG-6 | `budget_pause_cap_seconds` | number, at least 1 | 300 | the longest pause between his turns while the gateway refuses for a spent budget |
 
 At the default history, a skat game (40 to 50 states of about 1.5 KB) fills it after about half a game.
 
 ## `[[apps]]`
 
-- CONFIG-7: `mcp_url`; type: URL, once per file; default: required; meaning: the app's MCP endpoint; it names the app in the history and the lines
-- CONFIG-8: `scope`; type: string; default: required; meaning: the token scope for this app
-- CONFIG-9: `max_tool_calls`; type: integer above 0; default: none; meaning: binds every tool the app offers to its agents' turns, that many calls per turn
-- CONFIG-10: `listens`; type: boolean; default: true; meaning: `false` serves tools only: no loop runs, its tools join the turns of the other apps deferred, shown to the model once `load_tools` loads them; needs `max_tool_calls`
-- CONFIG-11: `call_seconds`; type: number above 0; default: 30; meaning: bounds each request a turn of another app makes to it, and the tool list and turn state requests of a turn at its own places; keep it below the persona's `maxDurationSeconds`
+| ID | Name | Type | Default | Meaning |
+|---|---|---|---|---|
+| CONFIG-7 | `mcp_url` | URL, once per file | required | the app's MCP endpoint; it names the app in the history and the lines |
+| CONFIG-8 | `scope` | string | required | the token scope for this app |
+| CONFIG-9 | `max_tool_calls` | integer above 0 | none | binds every tool the app offers to its agents' turns, that many calls per turn |
+| CONFIG-10 | `listens` | boolean | true | `false` serves tools only: no loop runs, its tools join the turns of the other apps deferred, shown to the model once `load_tools` loads them; needs `max_tool_calls` |
+| CONFIG-11 | `call_seconds` | number above 0 | 30 | bounds each request a turn of another app makes to it, and the tool list and turn state requests of a turn at its own places; keep it below the persona's `maxDurationSeconds` |
 
 - CONFIG-12: At least one app listens. Apps are declared to a turn in the file's order, so list the apps whose places
   come and go last. An app with `max_tool_calls` requires `[gateway]` and a `persona_file` for every agent.
 
 ## `[[agents]]`
 
-- CONFIG-13: `client_id`; type: string, once per file; default: required; meaning: the agent's realm client; two whose lock keys collide are refused
-- CONFIG-14: `secret_file`; type: absolute path; default: required; meaning: the file holding its client secret
-- CONFIG-15: `persona_file`; type: absolute path; default: none; meaning: its agent file `<name>.md`; the image holds them at `/app/characters/`
-- CONFIG-16: `model`; type: `text/<model>`; default: the agent file's; meaning: the gateway model his turns run on; needs `persona_file`
-- CONFIG-17: `hold_model`; type: `text/<model>`; default: the agent's model; meaning: the model of the round or turn that decides a hold; needs `persona_file`
-- CONFIG-18: `[agents.figure]`; type: `url` (absolute `https`, no user, query or fragment), `sha256` (64 lowercase hex); default: none; meaning: carried by every accept; an app that shows figures and allows the address shows him with it
-  - `[agents.room]`; type: `url`, `sha256` as `[agents.figure]`; needs `[agents.figure]`; default: none; meaning: the agent's own room, drawn behind his figure; every accept carries it as the `room` of his figure's look, beside the `figure`, and an app that does not declare `looks` or `looks[].room` gets the accept without it
-- CONFIG-19: `[agents.voice]`; type: table, optional `names`: 1 to 8 distinct voice ids, first choice first; default: none; meaning: turns spoken turns on; every accept carries `names` as `voices`
+| ID | Name | Type | Default | Meaning |
+|---|---|---|---|---|
+| CONFIG-13 | `client_id` | string, once per file | required | the agent's realm client; two whose lock keys collide are refused |
+| CONFIG-14 | `secret_file` | absolute path | required | the file holding its client secret |
+| CONFIG-15 | `persona_file` | absolute path | none | its agent file `<name>.md`; the image holds them at `/app/characters/` |
+| CONFIG-16 | `model` | `text/<model>` | the agent file's | the gateway model his turns run on; needs `persona_file` |
+| CONFIG-17 | `hold_model` | `text/<model>` | the agent's model | the model of the round or turn that decides a hold; needs `persona_file` |
+| CONFIG-18 | `[agents.figure]`<br>`[agents.room]` | `url` (absolute `https`, no user, query or fragment), `sha256` (64 lowercase hex)<br>`url`, `sha256` as `[agents.figure]`; needs `[agents.figure]` | none | carried by every accept; an app that shows figures and allows the address shows him with it<br>the agent's own room, drawn behind his figure; every accept carries it as the `room` of his figure's look, beside the `figure`, and an app that does not declare `looks` or `looks[].room` gets the accept without it |
+| CONFIG-19 | `[agents.voice]` | table, optional `names`: 1 to 8 distinct voice ids, first choice first | none | turns spoken turns on; every accept carries `names` as `voices` |
 
 - CONFIG-20: The agent file names no tools and no call bound, offers the role `user`, and has no `voice` section. The
   token's `agent_name` claim is the name a line must carry to address the agent. A change of a figure or a
@@ -53,10 +58,11 @@ At the default history, a skat game (40 to 50 states of about 1.5 KB) fills it a
 
 ## `[database]`, required
 
-- CONFIG-22: `host`, `dbname`, `user`; type: strings; default: required; meaning: the Postgres every pod shares
-  - `port`; type: integer, 1 to 65535; default: required; meaning: the Postgres every pod shares
-- CONFIG-23: `password_file`; type: absolute path; default: required; meaning: the file holding the password
-- CONFIG-24: `write_seconds`; type: number above 0, or `inf`; default: 2; meaning: the bound on one write or read against a database that answers
+| ID | Name | Type | Default | Meaning |
+|---|---|---|---|---|
+| CONFIG-22 | `host`, `dbname`, `user`<br>`port` | strings<br>integer, 1 to 65535 | required | the Postgres every pod shares |
+| CONFIG-23 | `password_file` | absolute path | required | the file holding the password |
+| CONFIG-24 | `write_seconds` | number above 0, or `inf` | 2 | the bound on one write or read against a database that answers |
 
 - CONFIG-25: A connection that goes dark mid-write is given up only after the driver's own cancel wait, about five
   seconds more. A write runs inside the listen's deadline, so a bound from about 40 seconds on, or `inf`, lets
@@ -64,11 +70,13 @@ At the default history, a skat game (40 to 50 states of about 1.5 KB) fills it a
 
 ## `[ownership]`
 
-- CONFIG-26: `contend_seconds`; default: 5; meaning: how often a pod takes free locks and confirms its own
-- CONFIG-27: `heartbeat_timeout_seconds`; default: 3; meaning: how long one such round may take
-- CONFIG-28: `cancel_margin_seconds`; default: 2; meaning: the time a pod that lost an agent has to stop him
-- CONFIG-29: `grace_seconds`; default: 12; meaning: how long a pod that took an agent waits before it starts him
-- CONFIG-30: `stop_seconds`; default: 10; meaning: how long after a SIGTERM a pod may take to stop before it ends at once
+| ID | Name | Default | Meaning |
+|---|---|---|---|
+| CONFIG-26 | `contend_seconds` | 5 | how often a pod takes free locks and confirms its own |
+| CONFIG-27 | `heartbeat_timeout_seconds` | 3 | how long one such round may take |
+| CONFIG-28 | `cancel_margin_seconds` | 2 | the time a pod that lost an agent has to stop him |
+| CONFIG-29 | `grace_seconds` | 12 | how long a pod that took an agent waits before it starts him |
+| CONFIG-30 | `stop_seconds` | 10 | how long after a SIGTERM a pod may take to stop before it ends at once |
 
 - CONFIG-31: Each is a finite number above 0. A grace at or below the first three together is refused, and so is a
   stop at or below `cancel_margin_seconds`, the time each agent's last write has. A handover takes at most
@@ -86,10 +94,12 @@ At the default history, a skat game (40 to 50 states of about 1.5 KB) fills it a
 What then happens to lines kept before is in [the architecture](ARCHITECTURE.md),
 Persistence.
 
-- CONFIG-34: `lines_keep_days`; type: number above 0, or `inf`; default: 30; meaning: how long after its first read a line becomes due for the next sweep; `inf` keeps every line
-- CONFIG-35: `sweep_minutes`; type: number above 0, or `inf`; default: 60; meaning: how often the sweep runs after its first at start; `inf` sweeps once
-- CONFIG-36: `lookup_calls`; type: integer above 0; default: 2; meaning: lookups one turn may make; they join the turn's call total
-- CONFIG-37: `lookup_bytes`; type: integer, at least an empty result's size; default: 8192; meaning: the bytes of one result and the longest `text` a lookup takes
+| ID | Name | Type | Default | Meaning |
+|---|---|---|---|---|
+| CONFIG-34 | `lines_keep_days` | number above 0, or `inf` | 30 | how long after its first read a line becomes due for the next sweep; `inf` keeps every line |
+| CONFIG-35 | `sweep_minutes` | number above 0, or `inf` | 60 | how often the sweep runs after its first at start; `inf` sweeps once |
+| CONFIG-36 | `lookup_calls` | integer above 0 | 2 | lookups one turn may make; they join the turn's call total |
+| CONFIG-37 | `lookup_bytes` | integer, at least an empty result's size | 8192 | the bytes of one result and the longest `text` a lookup takes |
 
 ## Connection budget
 

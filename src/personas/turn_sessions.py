@@ -6,9 +6,11 @@ from __future__ import annotations
 from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING
 
+from logline import StepTimer
+
 from personas.decision import decisive_failure
 from personas.failures import leaves_of, raise_if_cancelled, within_call_time
-from personas.reporting import step_timer, stepping
+from personas.reporting import LOG, agent_app_fields, stepping
 from personas.task_record import ending_loud_when_cancelled, unreachable_unless_cancelling
 
 if TYPE_CHECKING:
@@ -69,7 +71,10 @@ class TurnSessions:
         """The session at another ``app``, closed with ``opened``; its opening is a step when ``measured``."""
         if not measured:
             return await opened.enter_async_context(self._open_session(app, bearer, self._agent.client_id))
-        with stepping(step_timer("session_open.ended", self._agent.client_id, app.mcp_url), turn_goes_on=True):
+        with stepping(
+            StepTimer("session_open.ended", LOG, **agent_app_fields(self._agent.client_id, app.mcp_url)),
+            turn_goes_on=True,
+        ):
             return await opened.enter_async_context(self._open_session(app, bearer, self._agent.client_id))
 
     async def _within_call_time[Answer](

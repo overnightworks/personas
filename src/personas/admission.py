@@ -32,6 +32,9 @@ class Admitted:
     apps: frozenset[str]
     held: Held | None = None
     """The hold the turn is told first, which the mind marked as told when the turn was claimed."""
+    went_on: bool = False
+    """Whether the turn is told first that a hold went on by itself, which the mind marked as told when the turn was
+    claimed."""
 
     @property
     def history(self) -> History:

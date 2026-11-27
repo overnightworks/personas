@@ -13,15 +13,14 @@ from urllib.parse import urlsplit
 
 from agents.member_outcomes import StatusFailure, UnusableAnswer
 from anyio import BrokenResourceError, ClosedResourceError
-from anyio.lowlevel import checkpoint
-from logline import Outcome, StepTimer, current_traceparent
+from logline import Outcome, StepTimer
+from typing_extensions import TypedDict
 
 from personas.decision import error_reason, failure_reason
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    import httpx2
     from agents.member_outcomes import ArgumentLeftOut, CallFailure
     from agents.turn import TurnUsage
 
@@ -29,7 +28,7 @@ if TYPE_CHECKING:
     from personas.decision import TurnEnding
     from personas.entries import InputSizes
 
-_LOG: Final = logging.getLogger("personas")
+LOG: Final = logging.getLogger("personas")
 CUT_FOR_SPOKEN: Final = "spoken"
 """The value of the ``cut`` field of a ``turn.ended`` line of a written turn that ended for a spoken place."""
 
@@ -124,49 +123,50 @@ class LoopReport(Protocol):
     ) -> None: ...
 
 
-_LINE_OF: Final = {
-    Event.STARTED: (logging.INFO, "loop.started"),
-    Event.SUSPENDED: (logging.INFO, "loop.suspended"),
-    Event.RESUMED: (logging.INFO, "loop.resumed"),
-    Event.BACKOFF: (logging.INFO, "loop.backed_off"),
-    Event.JOINED: (logging.INFO, "invitation.accepted"),
-    Event.REFUSED: (logging.INFO, "invitation.refused"),
-    Event.INVITATION_LEFT_OUT: (logging.INFO, "invitation.left_out"),
-    Event.INVITATION_DECLINED: (logging.INFO, "invitation.declined"),
-    Event.DECLINE_REFUSED: (logging.INFO, "invitation.decline_refused"),
-    Event.PAUSED: (logging.INFO, "turns.paused"),
-    Event.SPEAK_REFUSED: (logging.INFO, "speak.refused"),
-    Event.SPEECH_DROPPED: (logging.INFO, "speech.dropped"),
-    Event.HOLD_DECIDED: (logging.INFO, "hold.decided"),
-    Event.TURN_STATE_FAILED: (logging.WARNING, "turn_state.failed"),
-    Event.TURN_STATE_LOST: (logging.INFO, "turn_state.lost"),
-    Event.TOOLS_ONLY_APP_FAILED: (logging.WARNING, "tools_only_app.failed"),
-    Event.HELD_APP_FAILED: (logging.WARNING, "held_app.failed"),
-    Event.SKILL_REFUSED: (logging.WARNING, "skill.refused"),
-    Event.TOOLS_LEFT_OUT: (logging.INFO, "tools.left_out"),
-    Event.STORE_FAILED: (logging.WARNING, "store.failed"),
-    Event.STORE_RESUMED: (logging.INFO, "store.resumed"),
-    Event.SWEPT: (logging.INFO, "lines.swept"),
-    Event.TAKEN: (logging.INFO, "agent.taken"),
-    Event.LOST: (logging.WARNING, "agent.lost"),
-    Event.STOP_OVERRAN: (logging.WARNING, "agent.stop_overran"),
-    Event.STOP_CUT: (logging.WARNING, "runner.stop_cut"),
+_WRITE_OF: Final[dict[Event, Callable[[dict[str, str | int | float]], None]]] = {
+    Event.STARTED: lambda fields: LOG.info("loop.started", extra=fields),
+    Event.SUSPENDED: lambda fields: LOG.info("loop.suspended", extra=fields),
+    Event.RESUMED: lambda fields: LOG.info("loop.resumed", extra=fields),
+    Event.BACKOFF: lambda fields: LOG.info("loop.backed_off", extra=fields),
+    Event.JOINED: lambda fields: LOG.info("invitation.accepted", extra=fields),
+    Event.REFUSED: lambda fields: LOG.info("invitation.refused", extra=fields),
+    Event.INVITATION_LEFT_OUT: lambda fields: LOG.info("invitation.left_out", extra=fields),
+    Event.INVITATION_DECLINED: lambda fields: LOG.info("invitation.declined", extra=fields),
+    Event.DECLINE_REFUSED: lambda fields: LOG.info("invitation.decline_refused", extra=fields),
+    Event.PAUSED: lambda fields: LOG.info("turns.paused", extra=fields),
+    Event.SPEAK_REFUSED: lambda fields: LOG.info("speak.refused", extra=fields),
+    Event.SPEECH_DROPPED: lambda fields: LOG.info("speech.dropped", extra=fields),
+    Event.HOLD_DECIDED: lambda fields: LOG.info("hold.decided", extra=fields),
+    Event.TURN_STATE_FAILED: lambda fields: LOG.warning("turn_state.failed", extra=fields),
+    Event.TURN_STATE_LOST: lambda fields: LOG.info("turn_state.lost", extra=fields),
+    Event.TOOLS_ONLY_APP_FAILED: lambda fields: LOG.warning("tools_only_app.failed", extra=fields),
+    Event.HELD_APP_FAILED: lambda fields: LOG.warning("held_app.failed", extra=fields),
+    Event.SKILL_REFUSED: lambda fields: LOG.warning("skill.refused", extra=fields),
+    Event.TOOLS_LEFT_OUT: lambda fields: LOG.info("tools.left_out", extra=fields),
+    Event.STORE_FAILED: lambda fields: LOG.warning("store.failed", extra=fields),
+    Event.STORE_RESUMED: lambda fields: LOG.info("store.resumed", extra=fields),
+    Event.SWEPT: lambda fields: LOG.info("lines.swept", extra=fields),
+    Event.TAKEN: lambda fields: LOG.info("agent.taken", extra=fields),
+    Event.LOST: lambda fields: LOG.warning("agent.lost", extra=fields),
+    Event.STOP_OVERRAN: lambda fields: LOG.warning("agent.stop_overran", extra=fields),
+    Event.STOP_CUT: lambda fields: LOG.warning("runner.stop_cut", extra=fields),
 }
 
 
 def log_state_change(change: StateChange) -> None:
     """Writes the fields of ``_fields_of`` and nothing else: no secret, token or tool content reaches a line."""
     fields = _fields_of(change)
-    level, line = _LINE_OF[change.event]
-    _LOG.log(level, line, extra=fields)
+    _WRITE_OF[change.event](fields)
 
 
 def _fields_of(change: StateChange) -> dict[str, str | int | float]:
     fields: dict[str, str | int | float] = {}
-    if change.client_id is not None:
+    if change.client_id is not None and change.app is not None:
+        named = agent_app_fields(change.client_id, change.app)
+        fields["agent_id"] = named["agent_id"]
+        fields["app_id"] = named["app_id"]
+    elif change.client_id is not None:
         fields["agent_id"] = change.client_id
-    if change.app is not None:
-        fields["app_id"] = urlsplit(change.app).hostname or ""
     fields |= _failure_fields(change)
     if change.lines is not None:
         fields["line_count"] = change.lines
@@ -264,17 +264,7 @@ def _reason_of(ending: TurnEnding) -> str:
 
 def start_turn_tally(client_id: str, app: str) -> TurnTally:
     """The tally of a turn that starts now; its line carries the agent and the app's host."""
-    return TurnTally(StepTimer("turn.ended", _LOG, agent_id=client_id, app_id=urlsplit(app).hostname or ""))
-
-
-async def carry_trace(request: httpx2.Request) -> None:
-    """The request hook of every client that calls an app or the realm: the request carries the current trace's
-    ``traceparent``, and none when there is no current trace. The client awaits its hooks, so this is a coroutine that
-    yields to the event loop once."""
-    await checkpoint()
-    traceparent = current_traceparent()
-    if traceparent is not None:
-        request.headers["traceparent"] = traceparent
+    return TurnTally(StepTimer("turn.ended", LOG, **agent_app_fields(client_id, app)))
 
 
 class DueOccasion(StrEnum):
@@ -287,11 +277,10 @@ def report_fell_due(agent_id: str, app: str, occasion: DueOccasion, *, spoken: b
     """Writes ``turn.fell_due``: a pass made a place due that was not due. The line carries ids, the occasion's kind,
     whether the turn would be spoken and the milliseconds the pass had read the standing, never a line's text, kind or
     a name. The caller's current trace is the line's."""
-    _LOG.info(
+    LOG.info(
         "turn.fell_due",
         extra={
-            "agent_id": agent_id,
-            "app_id": urlsplit(app).hostname or "",
+            **agent_app_fields(agent_id, app),
             "occasion": occasion.value,
             "spoken": spoken,
             "read_ms": read_ms,
@@ -303,27 +292,36 @@ def report_argument_left_out(agent_id: str, app: str, left_out: ArgumentLeftOut)
     """Writes ``argument.left_out``: the runner sent a call without an optional argument its app's tool does not
     declare. The line carries the agent, the app's host, the tool's name and the argument's name, never a value.
     The caller's current trace is the line's."""
-    _LOG.info(
+    LOG.info(
         "argument.left_out",
         extra={
-            "agent_id": agent_id,
-            "app_id": urlsplit(app).hostname or "",
+            **agent_app_fields(agent_id, app),
             "tool": left_out.tool,
             "argument": left_out.argument,
         },
     )
 
 
-def step_timer(event: str, /, agent_id: str, app: str | None = None, *, elapsed_seconds: float = 0.0) -> StepTimer:
-    """The timer of one step of an agent, optionally at one app, written as ``event``, a literal ``<noun>.ended`` at the
-    call: its line carries the agent, the app's host and the timer's duration and outcome, never a name or content.
+def app_host(app_url: str) -> str:
+    """The host of an app's address: the only part of it a line names, never a path or a query."""
+    return urlsplit(app_url).hostname or ""
 
-    A step that began ``elapsed_seconds`` ago, as the caller's clock measured it, counts its duration from then.
-    """
-    fields = {"agent_id": agent_id} | ({} if app is None else {"app_id": urlsplit(app).hostname or ""})
+
+class AgentAppFields(TypedDict, closed=True):
+    agent_id: str
+    app_id: str
+
+
+def agent_app_fields(agent_id: str, app_url: str) -> AgentAppFields:
+    """The fields that name an agent and its app's host, the same on every line that names both."""
+    return AgentAppFields(agent_id=agent_id, app_id=app_host(app_url))
+
+
+def began_ago(seconds: float) -> float | None:
+    """The start of a step that began ``seconds`` ago, as the caller's clock measured it, for ``StepTimer``'s
+    ``started_at``; none when it just began."""
     # logline counts a step's duration on the time.perf_counter scale, so an elapsed time enters it only here.
-    started_at = time.perf_counter() - elapsed_seconds if elapsed_seconds else None
-    return StepTimer(event, _LOG, started_at=started_at, **fields)
+    return time.perf_counter() - seconds if seconds else None
 
 
 @contextmanager

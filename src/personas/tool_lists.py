@@ -11,11 +11,12 @@ from functools import partial
 from typing import TYPE_CHECKING, Final
 
 from agents.member_outcomes import CallFailure
+from logline import StepTimer
 
 from personas.app_session import read_skills
 from personas.decision import failure_code, is_not_granted
 from personas.failures import CallTimedOut, within_call_time
-from personas.reporting import Event, failure_event, step_timer, stepping
+from personas.reporting import LOG, Event, agent_app_fields, failure_event, stepping
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable
@@ -123,7 +124,7 @@ class ToolLists:
         record.tools_notices_read = session.tools_notices()
         if (kept := session.kept_tools()) is not None:
             return kept
-        timer = step_timer("tool_list.ended", self._agent.client_id, self._app.mcp_url)
+        timer = StepTimer("tool_list.ended", LOG, **agent_app_fields(self._agent.client_id, self._app.mcp_url))
         with stepping(timer):
             try:
                 async with within_call_time(self._app.call_seconds):
@@ -136,7 +137,10 @@ class ToolLists:
                 return None
 
     async def _list_tools(self, app: AppTarget, session: MemberSession) -> tuple[ToolDeclaration, ...]:
-        with stepping(step_timer("tool_list.ended", self._agent.client_id, app.mcp_url), turn_goes_on=True):
+        with stepping(
+            StepTimer("tool_list.ended", LOG, **agent_app_fields(self._agent.client_id, app.mcp_url)),
+            turn_goes_on=True,
+        ):
             async with within_call_time(app.call_seconds):
                 return await session.declared_tools()
 
@@ -162,7 +166,10 @@ class ToolLists:
     async def _listing_skills(self, app: AppTarget) -> AsyncGenerator[None]:
         """A ``skills/list`` that is sent: a step of its own, within the app's call time. The loop's token is renewed
         for its own app alone; another app's listing runs under that app's own token."""
-        with stepping(step_timer("skill_list.ended", self._agent.client_id, app.mcp_url), turn_goes_on=True):
+        with stepping(
+            StepTimer("skill_list.ended", LOG, **agent_app_fields(self._agent.client_id, app.mcp_url)),
+            turn_goes_on=True,
+        ):
             async with within_call_time(app.call_seconds):
                 if app.mcp_url == self._app.mcp_url:
                     await self._renew_token()

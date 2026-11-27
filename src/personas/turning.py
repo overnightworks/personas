@@ -16,6 +16,7 @@ from agents.tools import HandTool, ToolDeclaration, ToolOutcome
 from agents.turn import RejectionCode, ToolRound, Turn, TurnMessage, is_within_event_bound
 from agents.turn_events import FinalEvent, ToolCallEvent
 from agents.voice.reply import REPLY_RULES
+from logline import StepTimer
 
 from personas.decision import (
     LOAD_TOOLS_CALLS,
@@ -30,6 +31,7 @@ from personas.decision import (
 from personas.entries import (
     ActDone,
     TurnTold,
+    told_went_on,
     told_words,
 )
 from personas.failures import leaves_of, raise_if_cancelled, task_is_being_cancelled
@@ -70,7 +72,7 @@ from personas.recall import (
     search_text,
     text_refused_text,
 )
-from personas.reporting import Event, LoopReport, TurnTally, failure_event, step_timer, stepping
+from personas.reporting import LOG, Event, LoopReport, TurnTally, agent_app_fields, failure_event, stepping
 from personas.sizing import Sizing
 from personas.speech import HoldOutcome, Telling, hold_ended_as
 from personas.task_record import (
@@ -94,7 +96,6 @@ if TYPE_CHECKING:
     from agents.mcp_client import MemberSession
     from agents.member import PlaceRef, PlaceWindow
     from agents.turn import FailureCode, JsonObject, Principal
-    from logline import StepTimer
 
     from personas.admission import Admitted
     from personas.app_session import SessionOpener
@@ -310,7 +311,9 @@ class Turning:
     ) -> None:
         async with self._listing_beside(session, admitted, record) as listing:
             await gate()
-            with stepping(step_timer("turn_setup.ended", self._agent.client_id, self._app.mcp_url)) as hand_off:
+            with stepping(
+                StepTimer("turn_setup.ended", LOG, **agent_app_fields(self._agent.client_id, self._app.mcp_url))
+            ) as hand_off:
                 lists = await listing
                 turn = TurnTold(
                     admitted.at,
@@ -322,6 +325,8 @@ class Turning:
                 )
                 offered = self._offered(lists)
                 told = turn_messages(admitted.facts.name, admitted.present, turn, offered.deferred)
+                if admitted.went_on:
+                    told = (*told, user_message(told_went_on()))
                 if admitted.held is not None:
                     told = (*told, user_message(self._holds.told_standing(admitted.place, admitted.held)))
                 bound = TurnBound(self._clock, setup.persona.max_duration_seconds)
@@ -365,7 +370,12 @@ class Turning:
                 partial(self._holds.hold_decided, place),
                 lambda hold: self._holds.end_hold(place, record, hold, HoldOutcome.UNDECIDED, bound),
             )
-        hold = HoldBack(admitted.history, inbox, deciding)
+        hold = HoldBack(
+            admitted.history,
+            inbox,
+            deciding,
+            went_on_to_tell=partial(self._mind.went_on_to_tell, self._at(admitted.place)),
+        )
         held = self._hold_tools(session, record, admitted, bound, offered, told, hold, answering)
         request = self._request_of(setup, admitted, told, held, offered.skills)
         sizing.request_built(held.declarations, held.deferred_names, told)
@@ -452,7 +462,7 @@ class Turning:
         whose turn ended without deciding it is stopped with its id, the loop's session taking the call, and the unsent
         sentences at the place drop. Whether the hold made the place due."""
         at = self._at(place)
-        held = self._mind.hold_read(at, window)
+        held = self._mind.hold_read(at, window, self._clock.now())
         if self._holds.heard_at(place, window) or held is None or self._aloud_at == place:
             return False
         if held.telling is Telling.UNDECIDED:
@@ -517,19 +527,29 @@ class Turning:
                     self._hand_tools(self._app_at[offer.app], session, offer.declarations, calls, hold, record)
                 )
                 bounds.append(calls.bound)
+        tools.extend(self._decision_tools(admitted, record, bound, deciding, answering))
+        bounds.append(DECISION_CALLS)
+        return HeldTools(tuple(tools), turn_call_bound(bounds), deferred, hold.inbox, deciding)
+
+    def _decision_tools(
+        self,
+        admitted: Admitted,
+        record: TaskRecord,
+        bound: TurnBound,
+        deciding: TurnHold | None,
+        answering: Answering | None,
+    ) -> list[HandTool]:
+        """The decision tools: decided at the hold when one stands, else answered apart."""
         if deciding is not None:
-            tools.extend(
+            return [
                 HandTool(
                     each,
                     partial(self._holds.decide_told, admitted.place, record, deciding, answering, bound, each.name),
                 )
                 for each in DECISION_DECLARATIONS
-            )
-        else:
-            apart = partial(self._answered_apart, _APART_TEXT if admitted.aloud else _WRITTEN_TURN_TEXT)
-            tools.extend(HandTool(each, apart) for each in DECISION_DECLARATIONS)
-        bounds.append(DECISION_CALLS)
-        return HeldTools(tuple(tools), turn_call_bound(bounds), deferred, hold.inbox, deciding)
+            ]
+        apart = partial(self._answered_apart, _APART_TEXT if admitted.aloud else _WRITTEN_TURN_TEXT)
+        return [HandTool(each, apart) for each in DECISION_DECLARATIONS]
 
     def _enter_load(self, app: str, skill: str, tools: tuple[str, ...]) -> None:
         self._mind.tools_loaded(app, skill, tools, self._clock.wall())
@@ -604,9 +624,9 @@ class Turning:
         arguments: JsonObject,
     ) -> ToolOutcome:
         """Reads a skill this turn listed and enters it into his history, so the next turn tells it as a round. It is
-        never held back by what arrived, only by a hold he has not decided. A skill an app refuses, a name no line
-        holds and a body past a result's bound answer an error and enter nothing; a read that fails is a failed call to
-        its app."""
+        never held back by what arrived, only by a hold he has not decided; its result tells that he went on as a call's
+        does. A skill an app refuses, a name no line holds and a body past a result's bound answer an error and enter
+        nothing; a read that fails is a failed call to its app."""
         if hold.deciding_first:
             return ToolOutcome(DECIDING_FIRST_TEXT, is_error=True)
         if not calls.take():
@@ -616,8 +636,9 @@ class Turning:
             return ToolOutcome(NO_SUCH_SKILL_TEXT, is_error=True)
         app = self._app_at[listed.app]
         read = await self._skill_read(app, listed.skill, app_calls[listed.app], session, hold, record)
-        if isinstance(read, ToolOutcome):
-            return read
+        return hold.telling_went_on(read if isinstance(read, ToolOutcome) else self._entered(app, read))
+
+    def _entered(self, app: AppTarget, read: Skill) -> ToolOutcome:
         text = skill_text(read.body)
         if not is_within_event_bound(text, None):
             return ToolOutcome(_SKILL_TOO_LARGE_TEXT, is_error=True)
@@ -682,9 +703,10 @@ class Turning:
             return held
         if not calls.take():
             return ToolOutcome(_CALL_BOUND_TEXT, is_error=True)
-        return await _sent(
+        sent = await _sent(
             hold, self._recorded_as_act(self._app, name, arguments, self._invoke(session, name, arguments))
         )
+        return hold.telling_went_on(sent)
 
     async def _invoke(self, session: MemberSession, name: str, arguments: JsonObject) -> ToolOutcome:
         await self._renew_token()
@@ -708,7 +730,7 @@ class Turning:
             return held
         if not calls.take():
             return ToolOutcome(_CALL_BOUND_TEXT, is_error=True)
-        return await self._asked_elsewhere(
+        answer = await self._asked_elsewhere(
             app,
             calls,
             hold,
@@ -719,6 +741,7 @@ class Turning:
                 self._sessions.ask_elsewhere(app, lambda session: session.invoke(name, arguments), record),
             ),
         )
+        return hold.telling_went_on(answer)
 
     async def _asked_elsewhere[Answer](
         self, app: AppTarget, calls: Calls, hold: HoldBack, asking: Callable[[], Awaitable[Answer | CallFailure]]

@@ -20,10 +20,16 @@ release changes the runner, its characters, their figures and their rooms togeth
    `unchanged.` holds nothing, and so does an agents release-note line `fields added: <records>`, since the
    runner reads a standing, window and view with the keys it does not know ignored. A line that says
    `changed` and names nothing (its change is written in prose) is read by hand: it holds when a kept app
-   uses the change its prose describes, judged against the previous release's notes. For each name that
-   holds, keep the served apps from the deployment's runner configuration (`apps/personas/personas.toml`
-   in platform) that use the changed or removed tool, record or field, or every served app for an added
-   tool, then read each kept app's `main` for its agents pin.
+   uses the change its prose describes, judged against the previous release's notes.
+   The rollout order covers changed names only; the rules above for additions and for removed, renamed or newly
+   required arguments stay. A changed name holds when agents' `docs/connector.md`, "Rollout order", at the agents
+   version `pyproject.toml` pins on `main`, has apps take that change first or does not place it, and holds
+   nothing when it has runners take it first. The section places a change only where it names that change (its
+   tool, record or field) with the side that takes it first; its general sentence that runners take each release
+   first places nothing on its own. Agents owns the order: read it there.
+   For each name that holds, keep the served apps from the deployment's runner configuration
+   (`apps/personas/personas.toml` in platform) that use the changed or removed tool, record or field, or every
+   served app for an added tool, then read each kept app's `main` for its agents pin.
 
 ## Fix
 
@@ -51,7 +57,8 @@ chooses which release runs.
 
 ## Escalate
 
-A gate refusal is fixed on `main` first and dispatched again. A served app that pins an older agents
-version than a bump that holds a release under Check 2 (a change or removal of a tool, record or field
-the app uses, or an added tool `docs/calling.md` requires it to serve) needs: the release waits, and
-the operator hears which app holds it.
+A gate refusal is fixed on `main` first and dispatched again. A served app that pins an older agents version
+than a bump that holds a release under Check 2 (a changed name the app uses that the rollout order has apps
+take first or does not place, a removed, renamed or newly required argument, a removed or renamed tool, record
+or field, or an added tool `docs/calling.md` requires it to serve) needs: the release waits, and the operator
+hears which app holds it.

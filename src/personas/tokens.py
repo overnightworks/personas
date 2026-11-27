@@ -11,10 +11,11 @@ from typing import TYPE_CHECKING, Final, Protocol
 import httpx2
 from agents.member_outcomes import INVALID_ANSWER_CODE, Unreachable, UnusableAnswer
 from agents.turn import NonEmptyUnicodeText, Principal
+from logline import StepTimer
 from pydantic import BaseModel, ConfigDict
 
 from personas.failures import TokenStatusFailure
-from personas.reporting import step_timer, stepping
+from personas.reporting import LOG, stepping
 from personas.secret import Secret
 
 if TYPE_CHECKING:
@@ -48,7 +49,7 @@ class HttpTokenSource:
             "client_secret": agent.client_secret.reveal(),
             "scope": scope,
         }
-        with stepping(step_timer("token_request.ended", agent.client_id)):
+        with stepping(StepTimer("token_request.ended", LOG, agent_id=agent.client_id)):
             try:
                 response = await self._client.post(self._endpoint, data=form, timeout=TOKEN_TIMEOUT_SECONDS)
             except httpx2.HTTPError:

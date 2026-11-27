@@ -32,7 +32,6 @@ from personas.reporting import (
     Event,
     StateChange,
     StoreOutage,
-    carry_trace,
     demote_a_closed_stream,
     log_state_change,
 )
@@ -114,7 +113,7 @@ async def real_boundaries(config: Config, ready: ReadyMarker) -> AsyncGenerator[
     histories = PostgresHistoryStore(config.database)
     try:
         async with (
-            httpx2.AsyncClient(event_hooks={"request": [carry_trace]}) as token_client,
+            httpx2.AsyncClient() as token_client,
             _line_store(config) as lines,
         ):
             yield SweepingBoundaries(

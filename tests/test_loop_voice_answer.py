@@ -202,7 +202,7 @@ async def test_the_first_answer_sentence_enters_the_history_and_is_the_sentence_
     await runner.reports.until_a_turn_completed(count=2)
 
     told = runner.gateway.hold_told(2)
-    assert told["in_sentence"] == (None if written else ANSWER_FIRST)
+    assert told.get("sentence") == (None if written else ANSWER_FIRST)
     assert told["unsaid"] == [ANSWER_REST]
     outcome = {"answered": True, **({"written": True} if written else {})}
     said = [

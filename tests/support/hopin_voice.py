@@ -16,6 +16,7 @@ from agents.member import (
     ContinueSpeakingRefusal,
     ContinueSpeakingRefused,
     DroppedSpeaking,
+    HoldPlace,
     PartialSpeech,
     SpeakArguments,
     SpeakRefusal,
@@ -27,6 +28,7 @@ from agents.member import (
     StopSpeakingRefused,
     VoiceState,
     Written,
+    has_words,
 )
 from agents.tools import ToolDeclaration, ToolEffect, ToolOutcome
 
@@ -83,6 +85,12 @@ class AppVoice(AppPlaces):
         default_factory=dict[str, tuple[str, tuple[PartialSpeech, ...] | None]]
     )
     """Each place whose member is held: the hold's id and what is said over it, none once the record is gone."""
+    wordless: set[str] = field(default_factory=set[str])
+    """Each place whose hold stands with no word of its talk-over heard yet."""
+    went_on: dict[str, str] = field(default_factory=dict[str, str])
+    """Each place whose latest hold went on by itself: that hold's id."""
+    hold_places: dict[str, HoldPlace] = field(default_factory=dict[str, HoldPlace])
+    """Each place whose app states, with every hold, where it stopped the member; the others state none."""
     talked_over: dict[str, tuple[PartialSpeech, ...]] = field(default_factory=dict[str, tuple[PartialSpeech, ...]])
     """Each place where people still talk over a member whose hold a continue ended: what each has said so far."""
     hold_calls: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
@@ -94,20 +102,44 @@ class AppVoice(AppPlaces):
     hold_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
     """The answer to each next ``continue_speaking`` or ``stop_speaking`` as it arrives, in order."""
 
+    @staticmethod
+    def _partial_speeches(said: tuple[tuple[str, str], ...]) -> tuple[PartialSpeech, ...]:
+        return tuple(PartialSpeech(name=name, text=text) for name, text in said)
+
     def hold(self, place_id: str, hold_id: str, *said: tuple[str, str]) -> None:
         """The member is held at the place: the window states the hold and, over it, what each person has said so far
         (a name and its words), and signals the change."""
-        self.holds[place_id] = (hold_id, tuple(PartialSpeech(name=name, text=text) for name, text in said))
+        self.holds[place_id] = (hold_id, self._partial_speeches(said))
+        if any(has_words(text) for _, text in said):
+            self.wordless.discard(place_id)
+        self._signal_window(place_id)
+
+    def hold_wordless(self, place_id: str, hold_id: str, *said: tuple[str, str]) -> None:
+        """The member is held and no word has been heard of the talk-over: the app ends the hold by itself."""
+        self.wordless.add(place_id)
+        self.hold(place_id, hold_id, *said)
+
+    def go_on(self, place_id: str) -> None:
+        """The app ends a wordless hold by itself: it states the hold's id as the one that went on, and a sentence
+        waiting for its turn plays after the playing one."""
+        hold_id, _ = self.holds.pop(place_id)
+        self.wordless.discard(place_id)
+        self.went_on[place_id] = hold_id
         self._signal_window(place_id)
 
     def talk_over(self, place_id: str, *said: tuple[str, str]) -> None:
         """What is said over the held member changes, under the same hold."""
         if place_id in self.talked_over:
-            self.talked_over[place_id] = tuple(PartialSpeech(name=name, text=text) for name, text in said)
+            self.talked_over[place_id] = self._partial_speeches(said)
             self._signal_window(place_id)
             return
         hold_id, _ = self.holds[place_id]
         self.hold(place_id, hold_id, *said)
+
+    def talk_over_unheld(self, place_id: str, *said: tuple[str, str]) -> None:
+        """People talk over the member and the window states what they say, with no hold yet."""
+        self.talked_over[place_id] = self._partial_speeches(said)
+        self._signal_window(place_id)
 
     def end_record(self, place_id: str) -> None:
         """The record of what was said over the held member is gone while the hold stands."""

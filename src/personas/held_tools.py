@@ -4,12 +4,13 @@ news that arrived since the turn's admission."""
 from __future__ import annotations
 
 from contextlib import nullcontext
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Final
 
 from agents.tools import ToolOutcome
 
 from personas.decision import call_within_bound
+from personas.entries import told_went_on
 from personas.holds import DECIDING_FIRST_TEXT, deciding_first
 from personas.present import NO_SUCH_SKILL_TEXT, arrived_since, listed_skill_named, tools_to_load
 
@@ -57,6 +58,7 @@ class HoldBack:
     inbox: HoldInbox | None
     told: TurnHold | None = None
     spent: bool = False
+    went_on_to_tell: Callable[[], bool] = field(default=lambda: False, repr=False)
 
     @property
     def deciding_first(self) -> bool:
@@ -76,6 +78,13 @@ class HoldBack:
 
     def said_over_him(self) -> tuple[PartialSpeech, ...]:
         return () if self.inbox is None else self.inbox.untold()
+
+    def telling_went_on(self, outcome: ToolOutcome) -> ToolOutcome:
+        """The result of a call that went out, which says besides that a sound without words held him and he went on,
+        when no round or turn has told him."""
+        if self.inbox is None or not self.went_on_to_tell():
+            return outcome
+        return replace(outcome, content=f"{outcome.content}\n{told_went_on()}")
 
 
 @dataclass(frozen=True)

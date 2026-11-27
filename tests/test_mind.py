@@ -434,7 +434,7 @@ def playing_at(mind: Mind, at: AppPlace) -> bool:
 
 def one_sentence_sent(mind: Mind, at: AppPlace) -> None:
     """The sender at the place sent a sentence, which stays in flight."""
-    mind.sentences_released(at, ("One.",), 100.0, replacing=False)
+    mind.sentences_released(at, ("One.",), 100.0, 30.0, replacing=False)
     sentence, _ = mind.sentence_to_send(at, 0.0)
     assert sentence is not None
 
@@ -513,7 +513,7 @@ def test_a_change_of_the_speech_record_wakes_the_sender_of_its_place_only_and_no
     waiting_here, waiting_there = mind.speech_wake(here), mind.speech_wake(there)
     mind.changed().clear()
 
-    mind.sentences_released(here, ("One.",), 100.0, replacing=False)
+    mind.sentences_released(here, ("One.",), 100.0, 30.0, replacing=False)
 
     assert (waiting_here.is_set(), waiting_there.is_set(), mind.changed().is_set()) == (True, False, False)
 

@@ -63,6 +63,8 @@ from personas.speech import (
     speech_stopped,
     speech_unsaid,
     unsent_dropped,
+    went_on_marked_told,
+    went_on_untold,
 )
 
 if TYPE_CHECKING:
@@ -134,9 +136,14 @@ class Mind:
         self._present = taken_into(self._present, taken, self._history_bytes, self._history_keep_bytes)
         self._change()
 
-    def sentences_released(self, at: AppPlace, texts: Iterable[str], bound: float, *, replacing: bool) -> int:
-        """A spoken turn released sentences with its bound; how many unsent ones of the turns before it dropped."""
-        record, dropped = sentences_released(self._speech.get(at, NO_SPEECH), texts, bound, replacing=replacing)
+    def sentences_released(
+        self, at: AppPlace, texts: Iterable[str], bound: float, allowed: float, *, replacing: bool
+    ) -> int:
+        """A spoken turn released sentences with its bound, which it gave for ``allowed`` seconds; how many unsent ones
+        of the turns before it dropped."""
+        record, dropped = sentences_released(
+            self._speech.get(at, NO_SPEECH), texts, bound, allowed, replacing=replacing
+        )
         self._set_speech(at, record)
         return dropped
 
@@ -193,10 +200,11 @@ class Mind:
         window; the sender clears it."""
         return self._speech_wakes.setdefault(at, asyncio.Event())
 
-    def hold_read(self, at: AppPlace, window: PlaceWindow) -> Held | None:
-        """The place's window was read: the hold it states stands in the record, with the words people said over him
-        kept after their record ends and whether a turn was told it. The hold that stands, none when it was decided."""
-        record = hold_read(self._speech.get(at, NO_SPEECH), window)
+    def hold_read(self, at: AppPlace, window: PlaceWindow, now: float) -> Held | None:
+        """The place's window was read at ``now``: the hold it states stands in the record, with the words people said
+        over him kept after their record ends and whether a turn was told it; what waited has a renewed bound when a
+        hold went on by itself. The hold that stands, none when it was decided."""
+        record = hold_read(self._speech.get(at, NO_SPEECH), window, now)
         self._set_speech(at, record)
         self._speech_wake(at)
         return record.hold
@@ -209,6 +217,19 @@ class Mind:
         if held is not None:
             self._set_speech(at, hold_marked_told(record))
         return held
+
+    def went_on_to_tell(self, at: AppPlace) -> bool:
+        """Whether a round started now is told that a hold went on by itself, once per hold, which it then counts as."""
+        record = self._speech.get(at, NO_SPEECH)
+        if not went_on_untold(record):
+            return False
+        self._set_speech(at, went_on_marked_told(record))
+        return True
+
+    def sentence_bound(self, at: AppPlace, sentence: Sentence) -> float:
+        """The bound of the request in flight for ``sentence``, which a hold going on by itself renews."""
+        request = self._speech.get(at, NO_SPEECH).in_flight
+        return sentence.bound if request is None else request.sentence.bound
 
     def hold_makes_due(self, at: AppPlace) -> bool:
         """Whether the hold that stands at the place may be told to a turn, which a read of it then makes due."""

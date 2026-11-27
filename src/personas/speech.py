@@ -6,7 +6,15 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final, NamedTuple, cast
 
-from agents.member import ContinueSpeakingRefusal, SpeakRefusal, Spoken, StopSpeakingRefusal, Written
+from agents.member import (
+    ContinueSpeakingRefusal,
+    HoldPlace,
+    SpeakRefusal,
+    Spoken,
+    StopSpeakingRefusal,
+    Written,
+    has_words,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -21,6 +29,8 @@ class Sentence:
 
     text: str
     bound: float
+    allowed: float
+    """The seconds the bound was given for, which a going on gives the sentence again."""
 
 
 @dataclass(frozen=True)
@@ -67,7 +77,8 @@ class SpeechRecord:
     """What he holds of his speech at one place: the request in flight, the sentences released and not yet sent, the
     sentence that plays, the hold that stands there and the key of the last hold decided there. All of it outlives the
     turn that released the sentences. ``held_unread`` says the app answered a sentence as held and no read of the window
-    has stated the hold since."""
+    has stated the hold since. ``went_on`` is the hold the window states as gone on by itself and ``went_on_told`` the
+    one a round was told of."""
 
     in_flight: Request | None = None
     unsent: tuple[Sentence, ...] = ()
@@ -75,6 +86,8 @@ class SpeechRecord:
     hold: Held | None = None
     decided: HoldKey | None = None
     held_unread: bool = False
+    went_on: HoldKey | None = None
+    went_on_told: HoldKey | None = None
 
 
 NO_SPEECH: Final = SpeechRecord()
@@ -105,13 +118,13 @@ def bound_reached(now: float, bound: float) -> bool:
 
 
 def sentences_released(
-    record: SpeechRecord, texts: Iterable[str], bound: float, *, replacing: bool
+    record: SpeechRecord, texts: Iterable[str], bound: float, allowed: float, *, replacing: bool
 ) -> tuple[SpeechRecord, int]:
     """The record once a turn released sentences with its bound, and how many unsent ones it dropped: the first
     sentence of a spoken turn replaces the rest of the turns before it, the sentence in flight and the one that plays
     staying."""
     kept = () if replacing else record.unsent
-    released = tuple(Sentence(text, bound) for text in texts)
+    released = tuple(Sentence(text, bound, allowed) for text in texts)
     return replace(record, unsent=(*kept, *released)), len(record.unsent) - len(kept)
 
 
@@ -143,7 +156,7 @@ def speech_answered(record: SpeechRecord, answered: Answered) -> SpeechRecord:
         case Answered.STOPPED if request.cut:
             return ended
         case Answered.STOPPED if request.line_bound is not None:
-            return _revised(ended, unsent=(Sentence(request.sentence.text, request.line_bound), *record.unsent))
+            return _revised(ended, unsent=(replace(request.sentence, bound=request.line_bound), *record.unsent))
         case Answered.REFUSED | Answered.STOPPED:
             return _revised(ended, unsent=())
         case _:
@@ -189,7 +202,7 @@ def speech_started(record: SpeechRecord, text: str) -> SpeechRecord:
 
 def speech_continued(record: SpeechRecord, bound: float) -> SpeechRecord:
     """His continue: the unsent sentences have the deciding turn's bound."""
-    return _revised(record, unsent=tuple(Sentence(each.text, bound) for each in record.unsent))
+    return _revised(record, unsent=tuple(replace(each, bound=bound) for each in record.unsent))
 
 
 def speech_ended(record: SpeechRecord) -> tuple[SpeechRecord, int]:
@@ -221,14 +234,18 @@ class HoldKey(NamedTuple):
 
 @dataclass(frozen=True)
 class Held:
-    """A hold as the window states it: its id and window generation and what people said over him, which stays what
-    the last read that had a record said once the record is gone, and whether a turn was told it."""
+    """A hold as the window states it: its id and window generation, the place the app says it stopped him at, if it
+    does, and what people said over him, which stays what the last read that had a record said once the record is
+    gone, and whether a turn was told it."""
 
     id: str
     generation: str
     speech: tuple[PartialSpeech, ...]
     record_gone: bool
     telling: Telling = Telling.NOT_TOLD
+    place: HoldPlace | None = None
+    wordless: bool = False
+    """The app states that no word of the talk-over was heard: it ends the hold by itself."""
 
     @property
     def key(self) -> HoldKey:
@@ -271,14 +288,43 @@ def hold_stated(window: PlaceWindow, seen: Held | None) -> Held | None:
         kept if talked_over is None else talked_over.speech,
         record_gone=talked_over is None,
         telling=seen.telling if seen is not None and same else Telling.NOT_TOLD,
+        place=hold.place,
+        wordless=hold.wordless,
     )
 
 
-def hold_read(record: SpeechRecord, window: PlaceWindow) -> SpeechRecord:
-    """The record once the window is read: the hold it states, none when that is the one decided last."""
+def hold_read(record: SpeechRecord, window: PlaceWindow, now: float) -> SpeechRecord:
+    """The record once the window is read at ``now``: the hold it states, none when that is the one decided last, and
+    the hold that went on by itself, whose going on gives what waited a renewed bound."""
+    went_on = None if window.went_on is None else HoldKey(window.generation, window.went_on.id)
+    if went_on is not None and went_on != record.went_on:
+        record = _renewed(record, now)
+    record = _revised(record, went_on=went_on)
     if window.interrupted is not None and HoldKey(window.generation, window.interrupted.id) == record.decided:
         return _revised(record, hold=None, held_unread=False)
     return _revised(record, hold=hold_stated(window, record.hold), held_unread=False)
+
+
+def _renewed(record: SpeechRecord, now: float) -> SpeechRecord:
+    """The unsent sentences and the request in flight have each the bound they were given for, from ``now``."""
+    request = record.in_flight
+    return _revised(
+        record,
+        unsent=tuple(replace(each, bound=now + each.allowed) for each in record.unsent),
+        in_flight=None
+        if request is None
+        else replace(request, sentence=replace(request.sentence, bound=now + request.sentence.allowed)),
+    )
+
+
+def went_on_untold(record: SpeechRecord) -> bool:
+    """Whether a hold went on by itself that no round was told."""
+    return record.went_on is not None and record.went_on != record.went_on_told
+
+
+def went_on_marked_told(record: SpeechRecord) -> SpeechRecord:
+    """A round is told the hold that went on by itself."""
+    return _revised(record, went_on_told=record.went_on)
 
 
 def hold_untold(record: SpeechRecord) -> Held | None:
@@ -312,12 +358,13 @@ def hold_forgotten(record: SpeechRecord) -> SpeechRecord:
 
 
 def hold_tellable(held: Held) -> bool:
-    """Whether a hold may be told: a person has said words over him, or the record is gone and no more will come."""
-    return held.record_gone or any(each.text for each in held.speech)
+    """Whether a hold may be told: the app ends no wordless hold by itself, and a person has said words over him or the
+    record is gone and no more will come."""
+    return not held.wordless and (held.record_gone or any(has_words(each.text) for each in held.speech))
 
 
 def untold_words(said: Iterable[PartialSpeech], told: Iterable[PartialSpeech]) -> tuple[PartialSpeech, ...]:
     """What people have said over him that he was not told: each partial with words that differs from the one of the
     same name that was told."""
     known = {(each.name, each.text) for each in told}
-    return tuple(each for each in said if each.text and (each.name, each.text) not in known)
+    return tuple(each for each in said if has_words(each.text) and (each.name, each.text) not in known)

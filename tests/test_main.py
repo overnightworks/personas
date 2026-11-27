@@ -91,7 +91,7 @@ def test_the_mcp_clients_error_for_a_closed_stream_is_written_at_info_and_any_ot
     try:
         raise error
     except Exception:
-        logging.getLogger("mcp.client.streamable_http").exception("Error parsing SSE message")
+        logging.getLogger("mcp.client.streamable_http").exception("sse_message.failed")
 
     assert json.loads(capsys.readouterr().out)["level"] == level
 
@@ -419,7 +419,7 @@ def test_the_real_boundaries_hand_the_loops_the_marker_they_were_given(files):
     assert asyncio.run(boundaries_ready()) is marker
 
 
-def test_the_real_boundaries_send_the_current_trace_to_the_realm_and_none_outside_one(files):
+def test_the_real_boundaries_send_the_current_trace_to_the_realm_and_none_outside_one(files, restored_logging):
     files.write()
     seen: list[str | None] = []
 
