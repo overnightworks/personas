@@ -24,7 +24,7 @@ At the default history, a skat game (40 to 50 states of about 1.5 KB) fills it a
 
 | ID | Name | Type | Default | Meaning |
 |---|---|---|---|---|
-| CONFIG-7 | `mcp_url` | URL, once per file | required | the app's MCP endpoint; it names the app in the history and the lines |
+| CONFIG-7 | `mcp_url` | URL, once per file | required | the app's MCP endpoint, an http or https URL whose host holds a letter or a digit; it names the app in the history and the lines |
 | CONFIG-8 | `scope` | string | required | the token scope for this app |
 | CONFIG-9 | `max_tool_calls` | integer above 0 | none | binds every tool the app offers to its agents' turns, that many calls per turn |
 | CONFIG-10 | `listens` | boolean | true | `false` serves tools only: no loop runs, its tools join the turns of the other apps deferred, shown to the model once `load_tools` loads them; needs `max_tool_calls` |
