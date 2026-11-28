@@ -382,6 +382,18 @@ async def test_text_no_text_column_takes_is_kept_with_a_replacement_so_the_write
     assert (stored["text"], speaker, place_id) == ("a\ufffdb \ufffd", "Ada\ufffd", "r\ufffd")
 
 
+async def test_a_call_s_arguments_are_kept_with_a_replacement_for_what_jsonb_refuses_in_a_list_a_value_or_a_key(
+    histories, database
+):
+    mine = await histories.take_over(AGENT)
+    call = an_act(arguments={"k\x00ey": ["a\x00b", {"inner": "\ud800", "count": 2}]})
+
+    await histories.write(AGENT, mine, recorded(0, call), NO_TURNS_KEPT)
+
+    ((stored,),) = kept_record(database, "entry")
+    assert stored["arguments"] == {"k\ufffdey": ["a\ufffdb", {"inner": "\ufffd", "count": 2}]}
+
+
 async def test_a_delta_with_more_entries_than_one_statement_takes_is_kept_whole(histories, database):
     count = memory.RECORD_ROWS_PER_STATEMENT + 1
     mine = await histories.take_over(AGENT)
