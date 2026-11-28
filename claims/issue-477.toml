@@ -1,8 +1,0 @@
-claim_id = "8decade157f94ef7af6ab6b07f6757d7"
-agent = "Claude 09c5accf-533b-455a-a4f6-8e1e617175c5"
-role = "builder"
-base = "4a88ac0ee38b2a83ff700395fa34558e8dcfc472"
-branch = "claude/issue-477-an-app-that-lists-a-tool-twice-gets-its"
-scope = ["docs/configuration.md", "docs/log.md", "pyproject.toml", "src/personas/app_session.py", "src/personas/config.py", "src/personas/tool_lists.py", "tests/support/realm.py", "tests/test_config.py", "tests/test_loop_listing.py", "uv.lock"]
-opened_commit = "77dd77ad58569d9f9ea7eeb0a2dd84c7a646697d"
-whole_reason = "The agents release, the own app's listing refusal it makes reachable, the configuration refusal that replaces the guard the release makes dead, and the log and configuration documents that state both change together; apart, a listing refusal or a malformed mcp_url would end the agent's loop."
