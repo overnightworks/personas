@@ -55,6 +55,9 @@ DECISION_CALLS: Final = 8
 """The decisions one hold is told, in a round or in a turn: his first and seven more after the app took none, one it
 refused as stale counting as any other. Past them the hold ends undecided and stops him, as any hold without a
 decision does; the turn's own bound stays the turn's."""
+ROUND_CALLS: Final = DECISION_CALLS + 1
+"""The calls a round's run may make whatever the turn it began beside is bound to: the decisions and the call past
+them, which the hold answers that it takes no more."""
 _APART_DECISION_CALLS: Final = 1
 DECISIONS_BOUND_TEXT: Final = "this hold takes no more decisions"
 LINE_ARGUMENT: Final = "line"
@@ -400,6 +403,7 @@ class HoldDeciding:
                 ),
                 "model": self._agent.hold_model or voiced.request.model,
                 "max_duration_seconds": round_seconds(speaking.seconds_left()),
+                "max_tool_calls": ROUND_CALLS,
             }
         )
         tools = tuple(

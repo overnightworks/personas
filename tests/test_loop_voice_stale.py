@@ -3,6 +3,7 @@ a decision told fewer of them is decided again, and nothing that waited is dropp
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -163,7 +164,12 @@ async def test_a_stale_decision_is_no_decision_and_the_one_made_again_plays_what
     runner.app.count_worded_changes()
     runner.app.words_before_decision.extend(more_from_ada("wait a moment please"))
     await held_and_decided_by(
-        runner, beside_parked_run, deciding(tool, line=line), deciding(CONTINUE_SPEAKING_TOOL, time=2), completion(), completion()
+        runner,
+        beside_parked_run,
+        deciding(tool, line=line),
+        deciding(CONTINUE_SPEAKING_TOOL, time=2),
+        completion(),
+        completion(),
     )
 
     assert await decided(runner) == ["continued"]
@@ -179,12 +185,11 @@ async def test_a_stale_decision_is_no_decision_and_the_one_made_again_plays_what
 async def test_decisions_told_too_few_changes_past_the_bound_end_the_hold_undecided_and_stop_him_naming_no_count(
     runner, beside_parked_run, tool, line
 ):
-    """TURNS-31."""
+    """TURNS-22, TURNS-31."""
+    runner.config = replace(runner.config, apps=(replace(runner.config.apps[0], max_tool_calls=1),))
     runner.app.count_worded_changes()
     runner.app.words_before_decision.extend(more_from_ada(*[f"wait {each}" for each in range(DECISION_CALLS)]))
-    await held_and_decided_by(
-        runner, beside_parked_run, *deciding_times(tool, DECISION_CALLS + 1, line)
-    )
+    await held_and_decided_by(runner, beside_parked_run, *deciding_times(tool, DECISION_CALLS + 1, line))
 
     assert await decided(runner) == ["undecided"]
     await runner.reports.until_a_turn_ended()
@@ -250,7 +255,12 @@ async def test_a_stale_decision_whose_hold_he_cannot_read_again_is_told_so_and_h
     """TURNS-31."""
     runner.app.hold_outcomes.append(stale(CONTINUE_SPEAKING_TOOL))
     release = await held_with_the_first_request_waiting(
-        runner, beside_parked_run, deciding(CONTINUE_SPEAKING_TOOL), deciding(CONTINUE_SPEAKING_TOOL, time=2), completion(), completion()
+        runner,
+        beside_parked_run,
+        deciding(CONTINUE_SPEAKING_TOOL),
+        deciding(CONTINUE_SPEAKING_TOOL, time=2),
+        completion(),
+        completion(),
     )
     number = runner.gateway.arrivals
     decides_again = runner.gateway.hold_request(number + 1)
