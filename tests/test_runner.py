@@ -14,7 +14,7 @@ from tests.support.openers import opener_cancelled_once
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 SECOND_AGENT = "agent-ada"
 SECOND_SUBJECT = "ada-subject"

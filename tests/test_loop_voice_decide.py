@@ -33,7 +33,7 @@ from tests.support.store import ScriptedStore
 from tests.support.voice import TWO_SENTENCES, a_voice_call, holding_sentence_ends, sentences_spoken
 from tests.support.wire import refuses_with_a_server_error
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 
 HOLD_ID = "hold-1"

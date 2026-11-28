@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from personas.secret import Secret
     from tests.support.wire import Reply as AppReply
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 SHORT_CALL_SECONDS = 0.3
 THINKING = SetTurnStateArguments(place=CALL_PLACE, thinking=True)

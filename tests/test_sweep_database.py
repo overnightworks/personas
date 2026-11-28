@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from personas.config import DatabaseTarget
 
 
-pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
+pytestmark = [pytest.mark.anyio, pytest.mark.postgres, pytest.mark.integration]
 
 KEEP_DAYS = 30.0
 SWEEP_MINUTES = 7.0

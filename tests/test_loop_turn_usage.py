@@ -17,7 +17,7 @@ from tests.support.logs import lines_of
 from tests.support.pictures import a_picture, base64_of
 from tests.support.voice import a_voice_call
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 
 def counted(prompt: int, cached: int, written: int, completed: int) -> dict[str, object]:

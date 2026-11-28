@@ -18,7 +18,7 @@ from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.voice import TWO_SENTENCES, a_voice_call, ended_by, holding_sentence_ends
 from tests.support.wire import cuts
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 SILENT = "[silent]"
 _COUNTS = ("sentence_count", "silent_count", "tool_call_count")
