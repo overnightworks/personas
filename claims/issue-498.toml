@@ -1,0 +1,8 @@
+claim_id = "884cd5ff1e4746b69e7fcc0c4f25d539"
+agent = "Claude 71708d02-48d3-4f15-8274-66259235fcbc"
+role = "builder"
+base = "11f9217ca7e559901f434c5126e26f1057842e34"
+branch = "claude/issue-498-a-401-at-turn-setup-suspends-and-retries"
+scope = ["docs/turns.md", "quality/baseline.toml", "src/personas/decision.py", "src/personas/due.py", "src/personas/loop.py", "src/personas/mind.py", "src/personas/turning.py", "tests/support/hopin.py", "tests/test_decision.py", "tests/test_loop.py", "tests/test_loop_lifecycle.py", "tests/test_loop_skill_read.py", "tests/test_loop_turn_reach.py", "tests/test_loop_turns.py"]
+opened_commit = "7dd0dcff54d7633e4bf7e3db48994c3ec7bfc72c"
+whole_reason = "The renewal flag's reset and the line's due-again after a renewal are one reaction of the loop and its pure decider, and the tests that pin that reaction change with it."
