@@ -27,13 +27,7 @@ from personas.decision import (
     failure_code,
     turn_call_bound,
 )
-from personas.entries import (
-    ActDone,
-    Room,
-    TurnTold,
-    told_went_on,
-    told_words,
-)
+from personas.entries import ActDone, Room, TurnTold, told_went_on, told_words
 from personas.failures import leaves_of, raise_if_cancelled, task_is_being_cancelled
 from personas.held_tools import Calls, HeldTools, HoldBack, ToolLoads, TurnOffer
 from personas.holds import (
@@ -497,6 +491,7 @@ class Turning:
             tools.append(HandTool(RECALL_DECLARATION, partial(self._look, lookup, Calls(lookup.calls), admitted, hold)))
             bounds.append(lookup.calls)
         app_calls = {app.mcp_url: Calls(max_calls) for app, max_calls in self._apps}
+        at = self._at(admitted.place)
         reading = partial(self._read_skill, skills, app_calls, session, Calls(READ_SKILL_CALLS), hold, record)
         loads = ToolLoads(skills, deferred, set(loaded_by(told)), Calls(LOAD_TOOLS_CALLS), hold, self._enter_load)
         tools.extend((HandTool(READ_SKILL_DECLARATION, reading), HandTool(LOAD_TOOLS_DECLARATION, loads.load)))
@@ -504,17 +499,8 @@ class Turning:
         for offer in offered.offers:
             if offer.declarations:
                 calls = app_calls[offer.app]
-                tools.extend(
-                    self._hand_tools(
-                        self._app_at[offer.app],
-                        session,
-                        offer.declarations,
-                        calls,
-                        hold,
-                        record,
-                        self._at(admitted.place),
-                    )
-                )
+                app = self._app_at[offer.app]
+                tools.extend(self._hand_tools(app, session, offer.declarations, calls, hold, record, at))
                 bounds.append(calls.bound)
         tools.extend(self._decision_tools(admitted, record, bound, deciding, answering))
         bounds.append(DECISION_CALLS)
