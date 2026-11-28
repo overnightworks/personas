@@ -29,6 +29,7 @@ from personas.decision import (
 )
 from personas.entries import (
     ActDone,
+    Room,
     TurnTold,
     told_went_on,
     told_words,
@@ -504,7 +505,15 @@ class Turning:
             if offer.declarations:
                 calls = app_calls[offer.app]
                 tools.extend(
-                    self._hand_tools(self._app_at[offer.app], session, offer.declarations, calls, hold, record)
+                    self._hand_tools(
+                        self._app_at[offer.app],
+                        session,
+                        offer.declarations,
+                        calls,
+                        hold,
+                        record,
+                        self._at(admitted.place),
+                    )
                 )
                 bounds.append(calls.bound)
         tools.extend(self._decision_tools(admitted, record, bound, deciding, answering))
@@ -548,10 +557,14 @@ class Turning:
         calls: Calls,
         hold: HoldBack,
         record: TaskRecord,
+        at: AppPlace,
     ) -> list[HandTool]:
+        """The tools of ``app`` the turn at ``at`` holds; each call is kept with the room of that place."""
         if app.mcp_url == self._app.mcp_url:
-            return [HandTool(each, partial(self._relay, session, each.name, calls, hold)) for each in offered]
-        return [HandTool(each, partial(self._relay_elsewhere, app, each.name, calls, hold, record)) for each in offered]
+            return [HandTool(each, partial(self._relay, session, each.name, calls, hold, at)) for each in offered]
+        return [
+            HandTool(each, partial(self._relay_elsewhere, app, each.name, calls, hold, record, at)) for each in offered
+        ]
 
     def _tools_left_out(self, app: AppTarget, count: int) -> None:
         """Reports an app's names left out for an earlier app's, once until the loop's session ends."""
@@ -676,6 +689,7 @@ class Turning:
         name: str,
         calls: Calls,
         hold: HoldBack,
+        at: AppPlace,
         _principal: Principal,
         arguments: JsonObject,
     ) -> ToolOutcome:
@@ -684,7 +698,7 @@ class Turning:
         if not calls.take():
             return ToolOutcome(_CALL_BOUND_TEXT, is_error=True)
         sent = await _sent(
-            hold, self._recorded_as_act(self._app, name, arguments, self._invoke(session, name, arguments))
+            hold, self._recorded_as_act(self._app, at, name, arguments, self._invoke(session, name, arguments))
         )
         return hold.telling_went_on(sent)
 
@@ -703,6 +717,7 @@ class Turning:
         calls: Calls,
         hold: HoldBack,
         record: TaskRecord,
+        at: AppPlace,
         _principal: Principal,
         arguments: JsonObject,
     ) -> ToolOutcome:
@@ -716,6 +731,7 @@ class Turning:
             hold,
             lambda: self._recorded_as_act(
                 app,
+                at,
                 name,
                 arguments,
                 self._sessions.ask_elsewhere(app, lambda session: session.invoke(name, arguments), record),
@@ -738,9 +754,10 @@ class Turning:
         return answer
 
     async def _recorded_as_act[Answer: ToolOutcome | CallFailure](
-        self, app: AppTarget, name: str, arguments: JsonObject, request: Awaitable[Answer]
+        self, app: AppTarget, at: AppPlace, name: str, arguments: JsonObject, request: Awaitable[Answer]
     ) -> Answer:
-        """Awaits the request of a relayed call and records it as an act of the agent however it ends.
+        """Awaits the request of a relayed call and records it as an act of the agent however it ends, made in the room
+        of the turn's place ``at``.
 
         Whether the turn is being cancelled is asked once the request and every scope inside it have exited.
         """
@@ -759,7 +776,8 @@ class Turning:
         finally:
             outcome = None if ended is None else act_outcome(ended, cancelling=task_is_being_cancelled())
             if outcome is not None:
-                self._mind.take((ActDone(app.mcp_url, name, arguments, outcome, self._clock.wall()),))
+                room = Room(at.app, at.place, self._mind.generation_at(at))
+                self._mind.take((ActDone(app.mcp_url, name, arguments, outcome, self._clock.wall(), room),))
             self._calls_in_flight -= 1
             if not self._calls_in_flight and (act := self._at_safe_point) is not None:
                 self._at_safe_point = None

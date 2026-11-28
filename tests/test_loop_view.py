@@ -12,6 +12,7 @@ from agents.member import STANDING_URI, FigureRef, PlaceRef, place_view_uri, pla
 
 from personas.config import Voice, load_config
 from personas.decision import BACKOFF_BASE_SECONDS, NO_TURNS_CODE
+from personas.entries import KeptLine, ViewSeen
 from personas.reporting import Event
 from tests.support.app_driving import said_and_taken, settled
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, say_in_the_call
@@ -487,6 +488,27 @@ async def test_the_lines_of_a_place_enter_his_history_before_the_view_of_that_wa
         ]
     )
     assert opening.room["woke"]["why"] == "view"
+
+
+@pytest.mark.parametrize("place", PLACES_WITH_A_VIEW)
+async def test_a_view_is_kept_with_the_visit_of_the_lines_read_in_its_pass(runner, place):
+    joined_at(runner, place, said=("opening line",), awaits_you=True)
+    await runner.gateway.until_turns(1, why="view")
+    await settled(runner.app)
+
+    [line] = [each for each in runner.histories.entries() if isinstance(each, KeptLine)]
+    [view] = [each for each in runner.histories.entries() if isinstance(each, ViewSeen)]
+    assert view.generation == line.visit.generation
+
+
+async def test_a_view_at_a_place_without_a_window_is_kept_with_no_visit(runner):
+    runner.app.without_window.add(TABLE.id)
+    await seated_at_a_table_whose_view_waits(runner)
+    await runner.gateway.until_turns(1, why="view")
+    await settled(runner.app)
+
+    [view] = [each for each in runner.histories.entries() if isinstance(each, ViewSeen)]
+    assert view.generation is None
 
 
 async def test_the_lines_said_between_his_accept_and_the_first_view_are_told_though_the_place_showed_active_without_it(

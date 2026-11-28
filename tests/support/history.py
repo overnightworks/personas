@@ -217,14 +217,21 @@ def said(
     return KeptLine(visit, seq, LATER, name, "message", text, own=False, spoken=spoken, cut=False, act=act)
 
 
-def an_act(*, arguments=None, outcome=None, tool="say", app=APP, at=LATER - timedelta(seconds=9)) -> ActDone:
+def an_act(*, arguments=None, outcome=None, tool="say", app=APP, room=None, at=LATER - timedelta(seconds=9)) -> ActDone:
     return ActDone(
-        app, tool, {"text": "hi"} if arguments is None else arguments, outcome or Answered("posted", is_error=False), at
+        app,
+        tool,
+        {"text": "hi"} if arguments is None else arguments,
+        outcome or Answered("posted", is_error=False),
+        at,
+        room,
     )
 
 
-def a_sentence(*, text="Guten Tag.", outcome=None, at=LATER - timedelta(seconds=9)) -> SaidAloud:
-    return SaidAloud(APP, MORNING.place, text, Spoken(spoken=True) if outcome is None else outcome, at)
+def a_sentence(*, text="Guten Tag.", outcome=None, generation=None, at=LATER - timedelta(seconds=9)) -> SaidAloud:
+    return SaidAloud(
+        APP, MORNING.place, text, Spoken(spoken=True) if outcome is None else outcome, at, generation=generation
+    )
 
 
 def message_texts(messages) -> list[str]:

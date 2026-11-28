@@ -466,7 +466,7 @@ class AgentLoop:
             if seen is None:
                 self._mind.undue(partial(eq, at))
                 continue
-            self._mind.take((seen,))
+            self._mind.take((replace(seen, generation=self._mind.generation_at(at)),))
             if view_turn_due(self._turned_revisions.get(place), seen.view):
                 waiting = Waiting(seen.view.revision, seen.view.traceparent)
                 if self._mind.due(at, waiting, self._boundaries.clock.now()):

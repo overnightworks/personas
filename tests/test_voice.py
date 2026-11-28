@@ -11,7 +11,7 @@ from agents.turn import FailureCode
 from agents.turn_events import AssistantTextEvent, FinalEvent
 
 from personas.decision import DEFAULT_BUDGET_PAUSE_CAP_SECONDS, TURN_CANCELLED_CODE, AppPlace
-from personas.entries import KeptLine, SaidAloud, Unanswered, Visit
+from personas.entries import KeptLine, Reading, SaidAloud, Unanswered, Visit
 from personas.mind import Mind
 from personas.reporting import Event, start_turn_tally
 from personas.speech import DropReason
@@ -205,6 +205,19 @@ async def test_the_sender_sends_each_sentence_after_the_answer_of_the_one_before
     assert scenario.sent == ["One.", "Two."]
     assert [entry.outcome for entry in scenario.entered] == [scenario.answer, scenario.answer]
     assert scenario.reported == []
+    await ended(sending)
+
+
+@pytest.mark.parametrize(
+    ("checkpoint", "generation"), [(Reading("generation-5", 1), "generation-5"), (None, None)], ids=["read", "unread"]
+)
+async def test_a_sentence_is_entered_with_the_visit_of_the_places_last_read(checkpoint, generation):
+    scenario = Scenario("One.")
+    scenario.mind.move_checkpoint(AT, checkpoint)
+
+    sending = await scenario.sending()
+
+    assert [entry.generation for entry in scenario.entered] == [generation]
     await ended(sending)
 
 

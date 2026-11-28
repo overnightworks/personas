@@ -17,9 +17,10 @@ from mcp_types import INVALID_PARAMS, CallToolResult, TextContent
 
 from personas.app_session import open_app_session
 from personas.decision import BACKOFF_BASE_SECONDS, NETWORK_FAILURE_CODE, SUSPENDED_RETRY_SECONDS, TURN_CANCELLED_CODE
+from personas.entries import ActDone, KeptLine, Room
 from personas.reporting import Event
 from tests.support.app_driving import said_and_taken, settled, waits
-from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
+from tests.support.call import ADDRESSED, ANSWER, CALL_PLACE, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import CANCELLED_TURN
 from tests.support.gateway import Gateway, says_after_a_hold
 from tests.support.history import (
@@ -245,6 +246,23 @@ async def test_a_tools_only_call_and_the_say_after_it_are_acts_in_the_order_made
         a_song(runner, songmaker_url(runner), answered(songmaker.results[CREATE_SONG])),
         a_say(runner, ANSWER, answered("said")),
     ]
+
+
+@pytest.mark.parametrize("tools_only", [False, True], ids=["call to his own app", "call to another app"])
+async def test_a_call_is_kept_with_the_room_and_visit_of_the_turn_that_made_it_whichever_app_it_went_to(
+    runner, songmaker, tools_only
+):
+    runner.gateway = Gateway(
+        song_round(1) if tools_only else say_round(ANSWER), completion("done"), completion("again")
+    )
+    await restarted_in_the_call(runner)
+    say_in_the_call(runner, ADDRESSED)
+    await second_written_turn(runner)
+
+    [act] = [each for each in runner.histories.entries() if isinstance(each, ActDone)]
+    [line, *_] = [each for each in runner.histories.entries() if isinstance(each, KeptLine)]
+    assert act.app == (songmaker_url(runner) if tools_only else url_of(runner, 0))
+    assert act.room == Room(url_of(runner, 0), CALL_PLACE, line.visit.generation)
 
 
 async def test_calls_past_a_tools_only_apps_own_bound_enter_no_act(runner, songmaker):
