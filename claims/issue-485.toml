@@ -1,0 +1,8 @@
+claim_id = "0ca15d9cd2f14022a7771acac7251f68"
+agent = "Claude 09c5accf-533b-455a-a4f6-8e1e617175c5"
+role = "builder"
+base = "8a54eb99835408eb8fded08cd7d2c91f67e49111"
+branch = "claude/issue-485-the-join-s-skill-block-present-apps-tool"
+scope = ["docs/ARCHITECTURE.md", "docs/log.md", "docs/turns.md", "src/personas/held_tools.py", "src/personas/mind.py", "src/personas/present.py", "src/personas/skill_reads.py", "src/personas/turning.py", "tests/support/gateway.py", "tests/support/skills.py", "tests/test_loop_held.py", "tests/test_loop_history.py", "tests/test_loop_skill_block.py", "tests/test_loop_skill_read.py", "tests/test_loop_tools_kept.py", "tests/test_loop_tools_load.py", "tests/test_loop_turns_cut.py", "tests/test_present.py", "tests/test_present_history.py"]
+opened_commit = "cac8cb637a32142405cf4f886375b1dc0f5ce2b1"
+whole_reason = "The deferral of every present app's tools, the block that loads them through the one skill owner the model's read_skill also uses, and the test gateway's reading of a request that ends in the runner's rounds change together: deferral alone hides a seated agent's tools, a block alone loads tools agents refuses, and without the gateway change every loop test loses its turn openings."
