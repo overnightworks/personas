@@ -54,6 +54,16 @@ class Visit:
 
 
 @dataclass(frozen=True)
+class Room:
+    """Where a call was made: the app and place of the turn that made it and that place's visit, which is none where
+    the entry entered while no window of the place was read."""
+
+    app: str
+    place: PlaceRef
+    generation: str | None
+
+
+@dataclass(frozen=True)
 class KeptLine:
     """A line the memory kept as a visit's window gave it, with the wall time it was first read."""
 
@@ -77,6 +87,7 @@ class ViewSeen:
     place: PlaceRef
     view: PlaceView = field(repr=False)
     read_at: datetime
+    generation: str | None = None
 
 
 @dataclass(frozen=True)
@@ -102,13 +113,15 @@ type ActOutcome = Answered | Unanswered
 
 @dataclass(frozen=True)
 class ActDone:
-    """A call relayed for an agent to the app at ``app``, with the wall time its relay ended."""
+    """A call relayed for an agent to the app at ``app``, with the wall time its relay ended and the room it was made
+    in."""
 
     app: str
     tool: str
     arguments: JsonObject = field(repr=False)
     outcome: ActOutcome
     at: datetime
+    room: Room | None = None
 
 
 type SpeechOutcome = SpeakAnswer | SpeakRefusal | Unanswered
@@ -123,6 +136,7 @@ class SaidAloud:
     text: str = field(repr=False)
     outcome: SpeechOutcome
     at: datetime
+    generation: str | None = None
 
 
 @dataclass(frozen=True)

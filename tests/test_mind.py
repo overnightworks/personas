@@ -15,6 +15,9 @@ from personas.decision import (
     BACKOFF_CAP_SECONDS,
     TURN_CANCELLED_CODE,
     AppPlace,
+    Joined,
+    Paused,
+    Restarted,
 )
 from personas.entries import (
     ActDone,
@@ -22,6 +25,7 @@ from personas.entries import (
     KeptLine,
     Lines,
     Occasion,
+    Reading,
     SaidAloud,
     SkillRead,
     ToolsLoaded,
@@ -92,6 +96,25 @@ def test_the_views_he_read_join_his_lines_in_the_order_read_and_a_revision_he_ho
     mind.take(())
 
     assert [type(each) for each in mind.history.entries] == [KeptLine, ViewSeen]
+
+
+@pytest.mark.parametrize(
+    ("checkpoint", "generation"),
+    [
+        (Reading("generation-3", 5), "generation-3"),
+        (Joined(), None),
+        (Restarted(), None),
+        (Paused(), None),
+        (None, None),
+    ],
+    ids=["a read window", "a joined place", "a restarted place", "a paused place", "no checkpoint"],
+)
+def test_the_visit_of_an_entry_is_the_generation_of_the_places_last_read_and_none_without_one(checkpoint, generation):
+    mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS)
+    at = AppPlace(CALL.app, CALL.place)
+    mind.move_checkpoint(at, checkpoint)
+
+    assert mind.generation_at(at) == generation
 
 
 TABLE_AT_A = AppPlace(CALL.app, PlaceRef(kind="table", id="table-1"))

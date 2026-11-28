@@ -47,6 +47,7 @@ from typing import TYPE_CHECKING, Final, Self, cast
 from agents.agent_file import AgentDefinition, AgentFileError, load_agent
 from agents.config import AgentConfig  # noqa: TC002 - pydantic resolves the field's type at run time
 from agents.member import FigureRef, HttpsFileRef, VoiceName, Voices  # noqa: TC002 - pydantic resolves the fields' types at run time
+from agents.skills import implicit_skill_name
 from agents.turn import GatewayModelName, ModelKind, model_kind_of
 from pydantic import (
     AnyHttpUrl,
@@ -248,6 +249,15 @@ class _AppEntry(_Entry):
     max_tool_calls: PositiveInt | None = None
     listens: bool = True
     call_seconds: PositiveFloat | None = None
+
+    @field_validator("mcp_url")
+    @classmethod
+    def _mcp_url_names_an_app(cls, mcp_url: AnyHttpUrl) -> AnyHttpUrl:
+        try:
+            implicit_skill_name(str(mcp_url))
+        except ValueError:
+            raise ValueError("the host must hold a letter or a digit") from None
+        return mcp_url
 
     @_refusal("listens = false needs max_tool_calls")
     def _a_tools_only_app_has_a_call_bound(self) -> bool:

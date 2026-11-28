@@ -69,6 +69,10 @@ def test_a_file_that_cannot_be_read_stops_the_start_and_names_its_path(files, mo
         (lambda text: text.replace("token_endpoint", "token_url"), "token_endpoint"),
         (lambda text: text.replace("https://realm.test/protocol/openid-connect/token", "realm"), "token_endpoint"),
         (lambda text: text.replace('mcp_url = "https://hopin.test/mcp"', 'mcp_url = "ftp://x"'), "apps.0.mcp_url"),
+        (
+            lambda text: text.replace('mcp_url = "https://hopin.test/mcp"', 'mcp_url = "http://[::]/mcp"'),
+            "apps.0.mcp_url",
+        ),
         (lambda text: text.replace('scope = "mcp-hopin"', 'scope = ""'), "apps.0.scope"),
         (lambda text: text.replace('scope = "mcp-hopin"\n', ""), "apps.0.scope"),
         (lambda text: text.replace('client_id = "agent-mozart"', 'client_id = ""'), "agents.0.client_id"),
@@ -100,6 +104,7 @@ def test_a_file_that_cannot_be_read_stops_the_start_and_names_its_path(files, mo
         "token endpoint missing",
         "token endpoint not a URL",
         "app URL not http",
+        "app URL host without a letter or a digit",
         "app scope empty",
         "app scope missing",
         "client id empty",
