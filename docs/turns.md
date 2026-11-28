@@ -245,11 +245,16 @@ An entry has its app and the time he took it (`at`), and is one of:
 
 ## Recall
 
-- TURNS-39: With `[memory]` every turn holds `recall`, first among its tools: one string `text`, read only from the
-  lines he kept in the turn's own app and place, every visit of it.
-- TURNS-40: A line matches when its text holds every word (Postgres full text, `simple`: no stemming); a `text` with
-  no word matches every line. Only lines first read before his history's first entry are given, newest
-  first, as many as fit `lookup_bytes`, with `older_dropped` when more matched.
+- TURNS-39: With `[memory]` every turn holds `recall`, first among its tools: one string `text`, read only from what he
+  kept in the turn's own app and place, every visit of it: lines, views, his calls with their results and his
+  sentences.
+- TURNS-40: An entry matches when its words hold every word of `text` (Postgres full text, `simple`: no stemming): a
+  line's and a sentence's text, a view's state values, a call's tool name, its arguments' values and its result's
+  text, never a key, a kind, an app or a place name; a `text` with no word matches every entry. Only entries from
+  before his history are given: those of the record below the ordinal his history begins at, and the lines first read
+  before his history's first entry that the record does not hold. They are given newest first in the form his history
+  tells them, as many as fit `lookup_bytes`, with `older_dropped` when more matched and `too_large` counting the
+  matches too large for a result on their own.
 - TURNS-41: A lookup takes nothing into his history and is never held back. A store that cannot answer gives an error
   result; the turn goes on.
 

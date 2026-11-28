@@ -136,8 +136,8 @@ release path is in [the release runbook](runbooks/release.md).
 | `answered_turns` | what each answered turn's message told | the entries it told left, or `memory erase` |
 | `agent_turns` | checkpoints, due places, unanswered count, pause end | next write; on a takeover, as below |
 | `agent_owner` | the generation of the pod that owns him | every takeover and every erase renews it |
-| `lines`, with `[memory]` | every line of every window he read | a sweep past `lines_keep_days`, or `memory erase` |
-| `kept_entries`, with `[memory]` | the record: every line, view revision, call with its result and spoken sentence his history took, each with its app, place and visit | a sweep past `lines_keep_days` once his history no longer holds it, or `memory erase` |
+| `lines`, with `[memory]` | every line of every window he read; `recall` reads the ones before his history's first entry that the record does not hold | a sweep past `lines_keep_days`, or `memory erase` |
+| `kept_entries`, with `[memory]` | the record: every line, view revision, call with its result and spoken sentence his history took, each with its app, place and visit; `recall` finds by words in it what his history no longer holds | a sweep past `lines_keep_days` once his history no longer holds it, or `memory erase` |
 
 The mind writes through on every change, under his generation, so a write from a pod that lost him is
 refused. A restart or a takeover loads his history and turns, and his next turn is told what the holder
@@ -165,6 +165,9 @@ loaded him is not kept. An ordinal is kept once and its first row stays; a row w
 an ordinal a write hands over is a store defect: the write takes nothing and he stops on this pod (LOG-23)
 until `memory erase` removes the leftover. Without `[memory]` the record is neither written, copied into nor
 swept. A release before the record works on the migrated schema and never reads or cuts it.
+`recall` reads the record in the turn's own app and place, every visit, for the entries below the ordinal his history
+begins at, of every kind, and `lines` for the lines before his history that the record lacks; a line both hold is
+told once, from the record. It writes nothing and uses no index of its own.
 `personas memory list` and `personas memory erase` show and erase what an agent keeps; see
 [the runbook](runbooks/erase-memory.md).
 `personas migrate` is the only code that changes the schema, and a release only adds to it while two
