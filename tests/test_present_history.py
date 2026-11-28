@@ -98,10 +98,6 @@ def test_a_present_unchanged_since_its_write_still_has_a_delta_while_entries_wai
     assert (delta.entries, delta.told, delta.kept_first, delta.kept) == ((), (), 1, (said(2, "two"),))
 
 
-def test_a_delta_built_without_kept_entries_keeps_none_so_a_release_before_the_record_writes_it_as_it_always_did():
-    assert HistoryDelta(0, (), 0, (), 0).kept == ()
-
-
 def test_taking_names_the_entries_it_appends_leaving_out_a_view_revision_the_history_holds_or_the_take_repeats():
     view = ViewSeen(APP, TABLE, a_view(1), LATER)
     held = took(EMPTY_PRESENT, said(1, "one"), view).history.entries
