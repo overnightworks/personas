@@ -138,7 +138,14 @@ async def test_an_app_that_lists_a_tool_twice_gives_no_skill_line_and_no_tool_th
     assert not runner.task.done()
 
 
-@pytest.mark.parametrize("granted_before", range(1, 7))
+# The sweep moves the failing renewal through every point of the turn, the own app's listing included.
+@pytest.mark.parametrize(
+    "granted_before",
+    [
+        pytest.param(count, id=f"the realm answers no usable token at the renewal after {count} granted")
+        for count in range(1, 7)
+    ],
+)
 async def test_a_token_renewal_that_answers_no_usable_token_suspends_the_loop_wherever_the_turn_is(
     runner, caplog, granted_before
 ):
