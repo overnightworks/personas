@@ -27,7 +27,7 @@ from personas.decision import (
 from personas.entries import SkillRead, ToolsLoaded
 from personas.present import EMPTY_SKILL_TEXT, NOT_OFFERED_TEXT, ROUND_CALL_PREFIX
 from personas.reporting import Event
-from tests.support.app_driving import settled
+from tests.support.app_driving import seated_in_the_call, settled
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, a_turn, restarted, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import SweepClock
 from tests.support.gateway import BUDGET_SPENT, ERROR_MARK, Gateway, loading, reading, referenced
@@ -53,6 +53,10 @@ pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 OTHER = "other"
 TURN_ANSWERS = 5
+
+
+def turn_answers() -> list:
+    return [completion(str(each)) for each in range(TURN_ANSWERS)]
 
 
 def told(rounds) -> list[tuple[str, str, object]]:
@@ -100,21 +104,12 @@ async def stood_at(other, *standings) -> None:
 async def after_a_first_turn(runner, other=None, *replies) -> None:
     """The runner started in his call, whose first turn was answered; the table at the other app, when there is one, is
     joined after it."""
-    runner.gateway = Gateway(*replies or [completion(str(each)) for each in range(TURN_ANSWERS)])
+    runner.gateway = Gateway(*replies or turn_answers())
     await restarted_in_the_call(runner)
     await a_turn(runner, 1)
     await runner.reports.until_a_turn_completed()
     if other is not None:
         await stood_at(other, at_table())
-
-
-async def seated_at_both(runner, other, *replies) -> None:
-    """The runner started with his table at the other app and his call at the first, both read once."""
-    runner.gateway = Gateway(*replies or [completion(str(each)) for each in range(TURN_ANSWERS)])
-    other.stand(SUBJECT, at_table())
-    await restarted_in_the_call(runner)
-    await other.until_standing_read()
-    await settled(other)
 
 
 async def test_a_turn_after_a_join_ends_with_the_apps_read_and_load_rounds_and_tells_earlier_messages_byte_for_byte(
@@ -236,7 +231,7 @@ async def test_a_declared_apps_block_is_a_read_and_a_load_per_skill_in_listing_o
 
 async def test_two_present_apps_whose_skills_share_a_name_each_get_a_block_that_loads_their_own_tools(runner, other):
     """TURNS-18."""
-    await seated_at_both(runner, other)
+    await seated_in_the_call(runner, other, *turn_answers())
 
     await a_turn(runner, 1)
 
@@ -306,7 +301,7 @@ async def test_every_tool_a_turn_lists_is_sent_deferred_and_each_present_apps_is
     runner, other, songmaker
 ):
     """TURNS-18."""
-    await seated_at_both(runner, other)
+    await seated_in_the_call(runner, other, *turn_answers())
 
     await a_turn(runner, 1)
 
@@ -380,7 +375,7 @@ async def test_a_block_read_that_fails_at_another_app_logs_held_app_failed_and_t
     """LOG-19."""
     other.shelf = Shelf({OTHER: a_skill_file(OTHER, tools=PLAY_TOOL)})
     other.script(SKILLS_GET, refuses_with_a_server_error)
-    await seated_at_both(runner, other)
+    await seated_in_the_call(runner, other, *turn_answers())
 
     await a_turn(runner, 1)
     await runner.reports.until_a_turn_completed()
@@ -401,7 +396,7 @@ async def test_a_block_read_past_one_results_bound_is_left_out_and_its_load_ente
         OTHER if at_other else HOPIN, tools=PLAY_TOOL if at_other else SAY_TOOL, body="x" * (MAX_EVENT_BYTES + 1)
     )
     (other if at_other else runner.app).shelf = Shelf({OTHER if at_other else HOPIN: large})
-    await seated_at_both(runner, other)
+    await seated_in_the_call(runner, other, *turn_answers())
 
     await a_turn(runner, 1)
 

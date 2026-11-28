@@ -19,7 +19,7 @@ from mcp_types import ListToolsResult
 
 from personas.decision import LOAD_TOOLS_CALLS, NETWORK_FAILURE_CODE, READ_SKILL_CALLS, TURN_CANCELLED_CODE
 from personas.reporting import Event
-from tests.support.app_driving import said_and_taken, settled, shows, waits
+from tests.support.app_driving import said_and_taken, seated_in_the_call, settled, shows, waits
 from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import CANCELLED_TURN, failed_turn
 from tests.support.gateway import Gateway, play, reads_and_loads_the_bounds_allow, say, words
@@ -50,15 +50,6 @@ def played_act(runner, text: str, outcome=None):
 
 async def lists_nothing(reply):
     await reply.result(ListToolsResult(tools=[]))
-
-
-async def seated_in_the_call(runner, other, *replies):
-    """The runner started with his table at the other app and his call at the first, both read once, none waiting."""
-    runner.gateway = Gateway(*replies)
-    other.stand(SUBJECT, at_table())
-    await restarted_in_the_call(runner)
-    await other.until_standing_read()
-    await settled(other)
 
 
 def bound_requests_to(runner, app_url: str, seconds: float) -> None:

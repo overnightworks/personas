@@ -6,8 +6,9 @@ from typing import TYPE_CHECKING
 
 from agents.member import STANDING_URI
 
-from tests.support.call import PERSON
-from tests.support.history import SPEAKER, TABLE, a_state
+from tests.support.call import PERSON, restarted_in_the_call
+from tests.support.gateway import Gateway
+from tests.support.history import SPEAKER, TABLE, a_state, at_table
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 
 if TYPE_CHECKING:
@@ -30,6 +31,15 @@ async def settled(app: FakeApp, subject: str = SUBJECT) -> None:
         reads = app.reads[STANDING_URI]
         app.stand(subject, *app.standings[subject])
         await app.until_standing_read(reads + 1)
+
+
+async def seated_in_the_call(runner, other, *replies) -> None:
+    """The runner started with his table at the other app and his call at the first, both read once, none waiting."""
+    runner.gateway = Gateway(*replies)
+    other.stand(SUBJECT, at_table())
+    await restarted_in_the_call(runner)
+    await other.until_standing_read()
+    await settled(other)
 
 
 async def said_and_taken(
