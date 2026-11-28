@@ -8,7 +8,6 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 from agents.mcp_client import READ_SECONDS, MemberSession, open_member_session
-from agents.member_outcomes import INVALID_ANSWER_CODE, UnusableAnswer
 from agents.skills import Skill, implicit_skill, implicit_skill_name
 from pydantic import SecretStr
 
@@ -68,8 +67,5 @@ async def read_skills(
 
 
 def _implicit_skill(app_url: str, instructions: str | None, tools: Sequence[str]) -> Skill:
-    try:
-        description = _IMPLICIT_DESCRIPTION.format(implicit_skill_name(app_url))
-        return implicit_skill(app_url, app_url, instructions, tools, description)
-    except ValueError:
-        raise UnusableAnswer(INVALID_ANSWER_CODE) from None
+    description = _IMPLICIT_DESCRIPTION.format(implicit_skill_name(app_url))
+    return implicit_skill(app_url, app_url, instructions, tools, description)

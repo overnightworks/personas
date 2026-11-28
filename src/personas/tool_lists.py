@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, Final
 
-from agents.member_outcomes import CallFailure
+from agents.member_outcomes import CallFailure, UnusableAnswer
 from logline import StepTimer
 
 from personas.app_session import read_skills
@@ -117,10 +117,10 @@ class ToolLists:
         return Listed(tools, await self._skills_of(self._app, session, tools))
 
     async def _list_own_tools(self, session: MemberSession, record: TaskRecord) -> Declared:
-        """The tools the place's app lists, or ``None`` when it did not answer within its call time; the step then
-        ends failed with its reason and the turn goes on. The list the session kept is used as it is: no request is
-        sent and no step is written. The record keeps how many tools notices the session had received when the turn
-        read its list."""
+        """The tools the place's app lists, or ``None`` when it did not answer within its call time or its listing
+        breaks a rule; the step then ends failed with its reason and the turn goes on. The list the session kept is
+        used as it is: no request is sent and no step is written. The record keeps how many tools notices the session
+        had received when the turn read its list."""
         record.tools_notices_read = session.tools_notices()
         if (kept := session.kept_tools()) is not None:
             return kept
@@ -129,12 +129,18 @@ class ToolLists:
             try:
                 async with within_call_time(self._app.call_seconds):
                     await self._renew_token()
-                    return await session.declared_tools()
+                    try:
+                        return await session.declared_tools()
+                    except UnusableAnswer as failure:
+                        return self._ended_failed(timer, failure)
             except CallTimedOut as failure:
-                timer.handled()
-                timer.fail(failure_code(failure))
-                timer.end()
-                return None
+                return self._ended_failed(timer, failure)
+
+    @staticmethod
+    def _ended_failed(timer: StepTimer, failure: CallTimedOut | UnusableAnswer) -> None:
+        timer.handled()
+        timer.fail(failure_code(failure))
+        timer.end()
 
     async def _list_tools(self, app: AppTarget, session: MemberSession) -> tuple[ToolDeclaration, ...]:
         with stepping(
