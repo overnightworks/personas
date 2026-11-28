@@ -10,14 +10,14 @@ from agents.member import PlaceRef, SpeakAnswer, SpeakRefusal, Spoken, Written
 from agents.turn import FailureCode
 from agents.turn_events import AssistantTextEvent, FinalEvent
 
+from personas.config import AppTarget
 from personas.decision import DEFAULT_BUDGET_PAUSE_CAP_SECONDS, TURN_CANCELLED_CODE, AppPlace
 from personas.entries import KeptLine, Reading, SaidAloud, Unanswered, Visit
+from personas.holds import HoldInbox
 from personas.mind import Mind
 from personas.reporting import Event, start_turn_tally
-from personas.turn_bound import TurnBound
-from personas.config import AppTarget
-from personas.holds import HoldInbox
 from personas.speech import DropReason, Held, HoldOutcome
+from personas.turn_bound import TurnBound
 from personas.voice import Answering, Sender, Speaking, Voicing
 from tests.support.fakes import FakeClock
 
