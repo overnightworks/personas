@@ -1,8 +1,0 @@
-claim_id = "27e05732afe442e5bf29ef8e772f3c22"
-agent = "Claude 09c5accf-533b-455a-a4f6-8e1e617175c5"
-role = "builder"
-base = "7676fb91c597ef5eddecde71c5b10ef7ee453c8d"
-branch = "claude/issue-473-personas-pins-quality-v0-28-0"
-scope = [".github/workflows/ci.yml", ".github/workflows/code-scanning.yml", ".github/workflows/release.yml", "quality/config.toml"]
-opened_commit = "7059ac23f92b5ae69834c1a34aea99453f3ffac3"
-whole_reason = "Every quality pin moves together, because the gate, CodeQL and release workflows must run one quality version, and the root entry v0.28.0 turns into a case is deleted in the same change that adopts it."
