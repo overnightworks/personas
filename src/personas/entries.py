@@ -174,6 +174,12 @@ def is_told(entry: Entry) -> TypeIs[ToldEntry]:
     return not isinstance(entry, SkillRead | ToolsLoaded)
 
 
+def is_his_own(entry: ToldEntry) -> bool:
+    """Whether he said or did the entry: his own line, a call he made or a sentence he spoke; a view and another's line
+    are told to him."""
+    return entry.own if isinstance(entry, KeptLine) else isinstance(entry, ActDone | SaidAloud)
+
+
 @dataclass(frozen=True)
 class Lines:
     """Why a written turn runs: the lines of one visit's window taken since his last turn there, which the history
@@ -382,10 +388,9 @@ def _record_row(ordinal: int, entry: ToldEntry) -> RecordRow:
     app, place, generation = (
         (cast("ActDone", entry).app, None, None) if room is None else (room.app, room.place, room.generation)
     )
-    own = entry.own if isinstance(entry, KeptLine) else isinstance(entry, ActDone | SaidAloud)
     speaker = entry.name if isinstance(entry, KeptLine) and not entry.own else None
     kind = str(stored[STORED_KIND_KEY])
-    return RecordRow(ordinal, entry_time(entry), kind, app, place, generation, own, speaker, stored)
+    return RecordRow(ordinal, entry_time(entry), kind, app, place, generation, is_his_own(entry), speaker, stored)
 
 
 def record_rows(first: int, entries: Iterable[Entry]) -> tuple[RecordRow, ...]:

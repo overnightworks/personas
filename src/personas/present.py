@@ -33,6 +33,7 @@ from personas.entries import (
     ViewSeen,
     Visit,
     entry_size,
+    is_his_own,
     is_told,
     newest_that_fit,
     told_bytes,
@@ -57,11 +58,7 @@ def _holds_revision(entries: Iterable[Entry], view: ViewSeen) -> bool:
 
 
 def _not_his_own(entry: Entry) -> bool:
-    return (
-        is_told(entry)
-        and not isinstance(entry, ActDone | SaidAloud)
-        and not (isinstance(entry, KeptLine) and entry.own)
-    )
+    return is_told(entry) and not is_his_own(entry)
 
 
 @dataclass(frozen=True)
