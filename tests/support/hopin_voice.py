@@ -212,14 +212,8 @@ class AppVoice(AppPlaces):
         taken = SpeakArguments.model_validate(arguments)
         self.speaks_naming_holds.append((taken.text, taken.interrupted))
         self.speak_styles.append(taken.style)
-        if taken.interrupted is None and taken.place.id in self.holds:
-            return ToolOutcome(SpeakRefused(refused=SpeakRefusal.HELD).model_dump_json(), is_error=True)
-        if taken.interrupted is not None:
-            self._decision_arrives(taken.place.id, taken.told_changes)
-            if self.holds.get(taken.place.id, ("", None))[0] != taken.interrupted:
-                return ToolOutcome(SpeakRefused(refused=SpeakRefusal.NOT_INTERRUPTED).model_dump_json(), is_error=True)
-            if self._stale(taken.place.id, taken.told_changes):
-                return ToolOutcome(SpeakRefused(refused=SpeakRefusal.STALE).model_dump_json(), is_error=True)
+        if (refusal := self._refusal_before_playing(taken)) is not None:
+            return ToolOutcome(SpeakRefused(refused=refusal).model_dump_json(), is_error=True)
         self.content.add(taken.text)
         if (held := self.held_speak) is not None:
             self.held_speak = None
@@ -246,6 +240,16 @@ class AppVoice(AppPlaces):
         else:
             self.speak(taken.place.id, request.principal.sub, ACCEPTED_NAME, taken.text, spoken=True)
         return ToolOutcome(Spoken(spoken=True).model_dump_json(), is_error=False)
+
+    def _refusal_before_playing(self, taken: SpeakArguments) -> SpeakRefusal | None:
+        """Why a sentence is refused before it plays: it names no hold while one holds the member, the hold it names
+        does not stand, or it was told fewer changes than the hold counted."""
+        if taken.interrupted is None:
+            return SpeakRefusal.HELD if taken.place.id in self.holds else None
+        self._decision_arrives(taken.place.id, taken.told_changes)
+        if self.holds.get(taken.place.id, ("", None))[0] != taken.interrupted:
+            return SpeakRefusal.NOT_INTERRUPTED
+        return SpeakRefusal.STALE if self._stale(taken.place.id, taken.told_changes) else None
 
     def _settle(self, place_id: str, *, plays: bool) -> None:
         """The decision that waits at the place plays, or is voided, once."""

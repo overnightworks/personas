@@ -63,6 +63,16 @@ if TYPE_CHECKING:
 
 
 LIMIT_SECONDS = 10
+
+
+async def until_reached(changed: asyncio.Event, reached: Callable[[], bool]) -> None:
+    """Returns once ``reached`` holds, looking again each time ``changed`` is set; fails after the limit."""
+    async with asyncio.timeout(LIMIT_SECONDS):
+        while not reached():
+            changed.clear()
+            await changed.wait()
+
+
 _SUBJECT_KEY = "test.subject"
 
 DISCOVER = "server/discover"
@@ -488,10 +498,7 @@ class FakeApp(AppVoice):
 
     async def until_choices_waited(self, count: int) -> None:
         """Returns once this many decisions waited for the talk-over to end; fails after the limit."""
-        async with asyncio.timeout(LIMIT_SECONDS):
-            while self.choices_waited < count:
-                self.choice_waited.clear()
-                await self.choice_waited.wait()
+        await until_reached(self.choice_waited, lambda: self.choices_waited >= count)
 
     async def until_turn_states(self, count: int) -> None:
         """Returns once the app took this many statements; fails after the limit."""
