@@ -406,9 +406,10 @@ async def test_a_delta_with_more_entries_than_one_statement_takes_is_kept_whole(
 async def test_a_write_the_generation_refuses_keeps_nothing(histories, database):
     stale = await histories.take_over(AGENT)
     await histories.take_over(AGENT)
+    delta = recorded(0, said(1, "stale"))
 
     with pytest.raises(StaleGenerationError):
-        await histories.write(AGENT, stale, recorded(0, said(1, "stale")), NO_TURNS_KEPT)
+        await histories.write(AGENT, stale, delta, NO_TURNS_KEPT)
 
     assert kept_record(database, "ordinal") == []
 

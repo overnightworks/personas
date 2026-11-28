@@ -311,7 +311,8 @@ def test_a_record_row_holds_the_entry_its_kind_its_time_and_the_room_it_was_take
 def test_a_record_row_of_a_call_has_the_room_it_was_made_in_else_its_target_app(entry, room):
     (row,) = record_rows(0, (entry,))
 
-    assert (row.app, row.place, row.generation) == room
+    kept_room = (row.app, row.place, row.generation)
+    assert kept_room == room
 
 
 def test_the_record_keeps_what_a_turn_is_told_and_every_row_has_the_ordinal_its_entry_has_in_the_history():
