@@ -35,6 +35,7 @@ from personas.main import (
 from personas.memory import PostgresLineStore
 from personas.readiness import FileReadyMarker
 from personas.reporting import Event, log_state_change
+from personas.sweep import Swept
 from personas.tokens import HttpTokenSource
 from tests.support.fakes import FakeClock, credentials
 from tests.support.gateway import Gateway, says
@@ -372,10 +373,10 @@ class SweepEndedBySigterm:
         self._in_a_sweep = in_a_sweep
         self.time = FakeClock()
 
-    async def erase_before(self, first_read_before) -> int:
+    async def erase_before(self, first_read_before) -> Swept:
         if self._in_a_sweep:
             await self._terminated()
-        return 0
+        return Swept(0, 0)
 
     def now(self) -> float:
         return self.time.now()

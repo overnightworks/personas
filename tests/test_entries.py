@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import secrets
+from dataclasses import replace
 from datetime import timedelta, timezone
 
 import pytest
@@ -24,8 +25,10 @@ from personas.entries import (
     ViewSeen,
     Waiting,
     entry_from_stored,
+    entry_room,
     entry_size,
     is_told,
+    record_rows,
     stored_entry,
     stored_turn,
     taken_lines,
@@ -222,3 +225,90 @@ def test_an_answered_turn_comes_back_from_its_stored_json_as_it_went_in(turn):
 def test_a_stored_value_that_names_no_kind_of_entry_is_refused(stored):
     with pytest.raises(ValueError, match="no kind of entry"):
         entry_from_stored(stored)
+
+
+def a_view_taken_in(generation: str | None) -> ViewSeen:
+    return ViewSeen(APP, TABLE, PlaceView(revision=1, awaits_you=True, state={}), LATER, generation=generation)
+
+
+@pytest.mark.parametrize(
+    ("entry", "room"),
+    [
+        (said(1, "hello"), Room(MORNING.app, MORNING.place, MORNING.generation)),
+        (a_view_taken_in("morning"), Room(APP, TABLE, "morning")),
+        (a_view_taken_in(None), Room(APP, TABLE, None)),
+        (a_sentence(generation="morning"), Room(APP, MORNING.place, "morning")),
+        (a_sentence(), Room(APP, MORNING.place, None)),
+        (an_act(app="https://other.test/mcp", room=Room(APP, TABLE, "morning")), Room(APP, TABLE, "morning")),
+        (an_act(), None),
+        (a_skill_read(), None),
+        (a_tools_load(), None),
+    ],
+    ids=[
+        "line: its visit",
+        "view: its app, place and visit",
+        "view without a visit",
+        "sentence: its app, place and visit",
+        "sentence without a visit",
+        "call: the room of the turn that made it, not its target",
+        "call a release before the room took",
+        "skill read",
+        "tools loaded",
+    ],
+)
+def test_an_entry_was_taken_in_the_room_its_visit_or_its_own_fields_state(entry, room):
+    assert entry_room(entry) == room
+
+
+@pytest.mark.parametrize(
+    ("entry", "own", "speaker"),
+    [
+        (replace(said(1, "mine"), own=True), True, None),
+        (said(1, "yours", name="Bo"), False, "Bo"),
+        (a_view_taken_in("morning"), False, None),
+        (an_act(), True, None),
+        (a_sentence(), True, None),
+    ],
+    ids=["his own line", "another's line", "view", "call", "sentence"],
+)
+def test_a_record_row_says_who_said_or_did_the_entry_and_names_only_another_line_speaker(entry, own, speaker):
+    (row,) = record_rows(7, (entry,))
+
+    assert (row.own, row.speaker) == (own, speaker)
+
+
+@pytest.mark.parametrize(
+    ("entry", "kind", "at", "place"),
+    [
+        (said(1, "hello"), "line", LATER, MORNING.place),
+        (a_view_taken_in("morning"), "view", LATER, TABLE),
+        (an_act(room=Room(APP, TABLE, "morning")), "act", LATER - timedelta(seconds=9), TABLE),
+        (a_sentence(generation="morning"), "speech", LATER - timedelta(seconds=9), MORNING.place),
+    ],
+    ids=["line", "view", "call", "sentence"],
+)
+def test_a_record_row_holds_the_entry_its_kind_its_time_and_the_room_it_was_taken_in(entry, kind, at, place):
+    (row,) = record_rows(7, (entry,))
+
+    assert (row.ordinal, row.kind, row.at, row.entry) == (7, kind, at, stored_entry(entry))
+    assert (row.app, row.place) == (APP, place)
+
+
+def test_a_record_row_of_a_call_a_release_before_the_room_took_has_its_target_app_and_no_place_or_visit():
+    (row,) = record_rows(0, (an_act(app="https://target.test/mcp"),))
+
+    assert (row.app, row.place, row.generation) == ("https://target.test/mcp", None, None)
+
+
+def test_a_record_row_of_a_call_made_in_a_room_has_that_room_though_the_call_went_to_another_app():
+    (row,) = record_rows(0, (an_act(app="https://target.test/mcp", room=Room(APP, TABLE, "morning")),))
+
+    assert (row.app, row.place, row.generation) == (APP, TABLE, "morning")
+
+
+def test_the_record_keeps_what_a_turn_is_told_and_every_row_has_the_ordinal_its_entry_has_in_the_history():
+    entries = (said(1, "a"), a_skill_read(), an_act(), a_tools_load(), a_sentence())
+
+    rows = record_rows(10, entries)
+
+    assert [(row.ordinal, row.kind) for row in rows] == [(10, "line"), (12, "act"), (14, "speech")]

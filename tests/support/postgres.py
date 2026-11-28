@@ -93,15 +93,23 @@ def migrated_template() -> Iterator[str]:
         yield name
 
 
-def kept_lines(target: DatabaseTarget, columns: str) -> list[tuple[object, ...]]:
-    """The rows of the lines table, read with plain SQL in the order of agent and ``seq``."""
+def _rows_of(target: DatabaseTarget, query: str) -> list[tuple[object, ...]]:
     engine = engine_of(target.dbname)
     try:
         with engine.connect() as connection:
-            result = connection.execute(text(f"SELECT {columns} FROM lines ORDER BY client_id, seq"))  # noqa: S608 - test-chosen column names
-            return [tuple(row) for row in result]
+            return [tuple(row) for row in connection.execute(text(query))]
     finally:
         engine.dispose()
+
+
+def kept_lines(target: DatabaseTarget, columns: str) -> list[tuple[object, ...]]:
+    """The rows of the lines table, read with plain SQL in the order of agent and ``seq``."""
+    return _rows_of(target, f"SELECT {columns} FROM lines ORDER BY client_id, seq")  # noqa: S608 - test-chosen column names
+
+
+def kept_record(target: DatabaseTarget, columns: str) -> list[tuple[object, ...]]:
+    """The rows of the record, read with plain SQL in the order of agent and ordinal, rows without one last."""
+    return _rows_of(target, f"SELECT {columns} FROM kept_entries ORDER BY client_id, ordinal")  # noqa: S608 - test-chosen column names
 
 
 def revision_of(target: DatabaseTarget) -> str | None:

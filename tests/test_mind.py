@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import secrets
+from dataclasses import replace
 from datetime import UTC, datetime
 from functools import partial
 
@@ -22,6 +23,7 @@ from personas.decision import (
 from personas.entries import (
     ActDone,
     Entry,
+    KeptHistory,
     KeptLine,
     Lines,
     Occasion,
@@ -37,7 +39,7 @@ from personas.entries import (
     entry_size,
 )
 from personas.mind import Mind
-from personas.present import round_call_id, turn_messages
+from personas.present import present_of, round_call_id, turn_messages
 from personas.speech import Answered, HoldKey
 from tests.support.history import message_texts
 
@@ -73,6 +75,59 @@ def test_the_lines_of_every_visit_join_his_one_history_in_the_order_taken():
         (CALL.app, "second"),
         (OTHER_CALL.app, "third"),
     ]
+
+
+def a_recording_mind(history_bytes: int = 1_000, *, resumed: tuple[Entry, ...] = (), left_out: int = 0) -> Mind:
+    kept = KeptHistory(left_out, resumed, 0, ())
+    return Mind(history_bytes, history_bytes, BUDGET_PAUSE_CAP_SECONDS, present_of(kept), keeping_record=True)
+
+
+def test_a_mind_that_keeps_no_record_holds_no_entry_to_keep():
+    mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS, present_of(KeptHistory(2, (said(CALL, 1, "old"),), 0, ())))
+
+    mind.take((said(CALL, 2, "new"),))
+
+    assert mind.unrecorded()[1] == ()
+
+
+def test_a_mind_that_keeps_a_record_starts_with_every_entry_his_loaded_history_holds_from_its_first_ordinal():
+    old = (said(CALL, 1, "one"), said(CALL, 2, "two"))
+
+    assert a_recording_mind(resumed=old, left_out=5).unrecorded() == (5, old)
+
+
+def test_every_entry_taken_waits_to_be_recorded_in_order_even_after_the_bound_dropped_it_from_his_history():
+    one, two, three = said(CALL, 1, "one"), said(CALL, 2, "two"), said(CALL, 3, "three")
+    mind = a_recording_mind(history_bytes=entry_size(one))
+
+    mind.take((one, two))
+    mind.take((three,))
+
+    assert mind.history.left_out == 2
+    assert mind.unrecorded() == (0, (one, two, three))
+
+
+def test_a_view_revision_he_holds_waits_to_be_recorded_once():
+    table = PlaceRef(kind="table", id="table-1")
+    view = ViewSeen(CALL.app, table, PlaceView(revision=1, awaits_you=True, state={}), READ_AT)
+    mind = a_recording_mind()
+
+    mind.take((view,))
+    mind.take((replace(view, read_at=READ_AT.replace(minute=5)),))
+
+    assert mind.unrecorded() == (0, (view,))
+
+
+def test_recording_drops_exactly_the_entries_a_taken_write_held_and_keeps_those_taken_since():
+    one, two, three = said(CALL, 1, "one"), said(CALL, 2, "two"), said(CALL, 3, "three")
+    mind = a_recording_mind()
+    mind.take((one, two))
+    first, held = mind.unrecorded()
+    mind.take((three,))
+
+    mind.recorded(first + len(held))
+
+    assert mind.unrecorded() == (2, (three,))
 
 
 def test_a_history_read_earlier_does_not_change_when_more_lines_are_taken():

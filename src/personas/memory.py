@@ -1,11 +1,11 @@
-"""The memory: personas' Postgres, which holds the lines every agent read, verbatim, and each agent's history, and the
-migration that owns its schema.
+"""The memory: personas' Postgres, which holds the lines every agent read, verbatim, each agent's history and the record
+of every entry his history took, and the migration that owns its schema.
 
 The runner writes, searches and sweeps through ``PostgresLineStore``; ``PostgresHistoryStore`` keeps each agent's
-history for the pod that owns him; the ``memory`` commands list through both and erase through ``PostgresMemory``;
-``migrate`` is the only code that changes the schema. A line is keyed by the agent, the app, the place, the visit and
-its ``seq``, so reading a window again changes nothing and the time of the first read stands. No database error
-reaches a log or a traceback with a parameter or a row in it.
+history and record for the pod that owns him; the ``memory`` commands list through both and erase through
+``PostgresMemory``; ``migrate`` is the only code that changes the schema. A line is keyed by the agent, the app, the
+place, the visit and its ``seq``, so reading a window again changes nothing and the time of the first read stands. No
+database error reaches a log or a traceback with a parameter or a row in it.
 """
 
 from __future__ import annotations
@@ -13,8 +13,10 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import re
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
+from itertools import batched
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
@@ -36,6 +38,7 @@ from sqlalchemy import (
     Text,
     create_engine,
     delete,
+    exists,
     func,
     literal,
     literal_column,
@@ -46,7 +49,7 @@ from sqlalchemy import (
     union_all,
     update,
 )
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.exc import InterfaceError, OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
@@ -57,6 +60,7 @@ from personas.entries import (
     Visit,
     entry_from_stored,
     entry_time,
+    record_rows,
     stored_entry,
     stored_turn,
     stored_turns,
@@ -67,21 +71,24 @@ from personas.failures import (
     STORE_DEFECT_CODE,
     STORE_TIMEOUT_CODE,
     STORE_UNREACHABLE_CODE,
+    OrdinalReusedError,
     SchemaNotAtHeadError,
     StaleGenerationError,
     StoreDefect,
     StoreUnavailable,
     task_is_being_cancelled,
 )
+from personas.sweep import Swept
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable, Generator
     from datetime import datetime
 
+    from pydantic import JsonValue
     from sqlalchemy import ColumnElement, Delete, Update
 
     from personas.config import DatabaseTarget
-    from personas.entries import HistoryDelta, KeptTurns, WindowRead
+    from personas.entries import HistoryDelta, KeptTurns, RecordRow, WindowRead
     from personas.recall import LineSearch
 
 MIGRATIONS_DIRECTORY: Final = Path(__file__).parent / "migrations"
@@ -91,6 +98,8 @@ POSTGRES_DRIVER: Final = "postgresql+psycopg"
 MINIMUM_CONNECT_SECONDS: Final = 2
 """The least connect timeout the driver honours; it raises a smaller one to this and truncates a
 fraction, so the bound is rounded up."""
+RECORD_ROWS_PER_STATEMENT: Final = 1000
+"""The most rows of the record one statement inserts, which keeps its parameters below the driver's limit."""
 NUL: Final = "\x00"
 REPLACEMENT: Final = "�"
 SIMPLE_CONFIGURATION: Final = literal_column("'simple'::regconfig", Text)
@@ -126,6 +135,22 @@ _HISTORY_ENTRIES: Final = Table(
     Column("entry", Text),
     PrimaryKeyConstraint("client_id", "ordinal"),
 )
+_KEPT_ENTRIES: Final = Table(
+    "kept_entries",
+    MetaData(),
+    Column("id", BigInteger, primary_key=True),
+    Column("client_id", Text),
+    Column("ordinal", BigInteger),
+    Column("at", DateTime(timezone=True)),
+    Column("kind", Text),
+    Column("app", Text),
+    Column("place_kind", Text),
+    Column("place_id", Text),
+    Column("generation", Text),
+    Column("own", Boolean),
+    Column("speaker", Text),
+    Column("entry", JSONB),
+)
 _ANSWERED_TURNS: Final = Table(
     "answered_turns",
     MetaData(),
@@ -148,6 +173,8 @@ _AGENT_OWNER: Final = Table(
     Column("client_id", Text, primary_key=True),
     Column("generation", BigInteger),
 )
+_ERASED_TABLES: Final = (_LINES, _HISTORY_ENTRIES, _KEPT_ENTRIES, _ANSWERED_TURNS)
+"""The tables an erase empties, in the order ``MemoryErased`` counts them."""
 _RENEWED_GENERATION: Final = _AGENT_OWNER.c.generation + 1
 """An agent's next generation, which a takeover and an erase both set: every write under the one before is refused."""
 
@@ -175,9 +202,21 @@ class KeptAgentHistory:
 
 
 @dataclass(frozen=True)
+class KeptRecord:
+    """What the record holds of one agent's entries of one kind: how many, and the time of the first and the last."""
+
+    client_id: str
+    kind: str
+    entries: int
+    first_at: datetime
+    last_at: datetime
+
+
+@dataclass(frozen=True)
 class MemoryErased:
     lines: int
     entries: int
+    kept_entries: int
     answered_turns: int
 
 
@@ -268,6 +307,21 @@ def migrate(target: DatabaseTarget) -> None:
 def _without_nul(value: str) -> str:
     """Postgres refuses U+0000 in text, and a line of a call may carry it."""
     return value.replace(NUL, REPLACEMENT)
+
+
+_UNSTORABLE: Final = re.compile("[\x00\ud800-\udfff]")
+"""What no jsonb value holds: U+0000 and a lone surrogate, which JSON writes as an escape Postgres refuses."""
+
+
+def _storable(value: JsonValue) -> JsonValue:
+    """The JSON value with every string, a key included, free of what jsonb refuses."""
+    if isinstance(value, str):
+        return _UNSTORABLE.sub(REPLACEMENT, value)
+    if isinstance(value, list):
+        return [_storable(each) for each in value]
+    if isinstance(value, dict):
+        return {_UNSTORABLE.sub(REPLACEMENT, key): _storable(each) for key, each in value.items()}
+    return value
 
 
 def _rows_of(read: WindowRead) -> list[dict[str, object]]:
@@ -431,13 +485,18 @@ class PostgresLineStore(_PostgresStore):
             for agent, app, kind, place_id, generation, count, first, last in rows
         )
 
-    async def erase_before(self, first_read_before: datetime) -> int:
-        """Deletes every line of every agent first read before the time, in one statement, and returns how many."""
-        return await self._erase(delete(_LINES).where(_LINES.c.first_read_at < first_read_before))
-
-    async def _erase(self, statement: Delete) -> int:
+    async def erase_before(self, first_read_before: datetime) -> Swept:
+        """Deletes, in one transaction, every line of every agent first read before the time and every entry of the
+        record that entered before it and whose client and ordinal his history holds no entry for, and returns how many
+        of each."""
+        held_by_history = exists().where(
+            _HISTORY_ENTRIES.c.client_id == _KEPT_ENTRIES.c.client_id,
+            _HISTORY_ENTRIES.c.ordinal == _KEPT_ENTRIES.c.ordinal,
+        )
+        lines = delete(_LINES).where(_LINES.c.first_read_at < first_read_before)
+        entries = delete(_KEPT_ENTRIES).where(_KEPT_ENTRIES.c.at < first_read_before, ~held_by_history)
         async with self._bounded_transaction() as connection:
-            return (await connection.execute(statement)).rowcount
+            return Swept((await connection.execute(lines)).rowcount, (await connection.execute(entries)).rowcount)
 
 
 def _entry_rows(client_id: str, delta: HistoryDelta) -> list[dict[str, object]]:
@@ -445,6 +504,26 @@ def _entry_rows(client_id: str, delta: HistoryDelta) -> list[dict[str, object]]:
         {"client_id": client_id, "ordinal": ordinal, "at": entry_time(entry), "entry": json.dumps(stored_entry(entry))}
         for ordinal, entry in enumerate(delta.entries, start=delta.first)
     ]
+
+
+def _nullable_text(value: str | None) -> str | None:
+    return None if value is None else _without_nul(value)
+
+
+def _record_values(client_id: str, row: RecordRow) -> dict[str, object]:
+    return {
+        "client_id": client_id,
+        "ordinal": row.ordinal,
+        "at": row.at,
+        "kind": row.kind,
+        "app": _without_nul(row.app),
+        "place_kind": None if row.place is None else _without_nul(row.place.kind),
+        "place_id": None if row.place is None else _without_nul(row.place.id),
+        "generation": _nullable_text(row.generation),
+        "own": row.own,
+        "speaker": _nullable_text(row.speaker),
+        "entry": _storable(row.entry),
+    }
 
 
 def _turn_rows(client_id: str, delta: HistoryDelta) -> list[dict[str, object]]:
@@ -511,7 +590,30 @@ class PostgresHistoryStore(_PostgresStore):
                 await self._append(connection, client_id, delta)
 
     @staticmethod
-    async def _append(connection: AsyncConnection, client_id: str, delta: HistoryDelta) -> None:
+    async def _keep(connection: AsyncConnection, client_id: str, delta: HistoryDelta) -> None:
+        """Keeps the entries the delta hands over that the record lacks. An ordinal the record holds with another time
+        or kind is no entry written again, but one an erase by an older release left behind: it raises
+        ``OrdinalReusedError``, and the transaction takes nothing."""
+        rows = record_rows(delta.kept_first, delta.kept)
+        if not rows:
+            return
+        held = select(_KEPT_ENTRIES.c.ordinal, _KEPT_ENTRIES.c.at, _KEPT_ENTRIES.c.kind).where(
+            _KEPT_ENTRIES.c.client_id == client_id,
+            _KEPT_ENTRIES.c.ordinal.between(rows[0].ordinal, rows[-1].ordinal),
+        )
+        held_as = {ordinal: (at, kind) for ordinal, at, kind in await connection.execute(held)}
+        if any(held_as.get(row.ordinal, (row.at, row.kind)) != (row.at, row.kind) for row in rows):
+            raise OrdinalReusedError(STORE_DEFECT_CODE)
+        for batch in batched(rows, RECORD_ROWS_PER_STATEMENT, strict=False):
+            await connection.execute(
+                insert(_KEPT_ENTRIES)
+                .values([_record_values(client_id, row) for row in batch])
+                .on_conflict_do_nothing(index_elements=[_KEPT_ENTRIES.c.client_id, _KEPT_ENTRIES.c.ordinal])
+            )
+
+    @classmethod
+    async def _append(cls, connection: AsyncConnection, client_id: str, delta: HistoryDelta) -> None:
+        await cls._keep(connection, client_id, delta)
         if delta.entries:
             await connection.execute(
                 insert(_HISTORY_ENTRIES).values(_entry_rows(client_id, delta)).on_conflict_do_nothing()
@@ -588,10 +690,29 @@ class PostgresHistoryStore(_PostgresStore):
             rows = (await connection.execute(statement)).all()
         return tuple(KeptAgentHistory(*row) for row in rows)
 
+    async def kept_records(self, client_id: str | None) -> tuple[KeptRecord, ...]:
+        """What the record holds, per agent and kind, or of one agent, ordered by agent and kind; no entry's content."""
+        statement = (
+            select(
+                _KEPT_ENTRIES.c.client_id,
+                _KEPT_ENTRIES.c.kind,
+                func.count(),
+                func.min(_KEPT_ENTRIES.c.at),
+                func.max(_KEPT_ENTRIES.c.at),
+            )
+            .group_by(_KEPT_ENTRIES.c.client_id, _KEPT_ENTRIES.c.kind)
+            .order_by(_KEPT_ENTRIES.c.client_id, _KEPT_ENTRIES.c.kind)
+        )
+        if client_id is not None:
+            statement = statement.where(_KEPT_ENTRIES.c.client_id == client_id)
+        async with self._bounded_transaction() as connection:
+            rows = (await connection.execute(statement)).all()
+        return tuple(KeptRecord(*row) for row in rows)
+
 
 class PostgresMemory(_PostgresStore):
     """Everything the agents keep in the database, as ``personas memory erase`` deletes it: their lines, history
-    entries and answered turns, all of them or none.
+    entries, record and answered turns, all of them or none.
 
     An erase renews the generation of each agent it erases in the same transaction, so his owner's next write is
     refused: the owner stops him and takes him over again from the erased history, instead of writing back what it
@@ -599,28 +720,23 @@ class PostgresMemory(_PostgresStore):
     stands holds across the erase."""
 
     async def erase_agent(self, client_id: str) -> MemoryErased:
-        """Deletes the agent's lines and history in one transaction, renewing his generation, and returns how much."""
+        """Deletes the agent's lines, history and record in one transaction, renewing his generation, and returns how
+        much."""
         return await self._erase(
-            delete(_LINES).where(_LINES.c.client_id == client_id),
-            delete(_HISTORY_ENTRIES).where(_HISTORY_ENTRIES.c.client_id == client_id),
-            delete(_ANSWERED_TURNS).where(_ANSWERED_TURNS.c.client_id == client_id),
             _AGENT_OWNER.c.client_id == client_id,
+            [delete(table).where(table.c.client_id == client_id) for table in _ERASED_TABLES],
         )
 
     async def erase_all(self) -> MemoryErased:
-        """Deletes every agent's lines and history in one transaction, renewing every generation, and returns how
-        much; the schema stays."""
-        return await self._erase(delete(_LINES), delete(_HISTORY_ENTRIES), delete(_ANSWERED_TURNS), true())
+        """Deletes every agent's lines, history and record in one transaction, renewing every generation, and returns
+        how much; the schema stays."""
+        return await self._erase(true(), [delete(table) for table in _ERASED_TABLES])
 
-    async def _erase(
-        self, lines: Delete, entries: Delete, answered_turns: Delete, owners: ColumnElement[bool]
-    ) -> MemoryErased:
+    async def _erase(self, owners: ColumnElement[bool], deletes: list[Delete]) -> MemoryErased:
         async with self._bounded_transaction() as connection:
             await connection.execute(_renewed(owners))
             await connection.execute(_turns_carried(owners))
-            erased_lines = (await connection.execute(lines)).rowcount
-            erased_entries = (await connection.execute(entries)).rowcount
-            return MemoryErased(erased_lines, erased_entries, (await connection.execute(answered_turns)).rowcount)
+            return MemoryErased(*[(await connection.execute(each)).rowcount for each in deletes])
 
 
 def _renewed(owners: ColumnElement[bool]) -> Update:

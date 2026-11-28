@@ -34,6 +34,12 @@ class KeptHistories:
         """Every entry written, in order."""
         return [entry for _, delta in self.written for entry in delta.entries]
 
+    def recorded(self) -> list[tuple[int, Entry]]:
+        """Every entry written for the record, in order, with the ordinal it was handed."""
+        return [
+            (delta.kept_first + offset, entry) for _, delta in self.written for offset, entry in enumerate(delta.kept)
+        ]
+
     async def take_over(self, client_id: str) -> int:
         self.generations[client_id] = self.generations.get(client_id, 0) + 1
         return self.generations[client_id]

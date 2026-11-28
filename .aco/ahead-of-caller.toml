@@ -2,8 +2,3 @@
 path = "src/personas/holds.py"
 item = "overnightworks/hopin#1185"
 reason = "The told place of a hold has no live caller until hopin states it."
-
-[[code]]
-path = "src/personas/entries.py"
-item = "overnightworks/personas#401"
-reason = "The room of a call and the visit of a view and a sentence have no reader until #401 keeps entries by room."

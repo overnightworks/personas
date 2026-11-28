@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from personas.entries import KeptLine, WindowRead
     from personas.failures import StoreUnavailable
     from personas.recall import LineSearch
+    from personas.sweep import Swept
 
 
 class ScriptedStore:
@@ -58,7 +59,7 @@ class ScriptedStore:
             raise self.search_failure
         return self.found
 
-    async def erase_before(self, first_read_before: datetime) -> int:
+    async def erase_before(self, first_read_before: datetime) -> Swept:
         raise AssertionError("a test about the loop swept")
 
     def seqs_kept(self) -> list[int]:

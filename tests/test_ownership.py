@@ -15,7 +15,7 @@ import pytest
 
 from personas.config import OwnershipTimings
 from personas.entries import NO_TURNS_KEPT, HistoryDelta, KeptHistory, KeptTurns
-from personas.failures import StaleGenerationError, StoreUnavailable
+from personas.failures import STORE_DEFECT_CODE, OrdinalReusedError, StaleGenerationError, StoreUnavailable
 from personas.ownership import LockConnectionLost, LockedOwnership
 from personas.reporting import Event
 from tests.support.fakes import FakeClock, Reports
@@ -376,14 +376,15 @@ async def test_a_write_in_flight_when_the_cancel_margin_ends_writes_no_overrun_l
     assert pod.reports.reported() == reported
 
 
+@pytest.mark.parametrize(
+    ("refusal", "code"),
+    [(StaleGenerationError(), "generation_stale"), (OrdinalReusedError(STORE_DEFECT_CODE), STORE_DEFECT_CODE)],
+    ids=["another pod took him", "the record holds another entry at an ordinal"],
+)
 async def test_a_refused_write_stops_the_agent_and_a_later_round_that_holds_him_serves_him_under_a_new_generation(
-    clock,
+    clock, refusal, code
 ):
-    pod = Pod(
-        clock,
-        ScriptedLocks(clock, {AGENT}, After((AGENT,), {AGENT}), {AGENT}),
-        defect_of={AGENT: StaleGenerationError()},
-    )
+    pod = Pod(clock, ScriptedLocks(clock, {AGENT}, After((AGENT,), {AGENT}), {AGENT}), defect_of={AGENT: refusal})
     task = pod.start()
     await pod.until_spent(AGENT)
     async with asyncio.timeout(LIMIT_SECONDS):
@@ -396,7 +397,7 @@ async def test_a_refused_write_stops_the_agent_and_a_later_round_that_holds_him_
         ("ended", AGENT),
         ("started", AGENT),
     ]
-    assert pod.reports.reported()[:3] == [(Event.TAKEN, None), (Event.LOST, "generation_stale"), (Event.TAKEN, None)]
+    assert pod.reports.reported()[:3] == [(Event.TAKEN, None), (Event.LOST, code), (Event.TAKEN, None)]
     assert pod.histories.generations[AGENT] == 2
 
 
