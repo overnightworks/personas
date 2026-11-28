@@ -15,7 +15,7 @@ from agents.turn import MAX_EVENT_BYTES
 from agents.voice.reply import REPLY_RULES
 
 from personas.decision import READ_SKILL_CALLS, READ_SKILL_TOOL
-from personas.entries import ActDone, SkillRead
+from personas.entries import SkillRead
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, a_turn, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import ERROR_MARK, Gateway, reading
@@ -31,6 +31,7 @@ from tests.support.skills import (
     Shelf,
     a_skill_file,
     an_entry,
+    assert_a_round_beside_a_relayed_call_holds_only_itself,
     assert_a_round_is_told_byte_for_byte_after_a_restart,
     skilled,
     turns_past_a_cut_of_a_round,
@@ -132,27 +133,14 @@ async def test_a_read_skills_round_is_gone_once_a_cut_drops_its_entry_and_is_not
 async def test_a_read_skill_beside_a_relayed_call_enters_both_in_the_order_they_ended_and_its_round_holds_only_the_read(
     runner, songmaker
 ):
-    skilled(runner, songmaker)
-    spoken = f"Let me look {secrets.token_hex(4)}."
-    runner.gateway = Gateway(
-        tool_round(a_song("model-song"), reading(SONGMAKER), content=spoken), completion("done"), completion("again")
+    await assert_a_round_beside_a_relayed_call_holds_only_itself(
+        runner,
+        songmaker,
+        reading(SONGMAKER),
+        SkillRead,
+        READ_SKILL_TOOL,
+        lambda runner: skill_reads(runner, SONGMAKER),
     )
-    await restarted_in_the_call(runner)
-    await a_turn(runner, 1)
-    await runner.gateway.until_requested(2)
-
-    await a_turn(runner, 3)
-
-    songmakers_reads = skill_reads(runner, SONGMAKER)
-    assert [
-        type(entry) for entry in runner.histories.entries() if isinstance(entry, ActDone) or entry in songmakers_reads
-    ] == [ActDone, SkillRead]
-    ((assistant, _),) = runner.gateway.tool_rounds(3, skill=SONGMAKER)
-    assert [call["function"]["name"] for call in assistant["tool_calls"]] == [READ_SKILL_TOOL]
-    assert assistant["content"] is None
-    told = runner.gateway.told_in(3)
-    assert spoken not in told
-    assert '"entry": "act"' in told
 
 
 async def test_read_skill_for_a_name_no_line_holds_answers_an_error_and_enters_nothing(runner, songmaker):

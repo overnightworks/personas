@@ -4,7 +4,6 @@ turns after it."""
 from __future__ import annotations
 
 import json
-import secrets
 
 import pytest
 from agents.backend.fake_gateway import completion, tool_round
@@ -12,7 +11,7 @@ from agents.member import CONTINUE_SPEAKING_TOOL
 from agents.skills import implicit_skill_name
 
 from personas.decision import LOAD_TOOLS_CALLS, LOAD_TOOLS_TOOL
-from personas.entries import ActDone, ToolsLoaded, told_bytes
+from personas.entries import ToolsLoaded, told_bytes
 from personas.held_tools import LOADS_SPENT_TEXT, NOTHING_WAITS_TEXT
 from personas.present import NO_SUCH_SKILL_TEXT, NOT_OFFERED_TEXT
 from personas.reporting import Event
@@ -27,6 +26,7 @@ from tests.support.skills import (
     SONGMAKER,
     Shelf,
     a_skill_file,
+    assert_a_round_beside_a_relayed_call_holds_only_itself,
     assert_a_round_is_told_byte_for_byte_after_a_restart,
     skilled,
     turns_past_a_cut_of_a_round,
@@ -259,28 +259,9 @@ async def test_load_tools_calls_past_their_bound_answer_an_error_and_a_later_cal
 async def test_a_load_beside_a_relayed_call_enters_both_in_the_order_they_ended_and_its_round_holds_only_the_load(
     runner, songmaker
 ):
-    skilled(runner, songmaker)
-    spoken = f"Let me look {secrets.token_hex(4)}."
-    runner.gateway = Gateway(
-        tool_round(a_song("model-song"), loading(SONGMAKER), content=spoken), completion("done"), completion("again")
+    await assert_a_round_beside_a_relayed_call_holds_only_itself(
+        runner, songmaker, loading(SONGMAKER), ToolsLoaded, LOAD_TOOLS_TOOL, tools_loaded
     )
-    await restarted_in_the_call(runner)
-    await a_turn(runner, 1)
-    await runner.gateway.until_requested(2)
-
-    await a_turn(runner, 3)
-
-    songmakers_loads = tools_loaded(runner)
-    kinds = [
-        type(entry) for entry in runner.histories.entries() if isinstance(entry, ActDone) or entry in songmakers_loads
-    ]
-    assert kinds == [ActDone, ToolsLoaded]
-    ((assistant, _),) = runner.gateway.tool_rounds(3, skill=SONGMAKER)
-    assert [call["function"]["name"] for call in assistant["tool_calls"]] == [LOAD_TOOLS_TOOL]
-    assert assistant["content"] is None
-    told = runner.gateway.told_in(3)
-    assert spoken not in told
-    assert '"entry": "act"' in told
 
 
 async def test_a_spoken_hopin_turn_reads_loads_and_calls_songmakers_tool_one_round_each(runner, songmaker):

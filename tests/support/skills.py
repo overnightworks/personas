@@ -11,11 +11,12 @@ from agents.front_matter import parse_front_matter, split_front_matter
 from agents.skills import SKILLS_EXTENSION, skill_digest, skill_uri
 from mcp_types import ReadResourceResult, TextResourceContents
 
+from personas.entries import ActDone
 from tests.support.call import ADDRESSED, PLACE_ID, a_turn, restarted, restarted_in_the_call
 from tests.support.gateway import Gateway
 from tests.support.history import bounded_history, told_line_bytes
 from tests.support.hopin import DISCOVER, READ, SKILLS_GET, SKILLS_LIST, discovering
-from tests.support.songmaker import CREATE_SONG, GENERATE_SONG, songmaker_url
+from tests.support.songmaker import CREATE_SONG, GENERATE_SONG, a_song, songmaker_url
 
 if TYPE_CHECKING:
     from tests.support.wire import Handler, Rpc
@@ -137,3 +138,33 @@ async def turns_past_a_cut_of_a_round(runner, songmaker, call, entry_bytes: int)
     await restarted_in_the_call(runner)
     for number in (1, 3, 4, 5, 6):
         await a_turn(runner, number)
+
+
+async def assert_a_round_beside_a_relayed_call_holds_only_itself(
+    runner, songmaker, call, entry_type: type, tool: str, entries
+) -> None:
+    """A turn whose first reply is a relayed call, ``call`` and some words: the call's act entry and the round's
+    entry (those ``entries`` of the history yields) come in the order they ended, and the next turn tells the round
+    as a call of ``tool`` alone, the words and the act among the entries."""
+    skilled(runner, songmaker)
+    spoken = f"Let me look {secrets.token_hex(4)}."
+    runner.gateway = Gateway(
+        tool_round(a_song("model-song"), call, content=spoken), completion("done"), completion("again")
+    )
+    await restarted_in_the_call(runner)
+    await a_turn(runner, 1)
+    await runner.gateway.until_requested(2)
+
+    await a_turn(runner, 3)
+
+    round_entries = entries(runner)
+    kinds = [
+        type(entry) for entry in runner.histories.entries() if isinstance(entry, ActDone) or entry in round_entries
+    ]
+    assert kinds == [ActDone, entry_type]
+    ((assistant, _),) = runner.gateway.tool_rounds(3, skill=SONGMAKER)
+    assert [each["function"]["name"] for each in assistant["tool_calls"]] == [tool]
+    assert assistant["content"] is None
+    told = runner.gateway.told_in(3)
+    assert spoken not in told
+    assert '"entry": "act"' in told
