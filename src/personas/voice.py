@@ -20,7 +20,15 @@ from agents.voice.reply import ReplyReader
 from personas.decision import AppPlace, failure_code, speech_outcome
 from personas.entries import SaidAloud
 from personas.failures import task_is_being_cancelled
-from personas.holds import APP_FAILED_TEXT, CONTINUED_TEXT, GONE_TEXT, LINE_ARGUMENT, STYLE_ARGUMENT, dropping
+from personas.holds import (
+    APP_FAILED_TEXT,
+    CONTINUED_TEXT,
+    DECISIONS_BOUND_TEXT,
+    GONE_TEXT,
+    LINE_ARGUMENT,
+    STYLE_ARGUMENT,
+    dropping,
+)
 from personas.reporting import Event, failure_event
 from personas.speech import Answered, DropReason, HoldOutcome, NotDecided, answered_as, bound_reached, hold_ended_as
 from personas.task_record import (
@@ -198,6 +206,8 @@ class Answering:
             return ToolOutcome(_STYLE_TEXT, is_error=True)
         if not isinstance(line, str):
             return ToolOutcome(_STYLE_ALONE_TEXT, is_error=True)
+        if not told.take_decision():
+            return ToolOutcome(DECISIONS_BOUND_TEXT, is_error=True)
         ended = await self._line(told, line, style if isinstance(style, str) else None)
         if ended is NotDecided.STALE:
             return await self._retold(told)

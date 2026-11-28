@@ -525,8 +525,7 @@ class AgentLoop:
         perception = perceive(window, checkpoint)
         self._mind.move_checkpoint(at, perception.checkpoint)
         self._mind.take(taken_lines(Visit(self._app.mcp_url, place, window.generation), perception.new, read_at))
-        repeating = self._mind.lines_repeating_told(at, perception.new)
-        answerable = tuple(line for line in perception.new if line.seq not in repeating)
+        answerable = self._mind.answerable_lines(at, perception.new)
         waking = waking_line(answerable, serves_view=serves_view)
         if waking is not None:
             seqs = frozenset(line.seq for line in answerable)

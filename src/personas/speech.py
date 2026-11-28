@@ -42,6 +42,9 @@ class Request:
 
     sentence: Sentence
     cut: bool = False
+    cut_before_dropping: bool = False
+    """Whether a stop of his had cut the request before the decision now on its way marked it, which stays if the app
+    takes none."""
     line_entered: bool = False
     line_bound: float | None = None
 
@@ -193,8 +196,10 @@ def speech_stopped(record: SpeechRecord) -> tuple[SpeechRecord, int]:
 def speech_dropping(record: SpeechRecord) -> SpeechRecord:
     """His decision to drop what waited is on its way to the app: nothing is sent meanwhile, and the request in flight,
     which the app may answer stopped before his decision's answer arrives, is marked cut."""
-    in_flight = None if record.in_flight is None else replace(record.in_flight, cut=True)
-    return _revised(record, in_flight=in_flight, dropping=True)
+    request = record.in_flight
+    if request is not None and not record.dropping:
+        request = replace(request, cut=True, cut_before_dropping=request.cut)
+    return _revised(record, in_flight=request, dropping=True)
 
 
 def speech_dropping_ended(record: SpeechRecord) -> SpeechRecord:
@@ -202,8 +207,10 @@ def speech_dropping_ended(record: SpeechRecord) -> SpeechRecord:
     cut than before."""
     if not record.dropping:
         return record
-    in_flight = None if record.in_flight is None else replace(record.in_flight, cut=False)
-    return _revised(record, in_flight=in_flight, dropping=False)
+    request = record.in_flight
+    if request is not None:
+        request = replace(request, cut=request.cut_before_dropping)
+    return _revised(record, in_flight=request, dropping=False)
 
 
 def speech_line_said(record: SpeechRecord, bound: float) -> SpeechRecord:
@@ -402,17 +409,17 @@ def talk_told(record: SpeechRecord, speech: Iterable[PartialSpeech]) -> SpeechRe
     return _revised(record, told_talk=tuple(each for each in speech if has_words(each.text)))
 
 
-def lines_repeating_told(record: SpeechRecord, lines: Iterable[PlaceEntry]) -> tuple[SpeechRecord, frozenset[int]]:
-    """The record once a person's line ended the partial a decision was told of them, and the seqs of the lines that
-    repeat its words: they are no news to answer, and a partial is repeated once."""
+def answerable_lines(record: SpeechRecord, lines: Iterable[PlaceEntry]) -> tuple[SpeechRecord, tuple[PlaceEntry, ...]]:
+    """The record once a person's line ended the partial a decision was told of them, and the lines left to answer: one
+    that repeats the words of its partial is no news, and a partial is repeated once."""
     told = {each.name: each for each in record.told_talk}
-    repeating: set[int] = set()
+    answerable: list[PlaceEntry] = []
     for line in lines:
         partial = told.pop(line.name, None) if line.spoken and not line.own else None
-        if partial is not None and words_of(line.text) == words_of(partial.text):
-            repeating.add(line.seq)
+        if partial is None or words_of(line.text) != words_of(partial.text):
+            answerable.append(line)
     kept = tuple(each for each in record.told_talk if each.name in told)
-    return _revised(record, told_talk=kept), frozenset(repeating)
+    return _revised(record, told_talk=kept), tuple(answerable)
 
 
 def hold_tellable(held: Held) -> bool:

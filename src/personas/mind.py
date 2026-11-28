@@ -46,13 +46,13 @@ from personas.speech import (
     Request,
     Sentence,
     SpeechRecord,
+    answerable_lines,
     hold_decided,
     hold_forgotten,
     hold_marked_told,
     hold_read,
     hold_turn_ended,
     hold_untold,
-    lines_repeating_told,
     sentence_taken,
     sentences_released,
     speech_answered,
@@ -273,11 +273,11 @@ class Mind:
         """A decision at the place is told what people say over him."""
         self._set_speech(at, talk_told(self._speech.get(at, NO_SPEECH), speech))
 
-    def lines_repeating_told(self, at: AppPlace, lines: Iterable[PlaceEntry]) -> frozenset[int]:
-        """The seqs of the lines at the place that repeat the words a decision was told; they wake no turn."""
-        record, repeating = lines_repeating_told(self._speech.get(at, NO_SPEECH), lines)
+    def answerable_lines(self, at: AppPlace, lines: Iterable[PlaceEntry]) -> tuple[PlaceEntry, ...]:
+        """The lines at the place left to answer: one that repeats the words a decision was told wakes no turn."""
+        record, answerable = answerable_lines(self._speech.get(at, NO_SPEECH), lines)
         self._set_speech(at, record)
-        return repeating
+        return answerable
 
     def hold_decided(self, at: AppPlace, key: HoldKey) -> None:
         """The hold ``key`` at the place was decided: it stands no more and is not decided again."""

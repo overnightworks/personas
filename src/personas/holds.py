@@ -56,7 +56,7 @@ DECISION_CALLS: Final = 8
 refused as stale counting as any other. Past them the hold ends undecided and stops him, as any hold without a
 decision does; the turn's own bound stays the turn's."""
 _APART_DECISION_CALLS: Final = 1
-_DECISIONS_BOUND_TEXT: Final = "this hold takes no more decisions"
+DECISIONS_BOUND_TEXT: Final = "this hold takes no more decisions"
 LINE_ARGUMENT: Final = "line"
 STYLE_ARGUMENT: Final = "style"
 _NO_SPEECH_FOR_LINE_TEXT: Final = "this turn does not speak: continue_speaking without a line"
@@ -434,10 +434,10 @@ class HoldDeciding:
         at = self._at(voiced.admitted.place)
         if self._mind.hold_decided_key(at) == told.held.key:
             return ToolOutcome(DECIDED_TEXT, is_error=True)
-        if not told.take_decision():
-            return ToolOutcome(_DECISIONS_BOUND_TEXT, is_error=True)
         if outcome is HoldOutcome.CONTINUED and carries_line(arguments):
             return await voiced.answering.line_decided(told, arguments)
+        if not told.take_decision():
+            return ToolOutcome(DECISIONS_BOUND_TEXT, is_error=True)
         unsaid = self._mind.speech_unsaid(at)
         ended = await self.end_hold(voiced.admitted.place, voiced.record, told.held, outcome, voiced.bound)
         if ended is None:
@@ -579,12 +579,12 @@ class HoldDeciding:
         outcome = HoldOutcome.CONTINUED if name == CONTINUE_SPEAKING_TOOL else HoldOutcome.STOPPED
         if not deciding.pending:
             return ToolOutcome(DECIDED_TEXT, is_error=True)
-        if not deciding.take_decision():
-            return ToolOutcome(_DECISIONS_BOUND_TEXT, is_error=True)
         if outcome is HoldOutcome.CONTINUED and carries_line(arguments):
             if answering is None:
                 return ToolOutcome(_NO_SPEECH_FOR_LINE_TEXT, is_error=True)
             return await answering.line_decided(deciding, arguments)
+        if not deciding.take_decision():
+            return ToolOutcome(DECISIONS_BOUND_TEXT, is_error=True)
         deciding.outcome = outcome
         unsaid = self._mind.speech_unsaid(self._at(place))
         ended = await self.end_hold(place, record, deciding.held, outcome, bound)
