@@ -8,32 +8,44 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Final
 
-from agents.member import PlaceRef
+from agents.member import PlaceRef, PlaceView, Spoken
 from agents.tools import ToolDeclaration, ToolEffect
 from agents.turn import MAX_EVENT_BYTES
 
-from personas.entries import KeptLine, Visit, entry_time, newest_that_fit, told_bytes, told_entry
+from personas.entries import (
+    ActDone,
+    KeptLine,
+    SaidAloud,
+    Unanswered,
+    ViewSeen,
+    Visit,
+    entry_time,
+    newest_that_fit,
+    told_bytes,
+    told_entry,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from agents.turn import JsonObject
 
-    from personas.entries import History
+    from personas.entries import History, ToldEntry
 
 SECONDS_PER_MINUTE: Final = 60
 SECONDS_PER_DAY: Final = 24 * 3600
 
 RECALL_TOOL: Final = "recall"
 TEXT_PARAMETER: Final = "text"
-SCOPE_TEXT: Final = "this room, before your history"
+SCOPE_TEXT: Final = "lines, views, calls and sentences of this room, before your history"
 LOOKUPS_SPENT_TEXT: Final = "no more lookups in this turn"
 STORE_DID_NOT_ANSWER_TEXT: Final = "the memory did not answer"
 RECALL_DECLARATION: Final = ToolDeclaration(
     name=RECALL_TOOL,
     description=(
-        "Looks up what was said earlier in this room, before your history: give a few words that every line you want"
-        " holds exactly as written, or an empty text for the newest lines."
+        "Looks up what happened earlier in this room, before your history: its lines, the views you saw, your calls"
+        " with their results and your sentences. Give a few words that every entry you want holds exactly as written,"
+        " or an empty text for the newest entries."
     ),
     parameters={
         "type": "object",
@@ -45,17 +57,14 @@ RECALL_DECLARATION: Final = ToolDeclaration(
 )
 
 _SEPARATOR: Final = ", "
-_SMALLEST_LINE: Final = KeptLine(
-    Visit("a", PlaceRef(kind="k", id="i"), ""),
-    0,
-    datetime.min.replace(tzinfo=UTC),
-    "",
-    "",
-    "",
-    own=False,
-    spoken=False,
-    cut=False,
-    act=False,
+_LONG_AGO: Final = datetime.min.replace(tzinfo=UTC)
+_SMALLEST_ROOM: Final = PlaceRef(kind="k", id="i")
+# One empty entry of each kind: the least a hit can take of a result, whichever kind it is.
+_SMALLEST_ENTRIES: Final[tuple[ToldEntry, ...]] = (
+    KeptLine(Visit("a", _SMALLEST_ROOM, ""), 0, _LONG_AGO, "", "", "", own=False, spoken=False, cut=False, act=False),
+    ViewSeen("a", _SMALLEST_ROOM, PlaceView(revision=0, awaits_you=False, state={}, traceparent=None), _LONG_AGO),
+    ActDone("a", "", {}, Unanswered(""), _LONG_AGO),
+    SaidAloud("a", _SMALLEST_ROOM, "", Spoken(spoken=True), _LONG_AGO),
 )
 
 
@@ -69,48 +78,58 @@ class LookupBounds:
 
 
 @dataclass(frozen=True)
-class LineSearch:
-    """What the store is asked: the lines of this agent's room, every visit, that hold the words of ``text`` and were
-    first read before ``first_read_before``, newest first, at most ``rows`` of them."""
+class EntrySearch:
+    """What the store is asked: the entries of this agent's room, every visit, that hold the words of ``text``, newest
+    first, at most ``rows`` of them: those of the record whose ordinal is below ``first_ordinal`` and the lines first
+    read before ``first_read_before`` that the record does not hold."""
 
     client_id: str
     app: str
     place: PlaceRef
     text: str = field(repr=False)
+    first_ordinal: int
     first_read_before: datetime
     rows: int
 
 
-def _result_json(told: list[dict[str, object]], *, older_dropped: bool) -> str:
-    return json.dumps({"scope": SCOPE_TEXT, "older_dropped": older_dropped, "lines": told}, ensure_ascii=False)
+def _result_json(told: list[dict[str, object]], *, older_dropped: bool, too_large: int) -> str:
+    return json.dumps(
+        {"scope": SCOPE_TEXT, "older_dropped": older_dropped, "too_large": too_large, "entries": told},
+        ensure_ascii=False,
+    )
 
 
-# The least a result holds: its scope and flags with no line. A smaller bound holds no result at all.
-SMALLEST_RESULT_BYTES: Final = len(_result_json([], older_dropped=False).encode())
+# The least a result holds: its scope and flags with no entry. A smaller bound holds no result at all.
+SMALLEST_RESULT_BYTES: Final = len(_result_json([], older_dropped=False, too_large=0).encode())
 
 
-def _room_for_lines(result_bytes: int, *, older_dropped: bool) -> int:
-    """What is left of a result's bytes for lines and their separators, counting the separator the first line lacks.
-
-    A result that says more matched carries ``true`` where the smallest carries ``false``, which is a byte shorter.
-    """
-    envelope = SMALLEST_RESULT_BYTES - 1 if older_dropped else SMALLEST_RESULT_BYTES
+def _room_for_entries(result_bytes: int, *, older_dropped: bool, too_large: int) -> int:
+    """What is left of a result's bytes for entries and their separators, counting the separator the first entry
+    lacks."""
+    envelope = len(_result_json([], older_dropped=older_dropped, too_large=too_large).encode())
     return min(result_bytes, MAX_EVENT_BYTES) - envelope + len(_SEPARATOR)
+
+
+def _search_rows(result_bytes: int) -> int:
+    """One more than the smallest entries that fit the result, so that no entry that fits is missed."""
+    smallest = min(told_bytes(told_entry(each)) for each in _SMALLEST_ENTRIES) + len(_SEPARATOR)
+    return _room_for_entries(result_bytes, older_dropped=True, too_large=0) // smallest + 1
 
 
 def line_search(
     client_id: str, app: str, place: PlaceRef, history: History, text: str, result_bytes: int
-) -> LineSearch:
+) -> EntrySearch:
     """The room is the turn's own: this agent's, in the admission's app and place, whatever the model asked.
 
     ``result_bytes`` is at least ``SMALLEST_RESULT_BYTES``, which the configuration enforces.
 
-    Only lines first read before the first entry the admitted history still holds are given, since the history tells
-    the rest. An admitted history always holds the entry that woke the turn.
+    Only what the history does not tell is given: the record's entries below the first ordinal the admitted history
+    still holds, and the lines first read before that entry. An admitted history always holds the entry that woke
+    the turn.
     """
-    smallest = told_bytes(told_entry(_SMALLEST_LINE)) + len(_SEPARATOR)
-    fitting = _room_for_lines(result_bytes, older_dropped=True) // smallest
-    return LineSearch(client_id, app, place, text, entry_time(history.entries[0]), fitting + 1)
+    return EntrySearch(
+        client_id, app, place, text, history.left_out, entry_time(history.entries[0]), _search_rows(result_bytes)
+    )
 
 
 def search_text(arguments: JsonObject, longest_bytes: int) -> str | None:
@@ -129,15 +148,22 @@ def text_refused_text(longest_bytes: int) -> str:
     return f"{TEXT_PARAMETER}: give a string of at most {longest_bytes} bytes"
 
 
-def lookup_result(lines_newest_first: Sequence[KeptLine], result_bytes: int) -> str:
-    """The result of a lookup: its scope, the newest lines that fit ``result_bytes`` and the wire's bound for one
-    result, in the history's line form, and whether more matched."""
-    told = [told_entry(each) for each in lines_newest_first]
-    sizes = [told_bytes(each) + len(_SEPARATOR) for each in told]
-    if newest_that_fit(sizes, _room_for_lines(result_bytes, older_dropped=False)) == len(told):
-        return _result_json(told, older_dropped=False)
-    fitting = newest_that_fit(sizes, _room_for_lines(result_bytes, older_dropped=True))
-    return _result_json(told[: min(fitting, len(told) - 1)], older_dropped=True)
+def lookup_result(entries_newest_first: Sequence[ToldEntry], result_bytes: int) -> str:
+    """The result of a lookup: its scope, the newest entries that fit ``result_bytes`` and the wire's bound for one
+    result, in the history's form, whether more matched, and how many hits are too large to be shown at all."""
+    told = [told_entry(each) for each in entries_newest_first]
+    alone = _room_for_entries(result_bytes, older_dropped=True, too_large=len(told))
+    shown = [each for each in told if told_bytes(each) + len(_SEPARATOR) <= alone]
+    too_large = len(told) - len(shown)
+    sizes = [told_bytes(each) + len(_SEPARATOR) for each in shown]
+    capped = len(told) >= _search_rows(result_bytes)
+    if not capped and newest_that_fit(
+        sizes, _room_for_entries(result_bytes, older_dropped=False, too_large=too_large)
+    ) == len(shown):
+        return _result_json(shown, older_dropped=False, too_large=too_large)
+    fitting = newest_that_fit(sizes, _room_for_entries(result_bytes, older_dropped=True, too_large=too_large))
+    kept = fitting if capped or fitting < len(shown) else len(shown) - 1
+    return _result_json(shown[: max(kept, 0)], older_dropped=True, too_large=too_large)
 
 
 def swept_before(now: datetime, lines_keep_days: float) -> datetime | None:
