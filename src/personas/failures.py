@@ -72,6 +72,11 @@ class StoreDefect(Exception):  # noqa: N818
     """A database error that is no outage; the message holds a code and no parameter, row or secret."""
 
 
+class OrdinalReusedError(StoreDefect):
+    """The record of an agent holds another entry at an ordinal that a write hands over, as an erase by an older release
+    leaves it: the write took nothing and the agent stops on this pod, until an erase removes the record."""
+
+
 class StaleGenerationError(Exception):
     """A write of an agent's state carried a generation that is not the agent's current one: another pod has taken the
     agent over since, and the write changed nothing."""

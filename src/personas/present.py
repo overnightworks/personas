@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from enum import StrEnum
+from itertools import chain
 from typing import TYPE_CHECKING, Final
 
 from agents.skills import Skill, SkillEntry
@@ -32,6 +33,7 @@ from personas.entries import (
     ViewSeen,
     Visit,
     entry_size,
+    is_his_own,
     is_told,
     newest_that_fit,
     told_bytes,
@@ -56,11 +58,7 @@ def _holds_revision(entries: Iterable[Entry], view: ViewSeen) -> bool:
 
 
 def _not_his_own(entry: Entry) -> bool:
-    return (
-        is_told(entry)
-        and not isinstance(entry, ActDone | SaidAloud)
-        and not (isinstance(entry, KeptLine) and entry.own)
-    )
+    return is_told(entry) and not is_his_own(entry)
 
 
 @dataclass(frozen=True)
@@ -96,18 +94,25 @@ def _stays_told(turn: TurnTold, left_out: int) -> bool:
     return turn.through > left_out
 
 
+def appended_by(held: Collection[Entry], new: Iterable[Entry]) -> tuple[Entry, ...]:
+    """The entries of ``new`` that taking them appends to the entries ``held``: a view revision they hold, or an earlier
+    entry of ``new`` holds, adds nothing and an act is always added."""
+    appended: list[Entry] = []
+    for entry in new:
+        if not (isinstance(entry, ViewSeen) and _holds_revision(chain(held, appended), entry)):
+            appended.append(entry)
+    return tuple(appended)
+
+
 def taken_into(present: Present, new: Iterable[Entry], history_bytes: int, keep_bytes: int) -> Present:
     """The present with ``new`` appended, a view revision it already holds adding nothing and an act always added. Past
     ``history_bytes`` the oldest whole messages leave in one step until what stays fits ``keep_bytes``; only the newest
     message may be cut, and its newest entry always stays. A step's cut points are the ends of the answered messages, so
     the cut can fall inside the span of a turn still in flight: when it is answered, its message renders partly cut,
     and nothing is told twice or lost."""
-    entries = present.history.entries
-    heard = present.history.heard
-    for entry in new:
-        if not (isinstance(entry, ViewSeen) and _holds_revision(entries, entry)):
-            entries = (*entries, entry)
-            heard += _not_his_own(entry)
+    appended = appended_by(present.history.entries, new)
+    entries = (*present.history.entries, *appended)
+    heard = present.history.heard + sum(map(_not_his_own, appended))
     grown = History(entries, present.history.left_out, heard)
     if sum(map(entry_size, entries)) <= history_bytes:
         return Present(grown, present.told, present.told_left_out)
@@ -125,16 +130,19 @@ def answered_into(present: Present, turn: TurnTold) -> Present:
     return Present(present.history, (*present.told, turn), present.told_left_out)
 
 
-def history_delta(written: Present, current: Present) -> HistoryDelta | None:
-    """What ``current`` gained and lost since ``written``, an earlier value of the same present that the store holds;
-    ``None`` when nothing. What entered and left again between the two is never written."""
+def history_delta(
+    written: Present, current: Present, kept_first: int = 0, kept: tuple[Entry, ...] = ()
+) -> HistoryDelta | None:
+    """What ``current`` gained and lost since ``written``, an earlier value of the same present that the store holds,
+    and the entries to keep in the record from the ordinal ``kept_first``; ``None`` when nothing. What entered and left
+    again between the two is never written to the history, and is kept."""
     first = max(written.history.taken, current.history.left_out)
     first_told = max(written.answered, current.told_left_out)
     entries = current.history.entries[first - current.history.left_out :]
     told = current.told[first_told - current.told_left_out :]
-    if not entries and not told and current.history.left_out == written.history.left_out:
+    if not entries and not told and not kept and current.history.left_out == written.history.left_out:
         return None
-    return HistoryDelta(first, entries, first_told, told, current.history.left_out)
+    return HistoryDelta(first, entries, first_told, told, current.history.left_out, kept_first, kept)
 
 
 def present_of(kept: KeptHistory) -> Present:

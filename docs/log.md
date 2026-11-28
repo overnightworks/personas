@@ -50,7 +50,7 @@ events and their fields. A test cites each rule by its ID at the start of its do
 | LOG-39 | `argument.left_out` | a call went out without an optional argument its tool's declared schema does not name (`figure`, `voices`, `looks` and `looks[].room`, the `room` of each entry of `looks`, of `accept_invitation`, `style` and `interrupted` of `speak`, `thinking` of `set_turn_state`), once per tool and argument per app session, so an app that renamed an argument shows instead of losing the feature quietly; a required argument is never left out; an `accept_invitation` that carries `figure`, `voices` or `looks` on a session with no list yet asks the app for its tools first, so an app whose list fails fails that accept with the list's failure; logged at info | `tool`, `argument`, never a value |
 | LOG-19 | `held_app.failed`, `tools_only_app.failed` | a call to another app failed, a read of a skill included | `status`, `mcp_method`, `reason` |
 | LOG-20 | `store.failed`, `store.resumed` | once per store outage, and when it answers again | `reason` `store_unreachable` or `store_timeout` |
-| LOG-21 | `lines.swept` | a sweep that erased lines | `line_count`; no agent or app |
+| LOG-21 | `lines.swept` | a sweep that erased lines or record entries | `line_count`, `entry_count`; no agent or app |
 | LOG-22 | `agent.taken` | a pod holds an agent's lock | the agent only |
 | LOG-23 | `agent.lost` | a pod stops an agent it served | `reason`: `hold_lost`, `generation_stale` or the store's code |
 | LOG-24 | `agent.stop_overran` | an agent took longer than `cancel_margin_seconds` to stop | the agent only |

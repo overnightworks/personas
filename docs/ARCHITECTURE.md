@@ -137,6 +137,7 @@ release path is in [the release runbook](runbooks/release.md).
 | `agent_turns` | checkpoints, due places, unanswered count, pause end | next write; on a takeover, as below |
 | `agent_owner` | the generation of the pod that owns him | every takeover and every erase renews it |
 | `lines`, with `[memory]` | every line of every window he read | a sweep past `lines_keep_days`, or `memory erase` |
+| `kept_entries`, with `[memory]` | the record: every line, view revision, call with its result and spoken sentence his history took, each with its app, place and visit | a sweep past `lines_keep_days` once his history no longer holds it, or `memory erase` |
 
 The mind writes through on every change, under his generation, so a write from a pod that lost him is
 refused. A restart or a takeover loads his history and turns, and his next turn is told what the holder
@@ -150,8 +151,22 @@ and answer; how the cut shrinks the history to `history_keep_bytes` is in
 [the turns reference](turns.md), What a turn is told. A kept line holds its text verbatim, its speaker and
 its first-read time, from which the sweep counts `lines_keep_days`. A line a sweep removed from a window the
 app still holds is kept again with a new first-read time. Without `[memory]` no sweep runs, so lines kept
-before stay until `memory erase`. No picture byte is kept anywhere. `personas memory list` and
-`personas memory erase` show and erase what an agent keeps; see [the runbook](runbooks/erase-memory.md).
+before stay until `memory erase`. No picture byte is kept anywhere.
+
+The record is written in the same transaction as his history, under his generation, and the cut never drops
+a row of it: every entry his history takes is kept with the next write, even one that entered and left
+again between two writes, as during a store outage; only what a pod took in after its last write is lost
+when it dies. A row holds the entry's JSON, its ordinal in his history, its time, its kind, the app, place
+and visit it was taken in, whether he said or did it and the speaker of another's line. A call that a
+release before the room took has its target app and no place, and a view or a sentence such a release took
+has no visit. The first write after a pod loads him copies every entry his loaded history holds, so what a
+release before it wrote reaches the record; an entry that release cut before a release with the record
+loaded him is not kept. An ordinal is kept once and its first row stays; a row with another time or kind at
+an ordinal a write hands over is a store defect: the write takes nothing and he stops on this pod (LOG-23)
+until `memory erase` removes the leftover. Without `[memory]` the record is neither written, copied into nor
+swept. A release before the record works on the migrated schema and never reads or cuts it.
+`personas memory list` and `personas memory erase` show and erase what an agent keeps; see
+[the runbook](runbooks/erase-memory.md).
 `personas migrate` is the only code that changes the schema, and a release only adds to it while two
 releases run.
 
@@ -163,8 +178,9 @@ request to an app carries a token of that app's scope only. People in the apps a
 table states and tool answers reach the model as user messages, none of them an instruction; nothing but
 the apps' tools and the gateway's budget bounds what the model then does. A turn holds the tools of every
 app where the agent sits, so what is said in one app can lead to a call in another, and so can a lookup's
-result. Postgres holds content verbatim: names, lines, table states, tool arguments and answers. Whoever
-holds the database password reads it. The runner sets no TLS mode, so the driver's defaults apply;
+result. Postgres holds content verbatim: names, lines, table states, tool arguments and answers, the
+views, calls and results of the record for as long as `lines_keep_days`. Whoever holds the database
+password reads it. The runner sets no TLS mode, so the driver's defaults apply;
 encryption at rest and network access to the database are the platform's and unknown here. The model
 gateway sees the persona and everything a turn is told. The log carries ids, numbers and closed codes, never
 content, a token or a secret. Unknown here: how the realm and each app enforce their grants, which their

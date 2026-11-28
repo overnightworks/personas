@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 from agents.turn import ToolRound
 
-from personas.entries import HistoryDelta, KeptHistory, Lines, TurnTold, entry_size
+from personas.entries import HistoryDelta, KeptHistory, Lines, TurnTold, ViewSeen, entry_size
 from personas.present import (
     EMPTY_PRESENT,
     EMPTY_SKILL_TEXT,
@@ -16,6 +16,7 @@ from personas.present import (
     Arrived,
     Present,
     answered_into,
+    appended_by,
     arrived_since,
     held_told,
     history_delta,
@@ -23,7 +24,18 @@ from personas.present import (
     taken_into,
     turn_messages,
 )
-from tests.support.history import APP, LATER, MORNING, ROOMY_BYTES, a_skill_read, a_tools_load, an_act, said
+from tests.support.history import (
+    APP,
+    LATER,
+    MORNING,
+    ROOMY_BYTES,
+    TABLE,
+    a_skill_read,
+    a_tools_load,
+    a_view,
+    an_act,
+    said,
+)
 
 if TYPE_CHECKING:
     from personas.entries import Entry
@@ -64,6 +76,39 @@ def test_what_left_by_the_bound_before_a_write_is_not_written_and_the_delta_says
 
     assert history_delta(written, current) == HistoryDelta(1, (said(2, "two"), said(3, "six")), 1, current.told, 1)
     assert history_delta(EMPTY_PRESENT, current) == history_delta(written, current)
+
+
+def test_the_delta_carries_the_entries_kept_with_the_ordinal_of_the_first_of_them_whatever_the_bound_dropped():
+    written, current = after_a_cut()
+    kept = (said(1, "one"), said(2, "two"), said(3, "six"))
+
+    delta = history_delta(written, current, 0, kept)
+
+    assert delta is not None
+    assert (delta.first, delta.entries, delta.left_out) == (1, (said(2, "two"), said(3, "six")), 1)
+    assert (delta.kept_first, delta.kept) == (0, kept)
+
+
+def test_a_present_unchanged_since_its_write_still_has_a_delta_while_entries_wait_to_be_kept():
+    _, current = after_a_cut()
+
+    delta = history_delta(current, current, 1, (said(2, "two"),))
+
+    assert delta is not None
+    assert (delta.entries, delta.told, delta.kept_first, delta.kept) == ((), (), 1, (said(2, "two"),))
+
+
+def test_taking_names_the_entries_it_appends_leaving_out_a_view_revision_the_history_holds_or_the_take_repeats():
+    view = ViewSeen(APP, TABLE, a_view(1), LATER)
+    held = took(EMPTY_PRESENT, said(1, "one"), view).history.entries
+    again = ViewSeen(APP, TABLE, a_view(1), LATER)
+    next_revision = ViewSeen(APP, TABLE, a_view(2), LATER)
+
+    assert appended_by(held, (again, an_act(), next_revision, next_revision, an_act())) == (
+        an_act(),
+        next_revision,
+        an_act(),
+    )
 
 
 def test_a_present_unchanged_since_its_write_has_no_delta():

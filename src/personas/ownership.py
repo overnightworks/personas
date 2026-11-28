@@ -17,7 +17,13 @@ from dataclasses import dataclass, replace
 from functools import partial
 from typing import TYPE_CHECKING, Protocol
 
-from personas.failures import STORE_UNREACHABLE_CODE, StaleGenerationError, StoreUnavailable
+from personas.failures import (
+    STORE_DEFECT_CODE,
+    STORE_UNREACHABLE_CODE,
+    OrdinalReusedError,
+    StaleGenerationError,
+    StoreUnavailable,
+)
 from personas.reporting import Event, StateChange, StoreOutage
 
 if TYPE_CHECKING:
@@ -205,6 +211,8 @@ class LockedOwnership:
                 await serve_agent(replace(owned, write=partial(_noting_refusal, owned.write, stop)))
             except* StaleGenerationError:
                 self._report(StateChange(Event.LOST, client_id, None, STALE_GENERATION_CODE))
+            except* OrdinalReusedError:
+                self._report(StateChange(Event.LOST, client_id, None, STORE_DEFECT_CODE))
         finally:
             overrun.cancel()
 
@@ -248,6 +256,6 @@ async def _noting_refusal(
     try:
         async with stop.writing():
             await write(delta, turns)
-    except StaleGenerationError:
+    except StaleGenerationError, OrdinalReusedError:
         stop.began.set()
         raise

@@ -4,12 +4,15 @@ generation of the pod that owns the agent."""
 from __future__ import annotations
 
 import asyncio
+import json
+from dataclasses import replace
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
 import pytest
-from agents.member import VoiceState
+from agents.member import PlaceRef, VoiceState
 
+from personas import memory
 from personas.entries import (
     NO_TURNS_KEPT,
     HistoryDelta,
@@ -19,13 +22,25 @@ from personas.entries import (
     KeptTurns,
     Lines,
     Reading,
+    Room,
     TurnTold,
     ViewSeen,
+    stored_entry,
 )
-from personas.failures import StaleGenerationError, StoreDefect
+from personas.failures import STORE_DEFECT_CODE, OrdinalReusedError, StaleGenerationError, StoreDefect
 from personas.memory import PostgresHistoryStore, PostgresMemory
-from tests.support.history import APP, LATER, MORNING, TABLE, a_sentence, a_view, an_act, said
-from tests.support.postgres import run_sql, uncommitted_behind_a_lock, until_a_statement_waits
+from tests.support.history import (
+    APP,
+    LATER,
+    MORNING,
+    TABLE,
+    a_sentence,
+    a_skill_read,
+    a_view,
+    an_act,
+    said,
+)
+from tests.support.postgres import kept_record, run_sql, uncommitted_behind_a_lock, until_a_statement_waits
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -53,6 +68,11 @@ def a_turn(through: int, minutes: int = 0) -> TurnTold:
 
 def appended(first: int, *entries, told=(), first_told: int = 0, left_out: int = 0) -> HistoryDelta:
     return HistoryDelta(first, tuple(entries), first_told, tuple(told), left_out)
+
+
+def recorded(first: int, *entries, left_out: int = 0) -> HistoryDelta:
+    """A delta that appends the entries to his history, from the ordinal ``first``, and hands them to the record."""
+    return HistoryDelta(first, tuple(entries), 0, (), left_out, kept_first=first, kept=tuple(entries))
 
 
 async def test_a_new_owner_gets_the_next_generation_and_reading_it_gives_the_same(histories):
@@ -227,3 +247,201 @@ async def test_a_stored_entry_that_is_no_entry_loads_as_a_defect_that_holds_none
 
     assert "held" not in str(defect.value)
     assert defect.value.__cause__ is None
+
+
+ROW_COLUMNS = "ordinal, kind, app, place_kind, place_id, generation, own, speaker"
+
+
+async def test_every_told_entry_is_kept_with_its_ordinal_its_kind_the_room_it_was_taken_in_and_who_said_or_did_it(
+    histories, database
+):
+    mine = await histories.take_over(AGENT)
+    own_line = replace(said(1, "mine"), own=True)
+    view = ViewSeen(APP, TABLE, a_view(2), LATER, generation="morning")
+    call = an_act(app="https://target.test/mcp", room=Room(APP, TABLE, "evening"))
+    entries = (own_line, said(2, "yours", name="Bo"), view, call, a_sentence(generation="morning"), a_skill_read())
+
+    await histories.write(AGENT, mine, recorded(5, *entries), NO_TURNS_KEPT)
+
+    assert kept_record(database, ROW_COLUMNS) == [
+        (5, "line", APP, "call", "room-7", "morning", True, None),
+        (6, "line", APP, "call", "room-7", "morning", False, "Bo"),
+        (7, "view", APP, "table", "table-1", "morning", False, None),
+        (8, "act", APP, "table", "table-1", "evening", True, None),
+        (9, "speech", APP, "call", "room-7", "morning", True, None),
+    ]
+
+
+async def test_a_call_a_release_before_the_room_took_is_kept_under_its_target_app_without_place_or_visit(
+    histories, database
+):
+    mine = await histories.take_over(AGENT)
+
+    await histories.write(AGENT, mine, recorded(0, an_act(app="https://target.test/mcp")), NO_TURNS_KEPT)
+
+    assert kept_record(database, ROW_COLUMNS) == [(0, "act", "https://target.test/mcp", None, None, None, True, None)]
+
+
+async def test_the_record_holds_the_entry_as_json_with_a_call_s_arguments_and_result(histories, database):
+    mine = await histories.take_over(AGENT)
+    call = an_act(arguments={"card": "jack"}, room=Room(APP, TABLE, "morning"))
+
+    await histories.write(AGENT, mine, recorded(0, call), NO_TURNS_KEPT)
+
+    ((stored,),) = kept_record(database, "entry")
+    assert stored == json.loads(json.dumps(stored_entry(call)))
+    assert stored["arguments"] == {"card": "jack"}
+    assert stored["outcome"]["text"] == "posted"
+
+
+async def test_what_the_cut_drops_from_his_history_stays_in_the_record_and_so_does_what_entered_and_left_between_writes(
+    histories, database
+):
+    mine = await histories.take_over(AGENT)
+    view = ViewSeen(APP, TABLE, a_view(3), LATER)
+    await histories.write(AGENT, mine, recorded(0, said(1, "a"), view), NO_TURNS_KEPT)
+
+    await histories.write(AGENT, mine, recorded(2, said(2, "b"), said(3, "c"), left_out=3), NO_TURNS_KEPT)
+
+    assert (await histories.load(AGENT)).first == 3
+    assert [(ordinal, kind) for ordinal, kind, *_ in kept_record(database, ROW_COLUMNS)] == [
+        (0, "line"),
+        (1, "view"),
+        (2, "line"),
+        (3, "line"),
+    ]
+
+
+async def test_a_delta_that_hands_over_entries_the_history_has_no_more_keeps_them_and_changes_nothing_else(
+    histories, database
+):
+    mine = await histories.take_over(AGENT)
+    delta = HistoryDelta(5, (), 0, (), 5, kept_first=2, kept=(said(1, "a"), said(2, "b")))
+
+    await histories.write(AGENT, mine, delta, NO_TURNS_KEPT)
+
+    assert [ordinal for ordinal, *_ in kept_record(database, "ordinal")] == [2, 3]
+    assert await histories.load(AGENT) == KeptHistory(0, (), 0, ())
+
+
+async def test_a_delta_that_hands_over_nothing_to_keep_leaves_the_record_as_it_is(histories, database):
+    mine = await histories.take_over(AGENT)
+
+    await histories.write(AGENT, mine, appended(0, said(1, "a")), NO_TURNS_KEPT)
+
+    assert kept_record(database, "ordinal") == []
+
+
+async def test_writing_an_entry_again_at_its_ordinal_changes_nothing_and_the_held_row_keeps_its_first_form(
+    histories, database
+):
+    mine = await histories.take_over(AGENT)
+    first = said(1, "as first written")
+    await histories.write(AGENT, mine, recorded(0, first), NO_TURNS_KEPT)
+    again = replace(first, text="as a later release writes it", name="Ada")
+
+    await histories.write(AGENT, mine, recorded(0, again), NO_TURNS_KEPT)
+    await histories.write(AGENT, mine, recorded(0, first), NO_TURNS_KEPT)
+
+    ((stored, speaker),) = kept_record(database, "entry, speaker")
+    assert (stored["text"], speaker) == ("as first written", "Bo")
+
+
+@pytest.mark.parametrize(
+    "reused",
+    [
+        replace(said(1, "later"), first_read_at=LATER + timedelta(minutes=1)),
+        ViewSeen(APP, TABLE, a_view(1), LATER),
+    ],
+    ids=["another time", "another kind"],
+)
+async def test_an_ordinal_reused_with_another_time_or_kind_is_a_store_defect_that_takes_nothing_of_the_write(
+    histories, database, reused
+):
+    mine = await histories.take_over(AGENT)
+    await histories.write(AGENT, mine, recorded(0, said(1, "held")), NO_TURNS_KEPT)
+    delta = HistoryDelta(1, (said(2, "new"),), 0, (), 0, kept_first=0, kept=(reused, said(2, "new")))
+
+    with pytest.raises(OrdinalReusedError) as defect:
+        await histories.write(AGENT, mine, delta, KeptTurns(unanswered=3))
+
+    assert str(defect.value) == STORE_DEFECT_CODE
+    assert [ordinal for ordinal, *_ in kept_record(database, "ordinal")] == [0]
+    assert await histories.load(AGENT) == KeptHistory(0, (said(1, "held"),), 0, ())
+
+
+async def test_text_no_text_column_takes_is_kept_with_a_replacement_so_the_write_goes_through(histories, database):
+    mine = await histories.take_over(AGENT)
+    line = replace(
+        said(1, "a\x00b \ud800"), name="Ada\x00", visit=replace(MORNING, place=PlaceRef(kind="c", id="r\x00"))
+    )
+
+    await histories.write(AGENT, mine, recorded(0, line), NO_TURNS_KEPT)
+
+    ((stored, speaker, place_id),) = kept_record(database, "entry, speaker, place_id")
+    assert (stored["text"], speaker, place_id) == ("a\ufffdb \ufffd", "Ada\ufffd", "r\ufffd")
+
+
+async def test_a_call_s_arguments_are_kept_with_a_replacement_for_what_jsonb_refuses_in_a_list_a_value_or_a_key(
+    histories, database
+):
+    mine = await histories.take_over(AGENT)
+    call = an_act(arguments={"k\x00ey": ["a\x00b", {"inner": "\ud800", "count": 2}]})
+
+    await histories.write(AGENT, mine, recorded(0, call), NO_TURNS_KEPT)
+
+    ((stored,),) = kept_record(database, "entry")
+    assert stored["arguments"] == {"k\ufffdey": ["a\ufffdb", {"inner": "\ufffd", "count": 2}]}
+
+
+async def test_a_delta_with_more_entries_than_one_statement_takes_is_kept_whole(histories, database):
+    count = memory.RECORD_ROWS_PER_STATEMENT + 1
+    mine = await histories.take_over(AGENT)
+
+    await histories.write(AGENT, mine, recorded(0, *(said(seq, "a") for seq in range(count))), NO_TURNS_KEPT)
+
+    assert [ordinal for ordinal, *_ in kept_record(database, "ordinal")] == list(range(count))
+
+
+async def test_a_write_the_generation_refuses_keeps_nothing(histories, database):
+    stale = await histories.take_over(AGENT)
+    await histories.take_over(AGENT)
+    delta = recorded(0, said(1, "stale"))
+
+    with pytest.raises(StaleGenerationError):
+        await histories.write(AGENT, stale, delta, NO_TURNS_KEPT)
+
+    assert kept_record(database, "ordinal") == []
+
+
+async def test_entries_an_older_release_wrote_are_kept_when_a_load_hands_them_over_and_its_cut_leaves_the_record_alone(
+    histories, database
+):
+    mine = await histories.take_over(AGENT)
+    for ordinal, text in enumerate(("old", "older")):
+        stored = json.dumps(stored_entry(said(ordinal, text)))
+        run_sql(
+            database,
+            f"INSERT INTO history_entries VALUES ('{AGENT}', {ordinal}, now(), '{stored}')",  # noqa: S608 - test-chosen values
+        )
+    loaded = await histories.load(AGENT)
+
+    await histories.write(
+        AGENT, mine, HistoryDelta(2, (), 0, (), 0, kept_first=loaded.first, kept=loaded.entries), NO_TURNS_KEPT
+    )
+    run_sql(database, "DELETE FROM history_entries WHERE ordinal < 1")
+
+    assert [ordinal for ordinal, *_ in kept_record(database, "ordinal")] == [0, 1]
+
+
+async def test_kept_records_count_each_agents_entries_by_kind_with_their_first_and_last_time(histories):
+    mine, others = await histories.take_over(AGENT), await histories.take_over(OTHER_AGENT)
+    await histories.write(AGENT, mine, recorded(0, said(1, "a"), an_act(), said(2, "b")), NO_TURNS_KEPT)
+    await histories.write(OTHER_AGENT, others, recorded(0, a_sentence()), NO_TURNS_KEPT)
+
+    kept = await histories.kept_records(AGENT)
+
+    assert [(each.client_id, each.kind, each.entries) for each in kept] == [(AGENT, "act", 1), (AGENT, "line", 2)]
+    assert (kept[0].first_at, kept[0].last_at) == (an_act().at, an_act().at)
+    assert (kept[1].first_at, kept[1].last_at) == (LATER, LATER)
+    assert [each.client_id for each in await histories.kept_records(None)] == [OTHER_AGENT, AGENT, AGENT]

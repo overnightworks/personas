@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from agents.tools import HandTool
 
     from personas.config import DatabaseTarget
-    from personas.memory import KeptAgentHistory, KeptVisit
+    from personas.memory import KeptAgentHistory, KeptRecord, KeptVisit
     from personas.ownership import Ownership
     from personas.sweep import SweptStore
     from personas.turning import BackendFactory
@@ -65,6 +65,7 @@ LIST_COMMAND: Final = "list"
 ERASE_COMMAND: Final = "erase"
 VISIT_COLUMNS: Final = ("agent", "app", "place_kind", "place_id", "generation", "lines", "first_read", "last_read")
 HISTORY_COLUMNS: Final = ("agent", "history_entries", "answered_turns", "first_at", "last_at")
+RECORD_COLUMNS: Final = ("agent", "kind", "kept_entries", "first_at", "last_at")
 
 
 def _gateway_backends(gateway: AgentConfig | None) -> BackendFactory | None:
@@ -271,7 +272,7 @@ def _add_memory_commands(parser: argparse.ArgumentParser) -> None:
     listing.add_argument("--agent", action=_StoreOnce, metavar="CLIENT_ID", help="only this agent's visits and history")
     erasing = commands.add_parser(
         ERASE_COMMAND,
-        help="delete kept lines, history entries and answered turns and print how many",
+        help="delete kept lines, history entries, kept entries and answered turns and print how many",
         allow_abbrev=False,
     )
     selector = erasing.add_mutually_exclusive_group(required=True)
@@ -279,10 +280,13 @@ def _add_memory_commands(parser: argparse.ArgumentParser) -> None:
         "--agent",
         action=_StoreOnce,
         metavar="CLIENT_ID",
-        help="every line, history entry and answered turn this agent keeps",
+        help="every line, history entry, kept entry and answered turn this agent keeps",
     )
     selector.add_argument(
-        "--all", action="store_true", dest="every_agent", help="every agent's lines, history entries and answered turns"
+        "--all",
+        action="store_true",
+        dest="every_agent",
+        help="every agent's lines, history entries, kept entries and answered turns",
     )
 
 
@@ -323,11 +327,21 @@ def _print_histories(histories: Iterable[KeptAgentHistory]) -> None:
         rows.writerow((each.client_id, each.entries, each.answered_turns, *times))
 
 
+def _print_records(records: Iterable[KeptRecord]) -> None:
+    """A blank line, then tab-separated below the histories."""
+    sys.stdout.write("\n")
+    rows = csv.writer(sys.stdout, dialect="excel-tab", lineterminator="\n")
+    rows.writerow(RECORD_COLUMNS)
+    for each in records:
+        rows.writerow((each.client_id, each.kind, each.entries, each.first_at.isoformat(), each.last_at.isoformat()))
+
+
 async def _list_memory(target: DatabaseTarget, client_id: str | None) -> None:
     lines, histories = PostgresLineStore(target), PostgresHistoryStore(target)
     try:
         _print_visits(await lines.kept_visits(client_id))
         _print_histories(await histories.kept_histories(client_id))
+        _print_records(await histories.kept_records(client_id))
     finally:
         await lines.close()
         await histories.close()
@@ -341,8 +355,9 @@ async def _erase_memory(target: DatabaseTarget, request: argparse.Namespace) -> 
         await memory.close()
     lines = _counted(erased.lines, "line", "lines")
     entries = _counted(erased.entries, "history entry", "history entries")
+    kept = _counted(erased.kept_entries, "kept entry", "kept entries")
     turns = _counted(erased.answered_turns, "answered turn", "answered turns")
-    sys.stdout.write(f"{lines}, {entries} and {turns} erased\n")
+    sys.stdout.write(f"{lines}, {entries}, {kept} and {turns} erased\n")
 
 
 def _counted(count: int, one: str, many: str) -> str:

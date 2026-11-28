@@ -345,6 +345,10 @@ class Reports:
         """The line count of each sweep that finished."""
         return [change.lines for change in self.changes if change.event is Event.SWEPT]
 
+    def entries_removed(self) -> list[int | None]:
+        """The kept-entry count of each sweep that finished."""
+        return [change.entries for change in self.changes if change.event is Event.SWEPT]
+
     @property
     def is_empty(self) -> bool:
         return not self.changes
