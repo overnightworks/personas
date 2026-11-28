@@ -110,10 +110,15 @@ class AppVoice(AppPlaces):
     """The ``told_changes`` of each decision that arrived (a continue, a stop or a ``speak`` naming a hold)."""
     words_before_decision: list[tuple[tuple[str, str], ...]] = field(default_factory=list[tuple[tuple[str, str], ...]])
     """What people say over the held member before each next decision is judged, in order, as he decides."""
+    new_holds_before_decision: list[tuple[str, tuple[str, str]]] = field(
+        default_factory=list[tuple[str, tuple[str, str]]]
+    )
+    """A new hold (its id and what a person says over it) that stands before each next decision is judged, in order."""
     choices_wait: bool = False
     """Whether a decision that plays waits while people still talk over him, which ``talk_over_ends`` ends."""
     choices_waited: int = 0
     """How many decisions have waited for the talk-over to end."""
+    choice_waited: asyncio.Event = field(default_factory=asyncio.Event)
     waiting_choices: dict[str, asyncio.Future[bool]] = field(default_factory=dict[str, asyncio.Future[bool]])
     """The decision that waits at each place; its result says whether it plays or was voided."""
 
@@ -251,6 +256,9 @@ class AppVoice(AppPlaces):
     def _decision_arrives(self, place_id: str, told_changes: int | None) -> None:
         """A decision reaches the app: what was said while he decided arrives first."""
         self.hold_told.append(told_changes)
+        if self.new_holds_before_decision:
+            hold_id, said = self.new_holds_before_decision.pop(0)
+            self.hold(place_id, hold_id, said)
         if self.words_before_decision:
             self.talk_over(place_id, *self.words_before_decision.pop(0))
 
@@ -287,6 +295,7 @@ class AppVoice(AppPlaces):
         waiting = asyncio.get_running_loop().create_future()
         self.waiting_choices[place_id] = waiting
         self.choices_waited += 1
+        self.choice_waited.set()
         return await asyncio.shield(waiting)
 
     async def _stop_speaking(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:

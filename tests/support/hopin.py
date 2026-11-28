@@ -486,6 +486,13 @@ class FakeApp(AppVoice):
                 self.spoken_added.clear()
                 await self.spoken_added.wait()
 
+    async def until_choices_waited(self, count: int) -> None:
+        """Returns once this many decisions waited for the talk-over to end; fails after the limit."""
+        async with asyncio.timeout(LIMIT_SECONDS):
+            while self.choices_waited < count:
+                self.choice_waited.clear()
+                await self.choice_waited.wait()
+
     async def until_turn_states(self, count: int) -> None:
         """Returns once the app took this many statements; fails after the limit."""
         async with asyncio.timeout(LIMIT_SECONDS), self.turn_state_taken:

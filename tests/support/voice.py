@@ -151,8 +151,9 @@ def continuing_hold(hold_id: str):
     return continuing({}, hold_id)
 
 
-def deciding(tool: str, hold_id: str = HOLD_ID):
-    return tool_round(tool_call(f"{tool}-{hold_id}", tool, {"id": hold_id}))
+def deciding(tool: str, hold_id: str = HOLD_ID, *, time: int = 1):
+    """A reply that decides the hold with ``tool``; the call of a decision made again is told apart by its ``time``."""
+    return tool_round(tool_call(f"{tool}-{hold_id}-{time}", tool, {"id": hold_id}))
 
 
 async def held_in_the_first_sentence(runner, *replies, said=(SAID,), hold_id: str = HOLD_ID):
