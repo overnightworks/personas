@@ -38,7 +38,7 @@ from tests.support.standings import active, paused
 from tests.support.voice import HeldSleeps
 from tests.support.wire import answers_with, cuts
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 AGAIN = "And once more."
 SECOND_AGENT, SECOND_SUBJECT, SECOND_NAME = "agent-bach", "agent-subject-2", "Bach"

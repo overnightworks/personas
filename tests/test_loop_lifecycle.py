@@ -45,7 +45,7 @@ from tests.support.openers import (
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, invited
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 REFUSALS_BEFORE_THE_FIX = 3
 SHORT_STREAM_SECONDS = 0.3

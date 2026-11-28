@@ -49,7 +49,7 @@ from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active
 from tests.support.wire import cuts, hangs, hangs_once_entered, refuses_with_a_server_error
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 AGAIN = f"{ADDRESSED} Again."
 SECOND_AGENT, SECOND_SUBJECT, SECOND_NAME = "agent-bach", "agent-subject-2", "Bach"

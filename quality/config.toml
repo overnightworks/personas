@@ -1,2 +1,8 @@
 [gate]
 mandatory_jobs = ["Documents", "Lint and test", "Image", "Figures"]
+
+[[gate.loosened]]
+what = "import-linter changes include_external_packages"
+item = "#290"
+date = 2026-11-26
+reason = "the core contract forbids uvicorn, which import-linter checks only with include_external_packages at its root"

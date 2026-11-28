@@ -43,6 +43,8 @@ from tests.support.ownership import AllAgentsOwned
 from tests.support.realm import FakeRealm
 from tests.support.standings import AGENT_SUBJECT, active, invited
 
+pytestmark = pytest.mark.integration
+
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterable, Sequence
     from pathlib import Path

@@ -39,6 +39,8 @@ packages = ["src/personas"]
 [dependency-groups]
 dev = [
     "anyio>=4.16.0",
+    "mcp>=2.3.0",
+    "mcp-types>=2.3.0",
     "overnightworks-agents[mcp-server] @ git+https://github.com/overnightworks/agents@v0.81.1",
     "pyright>=1.1.414",
     "pytest>=9.0.2",
@@ -116,7 +118,10 @@ addopts = [
     "--cov",
     "--cov-report=term-missing",
 ]
-markers = ["postgres: tests that need the throwaway Postgres named by PERSONAS_TEST_POSTGRES_URL"]
+markers = [
+    "postgres: tests that need the throwaway Postgres named by PERSONAS_TEST_POSTGRES_URL",
+    "integration: tests that reach an adapter, kept apart from the core unit tests",
+]
 
 # --- Coverage ---
 
@@ -155,6 +160,9 @@ min_confidence = 80
 
 [tool.importlinter]
 root_packages = ["personas"]
+# The core contract forbids uvicorn, the server library tests/support reaches
+# through the loopback fake; import-linter takes external packages only here.
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "the pure decisions import one way"
@@ -166,4 +174,27 @@ layers = [
     "personas.speech",
     "personas.recall",
     "personas.entries",
+]
+
+[[tool.importlinter.contracts]]
+id = "core-imports-no-adapter"
+name = "the core imports no adapter"
+type = "forbidden"
+source_modules = [
+    "personas.decision",
+    "personas.speech",
+    "personas.present",
+    "personas.due",
+    "personas.recall",
+    "personas.entries",
+    "personas.mind",
+]
+forbidden_modules = [
+    "personas.app_session",
+    "personas.tokens",
+    "personas.memory",
+    "personas.locks",
+    "personas.clock",
+    "personas.main",
+    "uvicorn",
 ]

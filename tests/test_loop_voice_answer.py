@@ -33,7 +33,7 @@ from tests.support.voice import (
 )
 from tests.support.wire import refuses_with_a_server_error
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 ANSWER_FIRST, ANSWER_REST = "I hear you.", "Go on."
 ANSWER = f"{ANSWER_FIRST} {ANSWER_REST}"

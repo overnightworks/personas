@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from personas.config import DatabaseTarget
     from personas.entries import WindowRead
 
-pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
+pytestmark = [pytest.mark.anyio, pytest.mark.postgres, pytest.mark.integration]
 
 ANSWER = "Here I am."
 BOUND_SECONDS = 0.5

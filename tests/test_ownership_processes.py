@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
     from personas.entries import KeptTurns
 
-pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
+pytestmark = [pytest.mark.anyio, pytest.mark.postgres, pytest.mark.integration]
 
 AGENT = "agent-mozart"
 TIMINGS = OwnershipTimings(
