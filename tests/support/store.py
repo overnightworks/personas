@@ -11,9 +11,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from datetime import datetime
 
-    from personas.entries import KeptLine, WindowRead
+    from personas.entries import ToldEntry, WindowRead
     from personas.failures import StoreUnavailable
-    from personas.recall import LineSearch
+    from personas.recall import EntrySearch
     from personas.sweep import Swept
 
 
@@ -24,8 +24,8 @@ class ScriptedStore:
     def __init__(self) -> None:
         self.kept: list[WindowRead] = []
         self.failure: StoreUnavailable | None = None
-        self.searches: list[LineSearch] = []
-        self.found: tuple[KeptLine, ...] = ()
+        self.searches: list[EntrySearch] = []
+        self.found: tuple[ToldEntry, ...] = ()
         self.search_failure: Exception | None = None
         self.on_search_failure: Callable[[], None] = lambda: None
         self.waiting = asyncio.Event()
@@ -52,7 +52,7 @@ class ScriptedStore:
             raise self.failure
         self.kept.append(read)
 
-    async def search(self, search: LineSearch) -> tuple[KeptLine, ...]:
+    async def search(self, search: EntrySearch) -> tuple[ToldEntry, ...]:
         self.searches.append(search)
         if self.search_failure is not None:
             self.on_search_failure()

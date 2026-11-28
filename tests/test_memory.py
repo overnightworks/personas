@@ -19,10 +19,14 @@ from agents.backend.fake_gateway import completion, tool_call, tool_round
 from agents.member import PlaceEntry, PlaceRef, PlaceWindow
 from sqlalchemy.exc import IntegrityError, ProgrammingError
 
-from personas.entries import KeptLine, Visit, WindowRead
+from personas.entries import (
+    KeptLine,
+    Visit,
+    WindowRead,
+)
 from personas.failures import STORE_TIMEOUT_CODE, STORE_UNREACHABLE_CODE, StoreDefect, StoreUnavailable
 from personas.memory import PostgresLineStore, SchemaNotAtHeadError
-from personas.recall import RECALL_TOOL, LineSearch
+from personas.recall import RECALL_TOOL
 from personas.reporting import Event
 from personas.sweep import Swept
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
@@ -38,6 +42,15 @@ from tests.support.history import (
 )
 from tests.support.hopin import LIMIT_SECONDS
 from tests.support.logs import formatted
+from tests.support.memory_search import (
+    AGENT,
+    APP,
+    SECOND_AGENT,
+    a_read_in,
+    a_search,
+    a_visit,
+    texts_found,
+)
 from tests.support.postgres import (
     Forwarder,
     at_an_unknown_revision,
@@ -53,15 +66,11 @@ from tests.support.standings import active, invited, line, paused, window_of
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-    from datetime import datetime
 
     from personas.config import DatabaseTarget
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres, pytest.mark.integration]
 
-APP = "https://app.test/mcp"
-AGENT = "agent-mozart"
-SECOND_AGENT = "agent-ada"
 SECOND_SUBJECT = "ada-subject"
 BOUND_SECONDS = 0.5
 MARGIN_SECONDS = 1.0
@@ -116,15 +125,6 @@ async def store(database: DatabaseTarget) -> AsyncIterator[ObservedStore]:
 
 def a_read(*lines: PlaceEntry) -> WindowRead:
     return WindowRead(AGENT, APP, PlaceRef(kind="call", id=PLACE_ID), window_of(*lines), WALL_START)
-
-
-def a_visit(generation: str) -> Visit:
-    return Visit(APP, PlaceRef(kind="call", id=PLACE_ID), generation)
-
-
-def a_read_in(visit: Visit, *lines: PlaceEntry, client_id: str = AGENT, hours_after_start: float = 0.0) -> WindowRead:
-    read_at = WALL_START + timedelta(hours=hours_after_start)
-    return WindowRead(client_id, visit.app, visit.place, window_of(*lines, generation=visit.generation), read_at)
 
 
 async def ended_by(task):
@@ -487,29 +487,6 @@ async def test_every_line_first_read_before_the_time_is_erased_of_every_agent_wh
     assert kept_lines(database, "text") == [("Younger",), ("Exactly at the time",)]
 
 
-def a_search(
-    text: str = "",
-    *,
-    place: PlaceRef | None = None,
-    first_read_before: datetime | None = None,
-    rows: int = 50,
-    client_id: str = AGENT,
-    app: str = APP,
-) -> LineSearch:
-    return LineSearch(
-        client_id,
-        app,
-        place or PlaceRef(kind="call", id=PLACE_ID),
-        text,
-        first_read_before or WALL_START + timedelta(days=1),
-        rows,
-    )
-
-
-def texts_found(found: tuple[KeptLine, ...]) -> list[str]:
-    return [each.text for each in found]
-
-
 async def test_a_search_gives_the_lines_of_this_agents_room_across_its_visits_and_the_line_as_it_was_kept(store):
     """TURNS-39."""
     await store.keep(a_read_in(a_visit("morning"), line(1, "From the morning"), hours_after_start=1))
@@ -742,7 +719,7 @@ async def test_a_line_a_window_held_at_a_restart_and_one_said_in_a_pause_are_tol
 
     (opening,) = runner.gateway.openings()
     found = json.loads(runner.gateway.tool_results(2)[0])
-    assert [each["text"] for each in found["lines"]] == [PAUSE_LINE, RESTART_LINE]
+    assert [each["text"] for each in found["entries"]] == [PAUSE_LINE, RESTART_LINE]
     assert told_lines(opening) == [ADDRESSED]
 
 
@@ -768,5 +745,5 @@ async def test_a_lookup_gives_none_of_the_lines_kept_in_a_pause_while_the_first_
 
     _first, second = runner.gateway.openings()
     found = json.loads(runner.gateway.tool_results(4)[0])
-    assert [each["text"] for each in found["lines"]] == [RESTART_LINE]
+    assert [each["text"] for each in found["entries"]] == [RESTART_LINE]
     assert PAUSE_LINE not in told_lines(second)

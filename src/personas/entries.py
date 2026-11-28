@@ -306,7 +306,8 @@ _ENTRY_KINDS: Final = (
     ("load", ToolsLoaded),
 )
 _STORED_ENTRIES: Final = {kind: TypeAdapter(of_kind) for kind, of_kind in _ENTRY_KINDS}
-_KIND_OF_ENTRY: Final = {of_kind: kind for kind, of_kind in _ENTRY_KINDS}
+KIND_OF_ENTRY: Final = {of_kind: kind for kind, of_kind in _ENTRY_KINDS}
+"""The stored kind of each type of entry."""
 _ANY_ENTRY: Final = TypeAdapter[Entry](Entry)
 _STORED_TURN: Final = TypeAdapter(TurnTold)
 _STORED_TURNS: Final = TypeAdapter(KeptTurns)
@@ -315,7 +316,7 @@ _STORED_TURNS: Final = TypeAdapter(KeptTurns)
 def stored_entry(entry: Entry) -> JsonObject:
     """The entry as a JSON object, its kind under ``STORED_KIND_KEY``, which ``entry_from_stored`` turns back into an
     equal entry."""
-    return {STORED_KIND_KEY: _KIND_OF_ENTRY[type(entry)]} | _ANY_ENTRY.dump_python(entry, mode="json")
+    return {STORED_KIND_KEY: KIND_OF_ENTRY[type(entry)]} | _ANY_ENTRY.dump_python(entry, mode="json")
 
 
 def entry_from_stored(stored: object) -> Entry:
