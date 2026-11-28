@@ -254,8 +254,8 @@ An entry has its app and the time he took it (`at`), and is one of:
   before his history are given: those of the record below the ordinal his history begins at, and the lines first read
   before his history's first entry that the record does not hold. They are given newest first in the form his history
   tells them, as many as fit `lookup_bytes`, with `older_dropped` when more matched and `too_large` counting the
-  matches too large for a result on their own, so when the newest matches are all too large `entries` is empty with
-  `older_dropped` true, and older small matches beyond the row cap are not reached.
+  matches too large for a result on their own, so `entries` is empty when every match is too large, and `older_dropped`
+  is true there only when the row cap cut off more matches, which are then not reached.
 - TURNS-41: A lookup takes nothing into his history and is never held back. A store that cannot answer gives an error
   result; the turn goes on.
 
