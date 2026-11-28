@@ -7,16 +7,18 @@ from typing import TYPE_CHECKING, Final
 from sqlalchemy import Text, case, func, literal, literal_column
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 
+from personas.entries import KIND_OF_ENTRY, ActDone, KeptLine, SaidAloud, ViewSeen
+
 if TYPE_CHECKING:
     from sqlalchemy import ColumnElement
 
 SIMPLE_CONFIGURATION: Final = literal_column("'simple'::regconfig", Text)
 """Postgres full text without stemming or stop words: a word is what the parser makes of the text, lower case."""
 
-LINE_KIND: Final = "line"
-_TEXT_KINDS: Final = (LINE_KIND, "speech")
-_VIEW_KIND: Final = "view"
-_CALL_KIND: Final = "act"
+LINE_KIND: Final = KIND_OF_ENTRY[KeptLine]
+_TEXT_KINDS: Final = (LINE_KIND, KIND_OF_ENTRY[SaidAloud])
+_VIEW_KIND: Final = KIND_OF_ENTRY[ViewSeen]
+_CALL_KIND: Final = KIND_OF_ENTRY[ActDone]
 _JSON_VALUES: Final = literal_column("""'["string", "numeric", "boolean"]'::jsonb""", JSONB)
 """The kinds of JSON value a word is taken from; ``jsonb_to_tsvector`` takes no key with them."""
 _NO_OBJECT: Final = literal_column("'{}'::jsonb", JSONB)
