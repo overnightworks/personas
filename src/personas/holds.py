@@ -58,8 +58,9 @@ decision does; the turn's own bound stays the turn's."""
 ROUND_CALLS: Final = DECISION_CALLS + 1
 """The calls a round's run may make whatever the turn it began beside is bound to: the decisions and the call past
 them, which the hold answers that it takes no more. Every call of the round counts, one that takes no decision
-(another tool, a call after the decision, a malformed line) included, so a model that wastes calls is cut before its
-eighth decision and the hold ends undecided."""
+(another tool, a call after the decision, a malformed line) included, so each such call leaves one less for the
+decisions and the call past them, and a model that wastes a second one is cut before its eighth decision and the hold
+ends undecided."""
 _APART_DECISION_CALLS: Final = 1
 DECISIONS_BOUND_TEXT: Final = "this hold takes no more decisions"
 LINE_ARGUMENT: Final = "line"
