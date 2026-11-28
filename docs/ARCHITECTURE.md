@@ -164,8 +164,9 @@ release before it wrote reaches the record; an entry that release cut before a r
 loaded him is not kept. An ordinal is kept once and its first row stays; a row with another time or kind at
 an ordinal a write hands over is a store defect: the write takes nothing and he stops on this pod (LOG-23)
 until `memory erase` removes the leftover. Without `[memory]` the record is neither written, copied into nor
-swept. A release before the record works on the migrated schema and never reads or cuts it. `personas memory list` and
-`personas memory erase` show and erase what an agent keeps; see [the runbook](runbooks/erase-memory.md).
+swept. A release before the record works on the migrated schema and never reads or cuts it.
+`personas memory list` and `personas memory erase` show and erase what an agent keeps; see
+[the runbook](runbooks/erase-memory.md).
 `personas migrate` is the only code that changes the schema, and a release only adds to it while two
 releases run.
 

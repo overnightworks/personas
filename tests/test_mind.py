@@ -77,8 +77,8 @@ def test_the_lines_of_every_visit_join_his_one_history_in_the_order_taken():
     ]
 
 
-def a_recording_mind(history_bytes: int = 1_000, *, resumed: tuple[Entry, ...] = (), left_out: int = 0) -> Mind:
-    kept = KeptHistory(left_out, resumed, 0, ())
+def a_recording_mind(history_bytes: int = 1_000) -> Mind:
+    kept = KeptHistory(0, (), 0, ())
     return Mind(history_bytes, history_bytes, BUDGET_PAUSE_CAP_SECONDS, present_of(kept), keeping_record=True)
 
 
