@@ -487,10 +487,13 @@ class PostgresLineStore(_PostgresStore):
         async with self._bounded_transaction() as connection:
             stored = (await connection.execute(_recorded_entries(search, words))).scalars().all()
             kept_lines = (await connection.execute(_lines_the_record_lacks(search, words))).all()
-        found = [
-            *(cast("ToldEntry", entry_from_stored(each)) for each in stored),
-            *(_kept_line(row) for row in kept_lines),
-        ]
+        try:
+            found = [
+                *(cast("ToldEntry", entry_from_stored(each)) for each in stored),
+                *(_kept_line(row) for row in kept_lines),
+            ]
+        except ValueError:
+            raise StoreDefect(STORE_DEFECT_CODE) from None
         # Python's sort is stable, so of two entries read at the same time the record's comes first.
         return tuple(sorted(found, key=entry_time, reverse=True)[: search.rows])
 

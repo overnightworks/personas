@@ -22,6 +22,7 @@ from personas.entries import (
     ViewSeen,
     Visit,
 )
+from personas.failures import StoreDefect
 from personas.memory import PostgresHistoryStore, PostgresLineStore
 from tests.support.call import PLACE_ID
 from tests.support.fakes import WALL_START
@@ -34,6 +35,7 @@ from tests.support.memory_search import (
     a_visit,
     texts_found,
 )
+from tests.support.postgres import run_sql
 from tests.support.standings import line
 
 if TYPE_CHECKING:
@@ -235,3 +237,14 @@ async def test_a_line_only_the_lines_table_holds_is_found_only_before_the_time_h
     found = await store.search(a_search(first_read_before=hours_in(2)))
 
     assert [getattr(each, "text", None) for each in found] == ["Recorded", "Before"]
+
+
+async def test_a_record_row_that_is_no_entry_is_a_store_defect_that_holds_none_of_its_words(store, histories, database):
+    await recorded(histories, a_sentence_of("Guten Morgen"))
+    run_sql(database, """UPDATE kept_entries SET entry = '{"entry": "speech", "text": "Guten Morgen", "app": 1}'""")
+
+    with pytest.raises(StoreDefect) as defect:
+        await store.search(a_search("Morgen"))
+
+    assert "Morgen" not in str(defect.value)
+    assert defect.value.__cause__ is None
