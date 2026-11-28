@@ -69,8 +69,8 @@ def a_say(runner, text: str, outcome: dict[str, object]) -> dict[str, object]:
     return act_entry(url_of(runner, 0), "say", {"place": PLACE_ID, "text": text}, outcome)
 
 
-def a_song(runner, songmaker_url: str, outcome: dict[str, object]) -> dict[str, object]:
-    return act_entry(songmaker_url, CREATE_SONG, {"title": "t"}, outcome)
+def a_song_act(runner_url: str, outcome: dict[str, object]) -> dict[str, object]:
+    return act_entry(runner_url, CREATE_SONG, {"title": "t"}, outcome)
 
 
 async def second_written_turn(runner, text: str = AGAIN):
@@ -174,7 +174,7 @@ async def test_a_picture_that_breaks_the_wire_is_the_failure_of_the_tools_only_a
     second = await second_written_turn(runner)
 
     acts = [each for each in second.room["history"]["entries"] if each["entry"] == "act"]
-    assert acts[0] == a_song(runner, songmaker_url(runner), unanswered(INVALID_ANSWER_CODE))
+    assert acts[0] == a_song_act(songmaker_url(runner), unanswered(INVALID_ANSWER_CODE))
     assert runner.reports.reported(apps=True, started=False) == [
         (Event.TOOLS_ONLY_APP_FAILED, INVALID_ANSWER_CODE, songmaker_url(runner))
     ]
@@ -237,7 +237,7 @@ async def test_a_tools_only_call_and_the_say_after_it_are_acts_in_the_order_made
 
     acts = [each for each in second.room["history"]["entries"] if each["entry"] == "act"]
     assert acts == [
-        a_song(runner, songmaker_url(runner), answered(songmaker.results[CREATE_SONG])),
+        a_song_act(songmaker_url(runner), answered(songmaker.results[CREATE_SONG])),
         a_say(runner, ANSWER, answered("said")),
     ]
 
@@ -250,7 +250,7 @@ async def test_calls_past_a_tools_only_apps_own_bound_enter_no_act(runner, songm
     second = await second_written_turn(runner)
 
     acts = [each for each in second.room["history"]["entries"] if each["entry"] == "act"]
-    assert acts == [a_song(runner, songmaker_url(runner), answered(songmaker.results[CREATE_SONG]))] * CALLS
+    assert acts == [a_song_act(songmaker_url(runner), answered(songmaker.results[CREATE_SONG]))] * CALLS
 
 
 @pytest.mark.parametrize(
@@ -271,7 +271,7 @@ async def test_a_tools_only_call_that_fails_is_told_as_not_answered_with_the_fai
     second = await second_written_turn(runner)
 
     acts = [each for each in second.room["history"]["entries"] if each["entry"] == "act"]
-    assert acts[0] == a_song(runner, songmaker_url(runner), unanswered(code))
+    assert acts[0] == a_song_act(songmaker_url(runner), unanswered(code))
     assert runner.reports.reported(apps=True, started=False) == [
         (Event.TOOLS_ONLY_APP_FAILED, code, songmaker_url(runner))
     ]
@@ -290,7 +290,7 @@ async def a_call_waiting_for_its_app_while_its_place_leaves(runner, songmaker, *
     if tools_only:
         songmaker.script(CALL, hangs_once_entered(entered))
         runner.gateway = Gateway(song_round(1), completion("done"))
-        act = a_song(runner, songmaker_url(runner), unanswered(TURN_CANCELLED_CODE))
+        act = a_song_act(songmaker_url(runner), unanswered(TURN_CANCELLED_CODE))
     else:
         runner.app.script(CALL, hangs_once_entered(entered))
         runner.gateway = Gateway(say_round(ANSWER), completion("done"))
