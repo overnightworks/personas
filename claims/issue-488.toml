@@ -3,6 +3,6 @@ agent = "Claude 09c5accf-533b-455a-a4f6-8e1e617175c5"
 role = "builder"
 base = "393b8089c100fa08101f3d9f5b4ac8a601d48881"
 branch = "claude/issue-488-personas-decides-holds-under-agents-floo"
-scope = ["docs/configuration.md", "docs/turns.md", "pyproject.toml", "src/personas/decision.py", "src/personas/due.py", "src/personas/entries.py", "src/personas/held_tools.py", "src/personas/holds.py", "src/personas/loop.py", "src/personas/speech.py", "src/personas/turning.py", "src/personas/voice.py", "tests", "uv.lock"]
+scope = ["docs/configuration.md", "docs/log.md", "docs/turns.md", "pyproject.toml", "quality/baseline.toml", "src/personas/decision.py", "src/personas/due.py", "src/personas/entries.py", "src/personas/held_tools.py", "src/personas/holds.py", "src/personas/loop.py", "src/personas/mind.py", "src/personas/speech.py", "src/personas/turning.py", "src/personas/voice.py", "tests", "uv.lock"]
 opened_commit = "1111b77570379d636962a9083283ae8339126766"
 whole_reason = "Taking agents v0.85.0 changes how every hold is decided and when what waited is dropped, in the hold, voice and speech modules together with their renamed imports and the tests that pin them; apart, a stale refusal would stop him or a void would lose his sentences."
