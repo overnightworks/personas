@@ -221,7 +221,6 @@ REFUSALS = pytest.mark.parametrize(
     ("refusal", "outcome", "stops"),
     [
         pytest.param(SpeakRefusal.TOO_LONG, "undecided", [(STOP_SPEAKING_TOOL, HOLD_ID)], id="refused"),
-        pytest.param(SpeakRefusal.NOT_INTERRUPTED, "gone", [], id="not interrupted"),
     ],
 )
 

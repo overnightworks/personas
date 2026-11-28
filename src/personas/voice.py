@@ -148,11 +148,11 @@ class Answering:
         """Reads the events of the round that decides the hold ``told``: its first text while the hold is undecided
         answers instead, and the parked run is cut with its waiting call unsent once the app took the answer or the
         stop that follows its failure; the rest of that reply follows the answer. Text of a later reply says nothing;
-        the round's calls are answered as before. It tells whether the hold ended."""
+        the round's calls are answered as before. It tells whether it tried to answer, which ended the hold or left it
+        as the app says, once."""
         reader = ReplyReader()
         answer: HoldOutcome | NotDecided | None = None
         tried = False
-        ended = False
         async for event in events:
             sentences = reader.read(event).sentences
             if sentences and answer is HoldOutcome.ANSWERED:
@@ -161,11 +161,10 @@ class Answering:
                 tried = True
                 answer = await self.instead(told, sentences)
                 if isinstance(answer, HoldOutcome):
-                    ended = True
                     await cut_parked_run()
             if isinstance(event, ToolCallEvent | FinalEvent):
                 answer = None
-        return ended
+        return tried
 
     async def instead_told(self, sentences: tuple[str, ...]) -> None:
         """The sentences answer the hold the turn was told instead; the hold is decided for the turn's calls."""

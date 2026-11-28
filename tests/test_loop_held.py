@@ -18,6 +18,7 @@ from agents.turn import FailureCode, Principal, person_fingerprint
 from mcp_types import ListToolsResult
 
 from personas.decision import LOAD_TOOLS_CALLS, NETWORK_FAILURE_CODE, READ_SKILL_CALLS, TURN_CANCELLED_CODE
+from personas.holds import DECISION_CALLS
 from personas.reporting import Event
 from tests.support.app_driving import said_and_taken, settled, shows, waits
 from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
@@ -280,7 +281,7 @@ def rounds_spending_every_bound(runner) -> list[object]:
         *(tool_round(play(words(1)[0])) for _ in range(held_bound + 1)),
         *(tool_round(say(words(1)[0])) for _ in range(own_bound)),
         *(tool_round(tool_call(secrets.token_hex(4), CREATE_SONG, {"title": "t"})) for _ in range(CALLS)),
-        deciding(CONTINUE_SPEAKING_TOOL),
+        *(deciding(CONTINUE_SPEAKING_TOOL, time=time) for time in range(1, DECISION_CALLS + 1)),
     ]
 
 

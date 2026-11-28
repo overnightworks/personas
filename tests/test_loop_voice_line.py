@@ -187,7 +187,7 @@ async def test_the_short_line_beside_his_parked_run_leaves_the_run_to_go_on(runn
     assert [text for *_, text in runner.app.said] == ["before", "waits"]
 
 
-async def test_a_new_hold_beside_the_short_line_starts_one_more_round_while_his_run_is_parked(runner):
+async def test_a_new_hold_voiding_the_one_his_short_line_names_decides_nothing_for_it_and_starts_its_own_round(runner):
     """TURNS-46."""
     deciding_round = await calling_while_held(
         runner,
@@ -201,7 +201,7 @@ async def test_a_new_hold_beside_the_short_line_starts_one_more_round_while_his_
     runner.app.hold(PLACE_ID, "hold-2", ("Bob", "no, stop"))
     deciding_round.set()
 
-    assert (await decided(runner, 2))[1] == "continued"
+    assert await decided(runner) == ["continued"]
     assert runner.gateway.hold_told(5)["id"] == "hold-2"
 
 

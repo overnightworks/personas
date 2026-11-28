@@ -194,7 +194,11 @@ async def test_a_retry_after_an_expired_call_replaces_the_decision_that_still_wa
 async def test_a_line_that_repeats_the_words_he_was_told_makes_no_turn_due_and_another_line_does(runner):
     """TURNS-31."""
     await held_in_the_first_sentence(
-        runner, completion(TWO_SENTENCES), deciding(CONTINUE_SPEAKING_TOOL), completion("[silent]"), completion("Alright.")
+        runner,
+        completion(TWO_SENTENCES),
+        deciding(CONTINUE_SPEAKING_TOOL),
+        completion("[silent]"),
+        completion("Alright."),
     )
     assert await decided(runner) == ["continued"]
     await runner.app.spoken_count(2)

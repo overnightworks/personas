@@ -101,6 +101,18 @@ async def test_a_first_answer_sentence_the_app_refused_sends_no_further_one_and_
     )
 
 
+async def test_a_first_answer_sentence_refused_as_stale_ends_the_hold_undecided_and_stops_him(runner):
+    """TURNS-27, TURNS-31."""
+    await refused_ends_the_hold_as_the_app_says(
+        runner,
+        lambda: answered_in_the_round(runner, completion(ANSWER)),
+        SpeakRefusal.STALE,
+        "undecided",
+        [(STOP_SPEAKING_TOOL, HOLD_ID)],
+        unsent=ANSWER_REST,
+    )
+
+
 async def test_a_new_hold_during_his_answer_starts_no_round_and_is_told_to_his_next_turn(runner):
     """TURNS-27, TURNS-30."""
     await a_voice_call(runner, completion(ANSWER), completion("[silent]"))
