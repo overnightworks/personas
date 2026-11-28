@@ -57,7 +57,7 @@ from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, paused
 from tests.support.voice import a_voice_call
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 SECOND_AGENT, SECOND_SUBJECT, SECOND_NAME = "agent-bach", "agent-subject-2", "Bach"
 

@@ -8,7 +8,7 @@ from personas.holds import HoldInbox
 from personas.speech import Held, HoldKey, Telling
 from tests.support.standings import GENERATION
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 HOLD_ID = "hold-1"
 

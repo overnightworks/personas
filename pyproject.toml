@@ -118,7 +118,10 @@ addopts = [
     "--cov",
     "--cov-report=term-missing",
 ]
-markers = ["postgres: tests that need the throwaway Postgres named by PERSONAS_TEST_POSTGRES_URL"]
+markers = [
+    "postgres: tests that need the throwaway Postgres named by PERSONAS_TEST_POSTGRES_URL",
+    "integration: tests that reach an adapter, kept apart from the core unit tests",
+]
 
 # --- Coverage ---
 

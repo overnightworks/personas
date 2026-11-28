@@ -19,7 +19,7 @@ from tests.support.openers import opener_whose_request_raises
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.wire import hangs
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 
 async def test_a_turn_lists_the_tools_of_its_apps_while_its_claim_is_written_and_acts_only_once_it_was_taken(

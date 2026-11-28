@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import pytest
+
 from personas.held_tools import HoldBack
 from tests.support.history import a_marked_present
+
+pytestmark = pytest.mark.integration
 
 
 def test_a_hold_repr_shows_neither_a_view_state_nor_a_line_nor_an_act_of_the_history():

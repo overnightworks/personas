@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
     from personas.ownership import Owned
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 AGENT = "agent-mozart"
 OTHER_AGENT = "agent-ada"

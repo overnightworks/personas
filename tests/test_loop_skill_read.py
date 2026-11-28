@@ -39,7 +39,7 @@ from tests.support.songmaker import CREATE_SONG, GENERATE_SONG, OWN_DESCRIPTION,
 from tests.support.voice import a_voice_call
 from tests.support.wire import hangs, refuses_with_a_server_error
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 LARGE_BODY_BYTES = 5000
 

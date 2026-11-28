@@ -19,7 +19,7 @@ from personas.turn_bound import TurnBound
 from personas.voice import Sender, Speaking
 from tests.support.fakes import FakeClock
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 APP = "https://app.test/mcp"
 AGENT = "mozart"

@@ -24,7 +24,7 @@ from tests.support.hopin import PLAY_TOOL, FakeApp
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, invited
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 OTHER_CALL_ID = "room-at-the-other-app"
 

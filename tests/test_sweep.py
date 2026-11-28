@@ -14,7 +14,7 @@ from tests.support.call import restarted_in_the_call
 from tests.support.fakes import FakeClock, Reports, SweepClock, memory_target
 from tests.support.hopin import LIMIT_SECONDS
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 SWEEP_MINUTES = 7.0
 SWEEP_SECONDS = 420.0

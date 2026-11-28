@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
     from personas.config import DatabaseTarget
 
-pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
+pytestmark = [pytest.mark.anyio, pytest.mark.postgres, pytest.mark.integration]
 
 AGENT = "agent-mozart"
 OTHER_AGENT = "agent-ada"

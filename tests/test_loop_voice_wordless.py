@@ -37,7 +37,7 @@ from tests.support.voice import (
 )
 from tests.support.wire import answers_once_released
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 
 def said_texts(runner) -> list[str]:

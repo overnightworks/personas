@@ -22,7 +22,7 @@ from tests.support.hopin_places import ISSUER
 from tests.support.logs import lines_of
 from tests.support.realm import jwt_of
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 ENDPOINT = "https://realm.test/token"
 

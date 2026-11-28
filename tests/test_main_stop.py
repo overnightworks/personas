@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from personas.main import SweepingBoundaries
     from personas.readiness import ReadyMarker
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 WAIT_SECONDS = 30
 BACKOFF_EVENT = "loop.backed_off"

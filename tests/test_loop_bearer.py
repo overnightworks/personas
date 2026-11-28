@@ -7,7 +7,7 @@ from agents.member_outcomes import StatusFailure
 
 from tests.support.fakes import read_of
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 
 async def test_no_session_reads_a_bearer_the_realm_did_not_grant_across_a_renewal_and_a_suspension(scenario):

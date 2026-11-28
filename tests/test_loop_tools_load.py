@@ -34,7 +34,7 @@ from tests.support.skills import (
 from tests.support.songmaker import CREATE_SONG, GENERATE_SONG, OWN_DESCRIPTION, a_song, lists_only, songmaker_url
 from tests.support.voice import a_voice_call, deciding, held_in_the_first_sentence
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 SONG_TOOLS = [CREATE_SONG, GENERATE_SONG]
 

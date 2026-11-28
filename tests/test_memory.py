@@ -56,7 +56,7 @@ if TYPE_CHECKING:
 
     from personas.config import DatabaseTarget
 
-pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
+pytestmark = [pytest.mark.anyio, pytest.mark.postgres, pytest.mark.integration]
 
 APP = "https://app.test/mcp"
 AGENT = "agent-mozart"

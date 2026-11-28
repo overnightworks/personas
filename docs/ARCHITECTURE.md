@@ -178,7 +178,8 @@ the figures' regeneration check, the offline link check, and quality's shared ga
 whose `import-contract` rule holds the import direction to the layers contract under `[tool.importlinter]` in
 `pyproject.toml` and keeps the core (the pure decision modules and the mind) free of adapter imports through the
 contract `core-imports-no-adapter` there; its `adapter-import` rule applies that contract to core unit tests and the
-support modules they import.
+support modules they import, and its `integration-marker` rule has every other test that reaches an adapter carry
+the `integration` mark.
 
 **Errors.** A failure that could corrupt the history, the store or ownership ends the runner loud. A refusal
 by the realm or an app suspends that loop, a network failure backs it off, and a store outage is logged

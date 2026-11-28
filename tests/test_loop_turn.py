@@ -36,7 +36,7 @@ from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, invited
 from tests.support.wire import cuts, hangs
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 
 async def test_an_addressed_line_gets_exactly_one_say_under_the_agents_own_fingerprint(runner):
