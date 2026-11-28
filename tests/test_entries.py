@@ -294,16 +294,24 @@ def test_a_record_row_holds_the_entry_its_kind_its_time_and_the_room_it_was_take
     assert (row.app, row.place) == (APP, place)
 
 
-def test_a_record_row_of_a_call_a_release_before_the_room_took_has_its_target_app_and_no_place_or_visit():
-    (row,) = record_rows(0, (an_act(app="https://target.test/mcp"),))
+@pytest.mark.parametrize(
+    ("entry", "room"),
+    [
+        (an_act(app="https://target.test/mcp"), ("https://target.test/mcp", None, None)),
+        (
+            an_act(app="https://target.test/mcp", room=Room(APP, TABLE, "morning")),
+            (APP, TABLE, "morning"),
+        ),
+    ],
+    ids=[
+        "a call a release before the room took: its target app and no place or visit",
+        "a call made in a room: that room",
+    ],
+)
+def test_a_record_row_of_a_call_has_the_room_it_was_made_in_else_its_target_app(entry, room):
+    (row,) = record_rows(0, (entry,))
 
-    assert (row.app, row.place, row.generation) == ("https://target.test/mcp", None, None)
-
-
-def test_a_record_row_of_a_call_made_in_a_room_has_that_room_though_the_call_went_to_another_app():
-    (row,) = record_rows(0, (an_act(app="https://target.test/mcp", room=Room(APP, TABLE, "morning")),))
-
-    assert (row.app, row.place, row.generation) == (APP, TABLE, "morning")
+    assert (row.app, row.place, row.generation) == room
 
 
 def test_the_record_keeps_what_a_turn_is_told_and_every_row_has_the_ordinal_its_entry_has_in_the_history():

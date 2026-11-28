@@ -159,12 +159,12 @@ again between two writes, as during a store outage; only what a pod took in afte
 when it dies. A row holds the entry's JSON, its ordinal in his history, its time, its kind, the app, place
 and visit it was taken in, whether he said or did it and the speaker of another's line. A call that a
 release before the room took has its target app and no place, and a view or a sentence such a release took
-has no visit. The first write after a pod loads him copies every entry his loaded history holds, which
-reaches the record what a release before it wrote; an entry that release cut before a release with the
-record loaded him is not kept. An ordinal is kept once and its first row stays; a row with another time or
-kind at an ordinal a write hands over is a store defect: the write takes nothing and he stops on this pod
-(LOG-23) until `memory erase` removes the leftover. Without `[memory]` the record is neither written, copied
-into nor swept. A release before the record works on the migrated schema and never reads or cuts it. `personas memory list` and
+has no visit. The first write after a pod loads him copies every entry his loaded history holds, so what a
+release before it wrote reaches the record; an entry that release cut before a release with the record
+loaded him is not kept. An ordinal is kept once and its first row stays; a row with another time or kind at
+an ordinal a write hands over is a store defect: the write takes nothing and he stops on this pod (LOG-23)
+until `memory erase` removes the leftover. Without `[memory]` the record is neither written, copied into nor
+swept. A release before the record works on the migrated schema and never reads or cuts it. `personas memory list` and
 `personas memory erase` show and erase what an agent keeps; see [the runbook](runbooks/erase-memory.md).
 `personas migrate` is the only code that changes the schema, and a release only adds to it while two
 releases run.

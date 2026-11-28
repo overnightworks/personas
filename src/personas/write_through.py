@@ -22,7 +22,8 @@ class WriteThrough:
     """Writes what his present gained and how his turns changed, after each change of his mind, with the entries his
     mind holds that the record does not keep yet. A write the store could not take is reported once per outage and
     retried after a backoff, with whatever changed meanwhile; a write the fence refused raises
-    ``StaleGenerationError``, which stops him on this pod."""
+    ``StaleGenerationError`` and one that reuses an ordinal of the record raises ``OrdinalReusedError``, each of which
+    stops him on this pod."""
 
     def __init__(self, mind: Mind, owned: Owned, boundaries: Boundaries) -> None:
         self._mind = mind

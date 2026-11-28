@@ -382,13 +382,13 @@ async def test_text_no_text_column_takes_is_kept_with_a_replacement_so_the_write
     assert (stored["text"], speaker, place_id) == ("a\ufffdb \ufffd", "Ada\ufffd", "r\ufffd")
 
 
-async def test_a_delta_with_more_entries_than_one_statement_takes_is_kept_whole(histories, database, monkeypatch):
-    monkeypatch.setattr(memory, "RECORD_ROWS_PER_STATEMENT", 2)
+async def test_a_delta_with_more_entries_than_one_statement_takes_is_kept_whole(histories, database):
+    count = memory.RECORD_ROWS_PER_STATEMENT + 1
     mine = await histories.take_over(AGENT)
 
-    await histories.write(AGENT, mine, recorded(0, *(said(seq, "a") for seq in range(5))), NO_TURNS_KEPT)
+    await histories.write(AGENT, mine, recorded(0, *(said(seq, "a") for seq in range(count))), NO_TURNS_KEPT)
 
-    assert [ordinal for ordinal, *_ in kept_record(database, "ordinal")] == [0, 1, 2, 3, 4]
+    assert [ordinal for ordinal, *_ in kept_record(database, "ordinal")] == list(range(count))
 
 
 async def test_a_write_the_generation_refuses_keeps_nothing(histories, database):
