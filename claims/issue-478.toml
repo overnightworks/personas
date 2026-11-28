@@ -1,0 +1,7 @@
+claim_id = "24536a70583148eea1e5dc9bf5064138"
+agent = "Claude 09c5accf-533b-455a-a4f6-8e1e617175c5"
+role = "builder"
+base = "4a691055a4477033eba41d3460e115e568b71acc"
+branch = "claude/issue-478-tests-test-loop-acts-py-takes-songmaker"
+scope = ["tests/test_loop_acts.py"]
+opened_commit = "7a9f8c5fbe9ffb35f6291d387604be4c8a3f8d9e"
