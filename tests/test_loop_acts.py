@@ -352,6 +352,13 @@ async def test_a_call_cut_in_flight_because_its_place_left_is_told_cancelled_to_
     assert runner.reports.turn_endings == [CANCELLED_TURN]
 
 
+async def test_a_call_whose_relay_ends_after_its_place_left_is_kept_with_no_visit(runner, songmaker):
+    await a_call_waiting_for_its_app_while_its_place_leaves(runner, songmaker, tools_only=False)
+
+    [act] = [each for each in runner.histories.entries() if isinstance(each, ActDone)]
+    assert act.room == Room(url_of(runner, 0), CALL_PLACE, None)
+
+
 async def test_a_call_cut_in_flight_whose_request_ends_as_a_transport_failure_is_told_cancelled_not_network(
     runner, songmaker
 ):
