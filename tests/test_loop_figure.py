@@ -14,7 +14,7 @@ from tests.support.history import TABLE
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import invited
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 SECOND_AGENT, SECOND_SUBJECT = "agent-bach", "agent-subject-2"
 

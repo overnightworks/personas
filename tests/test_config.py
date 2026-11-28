@@ -18,7 +18,7 @@ from personas.decision import DEFAULT_BUDGET_PAUSE_CAP_SECONDS
 from tests.support.configfiles import MAX_TOOL_CALLS, PERSONA_NAME, fails_at_start
 from tests.support.realm import API_GROUP
 
-pytestmark = pytest.mark.usefixtures("restored_logging")
+pytestmark = [pytest.mark.usefixtures("restored_logging"), pytest.mark.integration]
 
 MORE_VOICES_THAN_ANY_LIST_HOLDS = [f"voice-{index}" for index in range(100)]
 APP_TABLE = f'[[apps]]\nmcp_url = "https://hopin.test/mcp"\nscope = "mcp-hopin"\nmax_tool_calls = {MAX_TOOL_CALLS}\n'

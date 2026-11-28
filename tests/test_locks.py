@@ -16,7 +16,7 @@ from personas.ownership import LockConnectionLost
 from tests.support.hopin import LIMIT_SECONDS
 from tests.support.postgres import Forwarder, engine_of, lock_holders, terminate_backend
 
-pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
+pytestmark = [pytest.mark.anyio, pytest.mark.postgres, pytest.mark.integration]
 
 AGENT = "agent-mozart"
 OTHER_AGENT = "agent-ada"

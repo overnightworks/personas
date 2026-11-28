@@ -29,7 +29,7 @@ from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.voice import in_a_voice_call_and_at_a_table
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 STARTED = (Event.STARTED, None)
 

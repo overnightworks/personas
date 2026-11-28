@@ -8,7 +8,7 @@ import pytest
 
 from personas.clock import SystemClock
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 
 async def test_a_sleep_moves_the_time_on():

@@ -23,7 +23,7 @@ from personas.config import (
 from personas.recall import SMALLEST_RESULT_BYTES
 from tests.support.configfiles import fails_at_start
 
-pytestmark = pytest.mark.usefixtures("restored_logging")
+pytestmark = [pytest.mark.usefixtures("restored_logging"), pytest.mark.integration]
 
 
 def test_a_database_table_gives_the_runner_its_database_its_password_and_a_default_write_bound(files):

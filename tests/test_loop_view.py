@@ -26,7 +26,7 @@ from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, invited, paused
 from tests.support.wire import cuts
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 
 def at_table(place: PlaceRef = TABLE):

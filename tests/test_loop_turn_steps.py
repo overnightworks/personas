@@ -26,7 +26,7 @@ from tests.support.wire import cuts, hangs
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 TOKEN_RAN_OUT_SECONDS = 10_000.0
 SHORT_CALL_SECONDS = 0.3

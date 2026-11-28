@@ -27,7 +27,7 @@ from tests.support.wire import hangs, hangs_once_entered, lost_on_demand
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 OTHER_PLACE_ID = "room-8"
 

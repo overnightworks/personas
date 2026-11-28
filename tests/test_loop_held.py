@@ -32,7 +32,7 @@ from tests.support.standings import active
 from tests.support.voice import HeldSleeps, a_voice_call, deciding, holding_sentence_ends
 from tests.support.wire import answers_with, cuts, hangs, hangs_once_entered, refuses_with_a_server_error
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 
 def fingerprints(tokens) -> set[str]:

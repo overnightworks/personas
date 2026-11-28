@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import pytest
+
 from personas.turn_bound import TurnBound
 from tests.support.fakes import FakeClock
+
+pytestmark = pytest.mark.integration
 
 
 def test_a_turn_has_nothing_left_at_the_time_it_ends_at_and_a_second_before_it_has_one_second():

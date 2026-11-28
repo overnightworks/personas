@@ -20,7 +20,7 @@ from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active
 from tests.support.voice import a_voice_call, holding_sentence_ends
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 HOLD_ID = "hold-1"
 FIELDS = {"agent_id", "app_id", "occasion", "spoken", "read_ms"}

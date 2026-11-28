@@ -25,6 +25,8 @@ from personas.main import (
 from tests.support.pods import ENTRY_POINT_CALL
 from tests.support.postgres import at_an_unknown_revision, kept_lines, migrated_to, revision_of, run_sql, tables_of
 
+pytestmark = pytest.mark.integration
+
 if TYPE_CHECKING:
     from tests.support.configfiles import Files
 

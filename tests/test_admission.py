@@ -11,6 +11,8 @@ from personas.entries import Lines, Visit, Waiting
 from personas.tokens import TokenFacts
 from tests.support.history import a_marked_present
 
+pytestmark = pytest.mark.integration
+
 PLACE = PlaceRef(kind="table", id="table-1")
 VISIT = Visit("https://app.test/mcp", PLACE, "generation-1")
 TAKEN_AT = datetime(2026, 11, 11, 20, 0, tzinfo=UTC)

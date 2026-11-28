@@ -45,7 +45,7 @@ from tests.support.voice import (
 )
 from tests.support.wire import cuts, refuses_with_a_server_error
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 
 def said_texts(runner) -> list[str]:
