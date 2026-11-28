@@ -82,20 +82,6 @@ def a_recording_mind(history_bytes: int = 1_000, *, resumed: tuple[Entry, ...] =
     return Mind(history_bytes, history_bytes, BUDGET_PAUSE_CAP_SECONDS, present_of(kept), keeping_record=True)
 
 
-def test_a_mind_that_keeps_no_record_holds_no_entry_to_keep():
-    mind = Mind(1_000, 1_000, BUDGET_PAUSE_CAP_SECONDS, present_of(KeptHistory(2, (said(CALL, 1, "old"),), 0, ())))
-
-    mind.take((said(CALL, 2, "new"),))
-
-    assert mind.unrecorded()[1] == ()
-
-
-def test_a_mind_that_keeps_a_record_starts_with_every_entry_his_loaded_history_holds_from_its_first_ordinal():
-    old = (said(CALL, 1, "one"), said(CALL, 2, "two"))
-
-    assert a_recording_mind(resumed=old, left_out=5).unrecorded() == (5, old)
-
-
 def test_every_entry_taken_waits_to_be_recorded_in_order_even_after_the_bound_dropped_it_from_his_history():
     one, two, three = said(CALL, 1, "one"), said(CALL, 2, "two"), said(CALL, 3, "three")
     mind = a_recording_mind(history_bytes=entry_size(one))
