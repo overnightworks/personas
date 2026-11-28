@@ -1,8 +1,0 @@
-claim_id = "a24c6d1633074ae2832e1e67aff80127"
-agent = "Claude 09c5accf-533b-455a-a4f6-8e1e617175c5"
-role = "builder"
-base = "393b8089c100fa08101f3d9f5b4ac8a601d48881"
-branch = "claude/issue-489-found-by-words-recall-reads-the-record-i"
-scope = ["docs/ARCHITECTURE.md", "docs/configuration.md", "docs/turns.md", "src/personas/entries.py", "src/personas/memory.py", "src/personas/recall.py", "src/personas/record_words.py", "src/personas/remembering.py", "tests/support/memory_search.py", "tests/support/store.py", "tests/test_loop_memory.py", "tests/test_loop_memory_record.py", "tests/test_loop_voice_memory.py", "tests/test_memory.py", "tests/test_memory_record.py", "tests/test_recall.py"]
-opened_commit = "0bd02df455df03b2fec8c225f4ac44c48a7a6c58"
-whole_reason = "Recall's decision, its store query and the result told to the model change together with the store fake and the tests that pin today's lines-only shape; apart, the model would be told a shape the store does not give."
