@@ -19,6 +19,8 @@ from tests.support.hopin import DISCOVER, READ, SKILLS_GET, SKILLS_LIST, discove
 from tests.support.songmaker import CREATE_SONG, GENERATE_SONG, a_song, songmaker_url
 
 if TYPE_CHECKING:
+    import asyncio
+
     from tests.support.wire import Handler, Rpc
 
 DESCRIPTION = "Greets."
@@ -74,6 +76,17 @@ class Shelf:
         if rpc.method == READ and (name := self._named_by(rpc.params["uri"])) is not None:
             return self._file_of(name)
         return None
+
+    def entry_held_until(self, entered: asyncio.Event, released: asyncio.Event) -> Handler:
+        """A handler for the request of an entry that sets ``entered``, waits until ``released`` is set and then answers
+        as the shelf does."""
+
+        async def held(reply) -> None:
+            entered.set()
+            await released.wait()
+            await self.answers(reply.rpc)(reply)
+
+        return held
 
     def _named_by(self, uri: str) -> str | None:
         return next((name for name in self.files if skill_uri(name) == uri), None)

@@ -407,12 +407,7 @@ async def test_a_line_that_arrives_while_the_block_reads_is_told_before_every_ro
     other.shelf = Shelf({OTHER: a_skill_file(OTHER, tools=PLAY_TOOL)})
     entered, released = asyncio.Event(), asyncio.Event()
 
-    async def answers_once_released(reply) -> None:
-        entered.set()
-        await released.wait()
-        await other.shelf.answers(reply.rpc)(reply)
-
-    other.script(SKILLS_GET, answers_once_released)
+    other.script(SKILLS_GET, other.shelf.entry_held_until(entered, released))
     await seated_in_the_call(runner, other, *turn_answers())
     say_in_the_call(runner, f"{ADDRESSED} {secrets.token_hex(3)}")
     await entered.wait()
