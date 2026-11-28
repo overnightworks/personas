@@ -27,7 +27,7 @@ At the default history, a skat game (40 to 50 states of about 1.5 KB) fills it a
 | CONFIG-7 | `mcp_url` | URL, once per file | required | the app's MCP endpoint; it names the app in the history and the lines |
 | CONFIG-8 | `scope` | string | required | the token scope for this app |
 | CONFIG-9 | `max_tool_calls` | integer above 0 | none | binds every tool the app offers to its agents' turns, that many calls per turn |
-| CONFIG-10 | `listens` | boolean | true | `false` serves tools only: no loop runs, its tools join the turns of the other apps; needs `max_tool_calls` |
+| CONFIG-10 | `listens` | boolean | true | `false` serves tools only: no loop runs, its tools join the turns of the other apps deferred, shown to the model once `load_tools` loads them; needs `max_tool_calls` |
 | CONFIG-11 | `call_seconds` | number above 0 | 30 | bounds each request a turn of another app makes to it, and the tool list and turn state requests of a turn at its own places; keep it below the persona's `maxDurationSeconds` |
 
 - CONFIG-12: At least one app listens. Apps are declared to a turn in the file's order, so list the apps whose places

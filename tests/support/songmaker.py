@@ -7,8 +7,10 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING
 
+from agents.backend.fake_gateway import tool_call
 from agents.mcp_server import PersonRequest, PersonTool
 from agents.tools import ToolDeclaration, ToolEffect, ToolOutcome
+from mcp_types import ListToolsResult, Tool
 
 from tests.support.hopin import FakeApp
 
@@ -18,9 +20,30 @@ if TYPE_CHECKING:
 CREATE_SONG = "create_song"
 GENERATE_SONG = "generate_song"
 SCOPE = "mcp-songmaker"
+OWN_DESCRIPTION = "Its own."
 CALLS = 2
 """The call bound a scenario gives the app."""
 _TOOLS = (CREATE_SONG, GENERATE_SONG)
+
+
+def a_song(call_id: str, tool: str = CREATE_SONG):
+    """A call of one of the app's tools."""
+    return tool_call(call_id, tool, {"title": "t"})
+
+
+def lists_only(*names: str):
+    """A listing of the app that holds only these tools, each described as the app's own."""
+
+    async def lists(reply) -> None:
+        tools = [Tool(name=each, description=OWN_DESCRIPTION, input_schema={"type": "object"}) for each in names]
+        await reply.result(ListToolsResult(tools=tools))
+
+    return lists
+
+
+def songmaker_url(runner) -> str:
+    (url,) = (each.mcp_url for each in runner.config.apps if not each.listens)
+    return url
 
 
 def _declaration(name: str) -> ToolDeclaration:

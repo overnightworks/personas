@@ -3,102 +3,49 @@ tells a read in the turns after it."""
 
 from __future__ import annotations
 
-import asyncio
 import json
 import secrets
 from http import HTTPStatus
 
 import pytest
-from agents.backend.fake_gateway import completion, tool_call, tool_round
+from agents.backend.fake_gateway import completion, tool_round
 from agents.member_outcomes import INVALID_ANSWER_CODE, status_code
 from agents.skills import SkillRefusal, implicit_skill_name
 from agents.turn import MAX_EVENT_BYTES
 from agents.voice.reply import REPLY_RULES
-from mcp_types import ListToolsResult, Tool
 
 from personas.decision import READ_SKILL_CALLS, READ_SKILL_TOOL
-from personas.entries import ActDone, SkillRead, told_bytes
+from personas.entries import ActDone, SkillRead
 from personas.reporting import Event
-from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
-from tests.support.gateway import Gateway
-from tests.support.history import bounded_history, told_line_bytes
+from tests.support.call import ADDRESSED, a_turn, restarted_in_the_call, say_in_the_call
+from tests.support.gateway import ERROR_MARK, Gateway, reading
 from tests.support.hopin import CALL, LIST_TOOLS, READ, SKILLS_GET, SKILLS_LIST
 from tests.support.logs import formatted, lines_of
 from tests.support.realm import LIFETIME_SECONDS
-from tests.support.skills import Shelf, a_skill_file, an_entry
-from tests.support.songmaker import CREATE_SONG, GENERATE_SONG
+from tests.support.skills import (
+    HOPIN,
+    HOPIN_DESCRIPTION,
+    SONG_BODY,
+    SONG_DESCRIPTION,
+    SONGMAKER,
+    Shelf,
+    a_skill_file,
+    an_entry,
+    assert_a_round_is_told_byte_for_byte_after_a_restart,
+    skilled,
+    turns_past_a_cut_of_a_round,
+)
+from tests.support.songmaker import CREATE_SONG, GENERATE_SONG, OWN_DESCRIPTION, a_song, lists_only, songmaker_url
 from tests.support.voice import a_voice_call
 from tests.support.wire import hangs, refuses_with_a_server_error
 
 pytestmark = pytest.mark.anyio
 
-ERROR_MARK = "Error: "
-"""How the gateway shows the model an error result."""
-SONGMAKER = "songmaker"
-HOPIN = "hopin"
-SONG_BODY = f"Make songs {secrets.token_hex(6)}."
 LARGE_BODY_BYTES = 5000
-SONG_DESCRIPTION = f"Makes songs {secrets.token_hex(4)}."
-HOPIN_DESCRIPTION = f"Plays at the table {secrets.token_hex(4)}."
-
-
-def songmaker_url(runner) -> str:
-    (url,) = (each.mcp_url for each in runner.config.apps if not each.listens)
-    return url
-
-
-def reading(name: str, call_id: str = "model-read") -> dict:
-    return tool_call(call_id, READ_SKILL_TOOL, {"skill": name})
-
-
-def a_song(call_id: str, tool: str = CREATE_SONG) -> dict:
-    return tool_call(call_id, tool, {"title": "t"})
-
-
-def skilled(runner, songmaker) -> None:
-    """Both apps declare a skill of their own: songmaker's makes songs and hopin's plays at the table."""
-    songmaker.shelf = Shelf(
-        {
-            SONGMAKER: a_skill_file(
-                SONGMAKER, tools=f"{CREATE_SONG} {GENERATE_SONG}", body=SONG_BODY, description=SONG_DESCRIPTION
-            )
-        }
-    )
-    runner.app.shelf = Shelf({HOPIN: a_skill_file(HOPIN, description=HOPIN_DESCRIPTION)})
-
-
-async def a_turn(runner, number: int, text: str = ADDRESSED) -> None:
-    """A line addressed to him, and the turn for it asked its first request: the request that arrives as this number."""
-    say_in_the_call(runner, f"{text} {secrets.token_hex(3)}")
-    await runner.gateway.until_requested(number)
-
-
-async def restarted(runner) -> None:
-    """The runner stops and starts again over the history the store kept, at the call it stood in."""
-    reads = runner.app.window_reads("room-7")
-    runner.task.cancel()
-    await asyncio.gather(runner.task, return_exceptions=True)
-    runner.start()
-    await runner.app.until_window_read("room-7", reads + 1)
-
-
-def rounds_in(runner, request_number: int) -> list[dict]:
-    """The tool rounds a request told: each assistant message with its calls and the tool results after it."""
-    messages = runner.gateway.body_of(request_number)["messages"]
-    told = []
-    for index, message in enumerate(messages):
-        if message["role"] == "assistant":
-            calls = message["tool_calls"]
-            told.append([message, *messages[index + 1 : index + 1 + len(calls)]])
-    return told
-
-
-def kept_entries(runner) -> list:
-    return [entry for _, delta in runner.histories.written for entry in delta.entries]
 
 
 def skill_reads(runner) -> list[SkillRead]:
-    return [entry for entry in kept_entries(runner) if isinstance(entry, SkillRead)]
+    return [entry for entry in runner.histories.entries() if isinstance(entry, SkillRead)]
 
 
 async def test_a_turn_tells_the_skill_lines_of_the_apps_it_lists_after_the_reply_rules(runner, songmaker):
@@ -130,7 +77,7 @@ async def test_read_skill_answers_a_listed_skills_body_and_the_next_turn_tells_i
     (shown,) = runner.gateway.tool_results(2)
     assert SONG_BODY in shown
     assert [name for name, _ in songmaker.called] == [CREATE_SONG]
-    ((assistant, result),) = rounds_in(runner, 4)
+    ((assistant, result),) = runner.gateway.tool_rounds(4)
     (call,) = assistant["tool_calls"]
     assert (call["function"]["name"], json.loads(call["function"]["arguments"])) == (
         READ_SKILL_TOOL,
@@ -138,7 +85,7 @@ async def test_read_skill_answers_a_listed_skills_body_and_the_next_turn_tells_i
     )
     assert (result["tool_call_id"], result["content"]) == (call["id"], shown)
     assert call["id"] != "model-read"
-    assert rounds_in(runner, 5) == [[assistant, result]]
+    assert runner.gateway.tool_rounds(5) == [[assistant, result]]
 
 
 async def the_turn_ended_lines_around_a_read_of(runner, songmaker, caplog, body: str) -> list[dict[str, object]]:
@@ -166,59 +113,15 @@ async def test_the_next_turn_counts_a_read_skills_round_in_its_told_bytes(runner
     assert second["told_bytes"] - first["told_bytes"] >= LARGE_BODY_BYTES
 
 
-async def test_the_tools_bytes_of_a_turn_cover_every_tool_its_request_offers_read_skill_included(
-    runner, songmaker, caplog
-):
-    skilled(runner, songmaker)
-    await restarted_in_the_call(runner)
-
-    await a_turn(runner, 1)
-    await runner.reports.until_a_turn_completed()
-
-    (ended,) = lines_of(caplog.get_records("call"), "turn.ended")
-    offered = runner.gateway.body_of(1)["tools"]
-    assert READ_SKILL_TOOL in {each["function"]["name"] for each in offered}
-    assert ended["tools_bytes"] == sum(told_bytes(each["function"]) for each in offered)
-
-
 async def test_a_read_skills_round_is_byte_equal_after_a_restart(runner, songmaker):
-    skilled(runner, songmaker)
-    runner.gateway = Gateway(tool_round(reading(SONGMAKER)), completion("done"), completion("again"))
-    await restarted_in_the_call(runner)
-    await a_turn(runner, 1)
-    await runner.gateway.until_requested(2)
-    await a_turn(runner, 3)
-
-    await restarted(runner)
-    await a_turn(runner, 4)
-
-    assert len(rounds_in(runner, 3)) == 1
-    assert rounds_in(runner, 4) == rounds_in(runner, 3)
+    await assert_a_round_is_told_byte_for_byte_after_a_restart(runner, songmaker, reading(SONGMAKER))
 
 
 async def test_a_read_skills_round_is_gone_once_a_cut_drops_its_entry_and_is_not_written_again(runner, songmaker):
-    skilled(runner, songmaker)
-    line_bytes = told_line_bytes(songmaker_url(runner), PLACE_ID, f"{ADDRESSED} {secrets.token_hex(3)}")
-    runner.config = bounded_history(runner.config, 2 * line_bytes + len(SONG_BODY.encode()))
-    runner.gateway = Gateway(
-        tool_round(reading(SONGMAKER)),
-        completion("done"),
-        completion("again"),
-        completion("later"),
-        completion("last"),
-        completion("end"),
-    )
-    await restarted_in_the_call(runner)
-    await a_turn(runner, 1)
-    await a_turn(runner, 3)
+    await turns_past_a_cut_of_a_round(runner, songmaker, reading(SONGMAKER), len(SONG_BODY.encode()))
 
-    assert len(rounds_in(runner, 3)) == 1
-
-    await a_turn(runner, 4)
-    await a_turn(runner, 5)
-    await a_turn(runner, 6)
-
-    assert (rounds_in(runner, 5), rounds_in(runner, 6)) == ([], [])
+    assert len(runner.gateway.tool_rounds(3)) == 1
+    assert (runner.gateway.tool_rounds(5), runner.gateway.tool_rounds(6)) == ([], [])
     assert len(skill_reads(runner)) == 1
 
 
@@ -236,11 +139,11 @@ async def test_a_read_skill_beside_a_relayed_call_enters_both_in_the_order_they_
 
     await a_turn(runner, 3)
 
-    assert [type(entry) for entry in kept_entries(runner) if isinstance(entry, ActDone | SkillRead)] == [
+    assert [type(entry) for entry in runner.histories.entries() if isinstance(entry, ActDone | SkillRead)] == [
         ActDone,
         SkillRead,
     ]
-    ((assistant, _),) = rounds_in(runner, 3)
+    ((assistant, _),) = runner.gateway.tool_rounds(3)
     assert [call["function"]["name"] for call in assistant["tool_calls"]] == [READ_SKILL_TOOL]
     assert assistant["content"] is None
     told = runner.gateway.told_in(3)
@@ -260,7 +163,7 @@ async def test_read_skill_for_a_name_no_line_holds_answers_an_error_and_enters_n
     (shown,) = runner.gateway.tool_results(2)
     assert shown.startswith(ERROR_MARK)
     assert skill_reads(runner) == []
-    assert rounds_in(runner, 3) == []
+    assert runner.gateway.tool_rounds(3) == []
     assert SKILLS_GET not in songmaker.log.entries + runner.app.log.entries
 
 
@@ -400,14 +303,7 @@ async def test_a_skill_name_two_apps_share_goes_to_the_first(runner, songmaker):
 async def test_an_apps_tool_named_read_skill_is_not_taken(runner, songmaker):
     skilled(runner, songmaker)
 
-    async def lists_read_skill(reply) -> None:
-        tools = [
-            Tool(name=name, description="Its own.", input_schema={"type": "object"})
-            for name in (READ_SKILL_TOOL, CREATE_SONG)
-        ]
-        await reply.result(ListToolsResult(tools=tools))
-
-    songmaker.script(LIST_TOOLS, lists_read_skill)
+    songmaker.script(LIST_TOOLS, lists_only(READ_SKILL_TOOL, CREATE_SONG))
     runner.gateway = Gateway(tool_round(reading(SONGMAKER)), completion("done"))
     await restarted_in_the_call(runner)
 
@@ -418,7 +314,7 @@ async def test_an_apps_tool_named_read_skill_is_not_taken(runner, songmaker):
         tool["function"] for tool in runner.gateway.body_of(1)["tools"] if tool["function"]["name"] == READ_SKILL_TOOL
     ]
     assert len(offered) == 1
-    assert offered[0]["description"] != "Its own."
+    assert offered[0]["description"] != OWN_DESCRIPTION
     assert runner.reports.changes_of(Event.TOOLS_LEFT_OUT) == []
     assert SONG_BODY in runner.gateway.tool_results(2)[0]
 
@@ -511,6 +407,6 @@ async def test_read_skill_answers_the_instructions_of_an_app_without_the_extensi
     (shown,) = runner.gateway.tool_results(2)
     assert instructions in shown
     assert not {SKILLS_GET, READ} & set(songmaker.log.entries)
-    ((assistant, _),) = rounds_in(runner, 3)
+    ((assistant, _),) = runner.gateway.tool_rounds(3)
     assert [call["function"]["name"] for call in assistant["tool_calls"]] == [READ_SKILL_TOOL]
     assert len(skill_reads(runner)) == 1

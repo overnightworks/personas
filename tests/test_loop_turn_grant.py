@@ -10,12 +10,12 @@ from agents.member_outcomes import status_code
 
 from personas.decision import SUSPENDED_RETRY_SECONDS
 from personas.reporting import Event
-from tests.support.call import ADDRESSED, PLACE_ID, restarted_in_the_call, say_in_the_call
+from tests.support.call import ADDRESSED, PLACE_ID, a_turn, restarted_in_the_call, say_in_the_call
 from tests.support.gateway import Gateway
 from tests.support.hopin import LIST_TOOLS, SKILLS_LIST
 from tests.support.pods import SECOND_AGENT, SECOND_SUBJECT
 from tests.support.skills import Shelf, a_skill_file
-from tests.support.songmaker import CREATE_SONG, GENERATE_SONG, SCOPE
+from tests.support.songmaker import CREATE_SONG, GENERATE_SONG, SCOPE, songmaker_url
 from tests.support.standings import AGENT_SUBJECT, active
 
 pytestmark = pytest.mark.anyio
@@ -57,18 +57,8 @@ REFUSALS = pytest.mark.parametrize(
 )
 
 
-def songmaker_url(runner) -> str:
-    (url,) = (each.mcp_url for each in runner.config.apps if not each.listens)
-    return url
-
-
 def song_tools_offered(runner, turn: int) -> set[str]:
     return set(runner.gateway.offered_tools(turn)) & SONG_TOOLS
-
-
-async def a_turn(runner, number: int) -> None:
-    say_in_the_call(runner, ADDRESSED)
-    await runner.gateway.until_requested(number)
 
 
 @REFUSALS

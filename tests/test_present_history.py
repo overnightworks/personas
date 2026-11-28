@@ -12,6 +12,7 @@ from personas.entries import HistoryDelta, KeptHistory, Lines, TurnTold, entry_s
 from personas.present import (
     EMPTY_PRESENT,
     EMPTY_SKILL_TEXT,
+    NOT_OFFERED_TEXT,
     Arrived,
     Present,
     answered_into,
@@ -87,7 +88,7 @@ def test_a_present_resumed_from_its_kept_history_tells_the_next_turn_the_same_me
 
     resumed = present_of(kept)
 
-    assert turn_messages("Mozart", resumed, next_turn) == turn_messages("Mozart", current, next_turn)
+    assert turn_messages("Mozart", resumed, next_turn, {}) == turn_messages("Mozart", current, next_turn, {})
 
 
 def test_the_first_delta_after_a_resume_continues_the_ordinals_of_the_kept_history():
@@ -145,23 +146,43 @@ def seen_in(messages) -> list[object]:
             [
                 ("message", []),
                 ("round", "call-body", '{"skill": "greeting"}', "Greet people by name.", 1),
+                ("round", "call-load", '{"skill": "greeting"}', "", 1),
                 ("message", [1]),
             ],
-            id="a read before the first line, a load told by nothing",
+            id="a read and a load before the first line, each its round",
         ),
     ],
 )
-def test_a_turn_message_splits_around_each_skill_entrys_round(entries, expected):
+def test_a_turn_message_splits_around_each_skill_and_load_entrys_round(entries, expected):
     held = took(EMPTY_PRESENT, *entries)
     turn = TurnTold(
         LATER, APP, MORNING.place, Lines(MORNING.generation, frozenset({1, 2}), missed=False), False, len(entries)
     )
 
-    messages = turn_messages("Mozart", held, turn)
+    messages = turn_messages("Mozart", held, turn, {APP: ("say", "play")})
 
     assert seen_in(messages) == expected
     assert "woke" in json.loads(messages[-1].text)
     assert all("woke" not in json.loads(each.text) for each in messages[1:-1] if not isinstance(each, ToolRound))
+
+
+@pytest.mark.parametrize(
+    ("deferred", "loads", "result"),
+    [
+        pytest.param({APP: ("play", "say")}, ("say", "play"), "", id="all kept"),
+        pytest.param({APP: ("say", "wave")}, ("say",), "", id="one gone"),
+        pytest.param({APP: ("wave",)}, (), NOT_OFFERED_TEXT, id="all gone"),
+        pytest.param({"https://elsewhere.test": ("say", "play")}, (), NOT_OFFERED_TEXT, id="its app not listed"),
+    ],
+)
+def test_a_loads_round_references_only_the_tools_its_app_still_sends_deferred(deferred, loads, result):
+    held = took(EMPTY_PRESENT, a_tools_load(tools=("say", "play")), said(1, "one"))
+    turn = TurnTold(LATER, APP, MORNING.place, Lines(MORNING.generation, frozenset({1}), missed=False), False, 2)
+
+    (round_,) = (each for each in turn_messages("Mozart", held, turn, deferred) if isinstance(each, ToolRound))
+
+    (call,) = round_.calls
+    assert (call.loads, call.result, call.is_error) == (loads, result, False)
 
 
 def test_a_skill_and_a_load_taken_since_the_admission_hold_back_no_call():

@@ -330,7 +330,7 @@ class HoldDeciding:
         standing = self.told_standing(
             admitted.place, hold, None if inbox.waiting is None else (inbox.waiting.name, inbox.waiting.input)
         )
-        told = [*turn_messages(admitted.facts.name, self._mind.present, current)]
+        told = [*turn_messages(admitted.facts.name, self._mind.present, current, voiced.held.deferred)]
         if self._mind.went_on_to_tell(self._at(admitted.place)):
             told.append(user_message(told_went_on()))
         told.append(user_message(standing))
