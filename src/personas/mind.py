@@ -35,7 +35,7 @@ from personas.due import (
     without_due,
     yields_to_spoken,
 )
-from personas.entries import KeptLine, SkillRead, ToolsLoaded
+from personas.entries import KeptLine, Reading, SkillRead, ToolsLoaded
 from personas.present import EMPTY_PRESENT, answered_into, round_call_id, taken_into
 from personas.speech import (
     NO_SPEECH,
@@ -318,6 +318,12 @@ class Mind:
     def checkpoint(self, at: AppPlace) -> Checkpoint | None:
         """Where reading the place stands, if it is one of his window places."""
         return self._checkpoints.get(at)
+
+    def generation_at(self, at: AppPlace) -> str | None:
+        """The visit an entry taken now at the place belongs to: the generation of its last window read, none for a
+        place joined and not read since, restarted or paused, and for one without a checkpoint."""
+        checkpoint = self._checkpoints.get(at)
+        return checkpoint.generation if isinstance(checkpoint, Reading) else None
 
     def move_checkpoint(self, at: AppPlace, checkpoint: Checkpoint | None) -> None:
         """Reading the place stands at ``checkpoint`` now; none drops the place's checkpoint."""

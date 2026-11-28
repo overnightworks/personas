@@ -208,7 +208,18 @@ class Answering:
         answer = await self._speak(first, hold.id, style)
         outcome = speech_outcome(answer, cancelling=False)
         assert outcome is not None  # noqa: S101 - a sent sentence always ends with an outcome
-        self._mind.take((SaidAloud(self._app.mcp_url, self._place, first, outcome, self._clock.wall()),))
+        self._mind.take(
+            (
+                SaidAloud(
+                    self._app.mcp_url,
+                    self._place,
+                    first,
+                    outcome,
+                    self._clock.wall(),
+                    self._mind.generation_at(self._at),
+                ),
+            )
+        )
         if isinstance(answer, Spoken | Written):
             if isinstance(answer, Spoken):
                 self._mind.speech_started(self._at, first)
@@ -416,6 +427,17 @@ class Sender:
             request = self._mind.speech_answered(self._at, answered)
             outcome = None if ended is None else speech_outcome(ended, cancelling=task_is_being_cancelled())
             if outcome is not None and answered is not Answered.HELD:
-                self._mind.take((SaidAloud(self._app, self._place, sentence.text, outcome, self._clock.wall()),))
+                self._mind.take(
+                    (
+                        SaidAloud(
+                            self._app,
+                            self._place,
+                            sentence.text,
+                            outcome,
+                            self._clock.wall(),
+                            self._mind.generation_at(self._at),
+                        ),
+                    )
+                )
         if isinstance(answer, SpeakRefusal) and answered in _REFUSED and not request.cut_by_stop(answer):
             self._report(Event.SPEAK_REFUSED, answer.value)

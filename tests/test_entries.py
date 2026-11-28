@@ -18,11 +18,13 @@ from personas.entries import (
     Answered,
     KeptLine,
     Lines,
+    Room,
     TurnTold,
     Unanswered,
     ViewSeen,
     Waiting,
     entry_from_stored,
+    entry_size,
     is_told,
     stored_entry,
     stored_turn,
@@ -128,7 +130,11 @@ def test_a_spoken_sentence_shows_no_text_in_its_repr_nor_in_the_history_that_hol
         ),
         an_act(arguments={"z": 0.1, "a": {"b": [True]}}, outcome=Answered("seen", is_error=True, image_shown=True)),
         an_act(outcome=Unanswered("cancelled")),
+        ViewSeen(APP, TABLE, PlaceView(revision=3, awaits_you=True, state={}), LATER, generation="morning"),
+        an_act(app="https://other.test/mcp", room=Room(APP, MORNING.place, "morning")),
+        an_act(room=Room(APP, MORNING.place, None)),
         a_sentence(),
+        a_sentence(generation="morning"),
         a_sentence(outcome=Written(written=True)),
         a_sentence(outcome=SpeakRefusal.HELD),
         a_sentence(outcome=Unanswered("network")),
@@ -141,7 +147,11 @@ def test_a_spoken_sentence_shows_no_text_in_its_repr_nor_in_the_history_that_hol
         "view",
         "act answered",
         "act unanswered",
+        "view with a visit",
+        "act to another app with its room and visit",
+        "act with a room and no visit",
         "sentence spoken",
+        "sentence with a visit",
         "sentence written",
         "sentence refused",
         "sentence unanswered",
@@ -158,6 +168,26 @@ def test_every_entry_kind_comes_back_from_its_stored_json_as_it_went_in(entry):
     assert json.dumps(stored_entry(back)) == stored
     if is_told(entry):
         assert json.dumps(told_entry(back)) == json.dumps(told_entry(entry))
+
+
+@pytest.mark.parametrize("kind", ["view", "act", "sentence"])
+def test_an_entry_stored_without_its_room_or_visit_loads_with_none_and_is_told_and_sized_as_one_with_them(kind):
+    kept = {
+        "view": ViewSeen(APP, TABLE, PlaceView(revision=1, awaits_you=True, state={}), LATER, generation="morning"),
+        "act": an_act(room=Room(APP, MORNING.place, "morning")),
+        "sentence": a_sentence(generation="morning"),
+    }[kind]
+    stored = stored_entry(kept)
+    for key in ("room", "generation"):
+        stored.pop(key, None)
+
+    loaded = entry_from_stored(stored)
+
+    assert getattr(loaded, "room", None) is None
+    assert getattr(loaded, "generation", None) is None
+    if is_told(kept):
+        assert json.dumps(told_entry(kept)) == json.dumps(told_entry(loaded))
+    assert entry_size(kept) == entry_size(loaded)
 
 
 def test_a_skill_read_shows_no_body_in_its_repr_nor_in_the_history_that_holds_it():
