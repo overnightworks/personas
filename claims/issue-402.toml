@@ -3,6 +3,6 @@ agent = "Claude 09c5accf-533b-455a-a4f6-8e1e617175c5"
 role = "builder"
 base = "4a88ac0ee38b2a83ff700395fa34558e8dcfc472"
 branch = "claude/issue-402-every-entry-is-taken-with-the-room-it-ha"
-scope = ["src/personas/entries.py", "src/personas/loop.py", "src/personas/mind.py", "src/personas/turning.py", "src/personas/voice.py", "tests/support/history.py", "tests/test_entries.py", "tests/test_loop_acts.py", "tests/test_loop_view.py", "tests/test_mind.py", "tests/test_voice.py"]
+scope = [".aco/ahead-of-caller.toml", "src/personas/entries.py", "src/personas/loop.py", "src/personas/mind.py", "src/personas/turning.py", "src/personas/voice.py", "tests/support/history.py", "tests/test_entries.py", "tests/test_loop_acts.py", "tests/test_loop_view.py", "tests/test_mind.py", "tests/test_voice.py"]
 opened_commit = "c44fec5486ff21f13d591067f31669b566c90c67"
 whole_reason = "The room is one field set that the call path, the voice and the view take fill from one generation rule, with the pins of each."
