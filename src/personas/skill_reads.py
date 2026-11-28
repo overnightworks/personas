@@ -46,6 +46,10 @@ async def got_skill(session: MemberSession, uri: str) -> Skill | SkillRefused:
         return refused
 
 
+def fits_one_result(skill: Skill) -> bool:
+    return is_within_event_bound(skill_text(skill.body), None)
+
+
 class SkillReads:
     """Reads the skills of one agent's apps and enters them into his history: on the loop's session for the place's
     own app and in a session of its own for each other app."""
@@ -89,29 +93,37 @@ class SkillReads:
 
     def entered(self, app: str, skill: Skill) -> SkillRead | None:
         """The entry a skill read joins his history as, or ``None`` when its text is past one result's bound."""
-        if not is_within_event_bound(skill_text(skill.body), None):
+        if not fits_one_result(skill):
             return None
+        return self._enter(app, skill)
+
+    def _enter(self, app: str, skill: Skill) -> SkillRead:
         return self._mind.skill_read(app, skill.name, skill.identity.uri, skill.body, self._clock.wall())
 
     async def block(
         self, session: MemberSession, admitted: Admitted, offered: TurnOffer, record: TaskRecord
     ) -> tuple[ToolRound, ...]:
-        """The rounds that end a turn's request, entered into his history as they are made: for each skill of the apps
-        he holds a place at that is due (``blocks_due``), its read when its app answered it, then its load. A read
-        that fails, is refused or is too large is left out, and its load enters all the same; the own app's refusal of
-        the agent is raised."""
+        """The rounds that end a turn's request: for each skill of the apps he holds a place at that is due
+        (``blocks_due``), its read when its app answered it, then its load. Every read is fetched before the first
+        entry joins his history, so no line the loop takes meanwhile comes between the block's rounds. A read that
+        fails, is refused or is too large is left out, and its load enters all the same; the own app's refusal of the
+        agent is raised."""
         present = admitted.apps | {self._app.mcp_url}
+        reads = [
+            (due, await self._read(session, due, record) if due.read else None)
+            for due in blocks_due(offered.offers, present, offered.deferred, admitted.history)
+        ]
         rounds: list[ToolRound] = []
-        for due in blocks_due(offered.offers, present, offered.deferred, admitted.history):
-            if due.read and (read := await self._read(session, due, record)) is not None:
-                rounds.append(skill_round(read))
+        for due, skill in reads:
+            if skill is not None:
+                rounds.append(skill_round(self._enter(due.app, skill)))
             if due.tools:
                 load = self._mind.tools_loaded(due.app, due.skill.name, due.tools, self._clock.wall())
                 rounds.append(load_round(load, offered.deferred))
         return tuple(rounds)
 
-    async def _read(self, session: MemberSession, due: BlockDue, record: TaskRecord) -> SkillRead | None:
-        """The entry of a block's read, or ``None`` when it is left out. A read sent on the loop's session is a step
+    async def _read(self, session: MemberSession, due: BlockDue, record: TaskRecord) -> Skill | None:
+        """The skill of a block's read, or ``None`` when it is left out. A read sent on the loop's session is a step
         of the turn, ``skill_read.ended``, as is a text past one result's bound, at any app."""
         app = self._app_at[due.app]
         sent = isinstance(due.skill, SkillEntry) and app.mcp_url == self._app.mcp_url
@@ -122,10 +134,11 @@ class SkillReads:
                 skill = await self._fetched(session, app, due.skill, record)
                 if skill is None:
                     return None
-                if (entry := self.entered(app.mcp_url, skill)) is None:
+                if not fits_one_result(skill):
                     timer.fail(TOO_LARGE_REASON)
                     timer.end()
-                return entry
+                    return None
+                return skill
         except CallFailure as failure:
             if is_not_granted(failure):
                 raise
@@ -135,7 +148,8 @@ class SkillReads:
         self, session: MemberSession, app: AppTarget, skill: AppSkill, record: TaskRecord
     ) -> Skill | None:
         """The skill of a block, read from its app unless it is the app's implicit skill, whose body its listing kept;
-        or ``None`` after the report of a read that failed or was refused."""
+        or ``None`` after the report of a refusal, or of the failure of another app's read; a failure of the own app's
+        read is raised."""
         if isinstance(skill, Skill):
             return skill
         if app.mcp_url == self._app.mcp_url:

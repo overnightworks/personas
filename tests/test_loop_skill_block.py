@@ -4,6 +4,7 @@ a notice added."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import secrets
 from http import HTTPStatus
@@ -27,7 +28,7 @@ from personas.decision import (
 from personas.entries import SkillRead, ToolsLoaded
 from personas.present import EMPTY_SKILL_TEXT, NOT_OFFERED_TEXT, ROUND_CALL_PREFIX
 from personas.reporting import Event
-from tests.support.app_driving import seated_in_the_call, settled
+from tests.support.app_driving import said_and_taken, seated_in_the_call, settled
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, a_turn, restarted, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import SweepClock
 from tests.support.gateway import BUDGET_SPENT, ERROR_MARK, Gateway, loading, reading, referenced
@@ -387,6 +388,34 @@ async def test_a_block_read_that_fails_at_another_app_logs_held_app_failed_and_t
     )
     assert [each[:2] for each in told(runner.gateway.appended_rounds(2))] == [(READ_SKILL_TOOL, OTHER)]
     assert other.log.count(SKILLS_GET) == 2
+
+
+async def test_a_line_that_arrives_while_the_block_reads_is_told_before_every_round_of_the_block(runner, other):
+    """TURNS-15."""
+    runner.app.shelf = Shelf({HOPIN: a_skill_file(HOPIN)})
+    other.shelf = Shelf({OTHER: a_skill_file(OTHER, tools=PLAY_TOOL)})
+    entered, released = asyncio.Event(), asyncio.Event()
+
+    async def answers_once_released(reply) -> None:
+        entered.set()
+        await released.wait()
+        await other.shelf.answers(reply.rpc)(reply)
+
+    other.script(SKILLS_GET, answers_once_released)
+    await seated_in_the_call(runner, other, *turn_answers())
+    say_in_the_call(runner, f"{ADDRESSED} {secrets.token_hex(3)}")
+    await entered.wait()
+    arrived = f"later {secrets.token_hex(3)}"
+
+    await said_and_taken(runner.app, PLACE_ID, arrived)
+    released.set()
+    await runner.reports.until_a_turn_completed()
+    await a_turn(runner, 2)
+
+    messages = runner.gateway.body_of(2)["messages"]
+    told_at = next(index for index, each in enumerate(messages) if arrived in str(each["content"]))
+    first_round = next(index for index, each in enumerate(messages) if each.get("tool_calls"))
+    assert told_at < first_round
 
 
 @pytest.mark.parametrize("at_other", [False, True], ids=["the own app", "another app"])
