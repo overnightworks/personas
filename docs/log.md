@@ -100,9 +100,11 @@ events and their fields. A test cites each rule by its ID at the start of its do
   with the value `spoken`; no other turn carries `cut`.
 - LOG-29: `sentence_count` (released by the turn's reply, whether sent or not), `first_output_ms` (absent when none
   was released), `silent_count` (rounds that opened with `[silent]`) and `tool_call_count`.
-- LOG-30: Of a turn that sent a model request, its input bytes: `tools_bytes`, `told_bytes` (the messages and the
-  calls and results of the rounds it was told), `results_bytes` and `images_bytes` (decoded picture bytes, apart from
-  `results_bytes`). The skill lines in the system text count in none.
+- LOG-30: Of a turn that sent a model request, its input bytes: `tools_bytes` (the declarations the model is shown:
+  those not deferred, each deferred one a told round loaded and each one a load of the turn loaded, counted once when
+  its load answers), `told_bytes` (the messages and the calls and results of the rounds it was told), `results_bytes`
+  and `images_bytes` (decoded picture bytes, apart from `results_bytes`). The skill lines in the system text count in
+  none.
 - LOG-31: Of a turn that got the final answer, when the gateway reported them for every round, the sums
   `input_tokens` (cached included; a picture counts once per round), `cached_input_tokens`,
   `cache_write_tokens` and `output_tokens`, and `model_request_count`; otherwise all five are absent, never

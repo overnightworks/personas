@@ -19,12 +19,12 @@ from agents.voice.reply import REPLY_RULES
 from logline import StepTimer
 
 from personas.decision import (
+    LOAD_TOOLS_CALLS,
     READ_SKILL_CALLS,
     TURN_ROLE,
     AppPlace,
     act_outcome,
     failure_code,
-    offered_declarations,
     turn_call_bound,
 )
 from personas.entries import (
@@ -34,7 +34,7 @@ from personas.entries import (
     told_words,
 )
 from personas.failures import leaves_of, raise_if_cancelled, task_is_being_cancelled
-from personas.held_tools import Calls, HeldTools, HoldBack
+from personas.held_tools import Calls, HeldTools, HoldBack, ToolLoads, TurnOffer
 from personas.holds import (
     APP_FAILED_TEXT,
     DECIDING_FIRST_TEXT,
@@ -47,13 +47,15 @@ from personas.holds import (
     close_when_over,
 )
 from personas.present import (
+    LOAD_TOOLS_DECLARATION,
+    NO_SUCH_SKILL_TEXT,
     READ_SKILL_DECLARATION,
     ListedSkill,
     held_told,
-    listed_skills,
+    listed_skill_named,
+    loaded_by,
     skill_lines,
     skill_text,
-    skill_to_read,
     turn_messages,
     user_message,
 )
@@ -112,7 +114,6 @@ _APART_TEXT: Final = (
 )
 _WRITTEN_TURN_TEXT: Final = "this turn is not spoken: continue_speaking and stop_speaking act only in a spoken turn"
 _SKILLS_SPENT_TEXT: Final = "no more skills can be read in this turn"
-_NO_SUCH_SKILL_TEXT: Final = "no skill of that name is listed in your instructions"
 _SKILL_REFUSED_TEXT: Final = "this skill cannot be read"
 _SKILL_TOO_LARGE_TEXT: Final = "this skill is too large to read"
 
@@ -318,7 +319,8 @@ class Turning:
                     aloud=admitted.aloud,
                     through=admitted.history.taken,
                 )
-                told = turn_messages(admitted.facts.name, admitted.present, turn)
+                offered = TurnOffer.of((app for app, _ in self._apps), lists, self._tools_left_out)
+                told = turn_messages(admitted.facts.name, admitted.present, turn, offered.deferred)
                 if admitted.went_on:
                     told = (*told, user_message(told_went_on()))
                 if admitted.held is not None:
@@ -326,7 +328,7 @@ class Turning:
                 bound = TurnBound(self._clock, setup.persona.max_duration_seconds)
                 try:
                     await self._run_session_body(
-                        setup, admitted, turn, told, session, record, sizing, tally, hand_off, bound, lists
+                        setup, admitted, turn, told, session, record, sizing, tally, hand_off, bound, offered
                     )
                 except Exception as error:
                     record.note(error)
@@ -346,7 +348,7 @@ class Turning:
         tally: TurnTally,
         hand_off: StepTimer,
         bound: TurnBound,
-        lists: tuple[Listed, ...],
+        offered: TurnOffer,
     ) -> None:
         raise_if_cancelled()
         deciding = None if admitted.held is None else TurnHold(admitted.held)
@@ -364,10 +366,15 @@ class Turning:
                 partial(self._holds.hold_decided, place),
                 lambda hold: self._holds.end_hold(place, record, hold, HoldOutcome.UNDECIDED, bound),
             )
-        skills = listed_skills((app.mcp_url, each.skills) for (app, _), each in zip(self._apps, lists, strict=True))
-        held = self._hold_tools(session, record, admitted, bound, lists, skills, inbox, deciding, answering)
-        request = self._request_of(setup, admitted, told, held, skills)
-        sizing.request_built(held.declarations, told)
+        hold = HoldBack(
+            admitted.history,
+            inbox,
+            deciding,
+            went_on_to_tell=partial(self._mind.went_on_to_tell, self._at(admitted.place)),
+        )
+        held = self._hold_tools(session, record, admitted, bound, offered, told, hold, answering)
+        request = self._request_of(setup, admitted, told, held, offered.skills)
+        sizing.request_built(held.declarations, held.deferred_names, told)
         person = TurnPerson(admitted.facts.principal, TURN_ROLE, admitted.groups)
         async with (
             setup.backend(tuple(sizing.measuring(each) for each in held.tools)) as backend,
@@ -400,6 +407,7 @@ class Turning:
             turn=Turn(system="\n\n".join(front), messages=list(told)),
             roles=setup.persona.roles,
             tools=held.declarations,
+            deferred_tools=held.deferred_names,
             model=(self._agent.hold_model if admitted.held else None) or setup.persona.model,
             max_duration_seconds=setup.persona.max_duration_seconds,
             max_tool_calls=held.max_tool_calls,
@@ -467,50 +475,41 @@ class Turning:
         record: TaskRecord,
         admitted: Admitted,
         bound: TurnBound,
-        lists: tuple[Listed, ...],
-        skills: Mapping[str, ListedSkill],
-        inbox: HoldInbox | None,
-        deciding: TurnHold | None,
+        offered: TurnOffer,
+        told: tuple[TurnMessage | ToolRound, ...],
+        hold: HoldBack,
         answering: Answering | None,
     ) -> HeldTools:
-        """The lookup when the configuration has a memory, the skills' ``read_skill``, then the tools of the place's
-        app, of each app named in the admission and of each tools-only app the realm grants and that answers, in the
-        configuration's order, each app counting its own calls.
+        """The lookup when the configuration has a memory, the skills' ``read_skill`` and ``load_tools``, then the tools
+        the apps offer, in the configuration's order, each app counting its own calls; those ``offered`` defers are
+        sent without their definition until a load of the turn or a round ``told`` loads them.
 
-        Of each app every tool it lists now is held but the runner's reserved names and those an earlier app holds,
-        none when it lists none. Another app whose listing fails, and the place's own app when it does not answer within
-        its call time, is left out and reported, and the turn holds the rest.
+        Another app whose listing fails, and the place's own app when it does not answer within its call time, is left
+        out and reported, and the turn holds the rest.
         """
-        hold = HoldBack(
-            admitted.history,
-            inbox,
-            deciding,
-            went_on_to_tell=partial(self._mind.went_on_to_tell, self._at(admitted.place)),
-        )
+        deciding = hold.told
+        skills, deferred = offered.skills, offered.deferred
         tools: list[HandTool] = []
         bounds: list[int] = []
-        taken = frozenset[str]()
         lookup = self._remembering.lookup
         if lookup is not None:
             tools.append(HandTool(RECALL_DECLARATION, partial(self._look, lookup, Calls(lookup.calls), admitted, hold)))
             bounds.append(lookup.calls)
         app_calls = {app.mcp_url: Calls(max_calls) for app, max_calls in self._apps}
         reading = partial(self._read_skill, skills, app_calls, session, Calls(READ_SKILL_CALLS), hold, record)
-        tools.append(HandTool(READ_SKILL_DECLARATION, reading))
-        bounds.append(READ_SKILL_CALLS)
-        for (app, _), listed in zip(self._apps, lists, strict=True):
-            calls = app_calls[app.mcp_url]
-            if (declared := listed.tools) is None:
-                continue
-            offered, left_out = offered_declarations(declared, taken)
-            self._tools_left_out(app, left_out)
-            taken |= {each.name for each in offered}
-            if offered:
-                tools.extend(self._hand_tools(app, session, offered, calls, hold, record))
+        loads = ToolLoads(skills, deferred, set(loaded_by(told)), Calls(LOAD_TOOLS_CALLS), hold, self._enter_load)
+        tools.extend((HandTool(READ_SKILL_DECLARATION, reading), HandTool(LOAD_TOOLS_DECLARATION, loads.load)))
+        bounds.extend((READ_SKILL_CALLS, LOAD_TOOLS_CALLS))
+        for offer in offered.offers:
+            if offer.declarations:
+                calls = app_calls[offer.app]
+                tools.extend(
+                    self._hand_tools(self._app_at[offer.app], session, offer.declarations, calls, hold, record)
+                )
                 bounds.append(calls.bound)
         tools.extend(self._decision_tools(admitted, record, bound, deciding, answering))
         bounds.append(DECISION_CALLS)
-        return HeldTools(tuple(tools), turn_call_bound(bounds), inbox, deciding)
+        return HeldTools(tuple(tools), turn_call_bound(bounds), deferred, hold.inbox, deciding)
 
     def _decision_tools(
         self,
@@ -531,6 +530,9 @@ class Turning:
             ]
         apart = partial(self._answered_apart, _APART_TEXT if admitted.aloud else _WRITTEN_TURN_TEXT)
         return [HandTool(each, apart) for each in DECISION_DECLARATIONS]
+
+    def _enter_load(self, app: str, skill: str, tools: tuple[str, ...]) -> None:
+        self._mind.tools_loaded(app, skill, tools, self._clock.wall())
 
     def _inbox_of(self, admitted: Admitted) -> HoldInbox:
         """What the spoken turn hears of a hold: the one that stands in the record, told at the turn's start or not."""
@@ -609,10 +611,9 @@ class Turning:
             return ToolOutcome(DECIDING_FIRST_TEXT, is_error=True)
         if not calls.take():
             return ToolOutcome(_SKILLS_SPENT_TEXT, is_error=True)
-        name = skill_to_read(arguments)
-        listed = None if name is None else skills.get(name)
+        listed = listed_skill_named(skills, arguments)
         if listed is None:
-            return ToolOutcome(_NO_SUCH_SKILL_TEXT, is_error=True)
+            return ToolOutcome(NO_SUCH_SKILL_TEXT, is_error=True)
         app = self._app_at[listed.app]
         read = await self._skill_read(app, listed.skill, app_calls[listed.app], session, hold, record)
         return hold.telling_went_on(read if isinstance(read, ToolOutcome) else self._entered(app, read))

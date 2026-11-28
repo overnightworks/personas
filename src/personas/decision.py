@@ -76,6 +76,9 @@ CALL_PLACE_KIND: Final = "call"
 READ_SKILL_TOOL: Final = "read_skill"
 READ_SKILL_CALLS: Final = 2
 """How many skills a turn may read."""
+LOAD_TOOLS_TOOL: Final = "load_tools"
+LOAD_TOOLS_CALLS: Final = 2
+"""How many skills' tools a turn may load."""
 RESERVED_TOOLS: Final = frozenset(
     {
         ACCEPT_INVITATION_TOOL,
@@ -83,14 +86,15 @@ RESERVED_TOOLS: Final = frozenset(
         SPEAK_TOOL,
         RECALL_TOOL,
         READ_SKILL_TOOL,
+        LOAD_TOOLS_TOOL,
         CONTINUE_SPEAKING_TOOL,
         STOP_SPEAKING_TOOL,
         SET_TURN_STATE_TOOL,
     }
 )
 """The names the runner calls or answers itself in every turn: the accept and the decline of an invitation, the voice's
-``speak``, the lookup's ``recall``, the skills' ``read_skill``, the two tools that decide a hold and the statement of
-his turns at a place."""
+``speak``, the lookup's ``recall``, the skills' ``read_skill`` and ``load_tools``, the two tools that decide a hold
+and the statement of his turns at a place."""
 RENEW_BEFORE_EXPIRY_SECONDS: Final = 60.0
 """A token is renewed once this little of its lifetime remains, so no call carries an expired one."""
 NETWORK_FAILURE_CODE: Final = "network"

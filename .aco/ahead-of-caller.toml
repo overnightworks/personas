@@ -1,9 +1,4 @@
 [[code]]
-path = "src/personas/entries.py"
-item = "#427"
-reason = "The load entry the history reads back; S8b2 writes it."
-
-[[code]]
 path = "src/personas/holds.py"
 item = "overnightworks/hopin#1185"
 reason = "The told place of a hold has no live caller until hopin states it."

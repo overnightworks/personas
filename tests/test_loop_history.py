@@ -299,7 +299,7 @@ async def test_a_write_in_flight_when_the_pod_stops_is_written_again_before_the_
     runner.task.cancel()
     await asyncio.gather(runner.task, return_exceptions=True)
 
-    entries = [entry for _, delta in runner.histories.written for entry in delta.entries]
+    entries = runner.histories.entries()
     assert REMARK in [each.text for each in entries if isinstance(each, KeptLine)]
 
 
@@ -399,7 +399,7 @@ async def test_a_write_of_the_history_the_store_cannot_take_is_reported_once_and
     await said_and_taken(runner.app, PLACE_ID, REMARK, act=True)
     await runner.reports.until(Event.STORE_RESUMED)
 
-    entries = [entry for _, delta in runner.histories.written for entry in delta.entries]
+    entries = runner.histories.entries()
     assert [each.text for each in entries if isinstance(each, KeptLine)] == [REMARK]
     assert [code for event, code in runner.reports.reported() if event is Event.STORE_FAILED] == [
         STORE_UNREACHABLE_CODE

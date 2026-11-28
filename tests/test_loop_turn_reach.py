@@ -34,7 +34,7 @@ from tests.support.openers import (
     opener_whose_request_raises,
     opener_whose_session_loses_a_child,
 )
-from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG, SCOPE, ToolsOnlyApp
+from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG, SCOPE, ToolsOnlyApp, songmaker_url
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.wire import cuts, hangs, hangs_once_entered, refuses_with_a_server_error
 
@@ -42,11 +42,6 @@ pytestmark = pytest.mark.anyio
 
 SHORT_CALL_SECONDS = 0.3
 WHOLE_CALL_SECONDS = 1.0
-
-
-def songmaker_url(runner) -> str:
-    (url,) = (each.mcp_url for each in runner.config.apps if not each.listens)
-    return url
 
 
 def calling(*names: str, prefix: str = "call") -> object:
