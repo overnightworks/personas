@@ -11,9 +11,9 @@ from typing import TYPE_CHECKING, Final
 from agents.agent_file import TurnRequest
 from agents.backend import TurnPerson, TurnStopped
 from agents.member_outcomes import CallFailure
-from agents.skills import Skill, SkillRefused
+from agents.skills import Skill
 from agents.tools import HandTool, ToolDeclaration, ToolOutcome
-from agents.turn import RejectionCode, ToolRound, Turn, TurnMessage, is_within_event_bound
+from agents.turn import RejectionCode, ToolRound, Turn, TurnMessage
 from agents.turn_events import FinalEvent, ToolCallEvent
 from agents.voice.reply import REPLY_RULES
 from logline import StepTimer
@@ -63,8 +63,9 @@ from personas.recall import (
     search_text,
     text_refused_text,
 )
-from personas.reporting import LOG, Event, LoopReport, TurnTally, agent_app_fields, failure_event, stepping
+from personas.reporting import LOG, LoopReport, TurnTally, agent_app_fields, failure_event, stepping
 from personas.sizing import Sizing
+from personas.skill_reads import SkillReads
 from personas.speech import HoldOutcome, Telling, hold_ended_as
 from personas.task_record import (
     RelayFailed,
@@ -166,6 +167,7 @@ class Turning:
         self._apps = tuple((each, each.max_tool_calls) for each in apps if each.max_tool_calls is not None)
         self._app_at = {each.mcp_url: each for each, _ in self._apps}
         self._sessions = TurnSessions(agent, tokens, open_session)
+        self._skills = SkillReads(agent, app, self._app_at, self._sessions, mind, clock, renew_token, report)
         self._lists = ToolLists(
             agent, app, tuple(each for each, _ in self._apps), self._sessions, mind, clock, renew_token, report
         )
@@ -316,6 +318,7 @@ class Turning:
                 )
                 offered = TurnOffer.of((app for app, _ in self._apps), lists, self._tools_left_out)
                 told = turn_messages(admitted.facts.name, admitted.present, turn, offered.deferred)
+                told = (*told, *await self._skills.block(session, admitted, offered, record))
                 if admitted.went_on:
                     told = (*told, user_message(told_went_on()))
                 if admitted.held is not None:
@@ -615,14 +618,11 @@ class Turning:
             return ToolOutcome(NO_SUCH_SKILL_TEXT, is_error=True)
         app = self._app_at[listed.app]
         read = await self._skill_read(app, listed.skill, app_calls[listed.app], session, hold, record)
-        return hold.telling_went_on(read if isinstance(read, ToolOutcome) else self._entered(app, read))
-
-    def _entered(self, app: AppTarget, read: Skill) -> ToolOutcome:
-        text = skill_text(read.body)
-        if not is_within_event_bound(text, None):
-            return ToolOutcome(_SKILL_TOO_LARGE_TEXT, is_error=True)
-        self._mind.skill_read(app.mcp_url, read.name, read.identity.uri, read.body, self._clock.wall())
-        return ToolOutcome(text, is_error=False)
+        if isinstance(read, ToolOutcome):
+            return hold.telling_went_on(read)
+        if self._skills.entered(app.mcp_url, read) is None:
+            return hold.telling_went_on(ToolOutcome(_SKILL_TOO_LARGE_TEXT, is_error=True))
+        return hold.telling_went_on(ToolOutcome(skill_text(read.body), is_error=False))
 
     async def _skill_read(
         self,
@@ -638,20 +638,17 @@ class Turning:
         if isinstance(skill, Skill):
             return skill
         if app.mcp_url == self._app.mcp_url:
-            answer = await _sent(hold, self._got_renewed(session, skill.uri))
+            answer = await _sent(hold, self._skills.own(session, skill.uri))
         else:
             answer = await self._asked_elsewhere(
                 app,
                 app_calls,
                 hold,
-                partial(self._sessions.ask_elsewhere, app, partial(_got_skill, uri=skill.uri), record),
+                partial(self._skills.elsewhere, app, skill.uri, record),
             )
             if isinstance(answer, ToolOutcome):
                 return answer
-        if isinstance(answer, SkillRefused):
-            self._report(Event.SKILL_REFUSED, answer.refusal.value, app)
-            return ToolOutcome(_SKILL_REFUSED_TEXT, is_error=True)
-        return answer
+        return self._skills.skill_of(app, answer) or ToolOutcome(_SKILL_REFUSED_TEXT, is_error=True)
 
     async def _answered_apart(  # NOSONAR(S7503) HandToolHandler is async
         self, text: str, _principal: Principal, _arguments: JsonObject
@@ -691,10 +688,6 @@ class Turning:
     async def _invoke(self, session: MemberSession, name: str, arguments: JsonObject) -> ToolOutcome:
         await self._renew_token()
         return await session.invoke(name, arguments)
-
-    async def _got_renewed(self, session: MemberSession, uri: str) -> Skill | SkillRefused:
-        await self._renew_token()
-        return await _got_skill(session, uri)
 
     async def _relay_elsewhere(
         self,
@@ -782,12 +775,3 @@ async def _sent[Answer](hold: HoldBack, sending: Awaitable[Answer]) -> Answer:
             return await sending
     except Exception as error:
         raise RelayFailed(error) from None
-
-
-async def _got_skill(session: MemberSession, uri: str) -> Skill | SkillRefused:
-    """The skill at ``uri``, or the refusal of a file that is not what its entry promised, which is an answer, not a
-    defect."""
-    try:
-        return await session.get_skill(uri)
-    except SkillRefused as refused:
-        return refused
