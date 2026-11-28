@@ -85,14 +85,15 @@ An entry has its app and the time he took it (`at`), and is one of:
 
 - TURNS-15: Every message before the turn's own is byte for byte as the turn before sent it, the rounds that turn
   appended at its end included, so the gateway's cache reads it back; lines that arrived while that turn was set up are
-  told before the rounds it appended. A skill he read, by `read_skill` or in a block, is told as a round of its own at its place among the messages: one `read_skill`
-  call with the skill's name under the id the runner minted for it, answered with the text the model was shown, byte
-  for byte in every later turn, after a restart or a take-over too. Tools he loaded, by `load_tools` or in a block, are told as a round likewise: one
-  `load_tools` call with the skill's name under the id the runner minted for it, answered with references to the
-  tools its app still sends deferred; a tool is left out of the round in every turn whose app does not offer it
-  deferred, and back in it once the app offers it again, each change rewriting the cache from that round on, and a
-  round with none answers "these tools are not offered now". A turn that ends without an answer adds no
-  message; its entries go to the next turn's, which tells a block it appended after a message of the entries before it.
+  told before the rounds it appended. A skill he read, by `read_skill` or in a block, is told as a round of its own at
+  its place among the messages: one `read_skill` call with the skill's name under the id the runner minted for it,
+  answered with the text the model was shown, byte for byte in every later turn, after a restart or a take-over too.
+  Tools he loaded, by `load_tools` or in a block, are told as a round likewise: one `load_tools` call with the skill's
+  name under the id the runner minted for it, answered with references to the tools its app still sends deferred; a tool
+  is left out of the round in every turn whose app does not offer it deferred, and back in it once the app offers it
+  again, each change rewriting the cache from that round on, and a round with none answers "these tools are not offered
+  now". A turn that ends without an answer adds no message; its entries go to the next turn's, which tells a block it
+  appended after a message of the entries before it.
 - TURNS-16: Past `history_bytes` the oldest whole messages leave in one step until what stays fits
   `history_keep_bytes`. When the newest message alone is past it, its oldest entries leave too until what
   stays fits; its newest entry always stays. A larger value keeps more and makes every request longer. A block the
@@ -105,25 +106,24 @@ An entry has its app and the time he took it (`at`), and is one of:
 ## Tools and calls
 
 - TURNS-18: A turn holds every tool its own app listed after its last tools notice on the loop's open stream, or at the
-  turn's start when that stream carries no notice, the tools of every other app where he holds an
-  active place, and those of the tools-only apps, declared in the configuration's order, every one of them sent deferred: the model
-  is shown one once a load in his history or in the turn names it, and a call to one is served as before. At the end
-  of each turn's request the runner appends a block for each app where he holds an active place, in the
-  configuration's order, from that app's own listing: for each of its skills, in the listing's order, a `read_skill`
-  round with the skill's text when his history holds no read of that skill of that app, then a `load_tools` round
-  naming the skill's tools that the app sends deferred and that no load of that app in his history names yet. A skill
-  whose tools are loaded already, or that names none, gets its read round alone, and a skill whose read his history
-  holds gets its load round alone, so a tool a notice added loads at his next turn. So his first turn after a join
-  appends that app's block once, and a second place or a second join at an app whose block his history holds appends
-  none. A name two apps offer goes to the first; `accept_invitation`, `speak`, `recall`, `read_skill`, `load_tools`,
-  `continue_speaking`, `stop_speaking` and `set_turn_state` are the runner's own and never taken from an app.
-  `read_skill(skill)` is held in every turn and answers the text of a skill whose line the turn holds; it loads
-  nothing. `load_tools(skill)` is held in every turn and loads the tools of a skill whose line the turn holds that
-  its app sends deferred and no round has loaded yet, answering references to them for the next round; it sends no
-  request and is never held back. `continue_speaking` and
-  `stop_speaking` are held in every turn, written or aloud, so a switch between them leaves the front as it was; called in a turn
-  that is not aloud they do nothing, and the model is told they act only in a spoken turn. No request asks the
-  gateway for `parallel_tool_calls`.
+  turn's start when that stream carries no notice, the tools of every other app where he holds an active place, and
+  those of the tools-only apps, declared in the configuration's order, every one of them sent deferred: the model is
+  shown one once a load in his history or in the turn names it, and a call to one is served as before. At the end of
+  each turn's request the runner appends a block for each app where he holds an active place, in the configuration's
+  order, from that app's own listing: for each of its skills, in the listing's order, a `read_skill` round with the
+  skill's text when his history holds no read of that skill of that app, then a `load_tools` round naming the skill's
+  tools that the app sends deferred and that no load of that app in his history names yet. A skill whose tools are
+  loaded already, or that names none, gets its read round alone, and a skill whose read his history holds gets its load
+  round alone, so a tool a notice added loads at his next turn. So his first turn after a join appends that app's block
+  once, and a second place or a second join at an app whose block his history holds appends none. A name two apps offer
+  goes to the first; `accept_invitation`, `speak`, `recall`, `read_skill`, `load_tools`, `continue_speaking`,
+  `stop_speaking` and `set_turn_state` are the runner's own and never taken from an app. `read_skill(skill)` is held in
+  every turn and answers the text of a skill whose line the turn holds; it loads nothing. `load_tools(skill)` is held in
+  every turn and loads the tools of a skill whose line the turn holds that its app sends deferred and no round has
+  loaded yet, answering references to them for the next round; it sends no request and is never held back.
+  `continue_speaking` and `stop_speaking` are held in every turn, written or aloud, so a switch between them leaves the
+  front as it was; called in a turn that is not aloud they do nothing, and the model is told they act only in a spoken
+  turn. No request asks the gateway for `parallel_tool_calls`.
 - TURNS-19: The turn's own app's list is kept on the loop's session for the stream and listed again after a tools notice, a
   new stream or a stream's end. The turn's relayed calls and `speak` go on the loop's session of that app, under the
   token the loop holds; a hold's decision and every call to another app go in a session of their own under a

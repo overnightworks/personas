@@ -56,13 +56,17 @@ flowchart LR
   sentence that plays, the hold that stands there with what was said over him and whether a turn was told it, and
   the id of the hold decided last. A turn's `Speaking` (`voice.py`) releases its sentences into it; the record
   outlives the turn.
-- **A turn** (`turning.py`) runs on its loop's session at its own app, lists the tools of its apps (the place's own app's list is kept on the loop's session while a stream that carries the tools notice is open, and a notice, an acknowledgement or a stream's end drops it; a turn a notice overtook before it ended does not count for its view's revision), sends the
-  gateway the persona and the told messages, and relays each call; it ends when the backend's events end, not
-  when its sentences have played. `voice.py` reads an aloud turn's reply into sentences, `turn_bound.py` bounds the
-  turn's waits and the sentences it released, `holds.py` decides a hold (the round beside the parked run, the
-  decision of a turn told it and the end of the hold in the app), `held_tools.py` and `turn_sessions.py` reach the
-  other apps a turn holds, and `held_tools.py` also loads a turn's deferred tools. `skill_reads.py` reads a listed skill from its app and enters it, for the model's `read_skill` and for the block a turn appends at the end of its request. His text while a hold is undecided answers it: `voice.py` sends the first
-  sentence to `speak` naming the hold, on a session of its own, and puts the rest into the record.
+- **A turn** (`turning.py`) runs on its loop's session at its own app, lists the tools of its apps (the place's own
+  app's list is kept on the loop's session while a stream that carries the tools notice is open, and a notice, an
+  acknowledgement or a stream's end drops it; a turn a notice overtook before it ended does not count for its view's
+  revision), sends the gateway the persona and the told messages, and relays each call; it ends when the backend's
+  events end, not when its sentences have played. `voice.py` reads an aloud turn's reply into sentences, `turn_bound.py`
+  bounds the turn's waits and the sentences it released, `holds.py` decides a hold (the round beside the parked run, the
+  decision of a turn told it and the end of the hold in the app), `held_tools.py` and `turn_sessions.py` reach the other
+  apps a turn holds, and `held_tools.py` also loads a turn's deferred tools. `skill_reads.py` reads a listed skill from
+  its app and enters it, for the model's `read_skill` and for the block a turn appends at the end of its request. His
+  text while a hold is undecided answers it: `voice.py` sends the first sentence to `speak` naming the hold, on a
+  session of its own, and puts the rest into the record.
 - **A sender** (`voice.py`) is a task of the loop's serving group at each place where a turn spoke, on the loop's
   session: it sends the record's unsent sentences to `speak`, one request at a time, also after the turn, and
   nothing while a hold stands. The loop cancels and awaits it before the session closes.

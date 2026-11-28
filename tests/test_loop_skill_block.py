@@ -355,6 +355,17 @@ async def test_a_block_read_that_fails_or_times_out_at_the_own_app_is_left_out_a
     assert entries_of(runner, SkillRead, 0) == []
 
 
+async def test_a_block_read_the_own_app_answers_ends_its_step_line_ok(runner, caplog):
+    """LOG-13."""
+    runner.app.shelf = Shelf({HOPIN: a_skill_file(HOPIN)})
+    await after_a_first_turn(runner)
+
+    (line,) = lines_of(caplog.get_records("call"), "skill_read.ended")
+    assert line["outcome"] == "ok"
+    assert "reason" not in line
+    assert len(entries_of(runner, SkillRead, 0)) == 1
+
+
 async def test_a_block_read_the_own_app_refuses_the_agent_ends_the_turn_into_the_loops_suspension(runner):
     """TURNS-19, LOG-7."""
     runner.app.shelf = Shelf({HOPIN: a_skill_file(HOPIN)})
