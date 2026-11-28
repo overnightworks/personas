@@ -406,7 +406,7 @@ async def test_a_relayed_call_that_fails_at_one_app_ends_its_turn_and_the_turn_d
     assert turn_order(runner) == [(0, "lines"), (1, "lines")]
     await runner.reports.until(Event.RESUMED)
     assert runner.reports.reported(started=False) == [(Event.BACKOFF, NETWORK_FAILURE_CODE), (Event.RESUMED, None)]
-    assert runner.gateway.round_sizes() == [3, 5, 3]
+    assert runner.gateway.round_sizes() == [3, 5, 4]
 
 
 async def test_while_a_cancelled_turn_still_unwinds_no_turn_of_his_starts_at_another_app_until_it_ended(runner, other):

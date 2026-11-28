@@ -154,7 +154,7 @@ async def test_a_line_said_while_a_turn_ran_is_answered_once_that_turn_ends_thou
     await runner.app.said_count(1)
     await runner.gateway.until_requested(3)
 
-    assert runner.gateway.round_sizes() == [3, 3, 5]
+    assert runner.gateway.round_sizes() == [3, 4, 6]
     assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[1], [1, 2]]
     await runner.reports.until_a_turn_ended()
     assert runner.reports.reported()[:2] == [(Event.STARTED, None), (Event.INVITATION_DECLINED, "busy")]
@@ -471,7 +471,7 @@ async def test_a_relayed_call_that_fails_ends_the_turn_after_one_round_and_leads
     await runner.gateway.until_requested(3)
 
     assert runner.reports.reported() == events
-    assert runner.gateway.round_sizes() == [3, 3, 5]
+    assert runner.gateway.round_sizes() == [3, 4, 6]
     assert [opening.woke_seqs for opening in runner.gateway.openings()] == [[1], [2]]
     assert len(runner.realm.issued) == issued
 

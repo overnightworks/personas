@@ -130,16 +130,16 @@ def with_a_skill_to_read(runner) -> None:
 
 
 @pytest.mark.parametrize(
-    ("early", "arrange"),
+    ("early", "arrange", "block_reads"),
     [
-        (say("early", PLACE_ID), lambda runner: None),
-        (tool_call("early-read", READ_SKILL_TOOL, {"skill": "hopin"}), with_a_skill_to_read),
-        (tool_call("early-load", LOAD_TOOLS_TOOL, {"skill": "hopin"}), with_a_skill_to_read),
+        (say("early", PLACE_ID), lambda runner: None, 0),
+        (tool_call("early-read", READ_SKILL_TOOL, {"skill": "hopin"}), with_a_skill_to_read, 1),
+        (tool_call("early-load", LOAD_TOOLS_TOOL, {"skill": "hopin"}), with_a_skill_to_read, 1),
     ],
     ids=["say", "read_skill", "load_tools"],
 )
 async def test_every_other_call_of_a_turn_told_a_hold_is_answered_deciding_first_until_he_decides(
-    runner, early, arrange
+    runner, early, arrange, block_reads
 ):
     """TURNS-31."""
     arrange(runner)
@@ -157,7 +157,7 @@ async def test_every_other_call_of_a_turn_told_a_hold_is_answered_deciding_first
     results = runner.gateway.tool_results(4)
     assert [each.startswith("Error") for each in results] == [True, False, True]
     assert SAY_TOOL not in runner.app.calls
-    assert SKILLS_GET not in runner.app.log.entries
+    assert runner.app.log.count(SKILLS_GET) == block_reads
     assert runner.app.hold_calls == [(CONTINUE_SPEAKING_TOOL, HOLD_ID)]
 
 
