@@ -14,9 +14,11 @@ from personas.decision import DEFAULT_BUDGET_PAUSE_CAP_SECONDS, TURN_CANCELLED_C
 from personas.entries import KeptLine, Reading, SaidAloud, Unanswered, Visit
 from personas.mind import Mind
 from personas.reporting import Event, start_turn_tally
-from personas.speech import DropReason
 from personas.turn_bound import TurnBound
-from personas.voice import Sender, Speaking
+from personas.config import AppTarget
+from personas.holds import HoldInbox
+from personas.speech import DropReason, Held, HoldOutcome
+from personas.voice import Answering, Sender, Speaking, Voicing
 from tests.support.fakes import FakeClock
 
 pytestmark = pytest.mark.anyio
@@ -126,12 +128,52 @@ class Scenario:
             self.his_spoken_line_enters()
         return self.answer
 
+    async def answered_instead(self) -> HoldOutcome:
+        """His reply answers a hold instead; the sentence goes to the app at once, as the answer of the hold."""
+        voicing = Voicing(
+            _Sessions(self),
+            AppTarget(APP, "scope"),
+            lambda *_arguments: None,
+            self.clock,
+            self.mind,
+            lambda reason, count: self.report_dropped(reason, count),
+        )
+        answering = Answering(
+            voicing,
+            PLACE,
+            None,
+            self.tally,
+            self.bound,
+            HoldInbox(),
+            None,
+            lambda *_ended: None,
+            _undecided,
+        )
+        return await answering.instead(Held("hold-1", "g1", (), False), ("One.",))
+
     async def sending(self) -> asyncio.Task[None]:
         """Starts the sender and returns once it has nothing left to do but wait."""
         self.renewal_gate.set()
         sending = asyncio.create_task(self.sender.run())
         await anyio.wait_all_tasks_blocked()
         return sending
+
+
+class _Sessions:
+    """Asks the scenario's ``speak`` as the one session there is."""
+
+    def __init__(self, scenario: Scenario) -> None:
+        self._scenario = scenario
+
+    async def ask_elsewhere(self, _app, ask, _record):
+        return await ask(self)
+
+    async def speak(self, place, text, _style, *, interrupted):
+        return await self._scenario.speak(place, text)
+
+
+async def _undecided(_hold):
+    return None
 
 
 def hear_whole(speaking: Speaking, text: str) -> None:
@@ -208,9 +250,12 @@ async def test_the_sender_sends_each_sentence_after_the_answer_of_the_one_before
     await ended(sending)
 
 
-@pytest.mark.parametrize(
+VISITS = pytest.mark.parametrize(
     ("checkpoint", "generation"), [(Reading("generation-5", 1), "generation-5"), (None, None)], ids=["read", "unread"]
 )
+
+
+@VISITS
 async def test_a_sentence_is_entered_with_the_visit_of_the_places_last_read(checkpoint, generation):
     scenario = Scenario("One.")
     scenario.mind.move_checkpoint(AT, checkpoint)
@@ -219,6 +264,16 @@ async def test_a_sentence_is_entered_with_the_visit_of_the_places_last_read(chec
 
     assert [entry.generation for entry in scenario.entered] == [generation]
     await ended(sending)
+
+
+@VISITS
+async def test_a_sentence_answering_a_hold_is_entered_with_the_visit_of_the_places_last_read(checkpoint, generation):
+    scenario = Scenario("One.", line_follows=False)
+    scenario.mind.move_checkpoint(AT, checkpoint)
+
+    await scenario.answered_instead()
+
+    assert [entry.generation for entry in scenario.entered] == [generation]
 
 
 async def test_the_sentence_last_answered_plays_until_his_line_enters_and_is_reported_by_nothing():
