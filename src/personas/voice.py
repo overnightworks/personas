@@ -169,7 +169,8 @@ class Answering:
     async def instead_told(self, sentences: tuple[str, ...]) -> None:
         """The sentences answer the hold the turn was told instead; the hold is decided for the turn's calls."""
         assert self._told is not None  # noqa: S101 - only a turn told a hold has text that answers it
-        self._told.outcome = await self.instead(self._told, sentences)
+        ended = await self.instead(self._told, sentences)
+        self._told.outcome = HoldOutcome.UNDECIDED if ended is NotDecided.GONE else ended
 
     async def instead(self, told: TurnHold, sentences: tuple[str, ...]) -> HoldOutcome | NotDecided:
         """The sentences answer the hold ``told`` instead of what he had not yet said; how the hold ended. The unsent

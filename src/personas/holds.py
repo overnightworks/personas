@@ -148,7 +148,7 @@ class TurnHold:
     @property
     def silenced(self) -> bool:
         """His answer instead of this hold failed: the rest of its reply is dropped."""
-        return self.outcome in {HoldOutcome.UNDECIDED, NotDecided.GONE}
+        return self.outcome is HoldOutcome.UNDECIDED
 
     def dropped(self) -> bool:
         """The turn's speech was cut before he decided this hold: it counts as undecided, once. Whether it was still
