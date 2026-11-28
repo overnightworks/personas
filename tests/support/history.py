@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 from agents.member import PlaceRef, PlaceView, Spoken
 from agents.skills import Skill, SkillIdentity
+from agents.tools import ToolDeclaration
 
 from personas.entries import (
     ActDone,
@@ -250,6 +251,11 @@ def a_skill_of(name: str, *tools: str) -> Skill:
     """A skill of this name that names these tools."""
     identity = SkillIdentity(server=name, uri=f"skill://{name}/SKILL.md")
     return Skill(identity=identity, name=name, description="Does things.", body="", tools=tools)
+
+
+def a_declaration(name: str) -> ToolDeclaration:
+    """A tool of this name that takes no arguments."""
+    return ToolDeclaration(name=name, description=name, parameters={"type": "object"})
 
 
 def a_tools_load(

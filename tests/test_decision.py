@@ -24,7 +24,7 @@ from agents.member import (
     Written,
 )
 from agents.member_outcomes import StatusFailure, Unreachable, UnrecognisedRefusal, UnusableAnswer, jsonrpc_code
-from agents.tools import ToolDeclaration, ToolOutcome
+from agents.tools import ToolOutcome
 from agents.turn import FailureCode, RejectionCode
 from logline import Outcome
 from mcp_types import INVALID_PARAMS
@@ -86,7 +86,7 @@ from personas.decision import (
 from personas.entries import Answered, Lines, Reading, Unanswered, Waiting
 from personas.failures import TokenStatusFailure
 from personas.secret import Secret
-from tests.support.history import MORNING, OTHER_TABLE, TABLE, a_view
+from tests.support.history import MORNING, OTHER_TABLE, TABLE, a_declaration, a_view
 from tests.support.pictures import a_picture
 from tests.support.standings import GENERATION, active, invited, line, paused, window_of
 
@@ -587,10 +587,6 @@ def test_the_apps_a_turn_holds_are_those_he_holds_a_place_at_other_than_its_own(
     assert held_apps("https://a.test/mcp", frozenset({"https://a.test/mcp"})) == frozenset()
 
 
-def _declaration(name: str) -> ToolDeclaration:
-    return ToolDeclaration(name=name, description=secrets.token_hex(4), parameters={"type": "object"})
-
-
 @pytest.mark.parametrize(
     ("listed", "taken", "kept", "left_out"),
     [
@@ -622,7 +618,7 @@ def _declaration(name: str) -> ToolDeclaration:
 def test_a_turn_declares_what_an_app_lists_but_the_reserved_names_and_those_an_earlier_app_holds(
     listed, taken, kept, left_out
 ):
-    declared = {name: _declaration(name) for name in listed}
+    declared = {name: a_declaration(name) for name in listed}
 
     offered = offered_declarations(list(declared.values()), frozenset(taken))
 
@@ -634,7 +630,7 @@ def test_a_turn_declares_what_an_app_lists_but_the_reserved_names_and_those_an_e
 def test_the_places_of_an_app_are_spoken_only_for_an_agent_with_a_voice_and_an_app_that_declares_speak(
     has_voice, declared_names
 ):
-    declared = [_declaration(name) for name in declared_names]
+    declared = [a_declaration(name) for name in declared_names]
 
     assert is_voice_app(has_voice, declared) is (has_voice and SPEAK_TOOL in declared_names)
 
