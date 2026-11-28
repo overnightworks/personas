@@ -1,7 +1,0 @@
-claim_id = "36d3d968849a4a9ebacfd3f6906b34f5"
-agent = "Claude 09c5accf-533b-455a-a4f6-8e1e617175c5"
-role = "builder"
-base = "ddccee279b590fa08c2f7eec7f8f1f3c02f4b326"
-branch = "claude/issue-475-the-release-check-holds-nothing-for-a-to"
-scope = ["docs/runbooks/release.md"]
-opened_commit = "d6c110e750d4a5706a9658d6eb6cb7186558ad9f"
