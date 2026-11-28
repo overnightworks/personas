@@ -114,9 +114,13 @@ async def test_a_first_answer_sentence_refused_as_stale_ends_the_hold_undecided_
     )
 
 
-@pytest.mark.parametrize("beside_parked_run", [True, False], ids=["round beside his parked run", "turn told the hold"])
+@pytest.mark.parametrize(
+    ("beside_parked_run", "said"),
+    [(True, ["before", "waits"]), (False, [])],
+    ids=["round beside his parked run", "turn told the hold"],
+)
 async def test_a_first_answer_sentence_refused_as_not_interrupted_drops_nothing_and_the_new_hold_is_decided_first(
-    runner, beside_parked_run
+    runner, beside_parked_run, said
 ):
     """TURNS-27, TURNS-31, TURNS-47, LOG-17."""
     runner.app.new_holds_before_decision.append((SECOND_HOLD, ("Bob", "no, wait")))
@@ -137,8 +141,7 @@ async def test_a_first_answer_sentence_refused_as_not_interrupted_drops_nothing_
 
     assert (CONTINUE_SPEAKING_TOOL, SECOND_HOLD) in runner.app.hold_calls
     assert Event.SPEECH_DROPPED not in [event for event, _ in runner.reports.reported()]
-    if beside_parked_run:
-        assert [text for *_, text in runner.app.said] == ["before", "waits"]
+    assert [text for *_, text in runner.app.said] == said
 
 
 async def test_a_new_hold_during_his_answer_starts_no_round_and_is_told_to_his_next_turn(runner):

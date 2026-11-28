@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from agents.backend.fake_gateway import completion, tool_call, tool_round
+from agents.backend.fake_gateway import completion
 from agents.member import (
     CONTINUE_SPEAKING_TOOL,
     STOP_SPEAKING_TOOL,
@@ -47,8 +47,8 @@ SHORT_CALL_SECONDS = 0.3
 BOB_SAYS = ("Bob", "no, wait")
 
 
-def deciding_times(tool: str, count: int):
-    return [deciding(tool, time=time) for time in range(1, count + 1)]
+def deciding_times(tool: str, count: int, line: str | None = None):
+    return [deciding(tool, time=time, line=line) for time in range(1, count + 1)]
 
 
 def more_from_ada(*texts: str) -> list[tuple[tuple[str, str], ...]]:
@@ -62,22 +62,18 @@ def told_since(runner, round_request: int) -> list[list[dict[str, str]]]:
     return [each["talked_over"] for each in runner.gateway.held_results(round_request)]
 
 
+LINE = "Right, one moment."
 BESIDE_THE_PARKED_RUN = pytest.mark.parametrize(
     "beside_parked_run", [True, False], ids=["round beside his parked run", "turn told the hold"]
 )
-DECISIONS = pytest.mark.parametrize("kind", ["continue", "stop", "line"])
+DECISIONS = pytest.mark.parametrize(
+    ("tool", "line"),
+    [(CONTINUE_SPEAKING_TOOL, None), (STOP_SPEAKING_TOOL, None), (CONTINUE_SPEAKING_TOOL, LINE)],
+    ids=["continue", "stop", "line"],
+)
 WAITING_SENTENCES = {True: ["before", "waits"], False: [FIRST, SECOND]}
 """What reaches the app of what waited at the hold, by whether a round beside the parked run decides it."""
 FIRST_SENTENCE_HEARD = {True: "before", False: FIRST}
-LINE = "Right, one moment."
-
-
-def decision(kind: str, time: int = 1, hold_id: str = HOLD_ID):
-    """A reply that decides the hold with a continue, a stop or a continue that says a short line; a decision made again
-    is told apart by its ``time``."""
-    tool = STOP_SPEAKING_TOOL if kind == "stop" else CONTINUE_SPEAKING_TOOL
-    arguments = {"id": hold_id, **({"line": LINE} if kind == "line" else {})}
-    return tool_round(tool_call(f"{kind}-{hold_id}-{time}", tool, arguments))
 
 
 def stale(tool: str) -> ToolOutcome:
@@ -161,13 +157,13 @@ async def test_a_decision_told_fewer_changes_than_the_app_counted_is_decided_aga
 @BESIDE_THE_PARKED_RUN
 @DECISIONS
 async def test_a_stale_decision_is_no_decision_and_the_one_made_again_plays_what_waited(
-    runner, beside_parked_run, kind
+    runner, beside_parked_run, tool, line
 ):
     """TURNS-31, TURNS-46."""
     runner.app.count_worded_changes()
     runner.app.words_before_decision.extend(more_from_ada("wait a moment please"))
     await held_and_decided_by(
-        runner, beside_parked_run, decision(kind), decision("continue", time=2), completion(), completion()
+        runner, beside_parked_run, deciding(tool, line=line), deciding(CONTINUE_SPEAKING_TOOL, time=2), completion(), completion()
     )
 
     assert await decided(runner) == ["continued"]
@@ -181,13 +177,13 @@ async def test_a_stale_decision_is_no_decision_and_the_one_made_again_plays_what
 @BESIDE_THE_PARKED_RUN
 @DECISIONS
 async def test_decisions_told_too_few_changes_past_the_bound_end_the_hold_undecided_and_stop_him_naming_no_count(
-    runner, beside_parked_run, kind
+    runner, beside_parked_run, tool, line
 ):
     """TURNS-31."""
     runner.app.count_worded_changes()
     runner.app.words_before_decision.extend(more_from_ada(*[f"wait {each}" for each in range(DECISION_CALLS)]))
     await held_and_decided_by(
-        runner, beside_parked_run, *(decision(kind, time) for time in range(1, DECISION_CALLS + 2))
+        runner, beside_parked_run, *deciding_times(tool, DECISION_CALLS + 1, line)
     )
 
     assert await decided(runner) == ["undecided"]
@@ -202,16 +198,16 @@ async def test_decisions_told_too_few_changes_past_the_bound_end_the_hold_undeci
 @BESIDE_THE_PARKED_RUN
 @DECISIONS
 async def test_a_decision_the_app_refused_as_not_interrupted_keeps_what_waited_and_the_new_hold_is_decided_first(
-    runner, beside_parked_run, kind
+    runner, beside_parked_run, tool, line
 ):
     """TURNS-31, TURNS-47."""
     runner.app.new_holds_before_decision.append((SECOND_HOLD, BOB_SAYS))
     await held_and_decided_by(
         runner,
         beside_parked_run,
-        decision(kind),
+        deciding(tool, line=line),
         completion("[silent]"),
-        decision("continue", hold_id=SECOND_HOLD),
+        deciding(CONTINUE_SPEAKING_TOOL, SECOND_HOLD),
         completion(),
         completion(),
     )
@@ -234,7 +230,7 @@ async def test_a_stale_decision_whose_hold_is_gone_when_he_is_told_what_was_said
     release = await held_with_the_first_request_waiting(
         runner,
         beside_parked_run,
-        decision("stop" if tool == STOP_SPEAKING_TOOL else "continue"),
+        deciding(tool),
         completion("[silent]"),
         completion(),
     )
@@ -254,7 +250,7 @@ async def test_a_stale_decision_whose_hold_he_cannot_read_again_is_told_so_and_h
     """TURNS-31."""
     runner.app.hold_outcomes.append(stale(CONTINUE_SPEAKING_TOOL))
     release = await held_with_the_first_request_waiting(
-        runner, beside_parked_run, decision("continue"), decision("continue", time=2), completion(), completion()
+        runner, beside_parked_run, deciding(CONTINUE_SPEAKING_TOOL), deciding(CONTINUE_SPEAKING_TOOL, time=2), completion(), completion()
     )
     number = runner.gateway.arrivals
     decides_again = runner.gateway.hold_request(number + 1)
@@ -278,8 +274,8 @@ async def test_a_turn_that_does_not_speak_is_told_what_was_said_since_a_stale_de
     await a_voice_call(
         runner,
         completion("done"),
-        decision("continue"),
-        decision("continue", time=2),
+        deciding(CONTINUE_SPEAKING_TOOL),
+        deciding(CONTINUE_SPEAKING_TOOL, time=2),
         completion("[silent]"),
     )
     answer = runner.gateway.hold_request(1)
