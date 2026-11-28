@@ -33,13 +33,13 @@ from personas.held_tools import Calls, HeldTools, HoldBack, ToolLoads, TurnOffer
 from personas.holds import (
     APP_FAILED_TEXT,
     DECIDING_FIRST_TEXT,
-    DECISION_CALLS,
     DECISION_DECLARATIONS,
     HoldDeciding,
     HoldInbox,
     TurnHold,
     Voiced,
     close_when_over,
+    decision_calls,
 )
 from personas.present import (
     LOAD_TOOLS_DECLARATION,
@@ -502,7 +502,7 @@ class Turning:
                 tools.extend(self._hand_tools(app, session, offer.declarations, calls, hold, record, at))
                 bounds.append(calls.bound)
         tools.extend(self._decision_tools(admitted, record, bound, deciding, answering))
-        bounds.append(DECISION_CALLS)
+        bounds.append(decision_calls(deciding))
         return HeldTools(tuple(tools), turn_call_bound(bounds), deferred, hold.inbox, deciding)
 
     def _decision_tools(

@@ -55,6 +55,7 @@ DECISION_CALLS: Final = 8
 """The decisions one hold is told, in a round or in a turn: his first and seven more after the app took none, one it
 refused as stale counting as any other. Past them the hold ends undecided and stops him, as any hold without a
 decision does; the turn's own bound stays the turn's."""
+_APART_DECISION_CALLS: Final = 1
 _DECISIONS_BOUND_TEXT: Final = "this hold takes no more decisions"
 LINE_ARGUMENT: Final = "line"
 STYLE_ARGUMENT: Final = "style"
@@ -114,6 +115,12 @@ DECISION_DECLARATIONS: Final = tuple(
         ),
     )
 )
+
+
+def decision_calls(deciding: TurnHold | None) -> int:
+    """The calls of the decision tools one turn counts: ``DECISION_CALLS`` for a turn told a hold, one for any other,
+    whose decision tools are answered apart with an error."""
+    return _APART_DECISION_CALLS if deciding is None else DECISION_CALLS
 
 
 class TurnHold:

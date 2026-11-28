@@ -128,7 +128,7 @@ An entry has its app and the time he took it (`at`), and is one of:
   failure's code or `cancelled`; a call past an app's bound was never sent and does not enter. An answered
   `read_skill` enters as a skill entry instead, and a `load_tools` that loaded tools as a load entry.
 - TURNS-22: A call past an app's bound is answered with an error and the model may go on. The turn's total is the sum
-  of the apps' bounds plus one for the held call and one for the speaking tools, plus `lookup_calls` with `[memory]`
+  of the apps' bounds plus one for the held call and one for the speaking tools, which count eight in a turn told a hold, plus `lookup_calls` with `[memory]`
   the two reads `read_skill` takes and the two loads `load_tools` takes, so a model that keeps calling past a bound can spend it and end
   the turn without its `say`.
 - TURNS-23: In a call and at a table at once, a turn at either can answer in the call and act at the table, also
