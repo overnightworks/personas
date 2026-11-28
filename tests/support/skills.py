@@ -121,9 +121,9 @@ async def assert_a_round_is_told_byte_for_byte_after_a_restart(runner, songmaker
     await a_turn(runner, 3)
     await restarted(runner)
     await a_turn(runner, 4)
-    told = runner.gateway.tool_rounds(3)
+    told = runner.gateway.tool_rounds(3, skill=SONGMAKER)
     assert len(told) == 1
-    assert runner.gateway.tool_rounds(4) == told
+    assert runner.gateway.tool_rounds(4, skill=SONGMAKER) == told
 
 
 async def turns_past_a_cut_of_a_round(runner, songmaker, call, entry_bytes: int) -> None:

@@ -12,7 +12,7 @@ from agents.backend.fake_gateway import completion
 from agents.turn import Principal, person_fingerprint
 
 from personas.decision import BACKOFF_BASE_SECONDS
-from personas.entries import HistoryDelta, KeptLine, KeptTurns
+from personas.entries import HistoryDelta, KeptLine, KeptTurns, entry_size
 from personas.failures import (
     STORE_DEFECT_CODE,
     STORE_TIMEOUT_CODE,
@@ -32,6 +32,7 @@ from tests.support.history import (
     SPEAKER,
     STATE_BYTES,
     TABLE,
+    a_tools_load,
     act_entry,
     after_start,
     answered,
@@ -49,7 +50,7 @@ from tests.support.history import (
     written_turns,
 )
 from tests.support.history_holding import HistoriesHoldingTheAddressedLine
-from tests.support.hopin import LIMIT_SECONDS, PLAY_TOOL
+from tests.support.hopin import LIMIT_SECONDS, PLAY_TOOL, SAY_TOOL
 from tests.support.hopin_places import ACCEPTED_NAME, ISSUER
 from tests.support.ownership import KeptHistories
 from tests.support.realm import AGENT_NAME
@@ -58,6 +59,9 @@ from tests.support.standings import active, paused
 from tests.support.voice import a_voice_call
 
 pytestmark = [pytest.mark.anyio, pytest.mark.integration]
+
+BLOCK_BYTES = entry_size(a_tools_load(tools=(SAY_TOOL,)))
+"""What the block of the call's app adds to a history that is bounded: its load's tool names."""
 
 SECOND_AGENT, SECOND_SUBJECT, SECOND_NAME = "agent-bach", "agent-subject-2", "Bach"
 
@@ -189,7 +193,7 @@ async def test_what_was_said_before_the_runner_started_is_not_told_and_what_is_s
 
 async def test_lines_past_the_bound_leave_the_oldest_out_and_the_history_says_so(runner):
     runner.config = bounded_history(
-        runner.config, 2 * told_line_bytes(url_of(runner, 0), PLACE_ID, "line-1") + STATE_BYTES
+        runner.config, 2 * told_line_bytes(url_of(runner, 0), PLACE_ID, "line-1") + STATE_BYTES + BLOCK_BYTES
     )
     await restarted_in_the_call(runner)
     for number in (1, 2, 3):
@@ -214,7 +218,9 @@ async def test_a_turn_is_told_as_many_of_the_newest_lines_as_the_bytes_they_are_
     app = url_of(runner, 0)
     runner.config = bounded_history(
         runner.config,
-        told_line_bytes(app, PLACE_ID, "second", seq=2) + told_line_bytes(app, PLACE_ID, ADDRESSED, seq=3),
+        told_line_bytes(app, PLACE_ID, "second", seq=2)
+        + told_line_bytes(app, PLACE_ID, ADDRESSED, seq=3)
+        + BLOCK_BYTES,
     )
     await restarted_in_the_call(runner)
     await said_and_taken(runner.app, PLACE_ID, "opening line")
@@ -748,8 +754,9 @@ async def test_a_turn_refused_for_a_spent_budget_adds_no_message_and_the_next_tu
     await runner.app.said_count(1)
 
     refused, retried = runner.gateway.openings()
-    assert len(refused.texts) == len(retried.texts) == 2
-    assert [each["seq"] for each in retried.own["entries"]] == [1, 2]
+    assert len(refused.texts) == 2
+    assert len(retried.texts) == 3
+    assert [each["seq"] for each in retried.told("line")] == [1, 2]
 
 
 async def test_a_turn_cancelled_with_its_place_adds_no_message_and_the_next_turn_tells_its_entries(runner):
@@ -769,5 +776,5 @@ async def test_a_turn_cancelled_with_its_place_adds_no_message_and_the_next_turn
     await runner.gateway.until_turns(1)
 
     (next_turn,) = runner.gateway.openings()
-    assert len(next_turn.texts) == 2
-    assert [each["text"] for each in next_turn.own["entries"]] == [f"{ADDRESSED} First.", f"{ADDRESSED} Second."]
+    assert len(next_turn.texts) == 3
+    assert [each["text"] for each in next_turn.told("line")] == [f"{ADDRESSED} First.", f"{ADDRESSED} Second."]
