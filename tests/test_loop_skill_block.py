@@ -130,7 +130,7 @@ async def test_a_turn_after_a_join_ends_with_the_apps_read_and_load_rounds_and_t
     assert all(each.startswith(ROUND_CALL_PREFIX) for each in ids)
     (read,) = entries_of(runner, SkillRead, 1)
     (load,) = entries_of(runner, ToolsLoaded, 1)
-    assert (read.call_id, load.call_id) == tuple(ids)
+    assert tuple(ids) == (read.call_id, load.call_id)
     assert load.tools == (PLAY_TOOL,)
 
 
@@ -425,12 +425,14 @@ async def test_a_line_that_arrives_while_the_block_reads_is_told_before_every_ro
 
 
 @pytest.mark.parametrize("at_other", [False, True], ids=["the own app", "another app"])
-async def test_a_block_read_past_one_results_bound_is_left_out_and_its_load_enters(runner, other, caplog, at_other):
+async def test_a_block_read_past_one_results_bound_is_left_out_and_its_load_enters(
+    runner, other, caplog, monkeypatch, at_other
+):
     """TURNS-19, LOG-13."""
     large = a_skill_file(
         OTHER if at_other else HOPIN, tools=PLAY_TOOL if at_other else SAY_TOOL, body="x" * (MAX_EVENT_BYTES + 1)
     )
-    (other if at_other else runner.app).shelf = Shelf({OTHER if at_other else HOPIN: large})
+    monkeypatch.setattr(other if at_other else runner.app, "shelf", Shelf({OTHER if at_other else HOPIN: large}))
     await seated_in_the_call(runner, other, *turn_answers())
 
     await a_turn(runner, 1)
