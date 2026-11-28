@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import pytest
 from agents.backend.fake_gateway import completion
+from agents.member_outcomes import INVALID_ANSWER_CODE
 from agents.skills import implicit_skill_name
 
 from personas.failures import leaves_of
+from personas.reporting import Event
 from tests.support.app_driving import settled
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, a_turn, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import CANCELLED_TURN
@@ -17,6 +20,7 @@ from tests.support.history_holding import HistoriesHoldingTheAddressedLine
 from tests.support.hopin import LIMIT_SECONDS, LIST_TOOLS, SAY_TOOL
 from tests.support.logs import lines_of
 from tests.support.openers import opener_whose_request_raises
+from tests.support.realm import LIFETIME_SECONDS
 from tests.support.skills import HOPIN, Shelf, a_skill_file
 from tests.support.songmaker import CREATE_SONG, lists_only, songmaker_url
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
@@ -132,3 +136,21 @@ async def test_an_app_that_lists_a_tool_twice_gives_no_skill_line_and_no_tool_th
     assert tool not in runner.gateway.offered_tools(1, speaking=True, reading=True)
     assert skill in runner.gateway.system_of(2)
     assert not runner.task.done()
+
+
+@pytest.mark.parametrize("granted_before", range(1, 7))
+async def test_a_token_renewal_that_answers_no_usable_token_suspends_the_loop_wherever_the_turn_is(
+    runner, caplog, granted_before
+):
+    runner.gateway = Gateway(completion("done"))
+    await restarted_in_the_call(runner)
+    runner.realm.lifetime_seconds = 1
+    runner.realm.requests_before_an_answer_without_a_token = granted_before
+    runner.clock.time += LIFETIME_SECONDS
+
+    say_in_the_call(runner, ADDRESSED)
+    await runner.reports.until(Event.SUSPENDED)
+
+    assert runner.reports.reported()[-1] == (Event.SUSPENDED, INVALID_ANSWER_CODE)
+    ended = [record for record in caplog.get_records("call") if record.getMessage() == "tool_list.ended"]
+    assert logging.WARNING not in {record.levelno for record in ended}

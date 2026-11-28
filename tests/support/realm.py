@@ -55,6 +55,9 @@ class FakeRealm:
         """The ``traceparent`` header of each token request, in order; none when the request carried none."""
         self.issued_for: dict[str, list[str]] = {scope: []}
         self.refusing = False
+        self.lifetime_seconds = LIFETIME_SECONDS
+        self.requests_before_an_answer_without_a_token: int | None = None
+        """Token requests the realm still grants, after which it answers every request without a token."""
         self.refused_scopes: set[str] = set()
         self.refused_to: set[tuple[str, str]] = set()
         """Pairs of a client id and a scope the realm refuses that client alone."""
@@ -93,6 +96,10 @@ class FakeRealm:
         ):
             self.refusals.put_nowait(None)
             return httpx2.Response(401, json={"error": "invalid_client"})
+        if self.requests_before_an_answer_without_a_token == 0:
+            return httpx2.Response(200, content=json.dumps({"token_type": "Bearer"}))
+        if self.requests_before_an_answer_without_a_token is not None:
+            self.requests_before_an_answer_without_a_token -= 1
         claims = {
             "iss": ISSUER,
             "sub": subject,
@@ -104,5 +111,5 @@ class FakeRealm:
         self.issued_for[form["scope"]].append(token)
         if self.reaches_app:
             self._apps[form["scope"]].let_in(token, subject)
-        body = {"access_token": token, "expires_in": LIFETIME_SECONDS, "token_type": "Bearer"}
+        body = {"access_token": token, "expires_in": self.lifetime_seconds, "token_type": "Bearer"}
         return httpx2.Response(200, content=json.dumps(body))

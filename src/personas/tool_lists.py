@@ -129,12 +129,18 @@ class ToolLists:
             try:
                 async with within_call_time(self._app.call_seconds):
                     await self._renew_token()
-                    return await session.declared_tools()
-            except (CallTimedOut, UnusableAnswer) as failure:
-                timer.handled()
-                timer.fail(failure_code(failure))
-                timer.end()
-                return None
+                    try:
+                        return await session.declared_tools()
+                    except UnusableAnswer as failure:
+                        return self._ended_failed(timer, failure)
+            except CallTimedOut as failure:
+                return self._ended_failed(timer, failure)
+
+    @staticmethod
+    def _ended_failed(timer: StepTimer, failure: CallTimedOut | UnusableAnswer) -> None:
+        timer.handled()
+        timer.fail(failure_code(failure))
+        timer.end()
 
     async def _list_tools(self, app: AppTarget, session: MemberSession) -> tuple[ToolDeclaration, ...]:
         with stepping(
