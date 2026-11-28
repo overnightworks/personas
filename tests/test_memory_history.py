@@ -27,7 +27,7 @@ from personas.entries import (
     ViewSeen,
     stored_entry,
 )
-from personas.failures import STORE_DEFECT_CODE, StaleGenerationError, StoreDefect
+from personas.failures import STORE_DEFECT_CODE, OrdinalReusedError, StaleGenerationError, StoreDefect
 from personas.memory import PostgresHistoryStore, PostgresMemory
 from tests.support.history import (
     APP,
@@ -362,7 +362,7 @@ async def test_an_ordinal_reused_with_another_time_or_kind_is_a_store_defect_tha
     await histories.write(AGENT, mine, recorded(0, said(1, "held")), NO_TURNS_KEPT)
     delta = HistoryDelta(1, (said(2, "new"),), 0, (), 0, kept_first=0, kept=(reused, said(2, "new")))
 
-    with pytest.raises(StoreDefect) as defect:
+    with pytest.raises(OrdinalReusedError) as defect:
         await histories.write(AGENT, mine, delta, KeptTurns(unanswered=3))
 
     assert str(defect.value) == STORE_DEFECT_CODE
