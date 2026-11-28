@@ -66,6 +66,8 @@ from tests.support.scripts import run_from
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
+pytestmark = pytest.mark.integration
+
 PREVIOUS_TAG = "v2026.11.17.2"
 VERSION = "2026.11.18.1"
 
