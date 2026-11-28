@@ -44,7 +44,7 @@ from tests.support.hopin import CALL, LISTEN, PLAY_TOOL, READ, SAY_TOOL
 from tests.support.hopin_places import ISSUER
 from tests.support.pictures import a_picture, a_real_picture, base64_of
 from tests.support.realm import AGENT_NAME
-from tests.support.songmaker import CALLS, CREATE_SONG
+from tests.support.songmaker import CALLS, CREATE_SONG, songmaker_url
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active
 from tests.support.wire import cuts, hangs, hangs_once_entered, refuses_with_a_server_error
@@ -71,11 +71,6 @@ def a_say(runner, text: str, outcome: dict[str, object]) -> dict[str, object]:
 
 def a_song(runner, songmaker_url: str, outcome: dict[str, object]) -> dict[str, object]:
     return act_entry(songmaker_url, CREATE_SONG, {"title": "t"}, outcome)
-
-
-def songmaker_url(runner) -> str:
-    (url,) = (each.mcp_url for each in runner.config.apps if not each.listens)
-    return url
 
 
 async def second_written_turn(runner, text: str = AGAIN):
