@@ -6,16 +6,19 @@ import asyncio
 
 import pytest
 from agents.backend.fake_gateway import completion
+from agents.skills import implicit_skill_name
 
 from personas.failures import leaves_of
 from tests.support.app_driving import settled
-from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
+from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, a_turn, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import CANCELLED_TURN
 from tests.support.gateway import Gateway, says
 from tests.support.history_holding import HistoriesHoldingTheAddressedLine
-from tests.support.hopin import LIMIT_SECONDS, LIST_TOOLS
+from tests.support.hopin import LIMIT_SECONDS, LIST_TOOLS, SAY_TOOL
 from tests.support.logs import lines_of
 from tests.support.openers import opener_whose_request_raises
+from tests.support.skills import HOPIN, Shelf, a_skill_file
+from tests.support.songmaker import CREATE_SONG, lists_only, songmaker_url
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.wire import hangs
 
@@ -97,3 +100,35 @@ async def test_every_turn_lists_at_an_app_whose_stream_does_not_carry_the_tools_
 
     assert runner.app.log.count(LIST_TOOLS) == 2
     assert len(lines_of(caplog.get_records("call"), "tool_list.ended")) == 2
+
+
+def songmaker_lists_a_tool_twice(runner, songmaker) -> tuple[str, str]:
+    songmaker.shelf = Shelf(declares=False)
+    runner.app.shelf = Shelf({HOPIN: a_skill_file(HOPIN)})
+    songmaker.script(LIST_TOOLS, lists_only(CREATE_SONG, CREATE_SONG))
+    return implicit_skill_name(songmaker_url(runner)), CREATE_SONG
+
+
+def own_app_lists_a_tool_twice(runner, songmaker) -> tuple[str, str]:
+    runner.app.shelf = Shelf({HOPIN: a_skill_file(HOPIN)})
+    runner.app.script(LIST_TOOLS, lists_only(SAY_TOOL, SAY_TOOL))
+    return HOPIN, SAY_TOOL
+
+
+@pytest.mark.parametrize(
+    "arranging", [songmaker_lists_a_tool_twice, own_app_lists_a_tool_twice], ids=["another app", "own app"]
+)
+async def test_an_app_that_lists_a_tool_twice_gives_no_skill_line_and_no_tool_that_turn_and_the_agent_goes_on(
+    runner, songmaker, arranging
+):
+    skill, tool = arranging(runner, songmaker)
+    runner.gateway = Gateway(completion("done"), completion("done"))
+    await restarted_in_the_call(runner)
+
+    await a_turn(runner, 1)
+    await a_turn(runner, 2)
+
+    assert skill not in runner.gateway.system_of(1)
+    assert tool not in runner.gateway.offered_tools(1, speaking=True, reading=True)
+    assert skill in runner.gateway.system_of(2)
+    assert not runner.task.done()
