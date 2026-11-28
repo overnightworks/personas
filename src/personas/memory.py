@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from itertools import batched
 from pathlib import Path
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final, cast
 
 from agents.member import PlaceRef
 from alembic import command
@@ -41,7 +41,6 @@ from sqlalchemy import (
     exists,
     func,
     literal,
-    literal_column,
     or_,
     select,
     text,
@@ -49,6 +48,7 @@ from sqlalchemy import (
     union_all,
     update,
 )
+from sqlalchemy import cast as sql_cast
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.exc import InterfaceError, OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
@@ -78,6 +78,7 @@ from personas.failures import (
     StoreUnavailable,
     task_is_being_cancelled,
 )
+from personas.record_words import LINE_KIND, SIMPLE_CONFIGURATION, entry_words
 from personas.sweep import Swept
 
 if TYPE_CHECKING:
@@ -85,11 +86,11 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from pydantic import JsonValue
-    from sqlalchemy import ColumnElement, Delete, Update
+    from sqlalchemy import ColumnElement, Delete, Row, Select, Update
 
     from personas.config import DatabaseTarget
-    from personas.entries import HistoryDelta, KeptTurns, RecordRow, WindowRead
-    from personas.recall import LineSearch
+    from personas.entries import HistoryDelta, KeptTurns, RecordRow, ToldEntry, WindowRead
+    from personas.recall import EntrySearch
 
 MIGRATIONS_DIRECTORY: Final = Path(__file__).parent / "migrations"
 # Serialises concurrent `personas migrate` runs; any constant shared by all of them does.
@@ -102,8 +103,6 @@ RECORD_ROWS_PER_STATEMENT: Final = 1000
 """The most rows of the record one statement inserts, which keeps its parameters below the driver's limit."""
 NUL: Final = "\x00"
 REPLACEMENT: Final = "�"
-SIMPLE_CONFIGURATION: Final = literal_column("'simple'::regconfig", Text)
-"""Postgres full text without stemming or stop words: a word is what the parser makes of the text, lower case."""
 
 _LINES: Final = Table(
     "lines",
@@ -405,6 +404,69 @@ class _PostgresStore:
         await self._engine.dispose()
 
 
+def _recorded_entries(search: EntrySearch, words: ColumnElement[object]) -> Select[tuple[object]]:
+    """The JSON of the record's entries in the search's room below its ordinal that hold the words, newest first."""
+    return (
+        select(_KEPT_ENTRIES.c.entry)
+        .where(
+            _KEPT_ENTRIES.c.client_id == search.client_id,
+            _KEPT_ENTRIES.c.app == search.app,
+            _KEPT_ENTRIES.c.place_kind == _without_nul(search.place.kind),
+            _KEPT_ENTRIES.c.place_id == _without_nul(search.place.id),
+            _KEPT_ENTRIES.c.ordinal < search.first_ordinal,
+            or_(
+                func.numnode(words) == 0, entry_words(_KEPT_ENTRIES.c.kind, _KEPT_ENTRIES.c.entry).bool_op("@@")(words)
+            ),
+        )
+        .order_by(_KEPT_ENTRIES.c.at.desc(), _KEPT_ENTRIES.c.ordinal.desc())
+        .limit(search.rows)
+    )
+
+
+def _lines_the_record_lacks(search: EntrySearch, words: ColumnElement[object]) -> Select[tuple[object, ...]]:
+    """The lines of the search's room first read before its time that hold the words and that the record does not hold
+    under the same visit and ``seq``, newest first."""
+    in_the_record = exists().where(
+        _KEPT_ENTRIES.c.client_id == _LINES.c.client_id,
+        _KEPT_ENTRIES.c.kind == LINE_KIND,
+        _KEPT_ENTRIES.c.app == _LINES.c.app,
+        _KEPT_ENTRIES.c.place_kind == _LINES.c.place_kind,
+        _KEPT_ENTRIES.c.place_id == _LINES.c.place_id,
+        _KEPT_ENTRIES.c.generation == _LINES.c.generation,
+        sql_cast(_KEPT_ENTRIES.c.entry["seq"].astext, Numeric) == _LINES.c.seq,
+    )
+    holds_every_word = func.to_tsvector(SIMPLE_CONFIGURATION, _LINES.c.text).bool_op("@@")(words)
+    return (
+        select(_LINES)
+        .where(
+            _LINES.c.client_id == search.client_id,
+            _LINES.c.app == search.app,
+            _LINES.c.place_kind == _without_nul(search.place.kind),
+            _LINES.c.place_id == _without_nul(search.place.id),
+            _LINES.c.first_read_at < search.first_read_before,
+            ~in_the_record,
+            or_(func.numnode(words) == 0, holds_every_word),
+        )
+        .order_by(_LINES.c.first_read_at.desc(), _LINES.c.seq.desc())
+        .limit(search.rows)
+    )
+
+
+def _kept_line(row: Row[Any]) -> KeptLine:
+    return KeptLine(
+        Visit(row.app, PlaceRef(kind=row.place_kind, id=row.place_id), row.generation),
+        int(row.seq),
+        row.first_read_at,
+        row.speaker,
+        row.kind,
+        row.text,
+        own=row.own,
+        spoken=row.spoken,
+        cut=row.cut,
+        act=row.act,
+    )
+
+
 class PostgresLineStore(_PostgresStore):
     """Keeps the lines of the windows the loops read."""
 
@@ -414,58 +476,26 @@ class PostgresLineStore(_PostgresStore):
         async with self._bounded_transaction() as connection:
             await connection.execute(statement)
 
-    async def search(self, search: LineSearch) -> tuple[KeptLine, ...]:
-        """The lines of the agent's place that hold every word of the text and were first read before the time, newest
-        first, at most the rows asked for; a text without a word matches every line.
+    async def search(self, search: EntrySearch) -> tuple[ToldEntry, ...]:
+        """The entries of the agent's place that hold every word of the text, newest first, at most the rows asked
+        for: those of the record below the ordinal, of every kind, and the lines first read before the time that the
+        record does not hold. A text without a word matches every entry.
 
         It raises as a write does: ``StoreUnavailable`` or ``StoreDefect`` with a code, never the text searched for.
         """
         words = func.plainto_tsquery(SIMPLE_CONFIGURATION, literal(_without_nul(search.text), Text))
-        holds_every_word = func.to_tsvector(SIMPLE_CONFIGURATION, _LINES.c.text).bool_op("@@")(words)
-        statement = (
-            select(
-                _LINES.c.app,
-                _LINES.c.place_kind,
-                _LINES.c.place_id,
-                _LINES.c.generation,
-                _LINES.c.seq,
-                _LINES.c.first_read_at,
-                _LINES.c.speaker,
-                _LINES.c.kind,
-                _LINES.c.text,
-                _LINES.c.own,
-                _LINES.c.spoken,
-                _LINES.c.cut,
-                _LINES.c.act,
-            )
-            .where(
-                _LINES.c.client_id == search.client_id,
-                _LINES.c.app == search.app,
-                _LINES.c.place_kind == _without_nul(search.place.kind),
-                _LINES.c.place_id == _without_nul(search.place.id),
-                _LINES.c.first_read_at < search.first_read_before,
-                or_(func.numnode(words) == 0, holds_every_word),
-            )
-            .order_by(_LINES.c.first_read_at.desc(), _LINES.c.seq.desc())
-            .limit(search.rows)
-        )
         async with self._bounded_transaction() as connection:
-            rows = (await connection.execute(statement)).all()
-        return tuple(
-            KeptLine(
-                Visit(row.app, PlaceRef(kind=row.place_kind, id=row.place_id), row.generation),
-                int(row.seq),
-                row.first_read_at,
-                row.speaker,
-                row.kind,
-                row.text,
-                own=row.own,
-                spoken=row.spoken,
-                cut=row.cut,
-                act=row.act,
-            )
-            for row in rows
-        )
+            stored = (await connection.execute(_recorded_entries(search, words))).scalars().all()
+            kept_lines = (await connection.execute(_lines_the_record_lacks(search, words))).all()
+        try:
+            found = [
+                *(cast("ToldEntry", entry_from_stored(each)) for each in stored),
+                *(_kept_line(row) for row in kept_lines),
+            ]
+        except ValueError:
+            raise StoreDefect(STORE_DEFECT_CODE) from None
+        # Python's sort is stable, so of two entries read at the same time the record's comes first.
+        return tuple(sorted(found, key=entry_time, reverse=True)[: search.rows])
 
     async def kept_visits(self, client_id: str | None) -> tuple[KeptVisit, ...]:
         """Every agent's visits, or those of one agent, ordered by agent and first read; no line's content."""

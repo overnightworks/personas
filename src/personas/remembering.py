@@ -10,25 +10,26 @@ from personas.reporting import StoreOutage
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from personas.entries import KeptLine, WindowRead
-    from personas.recall import LineSearch, LookupBounds
+    from personas.entries import ToldEntry, WindowRead
+    from personas.recall import EntrySearch, LookupBounds
     from personas.reporting import Event
 
 
 class LineStore(Protocol):
-    """Keeps the lines of the windows the loops read and searches them; it owns the time one write or read may take."""
+    """Keeps the lines of the windows the loops read, searches them and the record; it owns the time one write or
+    read may take."""
 
     async def keep(self, read: WindowRead) -> None:
         """Keeps every line of the window once; raises ``StoreUnavailable`` when it cannot now."""
         ...
 
-    async def search(self, search: LineSearch) -> tuple[KeptLine, ...]:
-        """The lines the search asks for, newest first; raises ``StoreUnavailable`` when it cannot answer now."""
+    async def search(self, search: EntrySearch) -> tuple[ToldEntry, ...]:
+        """The entries the search asks for, newest first; raises ``StoreUnavailable`` when it cannot answer now."""
         ...
 
 
 class Remembering:
-    """One loop's way to the store: it keeps each window it reads and searches the lines kept for a turn's lookup,
+    """One loop's way to the store: it keeps each window it reads and searches what is kept for a turn's lookup,
     within the ``lookup`` bounds, which are set exactly when the configuration has a memory.
 
     Without a store there is nothing kept, and no turn looks. A store that fails a write or a search is reported once
@@ -58,8 +59,8 @@ class Remembering:
         else:
             self._outage.answered()
 
-    async def search(self, search: LineSearch) -> tuple[KeptLine, ...] | None:
-        """The lines a turn's lookup asked for, or ``None`` after the report of a store that could not answer.
+    async def search(self, search: EntrySearch) -> tuple[ToldEntry, ...] | None:
+        """The entries a turn's lookup asked for, or ``None`` after the report of a store that could not answer.
 
         A defect of the store leaves as itself and ends the runner.
         """

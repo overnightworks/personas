@@ -10,12 +10,13 @@ from dataclasses import replace
 
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
-from agents.member import CONTINUE_SPEAKING_TOOL
+from agents.member import CONTINUE_SPEAKING_TOOL, PlaceView
 from agents.tools import ToolEffect
 from agents.turn import FailureCode
 from mcp_types import ListToolsResult
 
 from personas.decision import NETWORK_FAILURE_CODE
+from personas.entries import ViewSeen
 from personas.failures import (
     STORE_DEFECT_CODE,
     STORE_TIMEOUT_CODE,
@@ -47,7 +48,7 @@ from tests.support.call import (
 )
 from tests.support.fakes import CANCELLED_TURN, failed_turn, memory_target
 from tests.support.gateway import Gateway, play, reads_and_loads_the_bounds_allow, say, says
-from tests.support.history import MORNING, TABLE, a_state, at_table, entry, said, url_of
+from tests.support.history import LATER, MORNING, TABLE, a_state, at_table, entry, said, url_of
 from tests.support.hopin import LIMIT_SECONDS, LIST_TOOLS, LISTEN, PLAY_TOOL, SAY_TOOL
 from tests.support.logs import formatted, lines_of
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
@@ -266,6 +267,7 @@ async def test_a_lookup_asks_for_the_turns_own_room_whatever_arguments_the_model
     )
     assert search.text == "some words"
     assert search.first_read_before == runner.clock.wall()
+    assert search.first_ordinal == 0
 
 
 async def test_a_lookup_gives_the_model_its_scope_and_the_lines_found_in_the_historys_form_newest_first(runner):
@@ -277,7 +279,8 @@ async def test_a_lookup_gives_the_model_its_scope_and_the_lines_found_in_the_his
     assert result_of(runner, 2) == {
         "scope": SCOPE_TEXT,
         "older_dropped": False,
-        "lines": [told_said(2, "Newer"), told_said(1, "Older")],
+        "too_large": 0,
+        "entries": [told_said(2, "Newer"), told_said(1, "Older")],
     }
 
 
@@ -290,9 +293,26 @@ async def test_a_result_holds_the_newest_lines_within_lookup_bytes_and_says_when
 
     result = result_of(runner, 2)
     assert len(runner.gateway.tool_results(2)[0].encode()) <= result_bytes
-    assert result["lines"] == [told_said(seq, "x" * 200) for seq in range(5, 5 - len(result["lines"]), -1)]
-    assert 0 < len(result["lines"]) < 5
+    assert result["entries"] == [told_said(seq, "x" * 200) for seq in range(5, 5 - len(result["entries"]), -1)]
+    assert 0 < len(result["entries"]) < 5
     assert result["older_dropped"]
+
+
+async def test_a_lookup_counts_a_hit_too_large_for_its_result_so_the_model_knows_one_matched_that_it_cannot_be_shown(
+    runner,
+):
+    """TURNS-40."""
+    state = {"hand": "x" * 3000}
+    huge = ViewSeen(url_of(runner, 0), TABLE, PlaceView(revision=4, awaits_you=True, state=state), LATER)
+    store = ScriptedStore()
+    store.found = (said(2, "Newer"), huge, said(1, "Older"))
+    await looking_in_the_call(runner, store, tool_round(recalling()), completion("done"), lookup_bytes=1000)
+    await runner.gateway.until_requested(2)
+
+    result = result_of(runner, 2)
+    assert result["too_large"] == 1
+    assert result["entries"] == [told_said(2, "Newer"), told_said(1, "Older")]
+    assert not result["older_dropped"]
 
 
 async def test_a_lookup_past_lookup_calls_is_refused_with_a_text_of_its_own_and_reads_nothing(runner):
