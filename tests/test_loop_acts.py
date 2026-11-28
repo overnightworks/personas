@@ -69,8 +69,8 @@ def a_say(runner, text: str, outcome: dict[str, object]) -> dict[str, object]:
     return act_entry(url_of(runner, 0), "say", {"place": PLACE_ID, "text": text}, outcome)
 
 
-def a_song_act(runner_url: str, outcome: dict[str, object]) -> dict[str, object]:
-    return act_entry(runner_url, CREATE_SONG, {"title": "t"}, outcome)
+def a_song_act(app_url: str, outcome: dict[str, object]) -> dict[str, object]:
+    return act_entry(app_url, CREATE_SONG, {"title": "t"}, outcome)
 
 
 async def second_written_turn(runner, text: str = AGAIN):
