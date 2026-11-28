@@ -1,8 +1,10 @@
-"""The sweep: the task that removes the lines kept longer than the keep period, beside the loops."""
+"""The sweep: the task that removes the lines and the record's entries kept longer than the keep period, beside the
+loops."""
 
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from personas.failures import StoreUnavailable
@@ -17,12 +19,20 @@ if TYPE_CHECKING:
     from personas.reporting import Reporter
 
 
+@dataclass(frozen=True)
+class Swept:
+    """What one sweep removed: lines, and entries of the record."""
+
+    lines: int
+    entries: int
+
+
 class SweptStore(Protocol):
     """What the sweep asks of the store."""
 
-    async def erase_before(self, first_read_before: datetime) -> int:
-        """Deletes every line first read before the time and returns how many; ``StoreUnavailable`` when it cannot
-        now."""
+    async def erase_before(self, first_read_before: datetime) -> Swept:
+        """Deletes every line first read before the time and every entry of the record that entered before it and that
+        no history holds, and returns how many; ``StoreUnavailable`` when it cannot now."""
         ...
 
 
@@ -37,8 +47,8 @@ async def sweep_lines(store: SweptStore, memory: MemoryTarget, clock: Clock, rep
             outage.failed(unavailable.code)
         else:
             outage.answered()
-            if removed:
-                report(StateChange(Event.SWEPT, None, None, lines=removed))
+            if removed.lines or removed.entries:
+                report(StateChange(Event.SWEPT, None, None, lines=removed.lines, entries=removed.entries))
         if math.isinf(memory.sweep_minutes):
             return
         await clock.sleep(memory.sweep_minutes * SECONDS_PER_MINUTE)

@@ -13,22 +13,24 @@ import pytest
 from agents.member import PlaceRef
 
 from personas.config import MemoryTarget
-from personas.entries import WindowRead
+from personas.entries import NO_TURNS_KEPT, HistoryDelta, WindowRead
 from personas.failures import STORE_TIMEOUT_CODE, STORE_UNREACHABLE_CODE, StoreDefect, StoreUnavailable, leaves_of
-from personas.memory import PostgresLineStore
+from personas.memory import PostgresHistoryStore, PostgresLineStore
 from personas.reporting import Event
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import SweepClock
 from tests.support.gateway import Gateway, says
+from tests.support.history import a_sentence
 from tests.support.hopin import LIMIT_SECONDS
 from tests.support.logs import formatted, lines_of
-from tests.support.postgres import kept_lines, lines_table_locked, run_sql
+from tests.support.postgres import kept_lines, kept_record, lines_table_locked, run_sql
 from tests.support.standings import line, window_of
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from personas.config import DatabaseTarget
+    from personas.sweep import Swept
 
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres, pytest.mark.integration]
@@ -50,7 +52,7 @@ class UnreachableUntilMended(PostgresLineStore):
         super().__init__(target)
         self.mended = False
 
-    async def erase_before(self, first_read_before) -> int:
+    async def erase_before(self, first_read_before) -> Swept:
         if not self.mended:
             raise StoreUnavailable(STORE_UNREACHABLE_CODE)
         return await super().erase_before(first_read_before)
@@ -200,3 +202,87 @@ async def test_no_line_text_speaker_or_password_reaches_a_log_line_of_a_sweep(ru
     assert lines_of(caplog.get_records("call"), "lines.swept")
     for held in (text, speaker, database.password.reveal()):
         assert held not in logged
+
+
+AGENT = "agent-mozart"
+
+
+@pytest.fixture
+async def histories(database: DatabaseTarget) -> AsyncIterator[PostgresHistoryStore]:
+    kept = PostgresHistoryStore(database)
+    yield kept
+    await kept.close()
+
+
+async def recorded_days_ago(histories: PostgresHistoryStore, now, *days_ago: float, left_out: int = 0) -> None:
+    """The record takes one sentence per age, each as old as given, while his history drops the first ``left_out``."""
+    entries = tuple(a_sentence(text=f"sentence {age}", at=now - timedelta(days=age)) for age in days_ago)
+    generation = await histories.take_over(AGENT)
+    delta = HistoryDelta(0, entries, 0, (), left_out, kept_first=0, kept=entries)
+    await histories.write(AGENT, generation, delta, NO_TURNS_KEPT)
+
+
+async def test_the_sweep_removes_a_record_row_older_than_the_keep_period_his_history_no_longer_holds_and_counts_it(
+    runner, store, histories, database
+):
+    """CONFIG-34, LOG-21."""
+    await recorded_days_ago(histories, runner.clock.wall(), OLD_DAYS, OLD_DAYS, YOUNG_DAYS, left_out=1)
+    clock = sweeping(runner, store)
+    runner.start()
+    await clock.until_waiting(1)
+
+    assert [ordinal for ordinal, *_ in kept_record(database, "ordinal")] == [1, 2]
+    assert runner.reports.lines_removed() == [0]
+    assert runner.reports.entries_removed() == [1]
+
+
+async def test_the_sweep_never_removes_an_entry_his_history_still_holds_however_old(runner, store, histories, database):
+    await recorded_days_ago(histories, runner.clock.wall(), OLD_DAYS, OLD_DAYS)
+    clock = sweeping(runner, store)
+    runner.start()
+    await clock.until_waiting(1)
+
+    assert [ordinal for ordinal, *_ in kept_record(database, "ordinal")] == [0, 1]
+    assert runner.reports.of_the_sweep() == []
+
+
+async def test_the_sweep_removes_a_row_just_past_the_period_with_an_empty_history_and_keeps_one_at_the_period(
+    runner, store, histories, database
+):
+    await recorded_days_ago(histories, runner.clock.wall(), KEEP_DAYS, KEEP_DAYS + 1 / 24 / 3600, left_out=2)
+    clock = sweeping(runner, store)
+    runner.start()
+    await clock.until_waiting(1)
+
+    assert [ordinal for ordinal, *_ in kept_record(database, "ordinal")] == [0]
+
+
+async def test_the_sweep_removes_an_old_record_row_that_has_no_ordinal_and_keeps_a_young_one(
+    runner, store, histories, database
+):
+    now = runner.clock.wall()
+    await recorded_days_ago(histories, now)
+    for days_ago in (OLD_DAYS, YOUNG_DAYS):
+        run_sql(
+            database,
+            "INSERT INTO kept_entries (client_id, at, kind, app, own, entry)"  # noqa: S608 - test-chosen values
+            f" VALUES ('{AGENT}', '{(now - timedelta(days=days_ago)).isoformat()}', 'act', 'app', true, '{{}}')",  # noqa: S608 - test-chosen values
+        )
+    clock = sweeping(runner, store)
+    runner.start()
+    await clock.until_waiting(1)
+
+    assert len(kept_record(database, "ordinal")) == 1
+    assert runner.reports.entries_removed() == [1]
+
+
+async def test_a_sweep_that_removes_lines_and_entries_counts_each(runner, store, histories, database):
+    now = runner.clock.wall()
+    await store.keep(read_of("Older", days_ago=OLD_DAYS, now=now))
+    await recorded_days_ago(histories, now, OLD_DAYS, left_out=1)
+    clock = sweeping(runner, store)
+    runner.start()
+    await clock.until_waiting(1)
+
+    assert (runner.reports.lines_removed(), runner.reports.entries_removed()) == ([1], [1])
+    assert kept_lines(database, "text") == []

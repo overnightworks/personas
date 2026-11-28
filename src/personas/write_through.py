@@ -19,9 +19,11 @@ if TYPE_CHECKING:
 
 
 class WriteThrough:
-    """Writes what his present gained and how his turns changed, after each change of his mind. A write the store
-    could not take is reported once per outage and retried after a backoff, with whatever changed meanwhile; a write
-    the fence refused raises ``StaleGenerationError``, which stops him on this pod."""
+    """Writes what his present gained and how his turns changed, after each change of his mind, with the entries his
+    mind holds that the record does not keep yet. A write the store could not take is reported once per outage and
+    retried after a backoff, with whatever changed meanwhile; a write the fence refused raises
+    ``StaleGenerationError`` and one that reuses an ordinal of the record raises ``OrdinalReusedError``, each of which
+    stops him on this pod."""
 
     def __init__(self, mind: Mind, owned: Owned, boundaries: Boundaries) -> None:
         self._mind = mind
@@ -62,12 +64,14 @@ class WriteThrough:
         if state.turns.not_before != not_before:
             clock = self._boundaries.clock
             paused_until = pause_deadline(state.turns.not_before, clock.now(), clock.wall())
-        delta = history_delta(self._written, present)
+        kept_first, kept = self._mind.unrecorded()
+        delta = history_delta(self._written, present, kept_first, kept)
         turns = kept_turns(state, paused_until)
         if delta is not None or turns != self._written_turns:
             await self._owned.write(delta, turns)
             self._written, self._written_turns = present, turns
             self._paused = (state.turns.not_before, paused_until)
+            self._mind.recorded(kept_first + len(kept))
         self._mind.written(changes)
 
     def stopping(self, margin_seconds: float) -> None:

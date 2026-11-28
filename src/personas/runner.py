@@ -46,6 +46,7 @@ async def run_all(config: Config, boundaries: Boundaries, ownership: Ownership) 
             config.budget_pause_cap_seconds,
             present_of(owned.history),
             resumed,
+            keeping_record=memory is not None,
         )
         agent = agents[owned.client_id]
         write_through = WriteThrough(mind, owned, boundaries)

@@ -24,6 +24,7 @@ from personas.failures import STORE_TIMEOUT_CODE, STORE_UNREACHABLE_CODE, StoreD
 from personas.memory import PostgresLineStore, SchemaNotAtHeadError
 from personas.recall import RECALL_TOOL, LineSearch
 from personas.reporting import Event
+from personas.sweep import Swept
 from tests.support.call import ADDRESSED, ANSWER, PERSON, PLACE_ID, restarted_in_the_call, say_in_the_call
 from tests.support.fakes import WALL_START
 from tests.support.gateway import Gateway, says
@@ -482,7 +483,7 @@ async def test_every_line_first_read_before_the_time_is_erased_of_every_agent_wh
 
     erased = await store.erase_before(cutoff)
 
-    assert erased == 2
+    assert erased == Swept(lines=2, entries=0)
     assert kept_lines(database, "text") == [("Younger",), ("Exactly at the time",)]
 
 

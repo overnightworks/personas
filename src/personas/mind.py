@@ -36,7 +36,7 @@ from personas.due import (
     yields_to_spoken,
 )
 from personas.entries import KeptLine, Reading, SkillRead, ToolsLoaded
-from personas.present import EMPTY_PRESENT, answered_into, round_call_id, taken_into
+from personas.present import EMPTY_PRESENT, answered_into, appended_by, round_call_id, taken_into
 from personas.speech import (
     NO_SPEECH,
     Answered,
@@ -91,12 +91,17 @@ class Mind:
         budget_pause_cap_seconds: float,
         present: Present = EMPTY_PRESENT,
         resumed: TurnState = NO_TURNS,
+        *,
+        keeping_record: bool = False,
     ) -> None:
         self._history_bytes = history_bytes
         self._history_keep_bytes = history_keep_bytes
         self._budget_pause_cap_seconds = budget_pause_cap_seconds
         self._unanswered_turns = resumed.unanswered
         self._present = present
+        self._keeping_record = keeping_record
+        self._unrecorded_first = present.history.left_out
+        self._unrecorded = present.history.entries if keeping_record else ()
         self._changed = asyncio.Event()
         self._changes = 0
         self._written_changes = 0
@@ -133,8 +138,21 @@ class Mind:
             if isinstance(entry, KeptLine) and entry.own and entry.spoken:
                 at = AppPlace(entry.visit.app, entry.visit.place)
                 self._set_speech(at, speech_line_entered(self._speech.get(at, NO_SPEECH)))
+        if self._keeping_record:
+            self._unrecorded = (*self._unrecorded, *appended_by(self._present.history.entries, taken))
         self._present = taken_into(self._present, taken, self._history_bytes, self._history_keep_bytes)
         self._change()
+
+    def unrecorded(self) -> tuple[int, tuple[Entry, ...]]:
+        """The entries taken and not yet kept in the record, the ordinal of the first of them and the entries: every
+        entry his loaded history holds until a write keeps it, and none when he keeps no record."""
+        return self._unrecorded_first, self._unrecorded
+
+    def recorded(self, through: int) -> None:
+        """The record keeps every entry before the ordinal ``through`` now."""
+        if self._keeping_record:
+            self._unrecorded = self._unrecorded[through - self._unrecorded_first :]
+            self._unrecorded_first = through
 
     def sentences_released(
         self, at: AppPlace, texts: Iterable[str], bound: float, allowed: float, *, replacing: bool

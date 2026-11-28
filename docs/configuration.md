@@ -88,15 +88,16 @@ At the default history, a skat game (40 to 50 states of about 1.5 KB) fills it a
 
 ## `[memory]`
 
-- CONFIG-33: Its presence keeps every line the agents read, sweeps them and gives every turn the lookup `recall`; removing it
-  stops all three.
+- CONFIG-33: Its presence keeps every line the agents read and every entry their history takes in the record,
+  sweeps both and gives every turn the lookup `recall`; removing it stops all three, and what the record holds
+  stays until `memory erase`.
 
 What then happens to lines kept before is in [the architecture](ARCHITECTURE.md),
 Persistence.
 
 | ID | Name | Type | Default | Meaning |
 |---|---|---|---|---|
-| CONFIG-34 | `lines_keep_days` | number above 0, or `inf` | 30 | how long after its first read a line becomes due for the next sweep; `inf` keeps every line |
+| CONFIG-34 | `lines_keep_days` | number above 0, or `inf` | 30 | how long after its first read a line, and after its time an entry of the record his history no longer holds, becomes due for the next sweep; `inf` keeps every line and entry |
 | CONFIG-35 | `sweep_minutes` | number above 0, or `inf` | 60 | how often the sweep runs after its first at start; `inf` sweeps once |
 | CONFIG-36 | `lookup_calls` | integer above 0 | 2 | lookups one turn may make; they join the turn's call total |
 | CONFIG-37 | `lookup_bytes` | integer, at least an empty result's size | 8192 | the bytes of one result and the longest `text` a lookup takes |

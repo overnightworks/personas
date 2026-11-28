@@ -9,7 +9,7 @@ from dataclasses import replace
 import pytest
 
 from personas.reporting import Event
-from personas.sweep import sweep_lines
+from personas.sweep import Swept, sweep_lines
 from tests.support.call import restarted_in_the_call
 from tests.support.fakes import FakeClock, Reports, SweepClock, memory_target
 from tests.support.hopin import LIMIT_SECONDS
@@ -23,13 +23,13 @@ SWEEP_SECONDS = 420.0
 class ScriptedSweeps:
     """Counts the statements it is sent; it can stay inside the first one."""
 
-    def __init__(self, *, stays_inside: bool = False, removes: int = 0) -> None:
+    def __init__(self, *, stays_inside: bool = False, removes: int = 0, removes_entries: int = 0) -> None:
         self.statements = 0
-        self._removes = removes
+        self._removes = Swept(removes, removes_entries)
         self._stays_inside = stays_inside
         self._inside = asyncio.Event()
 
-    async def erase_before(self, first_read_before) -> int:
+    async def erase_before(self, first_read_before) -> Swept:
         self.statements += 1
         self._inside.set()
         if self._stays_inside:
@@ -64,16 +64,22 @@ async def test_a_task_with_nothing_to_remove_or_no_next_sweep_ends_after_the_sta
     assert store.statements == statements
 
 
-@pytest.mark.parametrize(("removes", "swept"), [(0, []), (3, [3])], ids=["nothing erased: no line", "lines erased"])
-async def test_a_sweep_reports_its_line_count_only_when_it_erased_lines(removes, swept):
+@pytest.mark.parametrize(
+    ("removes", "removes_entries", "swept"),
+    [(0, 0, []), (3, 0, [(3, 0)]), (0, 2, [(0, 2)]), (3, 2, [(3, 2)])],
+    ids=["nothing erased: no report", "lines erased", "kept entries erased", "both erased"],
+)
+async def test_a_sweep_reports_its_line_and_entry_counts_only_when_it_erased_any(removes, removes_entries, swept):
     """LOG-21."""
     reports = Reports()
     memory = replace(memory_target(), sweep_minutes=math.inf)
 
     async with asyncio.timeout(LIMIT_SECONDS):
-        await sweep_lines(ScriptedSweeps(removes=removes), memory, FakeClock(), reports)
+        await sweep_lines(
+            ScriptedSweeps(removes=removes, removes_entries=removes_entries), memory, FakeClock(), reports
+        )
 
-    assert [change.lines for change in reports.changes if change.event is Event.SWEPT] == swept
+    assert [(change.lines, change.entries) for change in reports.changes if change.event is Event.SWEPT] == swept
 
 
 async def test_a_runner_without_a_memory_table_sweeps_nothing(runner):

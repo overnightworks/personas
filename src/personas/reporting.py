@@ -78,12 +78,12 @@ class Event(Enum):
 class StateChange:
     """One change of an agent's loop for one app, with the refusal or failure code if any.
 
-    The sweep belongs to no agent and no app, and says how many lines it removed. A stop that its deadline cut belongs
-    to the runner alone. The lock of an agent taken, lost or slow to stop belongs to no app. The start says the model
-    the agent's turns run on, when it has a persona. An invitation the loop leaves out says its place's kind and the
-    reason as the code. A pause of his turns says its reason as the code and its wait in seconds. Tools left out for an
-    earlier app's of the same name say how many. Sentences dropped unsent say how many and why, as the code. Lines
-    that never came say how many. A hold decided says its id. A call that failed says its
+    The sweep belongs to no agent and no app, and says how many lines and record entries it removed. A stop that its
+    deadline cut belongs to the runner alone. The lock of an agent taken, lost or slow to stop belongs to no app. The
+    start says the model the agent's turns run on, when it has a persona. An invitation the loop leaves out says its
+    place's kind and the reason as the code. A pause of his turns says its reason as the code and its wait in seconds.
+    Tools left out for an earlier app's of the same name say how many. Sentences dropped unsent say how many and why, as
+    the code. Lines that never came say how many. A hold decided says its id. A call that failed says its
     failure: the line holds its HTTP status, the MCP method that failed and a closed reason.
     """
 
@@ -92,6 +92,7 @@ class StateChange:
     app: str | None
     code: str | None = None
     lines: int | None = None
+    entries: int | None = None
     place_kind: str | None = None
     seconds: float | None = None
     model: str | None = None
@@ -170,6 +171,8 @@ def _fields_of(change: StateChange) -> dict[str, str | int | float]:
     fields |= _failure_fields(change)
     if change.lines is not None:
         fields["line_count"] = change.lines
+    if change.entries is not None:
+        fields["entry_count"] = change.entries
     if change.place_kind is not None:
         fields["place_kind"] = change.place_kind
     if change.seconds is not None:

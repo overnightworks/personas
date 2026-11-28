@@ -117,11 +117,11 @@ def test_a_change_is_one_literal_event_with_ids_the_host_of_the_app_and_closed_c
     assert "hidden" not in json.dumps(line)
 
 
-def test_the_sweep_belongs_to_no_agent_and_no_app_and_says_its_line_count(written):
+def test_the_sweep_belongs_to_no_agent_and_no_app_and_says_its_line_and_entry_counts(written):
     """LOG-21."""
-    line = written(StateChange(Event.SWEPT, None, None, lines=7))
+    line = written(StateChange(Event.SWEPT, None, None, lines=7, entries=3))
 
-    assert (line["event"], line["line_count"]) == ("lines.swept", 7)
+    assert (line["event"], line["line_count"], line["entry_count"]) == ("lines.swept", 7, 3)
     assert not {"agent_id", "app_id"} & line.keys()
 
 

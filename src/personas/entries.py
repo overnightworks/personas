@@ -174,6 +174,12 @@ def is_told(entry: Entry) -> TypeIs[ToldEntry]:
     return not isinstance(entry, SkillRead | ToolsLoaded)
 
 
+def is_his_own(entry: ToldEntry) -> bool:
+    """Whether he said or did the entry: his own line, a call he made or a sentence he spoke; a view and another's line
+    are told to him."""
+    return entry.own if isinstance(entry, KeptLine) else isinstance(entry, ActDone | SaidAloud)
+
+
 @dataclass(frozen=True)
 class Lines:
     """Why a written turn runs: the lines of one visit's window taken since his last turn there, which the history
@@ -218,6 +224,9 @@ class HistoryDelta:
     ordinal ``first``, the turns answered in their order, the first of them at the ordinal ``first_told``, and
     ``left_out``, the ordinal of the oldest entry it still holds; every older entry has left it, and so has every
     answered turn that told none of the rest. An answered turn's ordinal, not its wall time, is its identity and order.
+
+    ``kept`` are the entries the record takes, the first of them at the ordinal ``kept_first``: every entry taken and
+    not yet kept, whether the history still holds it or not.
     """
 
     first: int
@@ -225,6 +234,8 @@ class HistoryDelta:
     first_told: int
     told: tuple[TurnTold, ...]
     left_out: int
+    kept_first: int = 0
+    kept: tuple[Entry, ...] = field(default=(), repr=False)
 
 
 @dataclass(frozen=True)
@@ -342,6 +353,50 @@ def entry_time(entry: Entry) -> datetime:
     if isinstance(entry, ViewSeen):
         return entry.read_at
     return entry.at
+
+
+def entry_room(entry: Entry) -> Room | None:
+    """The room an entry was taken in: a line's visit, a view's and a sentence's app, place and visit, a call's room;
+    none for a call a release before the room took, a skill and a load."""
+    if isinstance(entry, KeptLine):
+        return Room(entry.visit.app, entry.visit.place, entry.visit.generation)
+    if isinstance(entry, ViewSeen | SaidAloud):
+        return Room(entry.app, entry.place, entry.generation)
+    return entry.room if isinstance(entry, ActDone) else None
+
+
+@dataclass(frozen=True)
+class RecordRow:
+    """One entry as the record keeps it: its ordinal in his history, its time and kind, the app, place and visit it was
+    taken in, whether he said or did it, the display name of another's line and the entry's JSON."""
+
+    ordinal: int
+    at: datetime
+    kind: str
+    app: str
+    place: PlaceRef | None
+    generation: str | None
+    own: bool
+    speaker: str | None = field(repr=False)
+    entry: JsonObject = field(repr=False)
+
+
+def _record_row(ordinal: int, entry: ToldEntry) -> RecordRow:
+    stored = stored_entry(entry)
+    room = entry_room(entry)
+    # Only a call a release before the room took has none: it keeps its target app, and no place.
+    app, place, generation = (
+        (cast("ActDone", entry).app, None, None) if room is None else (room.app, room.place, room.generation)
+    )
+    speaker = entry.name if isinstance(entry, KeptLine) and not entry.own else None
+    kind = str(stored[STORED_KIND_KEY])
+    return RecordRow(ordinal, entry_time(entry), kind, app, place, generation, is_his_own(entry), speaker, stored)
+
+
+def record_rows(first: int, entries: Iterable[Entry]) -> tuple[RecordRow, ...]:
+    """The rows the record takes of entries the history holds from the ordinal ``first``: what a turn is told, each at
+    its ordinal; a skill and a load are told by their round and take an ordinal but no row."""
+    return tuple(_record_row(ordinal, entry) for ordinal, entry in enumerate(entries, start=first) if is_told(entry))
 
 
 def told_time(at: datetime) -> str:
