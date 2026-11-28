@@ -325,7 +325,7 @@ LOAD_TOOLS_DECLARATION: Final = ToolDeclaration(
     parameters=_SKILL_PARAMETERS,
     effect=ToolEffect.READ_ONLY,
 )
-_ROUND_CALL_PREFIX: Final = "personas-skill-"
+ROUND_CALL_PREFIX: Final = "personas-skill-"
 
 
 @dataclass(frozen=True)
@@ -354,7 +354,7 @@ def skill_lines(listed: Iterable[ListedSkill]) -> str:
 def round_call_id(ordinal: int) -> str:
     """The call id of the round whose entry has this ordinal, a skill's read or a load of tools. The prefix keeps it
     from a model's call id."""
-    return f"{_ROUND_CALL_PREFIX}{ordinal}"
+    return f"{ROUND_CALL_PREFIX}{ordinal}"
 
 
 def listed_skill_named(skills: Mapping[str, ListedSkill], arguments: JsonObject) -> ListedSkill | None:
@@ -402,19 +402,51 @@ def tools_to_load(skill: AppSkill, deferred: Sequence[str], loaded: Collection[s
 
 @dataclass(frozen=True)
 class AppOffer:
-    """What an app offers a turn: its URL, whether it listens, and the declarations of its listing the turn is offered,
-    in its order."""
+    """What an app offers a turn: its URL, the declarations of its listing the turn is offered, in its order, and the
+    skills of that listing."""
 
     app: str
-    listens: bool
     declarations: tuple[ToolDeclaration, ...]
+    skills: tuple[AppSkill, ...]
 
 
 def deferred_by_app(offers: Iterable[AppOffer]) -> Deferred:
-    """The tools a turn sends deferred by the URL of their app, in its listing's order: every tool of a tools-only app
-    and none of a listening app's."""
-    return {
-        offer.app: tuple(each.name for each in offer.declarations)
-        for offer in offers
-        if not offer.listens and offer.declarations
-    }
+    """The tools a turn sends deferred by the URL of their app, in its listing's order: every tool of every app the
+    turn lists."""
+    return {offer.app: tuple(each.name for each in offer.declarations) for offer in offers if offer.declarations}
+
+
+@dataclass(frozen=True)
+class BlockDue:
+    """The rounds a turn appends for one skill of one app: its read when ``read``, then the load of ``tools``."""
+
+    app: str
+    skill: AppSkill
+    read: bool
+    tools: tuple[str, ...]
+
+
+def blocks_due(
+    offers: Iterable[AppOffer], present: Collection[str], deferred: Deferred, history: History
+) -> tuple[BlockDue, ...]:
+    """The block a turn appends at the end of its request: for each skill, in the listing's order, of each app of
+    ``offers`` in ``present``, its read when ``history`` holds none of that skill of that app, and the load of the
+    tools it names that the app sends ``deferred`` and no load of that app in ``history`` names. A skill with neither
+    due is left out."""
+    due: list[BlockDue] = []
+    for offer in offers:
+        if offer.app not in present:
+            continue
+        read = {entry.name for entry in history.entries if isinstance(entry, SkillRead) and entry.app == offer.app}
+        loaded = {
+            name
+            for entry in history.entries
+            if isinstance(entry, ToolsLoaded) and entry.app == offer.app
+            for name in entry.tools
+        }
+        for skill in offer.skills:
+            tools = tools_to_load(skill, deferred.get(offer.app, ()), loaded)
+            loaded.update(tools)
+            if skill.name not in read or tools:
+                due.append(BlockDue(offer.app, skill, read=skill.name not in read, tools=tools))
+    return tuple(due)

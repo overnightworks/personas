@@ -10,16 +10,21 @@ from typing import TYPE_CHECKING
 
 import pytest
 from agents.member import PlaceView, SpeakRefusal, Spoken, Written
+from agents.tools import ToolDeclaration, ToolEffect
 from agents.turn import MAX_EVENT_BYTES
 
 from personas.decision import TURN_CANCELLED_CODE
 from personas.entries import Answered, Entry, History, KeptLine, Lines, TurnTold, Unanswered, ViewSeen, Waiting
 from personas.present import (
     EMPTY_PRESENT,
+    AppOffer,
     Arrived,
+    BlockDue,
     Present,
     answered_into,
     arrived_since,
+    blocks_due,
+    deferred_by_app,
     held_told,
     taken_into,
     told_header,
@@ -37,6 +42,9 @@ from tests.support.history import (
     ROOMY_BYTES,
     TABLE,
     a_sentence,
+    a_skill_of,
+    a_skill_read,
+    a_tools_load,
     a_view,
     an_act,
     history_holding,
@@ -641,3 +649,110 @@ def test_the_repr_of_an_arrival_shows_no_entry():
     arrived = Arrived((said(1, marker, name=marker), a_view_seen(1)), older_dropped=False)
 
     assert marker not in repr(arrived)
+
+
+SAY_PLAY = ("say", "play")
+SECOND = "https://second.test/mcp"
+
+
+def declaration(name: str) -> ToolDeclaration:
+    return ToolDeclaration(name=name, description=name, parameters={"type": "object"}, effect=ToolEffect.READ_ONLY)
+
+
+def an_offer(app: str, skills, *tools: str) -> AppOffer:
+    return AppOffer(app, tuple(declaration(each) for each in tools), tuple(skills))
+
+
+GREETING = a_skill_of("greeting", *SAY_PLAY)
+
+
+@pytest.mark.parametrize(
+    ("held", "present", "deferred", "due"),
+    [
+        pytest.param(
+            (),
+            (APP,),
+            {APP: (*SAY_PLAY, "wave")},
+            [BlockDue(APP, GREETING, read=True, tools=SAY_PLAY)],
+            id="no read and no load: both",
+        ),
+        pytest.param(
+            (a_skill_read(name=GREETING.name), a_tools_load()),
+            (APP,),
+            {APP: (*SAY_PLAY, "wave")},
+            [],
+            id="the read and the load held: none",
+        ),
+        pytest.param(
+            (a_skill_read(name=GREETING.name), a_tools_load(tools=("say",))),
+            (APP,),
+            {APP: SAY_PLAY},
+            [BlockDue(APP, GREETING, read=False, tools=("play",))],
+            id="a tool no load names yet: the load alone",
+        ),
+        pytest.param(
+            (a_tools_load(),),
+            (APP,),
+            {APP: SAY_PLAY},
+            [BlockDue(APP, GREETING, read=True, tools=())],
+            id="the read cut and the load held: the read alone",
+        ),
+        pytest.param((), (SECOND,), {APP: SAY_PLAY}, [], id="an app he holds no place at: none"),
+        pytest.param(
+            (),
+            (APP,),
+            {APP: ("say",)},
+            [BlockDue(APP, GREETING, read=True, tools=("say",))],
+            id="a tool the app does not send deferred is not loaded",
+        ),
+        pytest.param(
+            (a_tools_load(app=SECOND),),
+            (APP,),
+            {APP: SAY_PLAY},
+            [BlockDue(APP, GREETING, read=True, tools=SAY_PLAY)],
+            id="a load of another app holds nothing of this one",
+        ),
+    ],
+)
+def test_the_block_due_is_each_present_apps_skill_whose_read_or_deferred_tools_his_history_does_not_hold(
+    held, present, deferred, due
+):
+    offers = (an_offer(APP, (GREETING,), *deferred.get(APP, ())),)
+
+    assert blocks_due(offers, present, deferred, taking(EMPTY_HISTORY, *held)) == tuple(due)
+
+
+def test_a_tool_two_skills_of_an_app_name_is_loaded_once_by_the_first_and_a_skill_naming_none_is_read_alone():
+    first, second = a_skill_of("first", "say", "play"), a_skill_of("second", "play", "wave")
+    quiet = a_skill_of("quiet")
+    offers = (an_offer(APP, (first, second, quiet), "say", "play", "wave"),)
+
+    due = blocks_due(offers, (APP,), {APP: ("say", "play", "wave")}, EMPTY_HISTORY)
+
+    assert due == (
+        BlockDue(APP, first, read=True, tools=("say", "play")),
+        BlockDue(APP, second, read=True, tools=("wave",)),
+        BlockDue(APP, quiet, read=True, tools=()),
+    )
+
+
+def test_two_present_apps_whose_skills_share_a_name_each_get_a_block_of_their_own_in_the_order_of_the_offers():
+    one, other = a_skill_of("greeting", "say"), a_skill_of("greeting", "play")
+    offers = (an_offer(SECOND, (other,), "play"), an_offer(APP, (one,), "say"))
+
+    due = blocks_due(offers, {APP, SECOND}, {APP: ("say",), SECOND: ("play",)}, EMPTY_HISTORY)
+
+    assert due == (BlockDue(SECOND, other, read=True, tools=("play",)), BlockDue(APP, one, read=True, tools=("say",)))
+
+
+def test_a_skill_one_app_read_does_not_hold_the_read_of_the_skill_of_that_name_another_app_serves():
+    held = taking(EMPTY_HISTORY, a_skill_read(name=GREETING.name, app=SECOND))
+    offers = (an_offer(APP, (GREETING,), *SAY_PLAY),)
+
+    assert blocks_due(offers, (APP,), {APP: SAY_PLAY}, held) == (BlockDue(APP, GREETING, read=True, tools=SAY_PLAY),)
+
+
+def test_every_tool_an_app_offers_is_sent_deferred_and_an_app_that_offers_none_has_none():
+    offers = (an_offer(APP, (), "say", "play"), an_offer(SECOND, (), "wave"), an_offer("https://none.test/mcp", ()))
+
+    assert deferred_by_app(offers) == {APP: SAY_PLAY, SECOND: ("wave",)}
