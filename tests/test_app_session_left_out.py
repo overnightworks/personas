@@ -21,7 +21,7 @@ from tests.support.hopin import FakeApp
 from tests.support.logs import fields_of
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 AGENT_ID = "agent-one"
 

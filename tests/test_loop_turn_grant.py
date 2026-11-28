@@ -18,7 +18,7 @@ from tests.support.skills import Shelf, a_skill_file
 from tests.support.songmaker import CREATE_SONG, GENERATE_SONG, SCOPE, songmaker_url
 from tests.support.standings import AGENT_SUBJECT, active
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 SONG_TOOLS = {CREATE_SONG, GENERATE_SONG}
 

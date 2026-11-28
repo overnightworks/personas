@@ -55,7 +55,7 @@ from tests.support.standings import active
 from tests.support.store import ScriptedStore
 from tests.support.voice import deciding
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 OUTAGE_EVENTS = {Event.BACKOFF, Event.SUSPENDED}
 SHORT_STREAM_SECONDS = 0.5

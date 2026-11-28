@@ -38,7 +38,7 @@ from tests.support.songmaker import CALLS, CREATE_SONG, GENERATE_SONG, SCOPE, To
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.wire import cuts, hangs, hangs_once_entered, refuses_with_a_server_error
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 SHORT_CALL_SECONDS = 0.3
 WHOLE_CALL_SECONDS = 1.0

@@ -47,7 +47,7 @@ from tests.support.gateway import Gateway, says
 from tests.support.hopin import LIMIT_SECONDS
 from tests.support.standings import active, invited, line, window_of
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 
 async def test_an_invitation_is_accepted_once_with_its_place_invitation_and_epoch(scenario):

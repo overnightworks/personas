@@ -31,7 +31,7 @@ from tests.support.voice import (
     sentences_spoken,
 )
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 QUIET_PLACE_ID = "room-8"
 SECOND_AGENT, SECOND_SUBJECT, SECOND_NAME = "agent-bach", "agent-subject-2", "Bach"

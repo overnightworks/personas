@@ -8,6 +8,8 @@ from pydantic import AfterValidator, ValidationInfo, field_validator, model_vali
 
 from personas.config import ConfigError, _Entry, configuration_schema, load_config
 
+pytestmark = pytest.mark.integration
+
 TOOLS_ONLY_APP = '[[apps]]\nmcp_url = "https://songmaker.test/mcp"\nscope = "mcp-songmaker"\nlistens = false\n'
 
 

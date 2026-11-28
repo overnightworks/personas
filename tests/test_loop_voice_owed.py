@@ -16,7 +16,7 @@ from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active
 from tests.support.voice import a_voice_call, holding_sentence_ends, sentences_spoken
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 OTHER_PLACE_ID = "room-9"
 HOLD_ID = "hold-1"

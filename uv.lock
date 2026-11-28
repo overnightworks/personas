@@ -625,6 +625,8 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "anyio" },
+    { name = "mcp" },
+    { name = "mcp-types" },
     { name = "overnightworks-agents", extra = ["mcp-server"] },
     { name = "pyright" },
     { name = "pytest" },
@@ -652,6 +654,8 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "anyio", specifier = ">=4.16.0" },
+    { name = "mcp", specifier = ">=2.3.0" },
+    { name = "mcp-types", specifier = ">=2.3.0" },
     { name = "overnightworks-agents", extras = ["mcp-server"], git = "https://github.com/overnightworks/agents?rev=v0.81.1" },
     { name = "pyright", specifier = ">=1.1.414" },
     { name = "pytest", specifier = ">=9.0.2" },

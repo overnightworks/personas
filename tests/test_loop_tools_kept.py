@@ -14,7 +14,7 @@ from tests.support.hopin import LIST_TOOLS, LISTEN, SAY_TOOL
 from tests.support.logs import lines_of
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 TURNS = 4
 

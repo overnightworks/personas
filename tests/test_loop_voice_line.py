@@ -31,7 +31,7 @@ from tests.support.voice import (
     sentences_spoken,
 )
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 LINE = "Right, one moment."
 

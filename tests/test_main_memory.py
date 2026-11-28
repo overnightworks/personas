@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from personas.config import DatabaseTarget
     from tests.support.configfiles import Files
 
-pytestmark = pytest.mark.usefixtures("restored_logging")
+pytestmark = [pytest.mark.usefixtures("restored_logging"), pytest.mark.integration]
 
 APP = "https://app.test/mcp"
 OTHER_APP = "https://other.test/mcp"

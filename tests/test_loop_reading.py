@@ -13,7 +13,7 @@ from tests.support.hopin_places import WINDOW_LINES
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
 from tests.support.standings import active, invited, paused
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 
 async def test_after_a_restart_an_addressed_line_still_in_the_window_is_not_answered_and_the_next_one_is(runner):

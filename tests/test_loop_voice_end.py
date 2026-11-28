@@ -36,7 +36,7 @@ from tests.support.voice import (
 )
 from tests.support.wire import cuts
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 
 async def test_a_restart_in_a_call_answers_nothing_that_was_said_before_it(runner):

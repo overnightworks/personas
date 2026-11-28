@@ -19,7 +19,7 @@ from tests.support.skills import a_skill_file, an_entry
 if TYPE_CHECKING:
     from tests.support.wire import Handler
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 
 WITH_THE_EXTENSION = discovering(extensions={SKILLS_EXTENSION: {}})
 
