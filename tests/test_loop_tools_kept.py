@@ -9,7 +9,7 @@ from agents.backend.fake_gateway import completion
 from agents.member import STANDING_URI, place_window_uri
 
 from tests.support.call import ADDRESSED, CALL_PLACE, restarted_in_the_call, say_in_the_call
-from tests.support.gateway import Gateway
+from tests.support.gateway import Gateway, referenced
 from tests.support.hopin import LIST_TOOLS, LISTEN, SAY_TOOL
 from tests.support.logs import lines_of
 from tests.support.standings import AGENT_SUBJECT as SUBJECT
@@ -195,3 +195,17 @@ async def test_a_listing_across_the_end_and_the_acknowledgement_of_a_stream_is_n
     stays.set()
 
     assert runner.app.log.count(LIST_TOOLS) == listed + 1
+
+
+async def test_a_tool_a_tools_notice_adds_is_loaded_by_one_load_tools_round_at_the_end_of_his_next_turn(runner):
+    """TURNS-15, TURNS-18."""
+    runner.app.withheld_tools = {SAY_TOOL}
+    runner.gateway = Gateway(completion("done"), completion("done"))
+    await restarted_in_the_call(runner)
+    await a_turn_at_the_call(runner, 1)
+    await runner.app.change_offer(SUBJECT, withheld=set())
+    await a_turn_at_the_call(runner, 2)
+
+    assert runner.gateway.deferred_tools(1) == []
+    assert runner.gateway.deferred_tools(2) == [SAY_TOOL]
+    assert [referenced(result["content"]) for _, result in runner.gateway.appended_rounds(2)] == [[SAY_TOOL]]

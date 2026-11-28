@@ -212,12 +212,7 @@ async def test_at_its_going_on_the_result_of_a_skill_read_tells_he_went_on_once_
     runner.app.shelf = Shelf({"hopin": a_skill_file("hopin")})
     entered, released = asyncio.Event(), asyncio.Event()
 
-    async def waiting_skill_entry(reply) -> None:
-        entered.set()
-        await released.wait()
-        await runner.app.shelf.answers(reply.rpc)(reply)
-
-    runner.app.script(SKILLS_GET, waiting_skill_entry)
+    runner.app.script(SKILLS_GET, runner.app.shelf.entry_held_until(entered, released))
     await a_voice_call(
         runner,
         tool_round(tool_call("reads", READ_SKILL_TOOL, {"skill": "hopin"})),

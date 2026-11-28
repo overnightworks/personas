@@ -214,7 +214,7 @@ async def test_a_failure_of_the_call_that_follows_a_hold_ends_the_turn_with_one_
     await runner.gateway.until_turns(2, why="lines")
 
     assert runner.reports.reported() == [STARTED, (Event.BACKOFF, NETWORK_FAILURE_CODE), (Event.RESUMED, None)]
-    assert runner.gateway.round_sizes() == [3, 5, 3]
+    assert runner.gateway.round_sizes() == [3, 5, 4]
     acts = [each for each in runner.gateway.turns()[1].room["history"]["entries"] if each["entry"] == "act"]
     assert [each["outcome"] for each in acts] == [{"answered": False, "code": NETWORK_FAILURE_CODE}]
 

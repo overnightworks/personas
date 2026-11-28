@@ -39,8 +39,9 @@ async def test_with_a_memory_every_entry_taken_is_handed_the_store_to_keep_once(
     await said_and_taken(runner.app, PLACE_ID, REMARK)
     await said_and_taken(runner.app, PLACE_ID, "Again.")
 
-    assert texts(runner.histories.recorded()) == [REMARK, "Again."]
-    assert [ordinal for ordinal, _ in runner.histories.recorded()] == [0, 1]
+    recorded = runner.histories.recorded()
+    assert texts(recorded) == [REMARK, "Again."]
+    assert [ordinal for ordinal, _ in recorded] == list(range(len(recorded)))
 
 
 async def test_without_a_memory_no_entry_is_handed_the_store_to_keep(runner):

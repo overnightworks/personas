@@ -4,21 +4,20 @@ turns after it."""
 from __future__ import annotations
 
 import json
-import secrets
 
 import pytest
 from agents.backend.fake_gateway import completion, tool_round
 from agents.member import CONTINUE_SPEAKING_TOOL
 from agents.skills import implicit_skill_name
 
-from personas.decision import LOAD_TOOLS_CALLS, LOAD_TOOLS_TOOL, READ_SKILL_TOOL
-from personas.entries import ActDone, ToolsLoaded, told_bytes
+from personas.decision import LOAD_TOOLS_CALLS, LOAD_TOOLS_TOOL
+from personas.entries import ToolsLoaded, told_bytes
 from personas.held_tools import LOADS_SPENT_TEXT, NOTHING_WAITS_TEXT
 from personas.present import NO_SUCH_SKILL_TEXT, NOT_OFFERED_TEXT
 from personas.reporting import Event
 from tests.support.app_driving import said_and_taken
 from tests.support.call import ADDRESSED, ANSWER, PLACE_ID, a_turn, restarted_in_the_call, say_in_the_call
-from tests.support.gateway import ERROR_MARK, Gateway, loading, reading, say
+from tests.support.gateway import ERROR_MARK, Gateway, loading, reading, referenced, say
 from tests.support.hopin import LIST_TOOLS, SAY_TOOL
 from tests.support.logs import lines_of
 from tests.support.skills import (
@@ -27,6 +26,7 @@ from tests.support.skills import (
     SONGMAKER,
     Shelf,
     a_skill_file,
+    assert_a_round_beside_a_relayed_call_holds_only_itself,
     assert_a_round_is_told_byte_for_byte_after_a_restart,
     skilled,
     turns_past_a_cut_of_a_round,
@@ -40,18 +40,17 @@ SONG_TOOLS = [CREATE_SONG, GENERATE_SONG]
 
 
 def tools_loaded(runner) -> list[ToolsLoaded]:
-    return [entry for entry in runner.histories.entries() if isinstance(entry, ToolsLoaded)]
-
-
-def referenced(result) -> list[str]:
-    """The names a tool result of the wire references, in order."""
-    return [part["tool_name"] for part in result]
+    """The loads of songmaker's tools: the block of the call's own app loads its tools too."""
+    return [
+        entry
+        for entry in runner.histories.entries()
+        if isinstance(entry, ToolsLoaded) and entry.app == songmaker_url(runner)
+    ]
 
 
 def deferred_in(runner, request_number: int) -> list[str]:
-    """The names of the tools the request that arrived as this number sent deferred."""
-    tools = runner.gateway.body_of(request_number)["tools"]
-    return [each["function"]["name"] for each in tools if each.get("defer_loading")]
+    """The names of songmaker's tools the request that arrived as this number sent deferred."""
+    return [name for name in runner.gateway.deferred_tools(request_number) if name in SONG_TOOLS]
 
 
 def shown_bytes(runner, request_number: int) -> int:
@@ -59,7 +58,7 @@ def shown_bytes(runner, request_number: int) -> int:
     each one a tool result of it references."""
     loaded = {
         name
-        for result in runner.gateway.tool_results(request_number)
+        for result in runner.gateway.tool_results(request_number, rounds=True)
         if isinstance(result, list)
         for name in referenced(result)
     }
@@ -102,17 +101,6 @@ async def test_a_skill_read_and_a_tools_load_are_not_held_back_by_what_arrived_a
     assert runner.app.said == []
 
 
-async def test_a_hopin_turn_sends_songmakers_tools_deferred_and_its_own_and_the_runners_loaded(runner, songmaker):
-    skilled(runner, songmaker)
-    await restarted_in_the_call(runner)
-
-    await a_turn(runner, 1)
-
-    assert deferred_in(runner, 1) == SONG_TOOLS
-    sent = runner.gateway.offered_tools(1, reading=True)
-    assert {SAY_TOOL, READ_SKILL_TOOL, LOAD_TOOLS_TOOL} <= set(sent) - set(SONG_TOOLS)
-
-
 @pytest.mark.parametrize(
     ("arranging", "reads_first"),
     [(declared_skill, False), (implicit_skill, False), (declared_skill, True)],
@@ -147,7 +135,7 @@ async def test_the_next_turn_tells_a_load_as_a_load_tools_round_under_its_id_and
     await a_turn(runner, 3)
     await a_turn(runner, 4)
 
-    ((assistant, result),) = runner.gateway.tool_rounds(3)
+    ((assistant, result),) = runner.gateway.tool_rounds(3, skill=SONGMAKER)
     (call,) = assistant["tool_calls"]
     assert (call["function"]["name"], json.loads(call["function"]["arguments"])) == (
         LOAD_TOOLS_TOOL,
@@ -156,7 +144,7 @@ async def test_the_next_turn_tells_a_load_as_a_load_tools_round_under_its_id_and
     assert call["id"] != "model-load"
     assert result["tool_call_id"] == call["id"]
     assert referenced(result["content"]) == SONG_TOOLS
-    assert runner.gateway.tool_rounds(4) == [[assistant, result]]
+    assert runner.gateway.tool_rounds(4, skill=SONGMAKER) == [[assistant, result]]
 
 
 async def test_a_loads_round_is_byte_equal_after_a_restart(runner, songmaker):
@@ -184,7 +172,7 @@ async def test_a_tool_the_app_stops_listing_leaves_the_loads_round_until_the_app
     for turn, _ in enumerate(listings[1:]):
         await a_turn(runner, 3 + turn)
 
-    ((_, result),) = runner.gateway.tool_rounds(1 + len(listings))
+    ((_, result),) = runner.gateway.tool_rounds(1 + len(listings), skill=SONGMAKER)
     assert (referenced(result["content"]) if isinstance(told, list) else result["content"]) == told
 
 
@@ -248,7 +236,8 @@ async def test_load_tools_for_a_name_no_line_holds_answers_an_error_and_enters_n
 
     assert runner.gateway.tool_results(2) == [f"{ERROR_MARK}{NO_SUCH_SKILL_TEXT}"]
     assert tools_loaded(runner) == []
-    assert runner.gateway.tool_rounds(3) == []
+    assert runner.gateway.tool_rounds(3, skill="nobody") == []
+    assert runner.gateway.tool_rounds(3, skill=SONGMAKER) == []
 
 
 async def test_load_tools_calls_past_their_bound_answer_an_error_and_a_later_call_still_runs(runner, songmaker):
@@ -271,25 +260,9 @@ async def test_load_tools_calls_past_their_bound_answer_an_error_and_a_later_cal
 async def test_a_load_beside_a_relayed_call_enters_both_in_the_order_they_ended_and_its_round_holds_only_the_load(
     runner, songmaker
 ):
-    skilled(runner, songmaker)
-    spoken = f"Let me look {secrets.token_hex(4)}."
-    runner.gateway = Gateway(
-        tool_round(a_song("model-song"), loading(SONGMAKER), content=spoken), completion("done"), completion("again")
+    await assert_a_round_beside_a_relayed_call_holds_only_itself(
+        runner, songmaker, loading(SONGMAKER), ToolsLoaded, LOAD_TOOLS_TOOL, tools_loaded
     )
-    await restarted_in_the_call(runner)
-    await a_turn(runner, 1)
-    await runner.gateway.until_requested(2)
-
-    await a_turn(runner, 3)
-
-    kinds = [type(entry) for entry in runner.histories.entries() if isinstance(entry, ActDone | ToolsLoaded)]
-    assert kinds == [ActDone, ToolsLoaded]
-    ((assistant, _),) = runner.gateway.tool_rounds(3)
-    assert [call["function"]["name"] for call in assistant["tool_calls"]] == [LOAD_TOOLS_TOOL]
-    assert assistant["content"] is None
-    told = runner.gateway.told_in(3)
-    assert spoken not in told
-    assert '"entry": "act"' in told
 
 
 async def test_a_spoken_hopin_turn_reads_loads_and_calls_songmakers_tool_one_round_each(runner, songmaker):
@@ -324,7 +297,7 @@ async def test_a_hold_round_after_a_load_in_its_turn_tells_the_load_and_is_sent(
     await runner.reports.until(Event.HOLD_DECIDED)
 
     (number,) = runner.gateway.rounds()
-    ((_, result),) = runner.gateway.tool_rounds(number)
+    ((_, result),) = runner.gateway.tool_rounds(number, skill=SONGMAKER)
     assert referenced(result["content"]) == SONG_TOOLS
     assert deferred_in(runner, number) == SONG_TOOLS
 
@@ -332,8 +305,11 @@ async def test_a_hold_round_after_a_load_in_its_turn_tells_the_load_and_is_sent(
 async def test_a_loads_round_is_gone_once_a_cut_drops_its_entry_and_is_not_written_again(runner, songmaker):
     await turns_past_a_cut_of_a_round(runner, songmaker, loading(SONGMAKER), len(CREATE_SONG) + len(GENERATE_SONG))
 
-    assert len(runner.gateway.tool_rounds(3)) == 1
-    assert (runner.gateway.tool_rounds(5), runner.gateway.tool_rounds(6)) == ([], [])
+    assert len(runner.gateway.tool_rounds(3, skill=SONGMAKER)) == 1
+    assert (
+        runner.gateway.tool_rounds(5, skill=SONGMAKER),
+        runner.gateway.tool_rounds(6, skill=SONGMAKER),
+    ) == ([], [])
     assert len(tools_loaded(runner)) == 1
 
 

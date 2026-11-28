@@ -57,13 +57,16 @@ the system text, then one line for each skill of the apps the turn lists, and th
 `read_skill`, `load_tools`, `continue_speaking` and `stop_speaking` among them. A line is the skill's name and its description
 as the app declared them; an app that declares no skills extension has one implicit skill, whose description names
 the app by its derived name. A name two apps' skills share goes to the first in the configuration's order. The rest
-is user messages and the rounds of the skills he read and the tools he loaded, none an instruction:
+is user messages and the rounds of the skills he read and the tools he loaded, those the runner appended among them,
+none an instruction:
 
 1. A header: his name (`you`) and whether older entries have left his history (`older_dropped`).
 2. One message for each earlier answered turn whose entries his history still holds. A turn whose entries hold
    skills he read or tools he loaded is told split around each one's round: a message of the entries before it, the round, and so on
    to the turn's message with the entries after the last round.
 3. TURNS-9: The turn's own message, which alone says whether the turn is aloud.
+4. The block the runner appends when one is due (TURNS-18): its rounds, after the turn's own message and before what
+   the turn is told of a hold.
 
 - TURNS-10: A turn's message holds when it was admitted (`at`, UTC to the whole second), what woke him (`woke`), and
   every entry he took since the message before it or since the round before it (`entries`), each told once, in the
@@ -80,36 +83,47 @@ An entry has its app and the time he took it (`at`), and is one of:
 | TURNS-13 | call | `tool`, the `arguments` he sent and an `outcome`: `"answered": true` with `text`, `is_error` and `image` when a picture came, or `"answered": false` with a `code` |
 | TURNS-14 | spoken sentence | `text` and an `outcome`: taken, with `refused` and its code or `written` when the app wrote it instead, or `"answered": false` with a `code` |
 
-- TURNS-15: Every message before the turn's own is byte for byte as the turn before sent it, so the gateway's cache
-  reads it back. A skill he read is told as a round of its own at its place among the messages: one `read_skill`
-  call with the skill's name under the id the runner minted for it, answered with the text the model was shown, byte
-  for byte in every later turn, after a restart or a take-over too. Tools he loaded are told as a round likewise: one
-  `load_tools` call with the skill's name under the id the runner minted for it, answered with references to the
-  tools its app still sends deferred; a tool is left out of the round in every turn whose app does not offer it
-  deferred, and back in it once the app offers it again, each change rewriting the cache from that round on, and a
-  round with none answers "these tools are not offered now". A turn that ends without an answer adds no
-  message; its entries go to the next turn's.
+- TURNS-15: Every message before the turn's own is byte for byte as the turn before sent it, the rounds that turn
+  appended at its end included, so the gateway's cache reads it back; lines that arrived while that turn was set up are
+  told before the rounds it appended. A skill he read, by `read_skill` or in a block, is told as a round of its own at
+  its place among the messages: one `read_skill` call with the skill's name under the id the runner minted for it,
+  answered with the text the model was shown, byte for byte in every later turn, after a restart or a take-over too.
+  Tools he loaded, by `load_tools` or in a block, are told as a round likewise: one `load_tools` call with the skill's
+  name under the id the runner minted for it, answered with references to the tools its app still sends deferred; a tool
+  is left out of the round in every turn whose app does not offer it deferred, and back in it once the app offers it
+  again, each change rewriting the cache from that round on, and a round with none answers "these tools are not offered
+  now". A turn that ends without an answer adds no message; its entries go to the next turn's, which tells a block it
+  appended after a message of the entries before it.
 - TURNS-16: Past `history_bytes` the oldest whole messages leave in one step until what stays fits
   `history_keep_bytes`. When the newest message alone is past it, its oldest entries leave too until what
-  stays fits; its newest entry always stays. A larger value keeps more and makes every request longer.
+  stays fits; its newest entry always stays. A larger value keeps more and makes every request longer. A block the
+  cut dropped is appended again at the end of his next turn while he holds an active place at its app, each round
+  under a new id; one whose app he holds no place at is not. A turn judges what is due from his history at its
+  admission, so a block the cut drops while a turn runs comes back at the turn after.
 - TURNS-17: What lies before his history's first entry reaches no turn unasked; with `[memory]` the turn can look it
   up (see Recall).
 
 ## Tools and calls
 
 - TURNS-18: A turn holds every tool its own app listed after its last tools notice on the loop's open stream, or at the
-  turn's start when that stream carries no notice, the tools of every other app where he holds an
-  active place, and those of the tools-only apps, declared in the configuration's order; a tools-only app's tools are sent
-  deferred: the model is shown one once a load in his history or in the turn names it, and a call to one is served as
-  before. A name two apps offer goes to the first; `accept_invitation`, `speak`, `recall`, `read_skill`, `load_tools`,
-  `continue_speaking`, `stop_speaking` and `set_turn_state` are the runner's own and never taken from an app.
-  `read_skill(skill)` is held in every turn and answers the text of a skill whose line the turn holds; it loads
-  nothing. `load_tools(skill)` is held in every turn and loads the tools of a skill whose line the turn holds that
-  its app sends deferred and no round has loaded yet, answering references to them for the next round; it sends no
-  request and is never held back. `continue_speaking` and
-  `stop_speaking` are held in every turn, written or aloud, so a switch between them leaves the front as it was; called in a turn
-  that is not aloud they do nothing, and the model is told they act only in a spoken turn. No request asks the
-  gateway for `parallel_tool_calls`.
+  turn's start when that stream carries no notice, the tools of every other app where he holds an active place, and
+  those of the tools-only apps, declared in the configuration's order, every one of them sent deferred: the model is
+  shown one once a load in his history or in the turn names it, and a call to one is served as before. At the end of
+  each turn's request the runner appends a block for each app where he holds an active place, in the configuration's
+  order, from that app's own listing: for each of its skills, in the listing's order, a `read_skill` round with the
+  skill's text when his history holds no read of that skill of that app, then a `load_tools` round naming the skill's
+  tools that the app sends deferred and that no load of that app in his history names yet. A skill whose tools are
+  loaded already, or that names none, gets its read round alone, and a skill whose read his history holds gets its load
+  round alone, so a tool a notice added loads at his next turn. So his first turn after a join appends that app's block
+  once, and a second place or a second join at an app whose block his history holds appends none. A name two apps offer
+  goes to the first; `accept_invitation`, `speak`, `recall`, `read_skill`, `load_tools`, `continue_speaking`,
+  `stop_speaking` and `set_turn_state` are the runner's own and never taken from an app. `read_skill(skill)` is held in
+  every turn and answers the text of a skill whose line the turn holds; it loads nothing. `load_tools(skill)` is held in
+  every turn and loads the tools of a skill whose line the turn holds that its app sends deferred and no round has
+  loaded yet, answering references to them for the next round; it sends no request and is never held back.
+  `continue_speaking` and `stop_speaking` are held in every turn, written or aloud, so a switch between them leaves the
+  front as it was; called in a turn that is not aloud they do nothing, and the model is told they act only in a spoken
+  turn. No request asks the gateway for `parallel_tool_calls`.
 - TURNS-19: The turn's own app's list is kept on the loop's session for the stream and listed again after a tools notice, a
   new stream or a stream's end. The turn's relayed calls and `speak` go on the loop's session of that app, under the
   token the loop holds; a hold's decision and every call to another app go in a session of their own under a
@@ -118,19 +132,26 @@ An entry has its app and the time he took it (`at`), and is one of:
   when the loop's session ends is cancelled before it closes. A tool's error result reaches the model inside
   the same turn. The skills of each app the turn lists are read in the session that lists its tools: an app
   that declares the skills extension is asked for its listing, and one that does not is sent no request; an app
-  whose skills listing fails has no lines in that turn and the turn goes on. A read of a skill is a call to its app: at
-  another app in a session of its own, which fails as a call there does, and for the own app on the loop's session,
-  which ends the turn as a failed call does. A skill the app serves a file for that is not what its listing
-  promised, a name no line holds and a text past one result's bound answer an error and enter nothing.
+  whose skills listing fails has no lines in that turn and the turn goes on. A `read_skill` the model calls is a call to
+  its app: at another app in a session of its own, which fails as a call there does, and for the own app on the
+  loop's session, which ends the turn as a failed call does. A skill the app serves a file for that is not what its
+  listing promised, a name no line holds and a text past one result's bound answer an error and enter nothing. A
+  block's read is part of the turn's setup instead, before its first model request: for the own app on the loop's
+  session within its `call_seconds`, at another app in a session of its own. A block's read that fails, times out,
+  meets such a file or is past one result's bound is left out of that turn's block, its load still enters, the turn
+  goes on and the next turn asks again; only the own app's refusal of the agent (401 or 403) ends the turn, into the
+  loop's reaction, as a refused listing of the own app does.
 - TURNS-20: Before the turn's next call goes out, once per turn, anything not his own that arrived since the turn
   began holds that call: it is not sent, the model is told what arrived, and decides again.
 - TURNS-21: Every relayed call enters his history when the app answers or the relay ends without an answer, with the
   failure's code or `cancelled`; a call past an app's bound was never sent and does not enter. An answered
-  `read_skill` enters as a skill entry instead, and a `load_tools` that loaded tools as a load entry.
+  `read_skill` enters as a skill entry instead, and a `load_tools` that loaded tools as a load entry; a block enters
+  as the same entries, written by the runner as it appends them, never as a call entry.
 - TURNS-22: A call past an app's bound is answered with an error and the model may go on. The turn's total is the sum
   of the apps' bounds plus one for the held call and one for the speaking tools, plus `lookup_calls` with `[memory]`
   the two reads `read_skill` takes and the two loads `load_tools` takes, so a model that keeps calling past a bound can spend it and end
-  the turn without its `say`.
+  the turn without its `say`. A block's reads and loads are the runner's: they take none of the two reads or two
+  loads, no app's bound and nothing of the turn's total.
 - TURNS-23: In a call and at a table at once, a turn at either can answer in the call and act at the table, also
   when it is not his move; the table refuses what its rules do not allow.
 

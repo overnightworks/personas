@@ -7,6 +7,8 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 from agents.member import PlaceRef, PlaceView, Spoken
+from agents.skills import Skill, SkillIdentity
+from agents.tools import ToolDeclaration
 
 from personas.entries import (
     ActDone,
@@ -240,13 +242,26 @@ def message_texts(messages) -> list[str]:
 
 
 def a_skill_read(
-    *, name="greeting", body="Greet people by name.", call_id="call-body", at=LATER - timedelta(seconds=9)
+    *, name="greeting", body="Greet people by name.", call_id="call-body", at=LATER - timedelta(seconds=9), app=APP
 ) -> SkillRead:
-    return SkillRead(APP, name, f"skill://{name}/SKILL.md", body, at, call_id)
+    return SkillRead(app, name, f"skill://{name}/SKILL.md", body, at, call_id)
 
 
-def a_tools_load(*, tools=("say", "play"), at=LATER - timedelta(seconds=9)) -> ToolsLoaded:
-    return ToolsLoaded(APP, "greeting", tools, at, "call-load")
+def a_skill_of(name: str, *tools: str) -> Skill:
+    """A skill of this name that names these tools."""
+    identity = SkillIdentity(server=name, uri=f"skill://{name}/SKILL.md")
+    return Skill(identity=identity, name=name, description="Does things.", body="", tools=tools)
+
+
+def a_declaration(name: str) -> ToolDeclaration:
+    """A tool of this name that takes no arguments."""
+    return ToolDeclaration(name=name, description=name, parameters={"type": "object"})
+
+
+def a_tools_load(
+    *, tools=("say", "play"), at=LATER - timedelta(seconds=9), app=APP, skill="greeting", call_id="call-load"
+) -> ToolsLoaded:
+    return ToolsLoaded(app, skill, tools, at, call_id)
 
 
 def a_marked_present() -> tuple[str, Present]:

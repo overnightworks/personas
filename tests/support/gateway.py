@@ -14,6 +14,7 @@ from agents.backend.fake_gateway import FakeGateway, Reply, completion, tool_cal
 from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL
 
 from personas.decision import LOAD_TOOLS_CALLS, LOAD_TOOLS_TOOL, READ_SKILL_CALLS, READ_SKILL_TOOL
+from personas.present import ROUND_CALL_PREFIX
 from tests.support.call import PLACE_ID
 from tests.support.history import TABLE
 from tests.support.hopin import LIMIT_SECONDS, PLAY_TOOL, SAY_TOOL
@@ -233,16 +234,51 @@ class TurnOpening:
         return list(self.own["woke"].get("seqs", []))
 
 
+def _is_runner_round(message: JsonObject) -> bool:
+    """Whether the message is a part of a round the runner wrote: a call of a skill read or a load of tools, or its
+    result."""
+    if message["role"] == "tool":
+        return message["tool_call_id"].startswith(ROUND_CALL_PREFIX)
+    calls = message.get("tool_calls")
+    return (
+        message["role"] == "assistant"
+        and bool(calls)
+        and all(each["id"].startswith(ROUND_CALL_PREFIX) for each in calls)
+    )
+
+
 def _opens_a_turn(messages: list[JsonObject]) -> bool:
-    """A turn's first round ends with the turn's own user message; every later round adds the model's calls and
-    results after it. The rounds of skills read in earlier turns stand among the messages before."""
+    """A turn's first round ends with the turn's own user message and the rounds the runner appended after it; every
+    later round adds the model's calls and results after those. The rounds of skills read in earlier turns stand among
+    the messages before."""
     told = messages[1:]
+    while told and _is_runner_round(told[-1]):
+        told.pop()
     return len(told) >= MESSAGES_OF_A_FIRST_ROUND and told[-1]["role"] == "user" and '"woke"' in told[-1]["content"]
 
 
 def _user_messages(body: JsonObject) -> list[JsonObject]:
     """The user messages a request carried after the system text, in order; the rounds of skills read are none."""
     return [each for each in body["messages"][1:] if each["role"] == "user"]
+
+
+def _rounds_in(messages: list[JsonObject], skill: str | None) -> list[list[JsonObject]]:
+    """The tool rounds among the messages, in order; with ``skill``, those whose calls name that skill."""
+    return [
+        [message, *messages[index + 1 : index + 1 + len(message["tool_calls"])]]
+        for index, message in enumerate(messages)
+        if message["role"] == "assistant"
+        and message.get("tool_calls")
+        and (
+            skill is None
+            or all(json.loads(each["function"]["arguments"]).get("skill") == skill for each in message["tool_calls"])
+        )
+    ]
+
+
+def referenced(result: list[JsonObject]) -> list[str]:
+    """The names a tool result of the wire references, in order."""
+    return [part["tool_name"] for part in result]
 
 
 class Gateway(FakeGateway):
@@ -418,21 +454,35 @@ class Gateway(FakeGateway):
         """The ``user`` the request that arrived as this number (from one) carried."""
         return json.loads(self.requests[request_number - 1].content)["user"]
 
-    def tool_results(self, request_number: int) -> list[str | list[JsonObject]]:
+    def tool_results(self, request_number: int, *, rounds: bool = False) -> list[str | list[JsonObject]]:
         """The tool messages the request that arrived as this number (from one) carried, in order: the text of one
-        that is only text, the parts of one that holds a picture."""
+        that is only text, the parts of one that holds a picture. The results of the runner's own rounds, a skill read
+        or a load of tools it told, are left out unless ``rounds``."""
         messages = json.loads(self.requests[request_number - 1].content)["messages"]
-        return [message["content"] for message in messages if message["role"] == "tool"]
-
-    def tool_rounds(self, request_number: int) -> list[list[JsonObject]]:
-        """The tool rounds the request that arrived as this number (from one) told: each assistant message with its
-        calls and the tool results after it."""
-        messages = self.body_of(request_number)["messages"]
         return [
-            [message, *messages[index + 1 : index + 1 + len(message["tool_calls"])]]
-            for index, message in enumerate(messages)
-            if message["role"] == "assistant" and message.get("tool_calls")
+            message["content"]
+            for message in messages
+            if message["role"] == "tool" and (rounds or not _is_runner_round(message))
         ]
+
+    def tool_rounds(self, request_number: int, *, skill: str | None = None) -> list[list[JsonObject]]:
+        """The tool rounds the request that arrived as this number (from one) told, the runner's own among them: each
+        assistant message with its calls and the tool results after it; with ``skill``, those whose calls name it."""
+        return _rounds_in(self.body_of(request_number)["messages"], skill)
+
+    def appended_rounds(self, request_number: int) -> list[list[JsonObject]]:
+        """The tool rounds that end the request that arrived as this number (from one) after the turn's own message: the
+        runner's block, when the turn appended one."""
+        messages = self.body_of(request_number)["messages"]
+        own = max(
+            index for index, each in enumerate(messages) if each["role"] == "user" and '"woke"' in each["content"]
+        )
+        return _rounds_in(messages[own + 1 :], None)
+
+    def deferred_tools(self, request_number: int) -> list[str]:
+        """The names of the tools the request that arrived as this number (from one) sent deferred, in order."""
+        tools = self.body_of(request_number)["tools"]
+        return [each["function"]["name"] for each in tools if each.get("defer_loading")]
 
     def pictures_in(self, request_number: int) -> list[str]:
         """The data URL of each picture the tool messages of the request that arrived as this number (from one)
@@ -472,8 +522,12 @@ class Gateway(FakeGateway):
         return [name for name in names if name not in left_out]
 
     def round_sizes(self) -> list[int]:
-        """The number of messages of each request in arrival order: a turn's rounds grow, a new turn starts at two."""
-        return [len(json.loads(request.content)["messages"]) for request in self.requests]
+        """The number of messages of each request in arrival order, those of the runner's own rounds left out: a turn's
+        rounds grow, a new turn starts at two."""
+        return [
+            sum(not _is_runner_round(message) for message in json.loads(request.content)["messages"])
+            for request in self.requests
+        ]
 
     def users(self) -> set[str]:
         """The ``user`` every request carried."""

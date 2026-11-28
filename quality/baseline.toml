@@ -1,7 +1,7 @@
 # Measured by `quality check --fix`. Entries only ever go down.
 
 [file_lines]
-"tests/test_decision.py" = 968
+"tests/test_decision.py" = 964
 "tests/test_loop.py" = 810
 
 [clones."src/personas/migrations/versions/0002_cut.py"]

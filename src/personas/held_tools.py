@@ -122,7 +122,7 @@ class TurnOffer:
             offered, count = offered_declarations(declared, taken)
             left_out(app, count)
             taken |= {each.name for each in offered}
-            offers.append(AppOffer(app.mcp_url, app.listens, offered))
+            offers.append(AppOffer(app.mcp_url, offered, listed.skills))
         skills = listed_skills((app.mcp_url, listed.skills) for app, listed in paired)
         return cls(skills, tuple(offers), deferred_by_app(offers))
 

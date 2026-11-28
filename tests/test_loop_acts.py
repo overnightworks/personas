@@ -212,7 +212,7 @@ async def test_a_relayed_say_that_fails_is_told_as_not_answered_with_the_failure
             entry(app, PLACE_ID, AGAIN, seq=2, at=after_start(int(waited))),
         ]
     )
-    assert runner.gateway.round_sizes() == [3, 3, 5]
+    assert runner.gateway.round_sizes() == [3, 4, 6]
 
 
 async def test_calls_past_the_places_own_bound_enter_no_act(runner, songmaker):

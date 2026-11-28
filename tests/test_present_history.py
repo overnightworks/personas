@@ -13,11 +13,13 @@ from personas.present import (
     EMPTY_PRESENT,
     EMPTY_SKILL_TEXT,
     NOT_OFFERED_TEXT,
+    AppOffer,
     Arrived,
     Present,
     answered_into,
     appended_by,
     arrived_since,
+    blocks_due,
     held_told,
     history_delta,
     present_of,
@@ -30,6 +32,7 @@ from tests.support.history import (
     MORNING,
     ROOMY_BYTES,
     TABLE,
+    a_skill_of,
     a_skill_read,
     a_tools_load,
     a_view,
@@ -134,6 +137,22 @@ def test_a_present_resumed_from_its_kept_history_tells_the_next_turn_the_same_me
     resumed = present_of(kept)
 
     assert turn_messages("Mozart", resumed, next_turn, {}) == turn_messages("Mozart", current, next_turn, {})
+
+
+def test_a_present_resumed_from_a_kept_block_tells_its_rounds_byte_for_byte_and_finds_none_due():
+    block = (a_skill_read(call_id="personas-skill-0"), a_tools_load(call_id="personas-skill-1"))
+    current = answered_through(took(took(EMPTY_PRESENT, said(1, "one")), *block), 1)
+    kept = KeptHistory(0, current.history.entries, 0, current.told)
+    next_turn = TurnTold(LATER, APP, MORNING.place, Lines(MORNING.generation, frozenset({2}), missed=False), False, 3)
+    deferred = {APP: ("say", "play")}
+
+    resumed = present_of(kept)
+
+    assert turn_messages("Mozart", resumed, next_turn, deferred) == turn_messages(
+        "Mozart", current, next_turn, deferred
+    )
+    offers = (AppOffer(APP, (), (a_skill_of("greeting", "say", "play"),)),)
+    assert blocks_due(offers, (APP,), deferred, resumed.history) == ()
 
 
 def test_the_first_delta_after_a_resume_continues_the_ordinals_of_the_kept_history():
