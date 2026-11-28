@@ -151,8 +151,11 @@ def continuing_hold(hold_id: str):
     return continuing({}, hold_id)
 
 
-def deciding(tool: str, hold_id: str = HOLD_ID):
-    return tool_round(tool_call(f"{tool}-{hold_id}", tool, {"id": hold_id}))
+def deciding(tool: str, hold_id: str = HOLD_ID, *, time: int = 1, line: str | None = None):
+    """A reply that decides the hold with ``tool``, a continue with a short ``line`` to say first if one is given; the
+    call of a decision made again is told apart by its ``time``."""
+    arguments = {"id": hold_id, **({} if line is None else {"line": line})}
+    return tool_round(tool_call(f"{tool}-{hold_id}-{time}", tool, arguments))
 
 
 async def held_in_the_first_sentence(runner, *replies, said=(SAID,), hold_id: str = HOLD_ID):
@@ -220,7 +223,6 @@ REFUSALS = pytest.mark.parametrize(
     ("refusal", "outcome", "stops"),
     [
         pytest.param(SpeakRefusal.TOO_LONG, "undecided", [(STOP_SPEAKING_TOOL, HOLD_ID)], id="refused"),
-        pytest.param(SpeakRefusal.NOT_INTERRUPTED, "gone", [], id="not interrupted"),
     ],
 )
 

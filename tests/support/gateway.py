@@ -16,7 +16,7 @@ from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL
 from personas.decision import LOAD_TOOLS_CALLS, LOAD_TOOLS_TOOL, READ_SKILL_CALLS, READ_SKILL_TOOL
 from tests.support.call import PLACE_ID
 from tests.support.history import TABLE
-from tests.support.hopin import LIMIT_SECONDS, PLAY_TOOL, SAY_TOOL
+from tests.support.hopin import LIMIT_SECONDS, PLAY_TOOL, SAY_TOOL, until_reached
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -312,10 +312,7 @@ class Gateway(FakeGateway):
 
     async def until_requested(self, count: int) -> None:
         """Returns once this many requests arrived; fails after the limit."""
-        async with asyncio.timeout(LIMIT_SECONDS):
-            while self._arrivals < count:
-                self._arrived.clear()
-                await self._arrived.wait()
+        await until_reached(self._arrived, lambda: self._arrivals >= count)
 
     async def until_answered(self, count: int) -> None:
         """Returns once this many requests were answered; fails after the limit."""

@@ -63,6 +63,16 @@ if TYPE_CHECKING:
 
 
 LIMIT_SECONDS = 10
+
+
+async def until_reached(changed: asyncio.Event, reached: Callable[[], bool]) -> None:
+    """Returns once ``reached`` holds, looking again each time ``changed`` is set; fails after the limit."""
+    async with asyncio.timeout(LIMIT_SECONDS):
+        while not reached():
+            changed.clear()
+            await changed.wait()
+
+
 _SUBJECT_KEY = "test.subject"
 
 DISCOVER = "server/discover"
@@ -407,7 +417,12 @@ class FakeApp(AppVoice):
             talked_over=None if not said else TalkedOver(id=f"talk-{hold_id}", playing=True, speech=said),
             interrupted=None
             if hold_id is None
-            else Interrupted(id=hold_id, place=self.hold_places.get(place.id), wordless=place.id in self.wordless),
+            else Interrupted(
+                id=hold_id,
+                place=self.hold_places.get(place.id),
+                wordless=place.id in self.wordless,
+                worded_changes=self.worded.get(place.id),
+            ),
             went_on=None if place.id not in self.went_on else WentOn(id=self.went_on[place.id]),
             voice_state=self.voice_states.get(place.id),
         )
@@ -480,6 +495,10 @@ class FakeApp(AppVoice):
             while len(self.spoken) < count:
                 self.spoken_added.clear()
                 await self.spoken_added.wait()
+
+    async def until_choices_waited(self, count: int) -> None:
+        """Returns once this many decisions waited for the talk-over to end; fails after the limit."""
+        await until_reached(self.choice_waited, lambda: self.choices_waited >= count)
 
     async def until_turn_states(self, count: int) -> None:
         """Returns once the app took this many statements; fails after the limit."""

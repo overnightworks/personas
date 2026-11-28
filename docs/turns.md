@@ -128,9 +128,12 @@ An entry has its app and the time he took it (`at`), and is one of:
   failure's code or `cancelled`; a call past an app's bound was never sent and does not enter. An answered
   `read_skill` enters as a skill entry instead, and a `load_tools` that loaded tools as a load entry.
 - TURNS-22: A call past an app's bound is answered with an error and the model may go on. The turn's total is the sum
-  of the apps' bounds plus one for the held call and one for the speaking tools, plus `lookup_calls` with `[memory]`
+  of the apps' bounds plus one for the held call and one for the speaking tools, which count eight in a turn told a hold, plus `lookup_calls` with `[memory]`
   the two reads `read_skill` takes and the two loads `load_tools` takes, so a model that keeps calling past a bound can spend it and end
-  the turn without its `say`.
+  the turn without its `say`. A round beside a parked run is bound to nine calls, whatever the parked turn's total is: the eight
+  decisions and one call past them, and any call of the round counts, a call that takes no decision included, so each such call
+  leaves one less for the decisions and the call past them, and a model that wastes a second one is cut before its eighth decision and
+  the hold ends undecided.
 - TURNS-23: In a call and at a table at once, a turn at either can answer in the call and act at the table, also
   when it is not his move; the table refuses what its rules do not allow.
 
@@ -181,20 +184,32 @@ An entry has its app and the time he took it (`at`), and is one of:
   place. A turn told a hold sends no other call until he decided: after a stop its sentences play at once,
   after a continue they follow the rest. A round or turn that ends without a decision stops him, and what
   waited is dropped unsaid. Each id of a window generation is logged once as `hold.decided`, with its
-  `hold_id`. A call made while a hold stands at the place where the turn speaks waits for his decision; a
+  `hold_id`; a decision the app took none of is logged as none. A call made while a hold stands at the place where the turn speaks waits for his decision; a
   call already sent runs to its answer. A call waits so for a wordless hold too, and so does a sentence the app
   refused as held; both go once the hold no longer stands, whether he decided it or the app ended it by itself.
   When the turn's deadline passes first, the turn ends `limit_exceeded`, its waiting call is never sent and the
   turn's sentences not yet sent drop, as for any turn that fails; nothing in the runner ends a wordless hold, which
   lasts as long as someone speaks.
+  When the app states how many changes of words the talk-over made (`worded_changes`), his `continue_speaking`,
+  `stop_speaking` and the `speak` naming the hold carry the count of the window he was told (`told_changes`), and the
+  app refuses a decision told fewer as `stale`. That is no decision: nothing is logged, nothing that waited is dropped, and
+  the result of his call tells what was said since, as for a call held back (`sent` false, `talked_over`), so
+  that he decides again. One hold takes eight decisions of his in a round or a turn; the round or turn that ends
+  without the hold decided stops him, which names no count and so is never refused as `stale`. The eight bound the
+  model requests a talk-over that keeps changing may cost, beside the turn's deadline. His stop drops what waited
+  only once the app took it, and the place's sender sends nothing while the stop is on its way; a decision the app
+  refused as `not_interrupted`, because the hold no longer stands, drops and decides nothing for that id, and he
+  is told it is gone: a new id gets its round as the first. A line of a person that repeats the words he was told of
+  them wakes no turn.
   Text in a reply while the hold he was told is undecided, in the round beside his parked run or in a turn told
   the hold, answers it instead of either call: what he had not said is dropped, logged as `speech.dropped`
   `replaced`, the parked run is cut with its waiting call unsent, and a decision call of the same reply is
   answered that the hold is decided. The first sentence goes to `speak` naming the hold, in a session of its
   own, and counts in the turn's tally; the rest of the reply joins the record once the app took it, and
   his place's sender sends it plain, also after the turn. A first sentence the app refused or never answered
-  sends no further one and is logged; unless the app refused it as `not_interrupted` he is stopped with the
-  hold's id, and the hold ends `undecided`, or `gone` for that refusal. A new hold during his answer starts no
+  sends no further one and is logged; what he had not said drops only once the app took the first sentence, and the
+  hold is stopped with its id and ends `undecided`, unless the app refused it as `not_interrupted`, which
+  decides nothing for that id. A new hold during his answer starts no
   round and stands for his next turn; words said over him after it start no second decision. Text in a
   round after his decision says nothing.
 - TURNS-46: `continue_speaking(id, line, style)` says one short line and then goes on: the line goes to `speak` naming the hold, in
@@ -203,8 +218,9 @@ An entry has its app and the time he took it (`at`), and is one of:
   ends `short_line` once the app took the line. The parked run is not cut: its waiting call goes on once the hold no
   longer stands; a turn told the hold sends its sentences after the line. A line or style the app refused (`style_unavailable` for a style
   the voice does not take) or never answered
-  sends no further sentence and is logged; unless refused as `not_interrupted` he is stopped with the hold's id, and
-  the hold ends `undecided`, or `gone` for that refusal. A `line` or `style` that is no non-empty string decides nothing, and so does a `style` without a `line` and a
+  sends no further sentence and is logged; the hold is stopped with its id and ends `undecided`, unless refused as
+  `not_interrupted`, which decides nothing for that id, and a line refused as `stale` is no decision: his call is told what
+  was said since, as for `continue_speaking`. A `line` or `style` that is no non-empty string decides nothing, and so does a `style` without a `line` and a
   line in a turn that does not speak. In a turn told the hold no sentence of that turn is playing when the line
   is said, so none is cut. After the line a new hold is a new hold, as after a continue: it starts one more round
   in the same turn.

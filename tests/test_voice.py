@@ -7,13 +7,14 @@ from datetime import UTC, datetime
 import anyio
 import pytest
 from agents.member import PlaceRef, SpeakAnswer, SpeakRefusal, Spoken, Written
+from agents.tools import ToolOutcome
 from agents.turn import FailureCode
 from agents.turn_events import AssistantTextEvent, FinalEvent
 
 from personas.config import AppTarget
 from personas.decision import DEFAULT_BUDGET_PAUSE_CAP_SECONDS, TURN_CANCELLED_CODE, AppPlace
 from personas.entries import KeptLine, Reading, SaidAloud, Unanswered, Visit
-from personas.holds import HoldInbox
+from personas.holds import HoldInbox, TurnHold
 from personas.mind import Mind
 from personas.reporting import Event, start_turn_tally
 from personas.speech import DropReason, Held, HoldOutcome
@@ -148,8 +149,9 @@ class Scenario:
             None,
             lambda *_ended: None,
             _undecided,
+            _retold,
         )
-        return await answering.instead(Held("hold-1", "g1", (), False), ("One.",))
+        return await answering.instead(TurnHold(Held("hold-1", "g1", (), False)), ("One.",))
 
     async def sending(self) -> asyncio.Task[None]:
         """Starts the sender and returns once it has nothing left to do but wait."""
@@ -168,8 +170,12 @@ class _Sessions:
     async def ask_elsewhere(self, _app, ask, _record):
         return await ask(self)
 
-    async def speak(self, place, text, _style, *, interrupted):
+    async def speak(self, place, text, _style, *, interrupted, told_changes):
         return await self._scenario.speak(place, text)
+
+
+async def _retold(_told):
+    return ToolOutcome("", is_error=False)
 
 
 async def _undecided(_hold):

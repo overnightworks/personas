@@ -15,11 +15,12 @@ from agents.member import (
     Written,
     has_words,
 )
+from agents.member_speaking import words_of
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from agents.member import PartialSpeech, PlaceWindow
+    from agents.member import PartialSpeech, PlaceEntry, PlaceWindow
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,9 @@ class Request:
 
     sentence: Sentence
     cut: bool = False
+    cut_before_dropping: bool = False
+    """Whether a stop of his had cut the request before the decision now on its way marked it, which stays if the app
+    takes none."""
     line_entered: bool = False
     line_bound: float | None = None
 
@@ -78,7 +82,8 @@ class SpeechRecord:
     sentence that plays, the hold that stands there and the key of the last hold decided there. All of it outlives the
     turn that released the sentences. ``held_unread`` says the app answered a sentence as held and no read of the window
     has stated the hold since. ``went_on`` is the hold the window states as gone on by itself and ``went_on_told`` the
-    one a round was told of."""
+    one a round was told of. ``dropping`` says his decision to drop what waited is on its way to the app, and
+    ``told_talk`` the partials of people a decision was told, which a line of theirs may repeat."""
 
     in_flight: Request | None = None
     unsent: tuple[Sentence, ...] = ()
@@ -88,6 +93,8 @@ class SpeechRecord:
     held_unread: bool = False
     went_on: HoldKey | None = None
     went_on_told: HoldKey | None = None
+    dropping: bool = False
+    told_talk: tuple[PartialSpeech, ...] = ()
 
 
 NO_SPEECH: Final = SpeechRecord()
@@ -130,9 +137,9 @@ def sentences_released(
 
 def sentence_taken(record: SpeechRecord, now: float) -> tuple[SpeechRecord, Sentence | None, int]:
     """The record once the next sentence goes out, that sentence and how many unsent ones past their bound it dropped.
-    Nothing is dropped or sent while a hold stands; nothing is sent while a request is open or after one answered as
-    held until a read of the window."""
-    if record.hold is not None:
+    Nothing is dropped or sent while a hold stands or his decision to drop what waited is on its way; nothing is sent
+    while a request is open or after one answered as held until a read of the window."""
+    if record.hold is not None or record.dropping:
         return record, None, 0
     alive = tuple(each for each in record.unsent if not bound_reached(now, each.bound))
     expired = len(record.unsent) - len(alive)
@@ -183,7 +190,27 @@ def speech_stopped(record: SpeechRecord) -> tuple[SpeechRecord, int]:
     """His own stop: the unsent sentences drop, which is how many; a request in flight is marked cut and runs to its
     answer."""
     cut = None if record.in_flight is None else replace(record.in_flight, cut=True)
-    return replace(record, in_flight=cut, unsent=()), len(record.unsent)
+    return replace(record, in_flight=cut, unsent=(), dropping=False), len(record.unsent)
+
+
+def speech_dropping(record: SpeechRecord) -> SpeechRecord:
+    """His decision to drop what waited is on its way to the app: nothing is sent meanwhile, and the request in flight,
+    which the app may answer stopped before his decision's answer arrives, is marked cut."""
+    request = record.in_flight
+    if request is not None and not record.dropping:
+        request = replace(request, cut=True, cut_before_dropping=request.cut)
+    return _revised(record, in_flight=request, dropping=True)
+
+
+def speech_dropping_ended(record: SpeechRecord) -> SpeechRecord:
+    """The app did not take his decision to drop what waited: what waited stays, and the request in flight is no more
+    cut than before."""
+    if not record.dropping:
+        return record
+    request = record.in_flight
+    if request is not None:
+        request = replace(request, cut=request.cut_before_dropping)
+    return _revised(record, in_flight=request, dropping=False)
 
 
 def speech_line_said(record: SpeechRecord, bound: float) -> SpeechRecord:
@@ -246,6 +273,9 @@ class Held:
     place: HoldPlace | None = None
     wordless: bool = False
     """The app states that no word of the talk-over was heard: it ends the hold by itself."""
+    worded_changes: int | None = None
+    """How many times the words of the talk-over changed, as the window that stated the hold counts them, when it does;
+    a decision names it as the count it was told."""
 
     @property
     def key(self) -> HoldKey:
@@ -260,17 +290,33 @@ class HoldOutcome(StrEnum):
     STOPPED = "stopped"
     ANSWERED = "answered"
     UNDECIDED = "undecided"
+
+
+class NotDecided(StrEnum):
+    """Why the app took no decision of his, which leaves the hold undecided and logs nothing."""
+
     GONE = "gone"
-    """The hold no longer stood at the app, so the decision changed nothing there."""
+    """The hold no longer stands there, or his decision was voided: nothing was dropped or decided for its id."""
+    STALE = "stale"
+    """His decision was told fewer changes of the talk-over than the app counted."""
 
 
-_HOLD_NOT_STANDING: Final = frozenset({ContinueSpeakingRefusal.NOT_INTERRUPTED, StopSpeakingRefusal.NOT_INTERRUPTED})
+_NOT_DECIDED: Final = {
+    ContinueSpeakingRefusal.NOT_INTERRUPTED: NotDecided.GONE,
+    StopSpeakingRefusal.NOT_INTERRUPTED: NotDecided.GONE,
+    SpeakRefusal.NOT_INTERRUPTED: NotDecided.GONE,
+    ContinueSpeakingRefusal.STALE: NotDecided.STALE,
+    StopSpeakingRefusal.STALE: NotDecided.STALE,
+    SpeakRefusal.STALE: NotDecided.STALE,
+}
 
 
-def hold_ended_as(decided: HoldOutcome, refusal: ContinueSpeakingRefusal | StopSpeakingRefusal | None) -> HoldOutcome:
-    """How the hold ended once the app answered the decision: as decided, or gone when the app refused it because no
-    such hold stood."""
-    return HoldOutcome.GONE if refusal in _HOLD_NOT_STANDING else decided
+def hold_ended_as(
+    decided: HoldOutcome, refusal: ContinueSpeakingRefusal | StopSpeakingRefusal | SpeakRefusal | None
+) -> HoldOutcome | NotDecided:
+    """How the hold ended once the app answered the decision: as decided, or not decided when the app refused it because
+    no such hold stood or because it was told too few changes."""
+    return _NOT_DECIDED.get(refusal, decided) if refusal is not None else decided
 
 
 def hold_stated(window: PlaceWindow, seen: Held | None) -> Held | None:
@@ -290,6 +336,7 @@ def hold_stated(window: PlaceWindow, seen: Held | None) -> Held | None:
         telling=seen.telling if seen is not None and same else Telling.NOT_TOLD,
         place=hold.place,
         wordless=hold.wordless,
+        worded_changes=hold.worded_changes,
     )
 
 
@@ -354,7 +401,25 @@ def hold_decided(record: SpeechRecord, key: HoldKey) -> SpeechRecord:
 
 def hold_forgotten(record: SpeechRecord) -> SpeechRecord:
     """The place left the standing: the hold decided there is forgotten, and the rest of the record stays."""
-    return _revised(record, decided=None)
+    return _revised(record, decided=None, told_talk=())
+
+
+def talk_told(record: SpeechRecord, speech: Iterable[PartialSpeech]) -> SpeechRecord:
+    """A decision is told what people say over him: a line of theirs that repeats those words says nothing new."""
+    return _revised(record, told_talk=tuple(each for each in speech if has_words(each.text)))
+
+
+def answerable_lines(record: SpeechRecord, lines: Iterable[PlaceEntry]) -> tuple[SpeechRecord, tuple[PlaceEntry, ...]]:
+    """The record once a person's line ended the partial a decision was told of them, and the lines left to answer: one
+    that repeats the words of its partial is no news, and a partial is repeated once."""
+    told = {each.name: each for each in record.told_talk}
+    answerable: list[PlaceEntry] = []
+    for line in lines:
+        partial = told.pop(line.name, None) if line.spoken and not line.own else None
+        if partial is None or words_of(line.text) != words_of(partial.text):
+            answerable.append(line)
+    kept = tuple(each for each in record.told_talk if each.name in told)
+    return _revised(record, told_talk=kept), tuple(answerable)
 
 
 def hold_tellable(held: Held) -> bool:

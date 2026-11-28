@@ -35,6 +35,8 @@ from personas.speech import (
     sentences_released,
     speech_answered,
     speech_continued,
+    speech_dropping,
+    speech_dropping_ended,
     speech_ended,
     speech_line_entered,
     speech_line_said,
@@ -173,6 +175,26 @@ def test_his_stop_drops_the_unsent_sentences_and_marks_the_request_in_flight_cut
     assert stopped.in_flight.cut_by_stop(SpeakRefusal.STOPPED)
     assert not stopped.in_flight.cut_by_stop(SpeakRefusal.HELD)
     assert not Request(ONE).cut_by_stop(SpeakRefusal.STOPPED)
+
+
+@pytest.mark.parametrize("cut_before", [False, True], ids=["uncut request", "request his stop cut"])
+def test_a_decision_the_app_took_none_of_leaves_the_request_in_flight_as_cut_as_before_it_was_sent(cut_before):
+    record = SpeechRecord(in_flight=Request(ONE, cut=cut_before), unsent=(TWO,))
+
+    dropping = speech_dropping(record)
+    ended = speech_dropping_ended(dropping)
+
+    assert dropping.in_flight is not None
+    assert (dropping.dropping, dropping.in_flight.cut) == (True, True)
+    assert (ended.dropping, ended.unsent) == (False, (TWO,))
+    assert ended.in_flight is not None
+    assert ended.in_flight.cut is cut_before
+
+
+def test_a_decision_the_app_took_none_of_with_no_request_in_flight_only_lets_the_sender_send_again():
+    ended = speech_dropping_ended(speech_dropping(SpeechRecord(unsent=(TWO,))))
+
+    assert ended == SpeechRecord(unsent=(TWO,))
 
 
 def test_his_continue_gives_the_unsent_sentences_the_bound_of_the_turn_that_decided():

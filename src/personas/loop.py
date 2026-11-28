@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Final, Literal, NoReturn
 
 from agents.mcp_client import ToolsWake
 from agents.member import DeclineInvitationRefusal
-from agents.member_outcomes import CallFailure, DeclineOutcome, UnrecognisedRefusal
+from agents.member_outcomes import CallFailure, Delivery, UnrecognisedRefusal
 from logline import StepTimer, unit_trace
 
 from personas.admission import Admitted
@@ -412,7 +412,7 @@ class AgentLoop:
         self._memory = after_decline(self._memory, decline, answer)
         if isinstance(answer, DeclineInvitationRefusal | UnrecognisedRefusal):
             self._report(Event.DECLINE_REFUSED, answer.value, place_kind=decline.place.kind)
-        elif answer is DeclineOutcome.SENT:
+        elif answer is Delivery.SENT:
             self._report(Event.INVITATION_DECLINED, decline.reason.value, place_kind=decline.place.kind)
 
     async def _read_windows(self, session: MemberSession, standings: tuple[Standing, ...], began: float) -> bool:
@@ -525,9 +525,10 @@ class AgentLoop:
         perception = perceive(window, checkpoint)
         self._mind.move_checkpoint(at, perception.checkpoint)
         self._mind.take(taken_lines(Visit(self._app.mcp_url, place, window.generation), perception.new, read_at))
-        waking = waking_line(perception.new, serves_view=serves_view)
+        answerable = self._mind.answerable_lines(at, perception.new)
+        waking = waking_line(answerable, serves_view=serves_view)
         if waking is not None:
-            seqs = frozenset(line.seq for line in perception.new)
+            seqs = frozenset(line.seq for line in answerable)
             lines = Lines(window.generation, seqs, perception.missed, waking.traceparent)
             if self._mind.due(at, lines, self._boundaries.clock.now()):
                 self._report_fell_due(at, lines, DueOccasion.LINE, began)

@@ -30,6 +30,7 @@ from agents.member import (
     Written,
     has_words,
 )
+from agents.member_speaking import words_of
 from agents.tools import ToolDeclaration, ToolEffect, ToolOutcome
 
 from tests.support.hopin_places import ACCEPTED_NAME, AppPlaces
@@ -101,6 +102,25 @@ class AppVoice(AppPlaces):
     """The style of each ``speak``, in the order of ``speaks_naming_holds``."""
     hold_outcomes: list[ToolOutcome] = field(default_factory=list[ToolOutcome])
     """The answer to each next ``continue_speaking`` or ``stop_speaking`` as it arrives, in order."""
+    worded: dict[str, int] = field(default_factory=dict[str, int])
+    """Each place whose hold states how many times the words of its talk-over changed; a decision told fewer is refused.
+    The app counts only once a test turns it on with ``count_worded_changes``."""
+    counts_worded_changes: bool = False
+    hold_told: list[int | None] = field(default_factory=list[int | None])
+    """The ``told_changes`` of each decision that arrived (a continue, a stop or a ``speak`` naming a hold)."""
+    words_before_decision: list[tuple[tuple[str, str], ...]] = field(default_factory=list[tuple[tuple[str, str], ...]])
+    """What people say over the held member before each next decision is judged, in order, as he decides."""
+    new_holds_before_decision: list[tuple[str, tuple[str, str]]] = field(
+        default_factory=list[tuple[str, tuple[str, str]]]
+    )
+    """A new hold (its id and what a person says over it) that stands before each next decision is judged, in order."""
+    choices_wait: bool = False
+    """Whether a decision that plays waits while people still talk over him, which ``talk_over_ends`` ends."""
+    choices_waited: int = 0
+    """How many decisions have waited for the talk-over to end."""
+    choice_waited: asyncio.Event = field(default_factory=asyncio.Event)
+    waiting_choices: dict[str, asyncio.Future[bool]] = field(default_factory=dict[str, asyncio.Future[bool]])
+    """The decision that waits at each place; its result says whether it plays or was voided."""
 
     @staticmethod
     def _partial_speeches(said: tuple[tuple[str, str], ...]) -> tuple[PartialSpeech, ...]:
@@ -109,10 +129,30 @@ class AppVoice(AppPlaces):
     def hold(self, place_id: str, hold_id: str, *said: tuple[str, str]) -> None:
         """The member is held at the place: the window states the hold and, over it, what each person has said so far
         (a name and its words), and signals the change."""
+        self._count_changes(place_id, hold_id, said)
         self.holds[place_id] = (hold_id, self._partial_speeches(said))
         if any(has_words(text) for _, text in said):
             self.wordless.discard(place_id)
         self._signal_window(place_id)
+
+    def count_worded_changes(self) -> None:
+        """The app states ``worded_changes`` on its holds and refuses a decision told fewer than it counted."""
+        self.counts_worded_changes = True
+
+    def _count_changes(self, place_id: str, hold_id: str, said: tuple[tuple[str, str], ...]) -> None:
+        """A hold counts each person whose words differ from the ones the same hold had; a new hold counts afresh."""
+        if not self.counts_worded_changes:
+            return
+        stands = self.holds.get(place_id, ("", None))
+        before = {each.name: words_of(each.text) for each in (stands[1] or ()) if stands[0] == hold_id}
+        changed = sum(1 for name, text in said if words_of(text) and words_of(text) != before.get(name))
+        kept = self.worded.get(place_id, 0) if stands[0] == hold_id else 0
+        if kept + changed:
+            self.worded[place_id] = kept + changed
+        else:
+            self.worded.pop(place_id, None)
+        if stands[0] != hold_id:
+            self._settle(place_id, plays=False)
 
     def hold_wordless(self, place_id: str, hold_id: str, *said: tuple[str, str]) -> None:
         """The member is held and no word has been heard of the talk-over: the app ends the hold by itself."""
@@ -135,6 +175,10 @@ class AppVoice(AppPlaces):
             return
         hold_id, _ = self.holds[place_id]
         self.hold(place_id, hold_id, *said)
+
+    def talk_over_ends(self, place_id: str) -> None:
+        """Nobody of the talk-over speaks any more: the decision that waits at the place plays."""
+        self._settle(place_id, plays=True)
 
     def talk_over_unheld(self, place_id: str, *said: tuple[str, str]) -> None:
         """People talk over the member and the window states what they say, with no hold yet."""
@@ -168,10 +212,8 @@ class AppVoice(AppPlaces):
         taken = SpeakArguments.model_validate(arguments)
         self.speaks_naming_holds.append((taken.text, taken.interrupted))
         self.speak_styles.append(taken.style)
-        if taken.interrupted is None and taken.place.id in self.holds:
-            return ToolOutcome(SpeakRefused(refused=SpeakRefusal.HELD).model_dump_json(), is_error=True)
-        if taken.interrupted is not None and self.holds.get(taken.place.id, ("", None))[0] != taken.interrupted:
-            return ToolOutcome(SpeakRefused(refused=SpeakRefusal.NOT_INTERRUPTED).model_dump_json(), is_error=True)
+        if (refusal := self._refusal_before_playing(taken)) is not None:
+            return ToolOutcome(SpeakRefused(refused=refusal).model_dump_json(), is_error=True)
         self.content.add(taken.text)
         if (held := self.held_speak) is not None:
             self.held_speak = None
@@ -199,28 +241,84 @@ class AppVoice(AppPlaces):
             self.speak(taken.place.id, request.principal.sub, ACCEPTED_NAME, taken.text, spoken=True)
         return ToolOutcome(Spoken(spoken=True).model_dump_json(), is_error=False)
 
+    def _refusal_before_playing(self, taken: SpeakArguments) -> SpeakRefusal | None:
+        """Why a sentence is refused before it plays: it names no hold while one holds the member, the hold it names
+        does not stand, or it was told fewer changes than the hold counted."""
+        if taken.interrupted is None:
+            return SpeakRefusal.HELD if taken.place.id in self.holds else None
+        self._decision_arrives(taken.place.id, taken.told_changes)
+        if self.holds.get(taken.place.id, ("", None))[0] != taken.interrupted:
+            return SpeakRefusal.NOT_INTERRUPTED
+        return SpeakRefusal.STALE if self._stale(taken.place.id, taken.told_changes) else None
+
+    def _settle(self, place_id: str, *, plays: bool) -> None:
+        """The decision that waits at the place plays, or is voided, once."""
+        waiting = self.waiting_choices.pop(place_id, None)
+        if waiting is not None and not waiting.done():
+            waiting.set_result(plays)
+
+    def _decision_arrives(self, place_id: str, told_changes: int | None) -> None:
+        """A decision reaches the app: what was said while he decided arrives first."""
+        self.hold_told.append(told_changes)
+        if self.new_holds_before_decision:
+            hold_id, said = self.new_holds_before_decision.pop(0)
+            self.hold(place_id, hold_id, said)
+        if self.words_before_decision:
+            self.talk_over(place_id, *self.words_before_decision.pop(0))
+
+    def _stale(self, place_id: str, told_changes: int | None) -> bool:
+        """Whether the decision was told fewer changes than the hold counted."""
+        return told_changes is not None and told_changes < self.worded.get(place_id, 0)
+
     async def _continue_speaking(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
-        """Lets the held sentence play to its end, so that the sentence waiting for its turn is answered."""
+        """Lets the held sentence play to its end, so that the sentence waiting for its turn is answered. A continue
+        told too few changes is refused stale; one that plays waits while people talk over him, until they end, and
+        answers not interrupted when a new hold, a stop or a later continue voided it."""
         taken = ContinueSpeakingArguments.model_validate(arguments)
         self.hold_calls.append((CONTINUE_SPEAKING_TOOL, taken.interrupted))
+        self._decision_arrives(taken.place.id, taken.told_changes)
         if self.hold_outcomes:
             return self.hold_outcomes.pop(0)
-        if not self._ends_hold(taken.place.id, taken.interrupted, keep_record=True):
-            refusal = ContinueSpeakingRefused(refused=ContinueSpeakingRefusal.NOT_INTERRUPTED)
-            return ToolOutcome(refusal.model_dump_json(), is_error=True)
+        not_interrupted = ContinueSpeakingRefused(refused=ContinueSpeakingRefusal.NOT_INTERRUPTED)
+        if self.holds.get(taken.place.id, ("", None))[0] != taken.interrupted:
+            return ToolOutcome(not_interrupted.model_dump_json(), is_error=True)
+        if self._stale(taken.place.id, taken.told_changes):
+            stale = ContinueSpeakingRefused(refused=ContinueSpeakingRefusal.STALE)
+            return ToolOutcome(stale.model_dump_json(), is_error=True)
+        if self.choices_wait and not await self._plays_once_the_talk_over_ends(taken.place.id):
+            return ToolOutcome(not_interrupted.model_dump_json(), is_error=True)
+        self._ends_hold(taken.place.id, taken.interrupted, keep_record=True)
         if self.playing:
             self.end_sentence()
         return ToolOutcome(json.dumps({"continued": True}), is_error=False)
 
+    async def _plays_once_the_talk_over_ends(self, place_id: str) -> bool:
+        """Whether the decision plays: it replaces the one that waits, which is voided, and waits itself. A call the
+        runner gave up leaves it standing."""
+        self._settle(place_id, plays=False)
+        waiting = asyncio.get_running_loop().create_future()
+        self.waiting_choices[place_id] = waiting
+        self.choices_waited += 1
+        self.choice_waited.set()
+        return await asyncio.shield(waiting)
+
     async def _stop_speaking(self, request: PersonRequest, arguments: JsonObject) -> ToolOutcome:
-        """Cuts the held sentence and drops every sentence waiting for its turn."""
+        """Cuts the held sentence and drops every sentence waiting for its turn; a stop told too few changes is refused
+        stale, and a stop voids the decision that waits."""
         taken = StopSpeakingArguments.model_validate(arguments)
         self.hold_calls.append((STOP_SPEAKING_TOOL, taken.interrupted or ""))
+        self._decision_arrives(taken.place.id, taken.told_changes)
         if self.hold_outcomes:
             return self.hold_outcomes.pop(0)
-        if taken.interrupted is not None and not self._ends_hold(taken.place.id, taken.interrupted):
+        if taken.interrupted is not None and self.holds.get(taken.place.id, ("", None))[0] != taken.interrupted:
             refusal = StopSpeakingRefused(refused=StopSpeakingRefusal.NOT_INTERRUPTED)
             return ToolOutcome(refusal.model_dump_json(), is_error=True)
+        if self._stale(taken.place.id, taken.told_changes):
+            refusal = StopSpeakingRefused(refused=StopSpeakingRefusal.STALE)
+            return ToolOutcome(refusal.model_dump_json(), is_error=True)
+        self._settle(taken.place.id, plays=False)
+        if taken.interrupted is not None:
+            self._ends_hold(taken.place.id, taken.interrupted)
         if not self.playing:
             return ToolOutcome(DroppedSpeaking(dropped=True).model_dump_json(), is_error=False)
         cut = self.playing[0][2]

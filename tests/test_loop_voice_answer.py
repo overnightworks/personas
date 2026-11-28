@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from agents.backend.fake_gateway import completion, tool_call, tool_round
-from agents.member import STOP_SPEAKING_TOOL, SpeakRefusal
+from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL, SpeakRefusal
 from agents.tools import ToolOutcome
 
 from personas.failures import leaves_of
@@ -20,6 +20,7 @@ from tests.support.voice import (
     REFUSALS,
     SAID,
     SECOND,
+    SECOND_HOLD,
     THREE_SENTENCES,
     a_voice_call,
     calling_while_held,
@@ -99,6 +100,48 @@ async def test_a_first_answer_sentence_the_app_refused_sends_no_further_one_and_
     await refused_ends_the_hold_as_the_app_says(
         runner, lambda: answered_in_the_round(runner, completion(ANSWER)), refusal, outcome, stops, unsent=ANSWER_REST
     )
+
+
+async def test_a_first_answer_sentence_refused_as_stale_ends_the_hold_undecided_and_stops_him(runner):
+    """TURNS-27, TURNS-31."""
+    await refused_ends_the_hold_as_the_app_says(
+        runner,
+        lambda: answered_in_the_round(runner, completion(ANSWER)),
+        SpeakRefusal.STALE,
+        "undecided",
+        [(STOP_SPEAKING_TOOL, HOLD_ID)],
+        unsent=ANSWER_REST,
+    )
+
+
+@pytest.mark.parametrize(
+    ("beside_parked_run", "said"),
+    [(True, ["before", "waits"]), (False, [])],
+    ids=["round beside his parked run", "turn told the hold"],
+)
+async def test_a_first_answer_sentence_refused_as_not_interrupted_drops_nothing_and_the_new_hold_is_decided_first(
+    runner, beside_parked_run, said
+):
+    """TURNS-27, TURNS-31, TURNS-47, LOG-17."""
+    runner.app.new_holds_before_decision.append((SECOND_HOLD, ("Bob", "no, wait")))
+    if beside_parked_run:
+        await calling_while_held(
+            runner,
+            completion(ANSWER),
+            deciding(CONTINUE_SPEAKING_TOOL, SECOND_HOLD),
+            completion("[silent]"),
+            completion("done"),
+        )
+    else:
+        await a_voice_call(runner, completion(ANSWER), deciding(CONTINUE_SPEAKING_TOOL, SECOND_HOLD), completion())
+        runner.app.hold(PLACE_ID, HOLD_ID, SAID)
+
+    assert await decided(runner) == ["continued"]
+    await runner.reports.until_a_turn_completed()
+
+    assert (CONTINUE_SPEAKING_TOOL, SECOND_HOLD) in runner.app.hold_calls
+    assert Event.SPEECH_DROPPED not in [event for event, _ in runner.reports.reported()]
+    assert [text for *_, text in runner.app.said] == said
 
 
 async def test_a_new_hold_during_his_answer_starts_no_round_and_is_told_to_his_next_turn(runner):

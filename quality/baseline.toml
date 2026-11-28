@@ -9,7 +9,6 @@ upgrade = [["src/personas/migrations/versions/0003_act.py", "upgrade"]]
 
 [clones."tests/support/gateway.py"]
 "Gateway.until_answered" = [["tests/support/hopin.py", "FakeApp.said_count"], ["tests/support/hopin.py", "FakeApp.spoken_count"], ["tests/support/hopin.py", "FakeApp.until_called"], ["tests/support/voice.py", "HeldSleeps.until_began"]]
-"Gateway.until_requested" = [["tests/test_memory.py", "ObservedStore.until_finished"]]
 
 [clones."tests/support/hopin.py"]
 "FakeApp.said_count" = [["tests/support/voice.py", "HeldSleeps.until_began"]]

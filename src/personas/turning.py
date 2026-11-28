@@ -33,13 +33,13 @@ from personas.held_tools import Calls, HeldTools, HoldBack, ToolLoads, TurnOffer
 from personas.holds import (
     APP_FAILED_TEXT,
     DECIDING_FIRST_TEXT,
-    DECISION_CALLS,
     DECISION_DECLARATIONS,
     HoldDeciding,
     HoldInbox,
     TurnHold,
     Voiced,
     close_when_over,
+    decision_calls,
 )
 from personas.present import (
     LOAD_TOOLS_DECLARATION,
@@ -65,7 +65,7 @@ from personas.recall import (
 )
 from personas.reporting import LOG, Event, LoopReport, TurnTally, agent_app_fields, failure_event, stepping
 from personas.sizing import Sizing
-from personas.speech import HoldOutcome, Telling, hold_ended_as
+from personas.speech import HoldOutcome, Telling
 from personas.task_record import (
     RelayFailed,
     ending_loud_when_cancelled,
@@ -360,6 +360,7 @@ class Turning:
                 deciding,
                 partial(self._holds.hold_decided, place),
                 lambda hold: self._holds.end_hold(place, record, hold, HoldOutcome.UNDECIDED, bound),
+                partial(self._holds.retold, place, record),
             )
         hold = HoldBack(
             admitted.history,
@@ -457,9 +458,7 @@ class Turning:
         if self._holds.heard_at(place, window) or held is None or self._aloud_at == place:
             return False
         if held.telling is Telling.UNDECIDED:
-            self._holds.stop_speech(place)
-            refusal = await session.stop_speaking(place, held.id)
-            self._holds.hold_decided(place, held, hold_ended_as(HoldOutcome.UNDECIDED, refusal))
+            await self._holds.stop_undecided(session, place, held)
         elif self._mind.hold_makes_due(at):
             return self._mind.due_for_hold(at, window.generation, self._clock.now())
         return False
@@ -503,7 +502,7 @@ class Turning:
                 tools.extend(self._hand_tools(app, session, offer.declarations, calls, hold, record, at))
                 bounds.append(calls.bound)
         tools.extend(self._decision_tools(admitted, record, bound, deciding, answering))
-        bounds.append(DECISION_CALLS)
+        bounds.append(decision_calls(deciding))
         return HeldTools(tuple(tools), turn_call_bound(bounds), deferred, hold.inbox, deciding)
 
     def _decision_tools(

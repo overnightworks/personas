@@ -40,7 +40,7 @@ from tests.support.history import (
     history_of,
     url_of,
 )
-from tests.support.hopin import LIMIT_SECONDS
+from tests.support.hopin import LIMIT_SECONDS, until_reached
 from tests.support.logs import formatted
 from tests.support.memory_search import (
     AGENT,
@@ -104,10 +104,7 @@ class ObservedStore(PostgresLineStore):
             self._finishing.set()
 
     async def until_finished(self, count: int) -> None:
-        async with asyncio.timeout(LIMIT_SECONDS):
-            while self.finished < count:
-                self._finishing.clear()
-                await self._finishing.wait()
+        await until_reached(self._finishing, lambda: self.finished >= count)
 
     async def until_finished_for(self, client_id: str) -> None:
         async with asyncio.timeout(LIMIT_SECONDS):

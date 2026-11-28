@@ -30,7 +30,7 @@ from tests.support.gateway import BUDGET_SPENT, say
 from tests.support.hopin import CALL, SAY_TOOL, SKILLS_GET
 from tests.support.skills import Shelf, a_skill_file
 from tests.support.store import ScriptedStore
-from tests.support.voice import TWO_SENTENCES, a_voice_call, holding_sentence_ends, sentences_spoken
+from tests.support.voice import SECOND_HOLD, TWO_SENTENCES, a_voice_call, holding_sentence_ends, sentences_spoken
 from tests.support.wire import refuses_with_a_server_error
 
 pytestmark = [pytest.mark.anyio, pytest.mark.integration]
@@ -237,22 +237,22 @@ async def test_a_round_for_a_newer_hold_logs_no_line_for_the_older_hold_the_turn
     assert runner.reports.codes_of(Event.HOLD_DECIDED) == ["continued", "stopped"]
 
 
-async def test_a_stop_the_app_refuses_because_no_such_hold_stands_ends_the_hold_as_gone_and_is_not_sent_again(runner):
-    """LOG-17."""
-    await a_voice_call(runner, completion("[silent]"))
+async def test_a_stop_the_app_refuses_because_no_such_hold_stands_decides_nothing_and_a_new_hold_gets_its_round(runner):
+    """LOG-17, TURNS-31."""
+    await a_voice_call(runner, completion("[silent]"), completion("[silent]"))
     refusal = StopSpeakingRefused(refused=StopSpeakingRefusal.NOT_INTERRUPTED)
     runner.app.hold_outcomes.append(ToolOutcome(refusal.model_dump_json(), is_error=True))
 
     runner.app.hold(PLACE_ID, HOLD_ID, SAID)
-    assert await decided(runner) == ["gone"]
-    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
-    await window_read_after(runner)
+    await settled(runner.app)
+    assert runner.reports.codes_of(Event.HOLD_DECIDED) == []
+    runner.app.hold(PLACE_ID, SECOND_HOLD, SAID)
 
-    assert runner.app.hold_calls == [(STOP_SPEAKING_TOOL, HOLD_ID)]
-    assert runner.reports.codes_of(Event.HOLD_DECIDED) == ["gone"]
+    assert await decided(runner) == ["undecided"]
+    assert (STOP_SPEAKING_TOOL, SECOND_HOLD) in runner.app.hold_calls
 
 
-@pytest.mark.parametrize(
+NOT_INTERRUPTED_REFUSALS = pytest.mark.parametrize(
     ("tool", "refusal"),
     [
         pytest.param(
@@ -263,16 +263,37 @@ async def test_a_stop_the_app_refuses_because_no_such_hold_stands_ends_the_hold_
         pytest.param(STOP_SPEAKING_TOOL, StopSpeakingRefused(refused=StopSpeakingRefusal.NOT_INTERRUPTED), id="stop"),
     ],
 )
-async def test_a_decision_for_a_hold_that_no_longer_stands_is_logged_gone_and_he_is_told_so(runner, tool, refusal):
+
+
+@NOT_INTERRUPTED_REFUSALS
+async def test_a_decision_for_a_hold_that_no_longer_stands_decides_nothing_and_he_is_told_so(runner, tool, refusal):
     """TURNS-31, LOG-17."""
     await a_voice_call(runner, deciding(tool), completion("[silent]"))
     runner.app.hold_outcomes.append(ToolOutcome(refusal.model_dump_json(), is_error=True))
 
     runner.app.hold(PLACE_ID, HOLD_ID, SAID)
 
-    assert await decided(runner) == ["gone"]
     await runner.reports.until_a_turn_completed()
     assert runner.gateway.tool_results(2) == ['{"gone": true}']
+    assert runner.reports.codes_of(Event.HOLD_DECIDED) == []
+
+
+@NOT_INTERRUPTED_REFUSALS
+async def test_a_turn_told_a_hold_whose_decision_the_app_voided_keeps_the_rest_of_its_reply_and_it_plays_after_the_hold(
+    runner, tool, refusal
+):
+    """TURNS-31, LOG-17."""
+    await a_voice_call(runner, deciding(tool), completion(TWO_SENTENCES))
+    runner.app.hold_outcomes.append(ToolOutcome(refusal.model_dump_json(), is_error=True))
+
+    runner.app.hold(PLACE_ID, HOLD_ID, SAID)
+    await runner.reports.until_a_turn_completed()
+    runner.app.go_on(PLACE_ID)
+
+    await runner.app.spoken_count(2)
+    assert sentences_spoken(runner) == [FIRST, SECOND]
+    assert Event.SPEECH_DROPPED not in [event for event, _ in runner.reports.reported()]
+    assert runner.reports.codes_of(Event.HOLD_DECIDED) == []
 
 
 async def test_a_stop_whose_call_failed_is_sent_again_by_a_later_read_and_decided_once(runner):

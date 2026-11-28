@@ -46,6 +46,7 @@ from personas.speech import (
     Request,
     Sentence,
     SpeechRecord,
+    answerable_lines,
     hold_decided,
     hold_forgotten,
     hold_marked_told,
@@ -56,12 +57,15 @@ from personas.speech import (
     sentences_released,
     speech_answered,
     speech_continued,
+    speech_dropping,
+    speech_dropping_ended,
     speech_ended,
     speech_line_entered,
     speech_line_said,
     speech_started,
     speech_stopped,
     speech_unsaid,
+    talk_told,
     unsent_dropped,
     went_on_marked_told,
     went_on_untold,
@@ -71,7 +75,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
     from datetime import datetime
 
-    from agents.member import PlaceRef, PlaceWindow, Standing
+    from agents.member import PartialSpeech, PlaceEntry, PlaceRef, PlaceWindow, Standing
 
     from personas.decision import Checkpoint
     from personas.due import Due
@@ -256,6 +260,24 @@ class Mind:
     def hold_turn_ended(self, at: AppPlace) -> None:
         """The turn told the hold at the place ended: a hold it did not decide stays undecided."""
         self._set_speech(at, hold_turn_ended(self._speech.get(at, NO_SPEECH)))
+
+    def speech_dropping(self, at: AppPlace) -> None:
+        """His decision to drop what waited at the place is on its way to the app: nothing is sent meanwhile."""
+        self._set_speech(at, speech_dropping(self._speech.get(at, NO_SPEECH)))
+
+    def speech_dropping_ended(self, at: AppPlace) -> None:
+        """His decision to drop what waited at the place is answered; what waited stays unless it was dropped."""
+        self._set_speech(at, speech_dropping_ended(self._speech.get(at, NO_SPEECH)))
+
+    def talk_told(self, at: AppPlace, speech: Iterable[PartialSpeech]) -> None:
+        """A decision at the place is told what people say over him."""
+        self._set_speech(at, talk_told(self._speech.get(at, NO_SPEECH), speech))
+
+    def answerable_lines(self, at: AppPlace, lines: Iterable[PlaceEntry]) -> tuple[PlaceEntry, ...]:
+        """The lines at the place left to answer: one that repeats the words a decision was told wakes no turn."""
+        record, answerable = answerable_lines(self._speech.get(at, NO_SPEECH), lines)
+        self._set_speech(at, record)
+        return answerable
 
     def hold_decided(self, at: AppPlace, key: HoldKey) -> None:
         """The hold ``key`` at the place was decided: it stands no more and is not decided again."""

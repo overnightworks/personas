@@ -567,11 +567,7 @@ def told_hold(
 ) -> str:
     """The message that tells him he is held: the hold's id, what people said over him, where it stopped him and the
     sentences he had not yet said as agents tells them, and the call of his that waits, as its tool and arguments."""
-    held: dict[str, object] = {
-        "id": hold_id,
-        "talked_over": [{"name": each.name, "text": each.text} for each in speech],
-        **agents_told_hold(place, list(unsaid)),
-    }
+    held: dict[str, object] = {"id": hold_id, **agents_told_hold(place, list(unsaid), list(speech))}
     if waiting is not None:
         held["call_waiting"] = {"tool": waiting[0], "arguments": waiting[1]}
     return json.dumps({"held": held}, ensure_ascii=False)
@@ -583,8 +579,8 @@ def told_went_on() -> str:
 
 
 def told_words(words: Iterable[PartialSpeech]) -> str:
-    """The result of a call that was not sent because people kept talking over him after he went on: that it was not,
-    and what each has said that he was not told."""
+    """The result of a call that was not sent, or a decision the app did not take, because people kept talking over him
+    after he was told: that it was not, and what each has said that he was not told."""
     return json.dumps(
         {"sent": False, "talked_over": [{"name": each.name, "text": each.text} for each in words]}, ensure_ascii=False
     )

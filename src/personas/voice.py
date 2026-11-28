@@ -20,9 +20,17 @@ from agents.voice.reply import ReplyReader
 from personas.decision import AppPlace, failure_code, speech_outcome
 from personas.entries import SaidAloud
 from personas.failures import task_is_being_cancelled
-from personas.holds import APP_FAILED_TEXT, CONTINUED_TEXT, GONE_TEXT, LINE_ARGUMENT, STYLE_ARGUMENT
+from personas.holds import (
+    APP_FAILED_TEXT,
+    CONTINUED_TEXT,
+    DECISIONS_BOUND_TEXT,
+    GONE_TEXT,
+    LINE_ARGUMENT,
+    STYLE_ARGUMENT,
+    dropping,
+)
 from personas.reporting import Event, failure_event
-from personas.speech import Answered, DropReason, HoldOutcome, answered_as, bound_reached
+from personas.speech import Answered, DropReason, HoldOutcome, NotDecided, answered_as, bound_reached, hold_ended_as
 from personas.task_record import (
     RelayFailed,
     TaskRecord,
@@ -59,12 +67,12 @@ def _is_text(value: object) -> bool:
     return isinstance(value, str) and bool(value)
 
 
-def _line_told(ended: HoldOutcome) -> ToolOutcome:
-    """What his short line's call is told once the hold ended as ``ended``."""
+def _line_told(ended: HoldOutcome | NotDecided) -> ToolOutcome:
+    """What his short line's call is told once the hold ended as ``ended``, other than as stale."""
     match ended:
         case HoldOutcome.SHORT_LINE:
             return ToolOutcome(CONTINUED_TEXT, is_error=False)
-        case HoldOutcome.GONE:
+        case NotDecided.GONE:
             return ToolOutcome(GONE_TEXT, is_error=False)
         case _:
             return ToolOutcome(APP_FAILED_TEXT, is_error=True)
@@ -91,22 +99,25 @@ class Voicing:
         inbox: HoldInbox,
         told: TurnHold | None,
         decided: Callable[[Held, HoldOutcome], None],
-        ended_undecided: Callable[[Held], Awaitable[HoldOutcome | None]],
+        ended_undecided: Callable[[Held], Awaitable[HoldOutcome | NotDecided | None]],
+        retold: Callable[[TurnHold], Awaitable[ToolOutcome]],
     ) -> tuple[Speaking, Answering]:
         """One spoken turn's speech and its answer instead of a hold of his."""
         speaking = Speaking(
             self.app.mcp_url, place, bound, self.mind, tally, self.report_dropped, told=told, replacing=told is None
         )
-        return speaking, Answering(self, place, record, tally, bound, inbox, told, decided, ended_undecided)
+        return speaking, Answering(self, place, record, tally, bound, inbox, told, decided, ended_undecided, retold)
 
 
 class Answering:
     """His answer instead of a hold of his: the text of a reply while the hold he was told is undecided. It drops the
-    unsent sentences at the place, logged as replaced, and marks the request in flight cut. The first sentence goes to
-    ``speak`` naming the hold, in a session of its own, since the sender's open request answers only once the app took
-    it; the rest joins the mind's record with the deciding turn's bound once the app took the first, and the place's
-    sender sends it. A first sentence the app refused or never answered sends no further one: the refusal or the
-    failure is reported and the hold ends as the app says, gone when it no longer stood and undecided otherwise.
+    unsent sentences at the place, logged as replaced, once the app took the first sentence, and cuts the parked run
+    then. The first sentence goes to ``speak`` naming the hold and the changes of the talk-over he was told, in a
+    session of its own, since the sender's open request answers only once the app took it; the sender sends nothing
+    meanwhile. The rest joins the mind's record with the deciding turn's bound once the app took the first, and the
+    place's sender sends it. A first sentence the app refused or never answered sends no further one: the refusal or
+    the failure is reported, and a hold that no longer stood decides nothing and drops nothing; a hold that stands ends
+    undecided, as the answer stale is no decision to tell him of.
     """
 
     def __init__(
@@ -119,7 +130,8 @@ class Answering:
         inbox: HoldInbox,
         told: TurnHold | None,
         decided: Callable[[Held, HoldOutcome], None],
-        ended_undecided: Callable[[Held], Awaitable[HoldOutcome | None]],
+        ended_undecided: Callable[[Held], Awaitable[HoldOutcome | NotDecided | None]],
+        retold: Callable[[TurnHold], Awaitable[ToolOutcome]],
     ) -> None:
         self._told = told
         self._sessions = loop.sessions
@@ -136,25 +148,28 @@ class Answering:
         self._inbox = inbox
         self._decided = decided
         self._ended_undecided = ended_undecided
+        self._retold = retold
 
     async def hear_round(
-        self, events: AsyncIterator[TurnEvent], hold: Held, cut_parked_run: Callable[[], Awaitable[object]]
+        self, events: AsyncIterator[TurnEvent], told: TurnHold, cut_parked_run: Callable[[], Awaitable[object]]
     ) -> bool:
-        """Reads the events of the round that decides ``hold``: its first text while the hold is undecided answers
-        instead, once the parked run is cut with its waiting call unsent, and the rest of that reply follows the
-        answer. Text of a later reply says nothing; the round's calls are answered as before. It tells whether
-        it tried to answer, which ended the hold or tried to, once."""
+        """Reads the events of the round that decides the hold ``told``: its first text while the hold is undecided
+        answers instead, and the parked run is cut with its waiting call unsent once the app took the answer or the
+        stop that follows its failure; the rest of that reply follows the answer. Text of a later reply says nothing;
+        the round's calls are answered as before. It tells whether it tried to answer, which ended the hold or left it
+        as the app says, once."""
         reader = ReplyReader()
-        answer: HoldOutcome | None = None
+        answer: HoldOutcome | NotDecided | None = None
         tried = False
         async for event in events:
             sentences = reader.read(event).sentences
             if sentences and answer is HoldOutcome.ANSWERED:
                 self._release(sentences)
-            elif sentences and not tried and self._mind.hold_decided_key(self._at) != hold.key:
+            elif sentences and not tried and self._mind.hold_decided_key(self._at) != told.held.key:
                 tried = True
-                await cut_parked_run()
-                answer = await self.instead(hold, sentences)
+                answer = await self.instead(told, sentences)
+                if isinstance(answer, HoldOutcome):
+                    await cut_parked_run()
             if isinstance(event, ToolCallEvent | FinalEvent):
                 answer = None
         return tried
@@ -162,20 +177,28 @@ class Answering:
     async def instead_told(self, sentences: tuple[str, ...]) -> None:
         """The sentences answer the hold the turn was told instead; the hold is decided for the turn's calls."""
         assert self._told is not None  # noqa: S101 - only a turn told a hold has text that answers it
-        self._told.outcome = await self.instead(self._told.held, sentences)
+        ended = await self.instead(self._told, sentences)
+        self._told.outcome = HoldOutcome.UNDECIDED if ended is NotDecided.GONE else ended
 
-    async def instead(self, hold: Held, sentences: tuple[str, ...]) -> HoldOutcome:
-        """The sentences answer ``hold`` instead of what he had not yet said; how the hold ended."""
+    async def instead(self, told: TurnHold, sentences: tuple[str, ...]) -> HoldOutcome | NotDecided:
+        """The sentences answer the hold ``told`` instead of what he had not yet said; how the hold ended. The unsent
+        sentences drop once the app took the first sentence; one it refused as stale, for the words that came while he
+        answered, ends the hold undecided, since no call of his can be told what was said since."""
         self._inbox.answering()
         first, *rest = sentences
-        _, dropped = self._mind.speech_stopped(self._at)
-        self._report_dropped(DropReason.REPLACED, dropped)
-        return await self._sent_naming(hold, first, HoldOutcome.ANSWERED, rest)
+        with dropping(self._mind, self._at, self._inbox):
+            ended = await self._sent_naming(told, first, HoldOutcome.ANSWERED, rest)
+            if ended is NotDecided.STALE:
+                ended = await self._ended_undecided(told.held) or HoldOutcome.UNDECIDED
+        if ended is NotDecided.GONE:
+            self._inbox.answer_refused()
+        return ended
 
-    async def line_decided(self, hold: Held, arguments: JsonObject) -> ToolOutcome:
-        """His ``continue_speaking`` of ``hold`` with a ``line`` and maybe a ``style``: the line says at once, in that
-        style, what the call tells him; a line or style that is no non-empty string, or a style without a line, decides
-        nothing. The hold the turn was told is decided for the turn's calls."""
+    async def line_decided(self, told: TurnHold, arguments: JsonObject) -> ToolOutcome:
+        """His ``continue_speaking`` of the hold ``told`` with a ``line`` and maybe a ``style``: the line says at once,
+        in that style, what the call tells him, which for a line told too few changes is what was said since; a line or
+        style that is no non-empty string, or a style without a line, decides nothing. The hold the turn was told is
+        decided for the turn's calls."""
         line, style = arguments.get(LINE_ARGUMENT), arguments.get(STYLE_ARGUMENT)
         if LINE_ARGUMENT in arguments and not _is_text(line):
             return ToolOutcome(_LINE_TEXT, is_error=True)
@@ -183,29 +206,36 @@ class Answering:
             return ToolOutcome(_STYLE_TEXT, is_error=True)
         if not isinstance(line, str):
             return ToolOutcome(_STYLE_ALONE_TEXT, is_error=True)
-        ended = await self._line(hold, line, style if isinstance(style, str) else None)
-        if self._told is not None and self._told.held is hold:
-            self._told.outcome = ended
+        if not told.take_decision():
+            return ToolOutcome(DECISIONS_BOUND_TEXT, is_error=True)
+        ended = await self._line(told, line, style if isinstance(style, str) else None)
+        if ended is NotDecided.STALE:
+            return await self._retold(told)
+        if self._told is told:
+            told.outcome = ended
         return _line_told(ended)
 
-    async def _line(self, hold: Held, line: str, style: str | None) -> HoldOutcome:
-        """The line goes to ``speak`` naming ``hold``, the hold's sentence cut and the unsent ones kept for after it;
-        a line the app refused or never answered sends no further sentence. The inbox stays
-        open: a hold that stands after it is a new hold."""
+    async def _line(self, told: TurnHold, line: str, style: str | None) -> HoldOutcome | NotDecided:
+        """The line goes to ``speak`` naming the hold ``told``, the hold's sentence cut and the unsent ones kept for
+        after it; a line the app refused or never answered sends no further sentence. The inbox stays open: a hold
+        that stands after it is a new hold."""
         self._mind.speech_line_said(self._at, self._bound.ends_at())
-        ended = await self._sent_naming(hold, line, HoldOutcome.SHORT_LINE, (), style)
-        if ended is HoldOutcome.GONE:
-            _, dropped = self._mind.speech_stopped(self._at)
-            self._report_dropped(DropReason.STOPPED, dropped)
-        return ended
+        return await self._sent_naming(told, line, HoldOutcome.SHORT_LINE, (), style)
 
     async def _sent_naming(
-        self, hold: Held, first: str, ended_as: HoldOutcome, rest: list[str] | tuple[str, ...], style: str | None = None
-    ) -> HoldOutcome:
-        """The sentence goes to ``speak`` naming ``hold``; once the app took it the hold ends as ``ended_as`` and the
-        rest follows; how the hold ended."""
+        self,
+        told: TurnHold,
+        first: str,
+        ended_as: HoldOutcome,
+        rest: list[str] | tuple[str, ...],
+        style: str | None = None,
+    ) -> HoldOutcome | NotDecided:
+        """The sentence goes to ``speak`` naming the hold ``told`` and the changes he was told; once the app took it the
+        hold ends as ``ended_as``, what he had not said drops if his answer replaces it, and the rest follows; how the
+        hold ended."""
+        hold = told.held
         self._tally.sentence_released()
-        answer = await self._speak(first, hold.id, style)
+        answer = await self._speak(first, hold.id, style, hold.worded_changes)
         outcome = speech_outcome(answer, cancelling=False)
         assert outcome is not None  # noqa: S101 - a sent sentence always ends with an outcome
         self._mind.take(
@@ -224,15 +254,17 @@ class Answering:
             if isinstance(answer, Spoken):
                 self._mind.speech_started(self._at, first)
             self._decided(hold, ended_as)
+            if ended_as is HoldOutcome.ANSWERED:
+                _, dropped = self._mind.speech_stopped(self._at)
+                self._report_dropped(DropReason.REPLACED, dropped)
             self._release(rest)
             return ended_as
         if isinstance(answer, CallFailure):
             self._report(failure_event(self._app), failure_code(answer), self._app, answer)
         else:
             self._report(Event.SPEAK_REFUSED, answer.value)
-        if answer is SpeakRefusal.NOT_INTERRUPTED:
-            self._decided(hold, HoldOutcome.GONE)
-            return HoldOutcome.GONE
+            if isinstance(not_decided := hold_ended_as(ended_as, answer), NotDecided):
+                return not_decided
         return await self._ended_undecided(hold) or HoldOutcome.UNDECIDED
 
     def _release(self, sentences: list[str] | tuple[str, ...]) -> None:
@@ -241,10 +273,14 @@ class Answering:
             self._tally.sentence_released()
         self._mind.sentences_released(self._at, sentences, self._bound.ends_at(), self._bound.allowed, replacing=False)
 
-    async def _speak(self, text: str, hold_id: str, style: str | None) -> SpeakAnswer | SpeakRefusal | CallFailure:
+    async def _speak(
+        self, text: str, hold_id: str, style: str | None, told_changes: int | None
+    ) -> SpeakAnswer | SpeakRefusal | CallFailure:
         try:
             return await self._sessions.ask_elsewhere(
-                self._app, lambda session: session.speak(self._place, text, style, interrupted=hold_id), self._record
+                self._app,
+                lambda session: session.speak(self._place, text, style, interrupted=hold_id, told_changes=told_changes),
+                self._record,
             )
         except Exception as error:
             raise RelayFailed(error) from None

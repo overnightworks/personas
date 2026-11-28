@@ -43,7 +43,7 @@ from agents.member import (
 )
 from agents.member_outcomes import (
     CallFailure,
-    DeclineOutcome,
+    Delivery,
     StatusFailure,
     UnrecognisedRefusal,
     UnusableAnswer,
@@ -283,7 +283,7 @@ def declines_for(
 
 
 def after_decline(
-    memory: Memory, decline: Decline, answer: DeclineOutcome | DeclineInvitationRefusal | UnrecognisedRefusal
+    memory: Memory, decline: Decline, answer: Delivery | DeclineInvitationRefusal | UnrecognisedRefusal
 ) -> Memory:
     """The memory once the decline was answered: a decline the app refused is not remembered as declined, since the
     invitation no longer stands, and one that failed stays due."""
