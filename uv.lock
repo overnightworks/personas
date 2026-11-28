@@ -569,8 +569,8 @@ wheels = [
 
 [[package]]
 name = "overnightworks-agents"
-version = "0.82.0"
-source = { git = "https://github.com/overnightworks/agents?rev=v0.82.0#a9ab50825d37da69da03e95bd692eea2f0179035" }
+version = "0.85.0"
+source = { git = "https://github.com/overnightworks/agents?rev=v0.85.0#a3f53852a73973490b73cf70168a0356abbe27f7" }
 dependencies = [
     { name = "pydantic" },
     { name = "ruamel-yaml" },
@@ -643,7 +643,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.16" },
     { name = "anyio", specifier = ">=4.16.0" },
     { name = "httpx2", specifier = ">=2.16.0" },
-    { name = "overnightworks-agents", extras = ["backend", "voice", "mcp-client"], git = "https://github.com/overnightworks/agents?rev=v0.82.0" },
+    { name = "overnightworks-agents", extras = ["backend", "voice", "mcp-client"], git = "https://github.com/overnightworks/agents?rev=v0.85.0" },
     { name = "overnightworks-logline", git = "https://github.com/overnightworks/logline?rev=v1.12.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.12" },
@@ -656,7 +656,7 @@ dev = [
     { name = "anyio", specifier = ">=4.16.0" },
     { name = "mcp", specifier = ">=2.3.0" },
     { name = "mcp-types", specifier = ">=2.3.0" },
-    { name = "overnightworks-agents", extras = ["mcp-server"], git = "https://github.com/overnightworks/agents?rev=v0.82.0" },
+    { name = "overnightworks-agents", extras = ["mcp-server"], git = "https://github.com/overnightworks/agents?rev=v0.85.0" },
     { name = "pyright", specifier = ">=1.1.414" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-cov", specifier = ">=7.0.0" },

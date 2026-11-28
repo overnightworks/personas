@@ -20,7 +20,7 @@ from agents.member import (
     MemberStanding,
     Standing,
 )
-from agents.member_outcomes import CallFailure, DeclineOutcome
+from agents.member_outcomes import CallFailure, Delivery
 
 from personas.config import (
     DEFAULT_BUDGET_PAUSE_CAP_SECONDS,
@@ -235,9 +235,9 @@ class FakeSession(BareSession):
             raise step
         return step
 
-    async def decline(self, decline: DeclineInvitationArguments) -> DeclineOutcome | DeclineInvitationRefusal:
+    async def decline(self, decline: DeclineInvitationArguments) -> Delivery | DeclineInvitationRefusal:
         self.declined.append(decline)
-        return DeclineOutcome.SENT
+        return Delivery.SENT
 
     @asynccontextmanager
     async def open(self, app: AppTarget, bearer: Callable[[], Secret], agent_id: str) -> AsyncIterator[FakeSession]:

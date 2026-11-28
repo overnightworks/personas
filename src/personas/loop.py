@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Final, Literal, NoReturn
 
 from agents.mcp_client import ToolsWake
 from agents.member import DeclineInvitationRefusal
-from agents.member_outcomes import CallFailure, DeclineOutcome, UnrecognisedRefusal
+from agents.member_outcomes import CallFailure, Delivery, UnrecognisedRefusal
 from logline import StepTimer, unit_trace
 
 from personas.admission import Admitted
@@ -412,7 +412,7 @@ class AgentLoop:
         self._memory = after_decline(self._memory, decline, answer)
         if isinstance(answer, DeclineInvitationRefusal | UnrecognisedRefusal):
             self._report(Event.DECLINE_REFUSED, answer.value, place_kind=decline.place.kind)
-        elif answer is DeclineOutcome.SENT:
+        elif answer is Delivery.SENT:
             self._report(Event.INVITATION_DECLINED, decline.reason.value, place_kind=decline.place.kind)
 
     async def _read_windows(self, session: MemberSession, standings: tuple[Standing, ...], began: float) -> bool:

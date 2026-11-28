@@ -407,7 +407,12 @@ class FakeApp(AppVoice):
             talked_over=None if not said else TalkedOver(id=f"talk-{hold_id}", playing=True, speech=said),
             interrupted=None
             if hold_id is None
-            else Interrupted(id=hold_id, place=self.hold_places.get(place.id), wordless=place.id in self.wordless),
+            else Interrupted(
+                id=hold_id,
+                place=self.hold_places.get(place.id),
+                wordless=place.id in self.wordless,
+                worded_changes=self.worded.get(place.id),
+            ),
             went_on=None if place.id not in self.went_on else WentOn(id=self.went_on[place.id]),
             voice_state=self.voice_states.get(place.id),
         )

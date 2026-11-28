@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Final
 
 from agents.backend import TurnPerson, TurnStopped
 from agents.member import CONTINUE_SPEAKING_TOOL, STOP_SPEAKING_TOOL, hold_place
-from agents.member_outcomes import CallFailure
+from agents.member_outcomes import CallFailure, Delivery
 from agents.tools import HandTool, ToolDeclaration, ToolEffect, ToolOutcome
 from agents.turn import Turn
 
@@ -437,6 +437,7 @@ class HoldDeciding:
         if isinstance(answer, CallFailure):
             self._report(failure_event(self._app), failure_code(answer), self._app, answer)
             return None
+        assert answer is not Delivery.NOT_SERVED  # noqa: S101 - a continue without ``finish`` is always sent
         ended = hold_ended_as(outcome, answer)
         self.hold_decided(place, hold, ended)
         return ended
