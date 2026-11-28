@@ -265,7 +265,7 @@ async def test_the_sweep_removes_an_old_record_row_that_has_no_ordinal_and_keeps
     for days_ago in (OLD_DAYS, YOUNG_DAYS):
         run_sql(
             database,
-            "INSERT INTO kept_entries (client_id, at, kind, app, own, entry)"
+            "INSERT INTO kept_entries (client_id, at, kind, app, own, entry)"  # noqa: S608 - test-chosen values
             f" VALUES ('{AGENT}', '{(now - timedelta(days=days_ago)).isoformat()}', 'act', 'app', true, '{{}}')",  # noqa: S608 - test-chosen values
         )
     clock = sweeping(runner, store)
