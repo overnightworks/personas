@@ -40,7 +40,7 @@ SONG_TOOLS = [CREATE_SONG, GENERATE_SONG]
 
 
 def tools_loaded(runner) -> list[ToolsLoaded]:
-    """The loads of songmaker's tools: the block of the call's own app loads its tools in every turn."""
+    """The loads of songmaker's tools: the block of the call's own app loads its tools too."""
     return [
         entry
         for entry in runner.histories.entries()
@@ -237,6 +237,7 @@ async def test_load_tools_for_a_name_no_line_holds_answers_an_error_and_enters_n
     assert runner.gateway.tool_results(2) == [f"{ERROR_MARK}{NO_SUCH_SKILL_TEXT}"]
     assert tools_loaded(runner) == []
     assert runner.gateway.tool_rounds(3, skill="nobody") == []
+    assert runner.gateway.tool_rounds(3, skill=SONGMAKER) == []
 
 
 async def test_load_tools_calls_past_their_bound_answer_an_error_and_a_later_call_still_runs(runner, songmaker):

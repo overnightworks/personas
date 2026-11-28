@@ -46,7 +46,7 @@ LARGE_BODY_BYTES = 5000
 
 
 def skill_reads(runner, skill: str) -> list[SkillRead]:
-    """The reads of this skill: the block of the call's own app reads its skill in every turn."""
+    """The reads of this skill: the block of the call's own app reads its skill too."""
     return [entry for entry in runner.histories.entries() if isinstance(entry, SkillRead) and entry.name == skill]
 
 
@@ -154,8 +154,9 @@ async def test_read_skill_for_a_name_no_line_holds_answers_an_error_and_enters_n
 
     (shown,) = runner.gateway.tool_results(2)
     assert shown.startswith(ERROR_MARK)
-    assert skill_reads(runner, "nobody") == []
+    assert skill_reads(runner, SONGMAKER) == []
     assert runner.gateway.tool_rounds(3, skill="nobody") == []
+    assert runner.gateway.tool_rounds(3, skill=SONGMAKER) == []
     assert SKILLS_GET not in songmaker.log.entries
 
 
